@@ -44,7 +44,7 @@ const UNIT_ORDER=['s','b','B'];
 
 class Looper{
   constructor(unit,count,state='on'){this.unit=unit;this.count=count;this.state=state;this.events=[];this.auto=false;
-    this.qlive=1;this.qpost=0;}
+    this.qlive=1;this.qpost=1;this.mute=false;this.solo=false;}
   get len(){return this.count*UNITS[this.unit];}
   double(dup){
     if(this.count*2>256)return;
@@ -66,12 +66,12 @@ class Looper{
     }
   }
   toJSON(){return{unit:this.unit,count:this.count,state:this.state,events:this.events,auto:this.auto,
-    qlive:this.qlive,qpost:this.qpost};}
+    qlive:this.qlive,qpost:this.qpost,mute:this.mute,solo:this.solo};}
   static from(o){
     const st=o.state==='off'||o.state==='edit'?'on':(o.state||'on');
     const l=new Looper(o.unit,o.count,st);l.events=o.events||[];
     l.auto=o.auto!==undefined?o.auto:!l.events.length;
-    l.qlive=o.qlive??1; l.qpost=o.qpost??0;
+    l.qlive=o.qlive??1; l.qpost=o.qpost??1; l.mute=!!o.mute; l.solo=!!o.solo;
     return l;
   }
 }
@@ -88,8 +88,9 @@ const FTYPE_W=[null,'lowpass','highpass','bandpass','notch','peaking','lowshelf'
 const EDST=['off','amp','pitch','filt','op'];
 const LDST=['off','pitch','filt','amp','pan','op'];
 const LFOW=['sin','tri','sqr','saw'], LFOW_W=['sine','triangle','square','sawtooth'];
-const XTYPES=['off','dly','cho','fla','pha','trm','drv','crush','verb'];
-const PTYPES=['off','chord','arp','grv'];
+const XTYPES=['off','dly','cho','fla','pha','trm','drv','crush','verb','comp','gate','roll','tape','grs8','send'];
+const GPATS=[[1,1,1,1,0,0,0,0],[0,0,1,1,0,0,1,1],[1,0,1,0,1,0,1,0],[1,.7,.45,.3,.2,.12,.07,0],[1,0,0,1,0,0,1,0]];
+const PTYPES=['off','chord','arp','grv','prep'];
 /* groove templates: f(16th-index) -> -1..1, scaled by amt% * half a 16th */
 const GROOVES=[
  {n:'sw16',f:i=>i%2===1?1:0},
@@ -129,8 +130,41 @@ const mkFx  =()=>({typ:0,p1:0.3,p2:0.3,mix:0.3});
 const mkPly =()=>({typ:0,p1:2,p2:0,p3:1});
 const rack=(mk)=>Array.from({length:10},(_,i)=>mk(i));
 
+const CATS=['drum','bass','keys','chord','lead','pad','plk','fx','misc'];
+
+/* ---------------- cross-session settings ----------------------------- */
+const SCALES=[['maj',[0,2,4,5,7,9,11]],['min',[0,2,3,5,7,8,10]],['dor',[0,2,3,5,7,9,10]],
+  ['mix',[0,2,4,5,7,9,10]],['pmaj',[0,2,4,7,9]],['pmin',[0,3,5,7,10]],
+  ['hmin',[0,2,3,5,7,8,11]],['chr',[0,1,2,3,4,5,6,7,8,9,10,11]]];
+const KEYN=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+const CFG=Object.assign({latch:0,overdub:0,listen:1,defLen:1,scaleOn:0,key:0,scale:0},
+  (()=>{try{return JSON.parse(localStorage.getItem('ten-cfg'))||{};}catch(_){return{};}})());
+const saveCfg=()=>{try{localStorage.setItem('ten-cfg',JSON.stringify(CFG));}catch(_){}};
+const DEFLENS=[1,2,4,8];
+function snapToPCs(midi,pcs){          // nearest note whose pitch-class is allowed
+  if(!pcs||!pcs.length)return midi;
+  for(let d=0;d<=6;d++){
+    if(pcs.includes(((midi-d)%12+12)%12))return midi-d;
+    if(pcs.includes(((midi+d)%12+12)%12))return midi+d;
+  }
+  return midi;
+}
+const scalePCs=()=>SCALES[CFG.scale][1].map(x=>(x+CFG.key)%12);
+const heldPCs=new Map();               // pitch-class -> count, from chord-master channels
+const pcsNow=()=>heldPCs.size?[...heldPCs.keys()]:scalePCs();
+function addPC(pc){heldPCs.set(pc,(heldPCs.get(pc)||0)+1);}
+function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);else heldPCs.set(pc,n);}
+const SETTINGS=[
+ {n:'looper', v:()=>CFG.latch?'latch':'mmnt',  a:()=>CFG.latch=CFG.latch?0:1},
+ {n:'rec',    v:()=>CFG.overdub?'ovdub':'ovwrt',a:()=>CFG.overdub=CFG.overdub?0:1},
+ {n:'listen', v:()=>CFG.listen?'on':'off',     a:()=>CFG.listen=CFG.listen?0:1},
+ {n:'defLen', v:()=>DEFLENS[CFG.defLen]+'bar', a:d=>CFG.defLen=clamp(CFG.defLen+d,0,3)},
+ {n:'scale',  v:()=>CFG.scaleOn?'on':'off',    a:()=>CFG.scaleOn=CFG.scaleOn?0:1},
+ {n:'key',    v:()=>KEYN[CFG.key],             a:d=>CFG.key=fmod(CFG.key+d,12)},
+ {n:'mode',   v:()=>SCALES[CFG.scale][0],      a:d=>CFG.scale=fmod(CFG.scale+d,SCALES.length)},
+];
 function basePreset(name){return{
-  name,
+  name, cat:'misc', tr:0, prep:null,
   osc:rack(mkOsc), amp:rack(mkAmp), flt:rack(mkFlt), env:rack(mkEnv),
   lfo:rack(mkLfo), fx:rack(mkFx), ply:rack(mkPly),
   vox:{mode:0,glide:0,uni:1,sprd:12,wide:0.6,slop:0.008},
@@ -192,7 +226,21 @@ const FX_P=sl=>{
          SP('tone','p2','lin',{min:0,max:1,step:0.05}),SP('mix','mix','lin',{min:0,max:1,step:0.05})],
     crush:[SP('crush','p1','lin',{min:0,max:1,step:0.05}),
          SP('-','p2','lin',{min:0,max:1,step:0.05}),SP('mix','mix','lin',{min:0,max:1,step:0.05})],
-    verb:[SP('send','p1','lin',{min:0,max:1,step:0.05})],
+    verb:[SP('size','p1','lin',{min:0,max:1,step:0.05,fmt:v=>(0.3+v*4).toFixed(1)+'s'}),
+         SP('mix','mix','lin',{min:0,max:1,step:0.05})],
+    comp:[SP('thresh','p1','lin',{min:0,max:1,step:0.05,fmt:v=>Math.round(-60+v*60)+'dB'}),
+         SP('ratio','p2','lin',{min:0,max:1,step:0.05,fmt:v=>(1+v*19).toFixed(1)+':1'}),
+         SP('makeup','mix','lin',{min:0,max:1,step:0.05})],
+    gate:[SP('thresh','p1','lin',{min:0,max:1,step:0.05}),
+         SP('depth','p2','lin',{min:0,max:1,step:0.05}),SP('mix','mix','lin',{min:0,max:1,step:0.05})],
+    roll:[SP('div','p1','lin',{min:0,max:3,step:1,fmt:v=>['1/4','1/8','1/16','1/32'][clamp(Math.round(v),0,3)]}),
+         SP('fdbk','p2','lin',{min:0,max:1,step:0.05}),SP('mix','mix','lin',{min:0,max:1,step:0.05})],
+    tape:[SP('wow','p1','lin',{min:0,max:1,step:0.05}),
+         SP('sat','p2','lin',{min:0,max:1,step:0.05}),SP('mix','mix','lin',{min:0,max:1,step:0.05})],
+    grs8:[SP('pat','p1','lin',{min:0,max:4,step:1,fmt:v=>['half','off8','gate8','fade','trip'][clamp(Math.round(v),0,4)]}),
+         SP('depth','p2','lin',{min:0,max:1,step:0.05}),SP('mix','mix','lin',{min:0,max:1,step:0.05})],
+    send:[SP('bus','p1','lin',{min:1,max:10,step:1,fmt:v=>'slot'+Math.round(v)}),
+         SP('amt','p2','lin',{min:0,max:1,step:0.05})],
   };
   return base.concat(tail[t]||[]);
 };
@@ -200,7 +248,8 @@ const PLY_P=sl=>{
   const base=[SP('type','typ','enum',{opts:PTYPES})];
   if(sl.typ===1)return base.concat([
     SP('chord','p1','enum',{opts:CHORDS.map(c=>c[0])}),
-    SP('strum','p2','lin',{min:-0.06,max:0.06,step:0.005,fmt:v=>Math.round(v*1000)+'ms'})]);
+    SP('strum','p2','lin',{min:-0.06,max:0.06,step:0.005,fmt:v=>Math.round(v*1000)+'ms'}),
+    SP('role','p3','enum',{opts:['play','mstr']})]);
   if(sl.typ===2)return base.concat([
     SP('div','p1','enum',{opts:ARPDIV}),
     SP('mode','p2','enum',{opts:ARPMODE}),
@@ -208,17 +257,19 @@ const PLY_P=sl=>{
   if(sl.typ===3)return base.concat([
     SP('src','p1','enum',{opts:['glob'].concat(GROOVES.map(g=>g.n))}),
     SP('amt','p2','lin',{min:0,max:150,step:5,fmt:v=>v+'%'})]);
+  if(sl.typ===4)return base.concat([
+    SP('mode','p1','enum',{opts:['prep','kit']})]);
   return base;
 };
 
 const MODULES=[
- {k:'1',id:'osc',name:'OSC', slot:true,params:OSC_P,abbr:s=>s.amt>0.001?WAVES[s.wav]:'···'},
- {k:'2',id:'amp',name:'AMP', slot:true,params:AMP_P,abbr:s=>s.typ?DTYPES[s.typ]:'···'},
- {k:'3',id:'flt',name:'FILT',slot:true,params:FLT_P,abbr:s=>s.typ?FTYPES[s.typ]:'···'},
- {k:'4',id:'env',name:'ENV', slot:true,params:ENV_P,abbr:s=>s.dst?EDST[s.dst]:'···'},
- {k:'5',id:'lfo',name:'LFO', slot:true,params:LFO_P,abbr:s=>s.dst?LDST[s.dst]:'···'},
- {k:'6',id:'fx', name:'FX',  slot:true,params:FX_P, abbr:s=>s.typ?XTYPES[s.typ]:'···'},
- {k:'7',id:null, name:'····'},
+ {k:'1',id:'prs',name:'PRST',prs:true},
+ {k:'2',id:'osc',name:'OSC', slot:true,params:OSC_P,abbr:s=>s.amt>0.001?WAVES[s.wav]:'···'},
+ {k:'3',id:'amp',name:'AMP', slot:true,params:AMP_P,abbr:s=>s.typ?DTYPES[s.typ]:'···'},
+ {k:'4',id:'flt',name:'FILT',slot:true,params:FLT_P,abbr:s=>s.typ?FTYPES[s.typ]:'···'},
+ {k:'5',id:'env',name:'ENV', slot:true,params:ENV_P,abbr:s=>s.dst?EDST[s.dst]:'···'},
+ {k:'6',id:'lfo',name:'LFO', slot:true,params:LFO_P,abbr:s=>s.dst?LDST[s.dst]:'···'},
+ {k:'7',id:'fx', name:'FX',  slot:true,params:FX_P, abbr:s=>s.typ?XTYPES[s.typ]:'···'},
  {k:'8',id:'vox',name:'VOICE',flat:[SP('mode','mode','enum',{opts:MODE}),
     SP('glide','glide','time',{min:0,max:0.5}),
     SP('uni','uni','lin',{min:1,max:7,step:1,fmt:v=>v+'v'}),
@@ -259,48 +310,67 @@ function fmtVal(spec,v){
 }
 
 /* ---------------- factory presets ------------------------------------ */
-function mkP(name,fn){const p=basePreset(name);fn(p);return p;}
+function mkP(name,cat,fn){const p=basePreset(name);p.cat=cat;fn(p);return p;}
 const PRESETS0=()=>[
- mkP('KCK',p=>{Object.assign(p.osc[0],{wav:0,rat:0.5});
-   Object.assign(p.env[0],{a:0.001,d:0.22,s:0,r:0.08});
-   p.env[2]={dst:2,idx:1,amt:110,a:0.001,d:0.07,s:0,r:0.05};
-   p.flt[0].frq=3000; p.vox.mode=1; p.mix.lvl=0.95;}),
- mkP('SNR',p=>{p.osc[0].wav=4;
-   Object.assign(p.env[0],{a:0.001,d:0.16,s:0,r:0.08});
-   Object.assign(p.flt[0],{typ:3,frq:1800,q:2});
-   p.fx[0]={typ:8,p1:0.15,p2:0,mix:1};}),
- mkP('HAT',p=>{p.osc[0].wav=4;
-   Object.assign(p.env[0],{a:0.001,d:0.045,s:0,r:0.03});
-   Object.assign(p.flt[0],{typ:2,frq:7500}); p.mix.lvl=0.55;}),
- mkP('CLP',p=>{p.osc[0].wav=4;
-   Object.assign(p.env[0],{a:0.002,d:0.12,s:0,r:0.1});
-   Object.assign(p.flt[0],{typ:3,frq:1100,q:5});
-   p.fx[0]={typ:8,p1:0.25,p2:0,mix:1};}),
- mkP('BAS',p=>{Object.assign(p.osc[0],{wav:3,rat:0.25});
+ mkP('KCK','drum',p=>{Object.assign(p.osc[0],{wav:0,rat:0.5,ph:90});
+   Object.assign(p.env[0],{a:0.001,d:0.28,s:0,r:0.05});
+   p.env[2]={dst:2,idx:1,amt:95,a:0.001,d:0.06,s:0,r:0.05};
+   p.amp[0]={typ:4,drv:0.35,mix:0.5,par:0};
+   p.flt[0].frq=2400; p.vox.mode=1; p.mix.lvl=0.95;}),
+ mkP('SNR','drum',p=>{p.osc[0].wav=4;
+   p.osc[1]={wav:1,mode:0,dst:0,rat:1.5,amt:0.35,fine:0,ph:0,phm:0};
+   Object.assign(p.env[0],{a:0.001,d:0.16,s:0,r:0.07});
+   Object.assign(p.flt[0],{typ:3,frq:1900,q:1.5});
+   p.env[2]={dst:2,idx:1,amt:60,a:0.001,d:0.05,s:0,r:0.05};
+   p.fx[0]={typ:8,p1:0.18,p2:0,mix:1};}),
+ mkP('HAT','drum',p=>{p.osc[0].wav=4;
+   p.osc[1]={wav:8,mode:0,dst:0,rat:6,amt:0.3,fine:0,ph:0,phm:1};
+   Object.assign(p.env[0],{a:0.001,d:0.04,s:0,r:0.025});
+   Object.assign(p.flt[0],{typ:2,frq:8800,q:1.2}); p.mix.lvl=0.5;}),
+ mkP('CLP','drum',p=>{p.osc[0].wav=4;
+   Object.assign(p.env[0],{a:0.004,d:0.11,s:0,r:0.12});
+   Object.assign(p.flt[0],{typ:3,frq:1150,q:6});
+   p.amp[0]={typ:2,drv:0.25,mix:0.35,par:0};
+   p.fx[0]={typ:8,p1:0.3,p2:0,mix:1};}),
+ mkP('BAS','bass',p=>{Object.assign(p.osc[0],{wav:3,rat:0.25});
+   p.osc[1]={wav:0,mode:0,dst:0,rat:0.5,amt:0.55,fine:0,ph:0,phm:0};
    Object.assign(p.env[0],{a:0.003,d:0.2,s:0.6,r:0.08});
-   Object.assign(p.flt[0],{typ:1,frq:700,q:6});
-   p.env[1]={dst:3,idx:1,amt:50,a:0.003,d:0.15,s:0.1,r:0.2};
+   Object.assign(p.flt[0],{typ:1,frq:620,q:5});
+   p.env[1]={dst:3,idx:1,amt:55,a:0.003,d:0.14,s:0.1,r:0.2};
+   p.amp[0]={typ:1,drv:0.3,mix:0.4,par:0};
    Object.assign(p.vox,{mode:1,glide:0.04});}),
- mkP('KEY',p=>{p.osc[0].wav=1;
-   Object.assign(p.env[0],{a:0.002,d:0.3,s:0.5,r:0.25}); p.flt[0].frq=6000;}),
- mkP('CHD',p=>{p.osc[0].wav=2;
-   Object.assign(p.env[0],{a:0.01,d:0.4,s:0.6,r:0.3}); p.flt[0].frq=2600;
-   p.fx[0]={typ:8,p1:0.3,p2:0,mix:1};
-   p.ply[0]={typ:1,p1:2,p2:0.01,p3:1};}),
- mkP('LED',p=>{p.osc[0].wav=3;
-   Object.assign(p.env[0],{a:0.002,d:0.2,s:0.7,r:0.15});
-   Object.assign(p.flt[0],{typ:1,frq:4000,q:3});
+ mkP('KEY','keys',p=>{p.osc[0].wav=1;
+   p.osc[1]={wav:0,mode:0,dst:0,rat:2,amt:0.3,fine:4,ph:0,phm:1};
+   Object.assign(p.env[0],{a:0.002,d:0.3,s:0.45,r:0.3});
+   p.flt[0].frq=6500;
+   p.fx[0]={typ:2,p1:0.3,p2:0.35,mix:0.28};}),
+ mkP('CHD','chord',p=>{p.osc[0].wav=2;
+   Object.assign(p.env[0],{a:0.012,d:0.4,s:0.55,r:0.35});
+   p.flt[0].frq=2800;
+   Object.assign(p.vox,{uni:2,sprd:8,wide:0.5});
+   p.fx[0]={typ:2,p1:0.25,p2:0.3,mix:0.25};
+   p.fx[1]={typ:8,p1:0.3,p2:0,mix:1};
+   p.ply[0]={typ:1,p1:2,p2:0.012,p3:0};}),
+ mkP('LED','lead',p=>{p.osc[0].wav=3;
+   p.osc[1]={wav:2,mode:0,dst:0,rat:1,amt:0.4,fine:-7,ph:0,phm:1};
+   Object.assign(p.env[0],{a:0.002,d:0.2,s:0.7,r:0.12});
+   Object.assign(p.flt[0],{typ:1,frq:4200,q:4});
    Object.assign(p.vox,{mode:1,glide:0.06});
-   p.fx[0]={typ:1,p1:0.27,p2:0.35,mix:0.35};}),
- mkP('PAD',p=>{p.osc[0].wav=2;
-   Object.assign(p.env[0],{a:0.4,d:0.5,s:0.8,r:0.9}); p.flt[0].frq=2200;
-   p.lfo[0]={dst:2,idx:1,wav:0,rate:0.4,amt:40};
-   p.fx[0]={typ:8,p1:0.45,p2:0,mix:1}; p.mix.lvl=0.6;
-   Object.assign(p.vox,{uni:3,sprd:14});}),
- mkP('PLK',p=>{p.osc[0].wav=1;
-   Object.assign(p.env[0],{a:0.001,d:0.12,s:0,r:0.12});
-   p.env[1]={dst:3,idx:1,amt:70,a:0.001,d:0.1,s:0,r:0.1};
-   p.flt[0].frq=1200;
+   p.fx[0]={typ:1,p1:0.27,p2:0.4,mix:0.35};}),
+ mkP('PAD','pad',p=>{p.osc[0].wav=2;
+   p.osc[1]={wav:5,mode:0,dst:0,rat:2,amt:0.3,fine:6,ph:0,phm:1};
+   Object.assign(p.env[0],{a:0.5,d:0.5,s:0.85,r:1.2});
+   p.flt[0].frq=2000;
+   p.lfo[0]={dst:2,idx:1,wav:0,rate:0.35,amt:35};
+   Object.assign(p.vox,{uni:5,sprd:18,wide:0.85,slop:0.012});
+   p.fx[0]={typ:2,p1:0.2,p2:0.4,mix:0.3};
+   p.fx[1]={typ:8,p1:0.5,p2:0,mix:1}; p.mix.lvl=0.55;}),
+ mkP('PLK','plk',p=>{p.osc[0].wav=1;
+   p.osc[1]={wav:0,mode:1,dst:1,rat:3,amt:0.25,fine:0,ph:0,phm:0};
+   Object.assign(p.env[0],{a:0.001,d:0.13,s:0,r:0.14});
+   p.env[1]={dst:3,idx:1,amt:75,a:0.001,d:0.09,s:0,r:0.1};
+   p.env[3]={dst:4,idx:2,amt:100,a:0.001,d:0.08,s:0,r:0.1};
+   p.flt[0].frq=1400;
    p.fx[0]={typ:1,p1:0.27,p2:0.3,mix:0.3};}),
 ];
 
@@ -311,7 +381,11 @@ const S={
   grv:{typ:0,amt:0},                       // global groove: type + amount %
   octs:Array.from({length:10},()=>0),      // octave per channel/preset
   curPat:0, editPat:0, curPreset:4, editSnd:4,
-  curMod:0, curParam:0, curSlot:0, slotParam:0,
+  curMod:0, curParam:0, curSlot:0, slotParam:0, libSel:0,
+  master:Array.from({length:10},(_,i)=>
+    i===0?{typ:8,rt:1,p1:0.45,p2:0,mix:0.9}:      // send slot 1: reverb
+    i===1?{typ:1,rt:1,p1:0.27,p2:0.35,mix:0.8}:   // send slot 2: delay
+    {typ:0,rt:0,p1:0.3,p2:0.3,mix:0.3}),
   arr:new Looper('B',4,'on'),
   patterns:Array.from({length:10},mkPattern),
   presets:PRESETS0(),
@@ -332,9 +406,17 @@ const spb=()=>60/T.bpm;
 const beatsAt=t=>T.startBeat+(t-T.startTime)/spb();
 const timeAt=b=>T.startTime+(b-T.startBeat)*spb();
 const posNow=()=>T.playing?Math.max(0,beatsAt(AC.currentTime)):0;
+/* free-running grid: always ticking at the current bpm, whether or not the
+   transport plays. live quantize rides this so it works when stopped too. */
+const G={t0:0,b0:0};
+const gridNow=()=>T.playing?posNow():G.b0+(AC.currentTime-G.t0)/spb();
+const gridTime=b=>T.playing?timeAt(b):G.t0+(b-G.b0)*spb();
 function setBpm(v){
+  const gb=gridNow();
   if(T.playing){const n=AC.currentTime;T.startBeat=beatsAt(n);T.startTime=n;}
-  T.bpm=clamp(v,40,280); dirty=true; dirtySave=true;
+  T.bpm=clamp(v,40,280);
+  G.b0=gb; G.t0=AC.currentTime;
+  dirty=true; dirtySave=true;
 }
 function play(){
   AC.resume();
@@ -342,7 +424,13 @@ function play(){
   acts=[{pat:S.curPat,start:-1e9,anchor:0}];
   dirty=true;
 }
-function stop(){T.playing=false; engine.allOff(); finalizeCaptures(true); dirty=true;}
+function stop(){
+  const gb=posNow();                 // keep the free grid in phase across stop
+  T.playing=false; G.b0=gb; G.t0=AC.currentTime;
+  engine.allOff(); finalizeCaptures(true);
+  for(const gr of engine.grossList)gr.g.gain.setTargetAtTime(1,AC.currentTime,0.02);
+  dirty=true;
+}
 
 let acts=[{pat:0,start:-1e9,anchor:0}];
 function actAt(b){let r=acts[0];for(const a of acts)if(a.start<=b+1e-9)r=a;return r;}
@@ -377,9 +465,11 @@ function scheduleRange(from,to){
   for(let i=0;i<bounds.length-1;i++){
     const s0=bounds[i],s1=bounds[i+1]; if(s1-s0<1e-9)continue;
     const a=actAt(s0+1e-6), pat=S.patterns[a.pat];
+    const anySolo=pat.lanes.some(l=>l.solo);
     for(let li=0;li<10;li++){
       const lane=pat.lanes[li];
       if(!lane.events.length||lane._cap)continue;
+      if(anySolo?!lane.solo:lane.mute)continue;
       lane.occur(s0-a.anchor,s1-a.anchor,(t,e)=>{
         let tt=t;
         if(lane.qpost>0.001)tt+=(Math.round(e.t/0.25)*0.25-e.t)*lane.qpost;
@@ -389,6 +479,16 @@ function scheduleRange(from,to){
     }
   }
   engine.arpTick(from,to);
+  if(engine.grossList.length){                     // gross-beat gate patterns, 8ths on the grid
+    for(let b=Math.ceil(from/0.5-1e-9)*0.5;b<to-1e-9;b+=0.5){
+      if(b<from-1e-9)continue;
+      const i8=Math.floor(b/0.5)%8;
+      for(const gr of engine.grossList){
+        const v=1-gr.depth*(1-GPATS[gr.pat][i8]);
+        gr.g.gain.setTargetAtTime(v,timeAt(b),0.004);
+      }
+    }
+  }
   for(let si=0;si<10;si++){
     const ml=S.presets[si].modLoop;
     if(!ml.events.length)continue;
@@ -399,6 +499,7 @@ function scheduleRange(from,to){
   }
 }
 setInterval(()=>{
+  engine.procFollowers();
   if(!T.playing)return;
   eraseSweep();
   finalizeCaptures(false);
@@ -429,9 +530,45 @@ function distCurve(typ,drv){
   return c;
 }
 
+/* per-note preparations: overlay a note's tweaks (prep) or a whole library
+   preset's voice-level modules (kit) on top of the channel preset */
+const prepCache=new Map();
+function prepEffective(p,midi){
+  const pr=p.prep&&p.prep.notes&&p.prep.notes[midi];
+  if(!pr)return p;
+  if(pr.preset){
+    let kp=prepCache.get(pr.preset);
+    if(!kp){
+      const en=libAll().find(e2=>e2.name===pr.preset);
+      if(!en)return p;
+      kp=basePreset(en.name);
+      for(const M of MODULES){
+        if(!M.id||M.prs)continue;
+        if(M.flat){if(en.data[M.id])Object.assign(kp[M.id],en.data[M.id]);}
+        else if(Array.isArray(en.data[M.id]))en.data[M.id].forEach((sl,j)=>{if(sl)Object.assign(kp[M.id][j],sl);});
+      }
+      prepCache.set(pr.preset,kp);
+    }
+    return {...p,osc:kp.osc,flt:kp.flt,env:kp.env,lfo:kp.lfo,vox:kp.vox};
+  }
+  if(pr.k){
+    const eff={...p};
+    for(const key in pr.k){
+      const [mid,si,pk]=key.split(':');
+      if(si==='-')eff[mid]={...eff[mid],[pk]:pr.k[key]};
+      else{
+        if(eff[mid]===p[mid])eff[mid]=p[mid].slice();
+        eff[mid][+si]={...eff[mid][+si],[pk]:pr.k[key]};
+      }
+    }
+    return eff;
+  }
+  return p;
+}
+
 class Voice{
   constructor(E,at,pi,midi,vel){
-    const p=S.presets[pi], ac=AC;
+    const p=prepEffective(S.presets[pi],midi), ac=AC;
     this.pi=pi; this.midi=midi; this.p=p;
     this.released=false; this.killed=false; this.nodes=[]; this.startAt=at;
     const ops=p.osc, rootW=ops[0].wav, isN=rootW===4;
@@ -495,11 +632,11 @@ class Voice{
       else{src=ac.createOscillator();E.setWave(src,rootW,ops[0].phm===1?Math.random()*360:ops[0].ph);pitchParam=src.frequency;}
       if(pitchEnv){
         const semis=pitchEnv.amt/100*24;
-        const peak=target*Math.pow(2,semis/12);
+        const peak=Math.max(target*Math.pow(2,semis/12),0.01);
         const a=Math.max(0.001,pitchEnv.a);
-        pitchParam.setValueAtTime(target,at);
-        pitchParam.linearRampToValueAtTime(Math.max(peak,0.01),at+a);
-        pitchParam.setTargetAtTime(Math.max(target+(peak-target)*pitchEnv.s,0.01),at+a,Math.max(0.005,pitchEnv.d/3));
+        if(a<=0.003)pitchParam.setValueAtTime(peak,at);          // drop starts AT the peak: no chirp
+        else{pitchParam.setValueAtTime(target,at);pitchParam.linearRampToValueAtTime(peak,at+a);}
+        pitchParam.setTargetAtTime(Math.max(target+(peak-target)*pitchEnv.s,0.01),at+Math.max(a,0.001),Math.max(0.005,pitchEnv.d/3));
       }else if(p.vox.mode===1&&p.vox.glide>0.001&&E.lastPitch[pi]){
         pitchParam.setValueAtTime(E.lastPitch[pi]*(target/baseTarget),at);
         pitchParam.exponentialRampToValueAtTime(Math.max(target,0.01),at+p.vox.glide);
@@ -610,12 +747,12 @@ class Voice{
     for(const fe of this.fEnvs)fe.node.setTargetAtTime(fe.base,at,Math.max(0.005,fe.r/3));
     this._end(at+this.rel*4+0.1);
   }
-  kill(at){
+  kill(at,fast){
     if(this.killed)return; this.killed=true; this.released=true;
     const g=this.vca.gain;
     g.cancelScheduledValues(at);
-    g.setTargetAtTime(0,at,0.008);
-    this._end(at+0.12);
+    g.setTargetAtTime(0,at,fast?0.0015:0.008);   // fast: mono steal — old tail dies before the new attack
+    this._end(at+(fast?0.03:0.12));
   }
   _end(t){for(const n of this.nodes){try{n.stop(t);}catch(_){}}}
 }
@@ -626,16 +763,13 @@ class Engine{
     this.master=ac.createGain(); this.master.gain.value=0.8;
     this.comp=ac.createDynamicsCompressor();
     this.master.connect(this.comp); this.comp.connect(ac.destination);
-    this.rIn=ac.createGain(); this.conv=ac.createConvolver(); this.rOut=ac.createGain();
-    this.rIn.connect(this.conv); this.conv.connect(this.rOut); this.rOut.connect(this.master);
-    this.rOut.gain.value=0.6;
+    this.mSum=ac.createGain();                       // channel sum -> master insert chain
+    this.sendIns=Array.from({length:10},()=>ac.createGain());
+    this.mRack=[]; this.followers=[]; this.grossList=[]; this.irCache=new Map();
+    this.lastMidi=[];
     const len=2*ac.sampleRate, nb=ac.createBuffer(1,len,ac.sampleRate), nd=nb.getChannelData(0);
     for(let i=0;i<len;i++)nd[i]=Math.random()*2-1;
     this.noiseBuf=nb;
-    { const dur=2.0, l2=Math.floor(dur*ac.sampleRate), ir=ac.createBuffer(2,l2,ac.sampleRate);
-      for(let c=0;c<2;c++){const d=ir.getChannelData(c);
-        for(let i=0;i<l2;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/l2,2.5);}
-      this.conv.buffer=ir; }
     this.waveCache=new Map();
     this.tables={ // harmonic magnitude tables (index 5..8 in WAVES)
       5:[1,0.5,0.33,0.25,0.5,0.15,0.1,0.4],
@@ -646,10 +780,127 @@ class Engine{
     this.buses=[]; this.act=[]; this.lastPitch=[]; this.arpPool=[]; this.arpIdx=[];
     for(let i=0;i<10;i++){
       const vIn=ac.createGain(), busG=ac.createGain(), pan=ac.createStereoPanner();
-      busG.connect(pan); pan.connect(this.master);
+      busG.connect(pan); pan.connect(this.mSum);
       this.buses.push({vIn,busG,pan,rack:[],panLfo:null});
       this.act.push([]); this.lastPitch.push(0); this.arpPool.push([]); this.arpIdx.push(0);
+      this.lastMidi.push(60);
       this.rebuildRack(i); this.refresh(i);
+    }
+    this.rebuildMaster();
+  }
+  getIR(sec){
+    const key=Math.round(sec*4);
+    let ir=this.irCache.get(key);
+    if(!ir){
+      const ac=AC, l2=Math.floor(Math.max(0.2,sec)*ac.sampleRate);
+      ir=ac.createBuffer(2,l2,ac.sampleRate);
+      for(let c=0;c<2;c++){const d=ir.getChannelData(c);
+        for(let i=0;i<l2;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/l2,2.5);}
+      this.irCache.set(key,ir);
+    }
+    return ir;
+  }
+  /* one FX unit; shared by channel racks, send slots and master inserts */
+  fxUnit(fx,cur,keep,owner,sendMode){
+    const ac=AC, t=XTYPES[fx.typ];
+    if(t==='send')return cur;                      // routing handled by the caller
+    const out=keep(ac.createGain());
+    const full=t==='comp';                         // some units are inherently 100% wet
+    const dry=keep(ac.createGain()); dry.gain.value=sendMode||full?0:1-fx.mix;
+    const wet=keep(ac.createGain()); wet.gain.value=full?1:fx.mix;
+    cur.connect(dry); dry.connect(out); wet.connect(out);
+    if(t==='dly'){
+      const dl=keep(ac.createDelay(2)); dl.delayTime.value=0.02+fx.p1*1.3;
+      const fb=keep(ac.createGain()); fb.gain.value=fx.p2;
+      cur.connect(dl); dl.connect(fb); fb.connect(dl); dl.connect(wet);
+    }else if(t==='cho'||t==='fla'){
+      const dl=keep(ac.createDelay(0.1));
+      dl.delayTime.value=t==='cho'?0.018:0.004;
+      const lo=keep(ac.createOscillator()), lg=keep(ac.createGain());
+      lo.frequency.value=t==='cho'?0.1+fx.p1*4:0.05+fx.p1*2;
+      lg.gain.value=(t==='cho'?0.006:0.002)*(t==='cho'?fx.p2:1);
+      lo.connect(lg); lg.connect(dl.delayTime); lo.start();
+      cur.connect(dl);
+      if(t==='fla'){const fb=keep(ac.createGain()); fb.gain.value=fx.p2; dl.connect(fb); fb.connect(dl);}
+      dl.connect(wet);
+    }else if(t==='pha'){
+      let ph=cur;
+      const lo=keep(ac.createOscillator()), lg=keep(ac.createGain());
+      lo.frequency.value=0.05+fx.p1*3; lg.gain.value=fx.p2*2000; lo.connect(lg); lo.start();
+      for(let i2=0;i2<4;i2++){
+        const ap=keep(ac.createBiquadFilter()); ap.type='allpass'; ap.frequency.value=400+i2*400;
+        lg.connect(ap.detune); ph.connect(ap); ph=ap;
+      }
+      ph.connect(wet);
+    }else if(t==='trm'){
+      const g=keep(ac.createGain()); g.gain.value=1-fx.p2*0.9;
+      const lo=keep(ac.createOscillator()), lg=keep(ac.createGain());
+      lo.frequency.value=0.5+fx.p1*15; lg.gain.value=fx.p2*0.45;
+      lo.connect(lg); lg.connect(g.gain); lo.start();
+      cur.connect(g); g.connect(wet);
+    }else if(t==='drv'||t==='crush'){
+      const sh=keep(ac.createWaveShaper());
+      sh.curve=distCurve(t==='drv'?1:6,fx.p1); sh.oversample='2x';
+      cur.connect(sh);
+      if(t==='drv'){const tone=keep(ac.createBiquadFilter());tone.type='lowpass';
+        tone.frequency.value=800+fx.p2*10000; sh.connect(tone); tone.connect(wet);}
+      else sh.connect(wet);
+    }else if(t==='verb'){
+      const cv=keep(ac.createConvolver()); cv.buffer=this.getIR(0.3+fx.p1*4);
+      cur.connect(cv); cv.connect(wet);
+    }else if(t==='comp'){
+      const cp=keep(ac.createDynamicsCompressor());
+      cp.threshold.value=-60+fx.p1*60; cp.ratio.value=1+fx.p2*19; cp.knee.value=12;
+      const mk=keep(ac.createGain()); mk.gain.value=1+fx.mix*2;
+      cur.connect(cp); cp.connect(mk); mk.connect(wet);
+    }else if(t==='gate'){
+      const g=keep(ac.createGain());
+      const an=keep(ac.createAnalyser()); an.fftSize=256;
+      cur.connect(an); cur.connect(g); g.connect(wet);
+      this.followers.push({an,g,thr:fx.p1*0.25,depth:fx.p2,buf:new Float32Array(256),owner});
+    }else if(t==='roll'){
+      const dl=keep(ac.createDelay(2));
+      dl.delayTime.value=[1,0.5,0.25,0.125][clamp(Math.round(fx.p1),0,3)]*spb();
+      const fb=keep(ac.createGain()); fb.gain.value=Math.min(0.97,fx.p2*1.05);
+      cur.connect(dl); dl.connect(fb); fb.connect(dl); dl.connect(wet);
+    }else if(t==='tape'){
+      const dl=keep(ac.createDelay(0.08)); dl.delayTime.value=0.02;
+      const lo=keep(ac.createOscillator()), lg=keep(ac.createGain());
+      lo.frequency.value=0.9+fx.p1*5; lg.gain.value=0.0008+fx.p1*0.004;
+      lo.connect(lg); lg.connect(dl.delayTime); lo.start();
+      const sh=keep(ac.createWaveShaper()); sh.curve=distCurve(7,0.2+fx.p2*0.5); sh.oversample='2x';
+      const lp=keep(ac.createBiquadFilter()); lp.type='lowpass'; lp.frequency.value=12000-fx.p2*6000;
+      cur.connect(dl); dl.connect(sh); sh.connect(lp); lp.connect(wet);
+    }else if(t==='grs8'){
+      const g=keep(ac.createGain());
+      cur.connect(g); g.connect(wet);
+      this.grossList.push({g,pat:clamp(Math.round(fx.p1),0,GPATS.length-1),depth:fx.p2,owner});
+    }
+    return out;
+  }
+  rebuildMaster(){
+    const ac=AC;
+    try{this.mSum.disconnect();}catch(_){}
+    for(const n of this.mRack){try{n.stop&&n.stop();}catch(_){} try{n.disconnect();}catch(_){}}
+    this.mRack=[];
+    this.followers=this.followers.filter(f=>f.owner!=='m');
+    this.grossList=this.grossList.filter(f=>f.owner!=='m');
+    const keep=n=>{this.mRack.push(n);return n;};
+    S.master.forEach((fx,i)=>{                     // send slots: bus -> unit(wet) -> sum
+      try{this.sendIns[i].disconnect();}catch(_){}
+      if(fx.typ&&Math.round(fx.rt)===1)this.fxUnit(fx,this.sendIns[i],keep,'m',true).connect(this.mSum);
+    });
+    let cur=this.mSum;                             // insert slots: serial on the mix bus
+    for(const fx of S.master)if(fx.typ&&Math.round(fx.rt)===0)cur=this.fxUnit(fx,cur,keep,'m',false);
+    cur.connect(this.master);
+  }
+  procFollowers(){
+    const n=AC.currentTime;
+    for(const f of this.followers){
+      f.an.getFloatTimeDomainData(f.buf);
+      let sum=0; for(let i=0;i<f.buf.length;i++)sum+=f.buf[i]*f.buf[i];
+      const open=Math.sqrt(sum/f.buf.length)>f.thr;
+      f.g.gain.setTargetAtTime(open?1:1-f.depth,n,open?0.004:0.06);
     }
   }
   harmonics(w){
@@ -705,57 +956,17 @@ class Engine{
       for(const g of parTaps)g.connect(out);
       cur=out;
     }
-    // FX chain
+    // FX chain (per channel): real units inline; 'send' taps to a master send slot
+    this.followers=this.followers.filter(f=>f.owner!==pi);
+    this.grossList=this.grossList.filter(f=>f.owner!==pi);
     for(const fx of p.fx){
       if(!fx.typ)continue;
-      const t=XTYPES[fx.typ];
-      if(t==='verb'){
-        const send=keep(ac.createGain()); send.gain.value=fx.p1;
-        cur.connect(send); send.connect(this.rIn);
+      if(XTYPES[fx.typ]==='send'){
+        const sg=keep(ac.createGain()); sg.gain.value=fx.p2;
+        cur.connect(sg); sg.connect(this.sendIns[clamp(Math.round(fx.p1),1,10)-1]);
         continue;
       }
-      const out=keep(ac.createGain());
-      const dry=keep(ac.createGain()); dry.gain.value=1-fx.mix;
-      const wet=keep(ac.createGain()); wet.gain.value=fx.mix;
-      cur.connect(dry); dry.connect(out);
-      if(t==='dly'){
-        const dl=keep(ac.createDelay(2)); dl.delayTime.value=0.02+fx.p1*1.3;
-        const fb=keep(ac.createGain()); fb.gain.value=fx.p2;
-        cur.connect(dl); dl.connect(fb); fb.connect(dl); dl.connect(wet);
-      }else if(t==='cho'||t==='fla'){
-        const dl=keep(ac.createDelay(0.1));
-        dl.delayTime.value=t==='cho'?0.018:0.004;
-        const lo=keep(ac.createOscillator()), lg=keep(ac.createGain());
-        lo.frequency.value=t==='cho'?0.1+fx.p1*4:0.05+fx.p1*2;
-        lg.gain.value=(t==='cho'?0.006:0.002)*(t==='cho'?fx.p2:1);
-        lo.connect(lg); lg.connect(dl.delayTime); lo.start();
-        cur.connect(dl);
-        if(t==='fla'){const fb=keep(ac.createGain()); fb.gain.value=fx.p2; dl.connect(fb); fb.connect(dl);}
-        dl.connect(wet);
-      }else if(t==='pha'){
-        let ph=cur;
-        const lo=keep(ac.createOscillator()), lg=keep(ac.createGain());
-        lo.frequency.value=0.05+fx.p1*3; lg.gain.value=fx.p2*2000; lo.connect(lg); lo.start();
-        for(let i2=0;i2<4;i2++){
-          const ap=keep(ac.createBiquadFilter()); ap.type='allpass'; ap.frequency.value=400+i2*400;
-          lg.connect(ap.detune); ph.connect(ap); ph=ap;
-        }
-        ph.connect(wet);
-      }else if(t==='trm'){
-        const g=keep(ac.createGain()); g.gain.value=1-fx.p2*0.9;
-        const lo=keep(ac.createOscillator()), lg=keep(ac.createGain());
-        lo.frequency.value=0.5+fx.p1*15; lg.gain.value=fx.p2*0.45;
-        lo.connect(lg); lg.connect(g.gain); lo.start();
-        cur.connect(g); g.connect(wet);
-      }else if(t==='drv'||t==='crush'){
-        const sh=keep(ac.createWaveShaper());
-        sh.curve=distCurve(t==='drv'?1:6,fx.p1); sh.oversample='2x';
-        cur.connect(sh);
-        if(t==='drv'){const tone=keep(ac.createBiquadFilter());tone.type='lowpass';
-          tone.frequency.value=800+fx.p2*10000; sh.connect(tone); tone.connect(wet);}
-        else sh.connect(wet);
-      }
-      cur=out;
+      cur=this.fxUnit(fx,cur,keep,pi,false);
     }
     cur.connect(b.busG);
     this.refresh(pi);
@@ -788,7 +999,7 @@ class Engine{
   }
   noteOn(at,pi,midi,vel){
     const p=S.presets[pi];
-    if(p.vox.mode===1)for(const v of [...this.act[pi]])v.kill(at);
+    if(p.vox.mode===1)for(const v of [...this.act[pi]])v.kill(at,true);
     else if(this.act[pi].length>=14)this.act[pi][0].kill(at);
     const v=new Voice(this,at,pi,midi,vel);
     this.act[pi].push(v);
@@ -797,28 +1008,50 @@ class Engine{
   /* PLAY rack: chord fanout + arp pool. Sequencer & live both come through here. */
   trigger(at,pi,midi,vel,durSec){
     const p=S.presets[pi];
+    midi+=(p.tr||0)*12;                 // channel transpose: live AND playback
+    const isMaster=p.ply.some(sl=>sl.typ===1&&Math.round(sl.p3)===1);
+    /* global scaling: snap non-drum channels to the held chord (from a chord-
+       master channel) or to the global scale. masters define, they don't follow */
+    if(CFG.scaleOn&&p.cat!=='drum'&&!isMaster)midi=snapToPCs(midi,pcsNow());
+    this.lastMidi[pi]=midi;
     let midis=[midi], strum=0;
-    for(const sl of p.ply)if(sl.typ===1){
-      const ch=CHORDS[clamp(Math.round(sl.p1),0,CHORDS.length-1)][1];
-      midis=midis.flatMap(m=>ch.map(o=>m+o)); strum=sl.p2||0;
+    const arpIdx=p.ply.findIndex(sl=>sl.typ===2&&T.playing);
+    for(let i2=0;i2<p.ply.length;i2++){  // chord slots BEFORE the arp expand pre-pool
+      const sl=p.ply[i2];
+      if(sl.typ===1&&(arpIdx<0||i2<arpIdx)){
+        const ch=CHORDS[clamp(Math.round(sl.p1),0,CHORDS.length-1)][1];
+        midis=midis.flatMap(m=>ch.map(o=>m+o)); strum=sl.p2||0;
+      }
     }
-    const arp=T.playing&&p.ply.find(sl=>sl.typ===2);
+    let pcHandle=null;
+    if(isMaster){                       // this channel's held notes define the chord
+      const pcs=[...new Set(midis.map(m=>((m%12)+12)%12))];
+      pcs.forEach(addPC);
+      if(durSec!=null)setTimeout(()=>pcs.forEach(subPC),Math.max(20,durSec*1000));
+      else pcHandle=()=>pcs.forEach(subPC);
+    }
+    const arp=arpIdx>=0?p.ply[arpIdx]:null;
     if(arp){
       const until=durSec!=null?beatsAt(at)+durSec/spb():Infinity;
       const entries=midis.map(m=>({midi:m,vel,until}));
       this.arpPool[pi].push(...entries);
       if(durSec!=null)return null;
-      return {release:t=>{const b2=T.playing?beatsAt(t):1e9;for(const en of entries)en.until=Math.min(en.until,b2);}};
+      return {release:t=>{if(pcHandle){pcHandle();pcHandle=null;}
+        const b2=T.playing?beatsAt(t):1e9;for(const en of entries)en.until=Math.min(en.until,b2);}};
     }
     midis.sort((a,b)=>a-b);
     const nM=midis.length;   // negative strum rolls high -> low
-    const voices=midis.map((m,i)=>this.noteOn(at+(strum>=0?i*strum:(nM-1-i)*(-strum)),pi,m,vel));
+    const voices=midis.map((m,i)=>{
+      const v=this.noteOn(at+(strum>=0?i*strum:(nM-1-i)*(-strum)),pi,m,vel);
+      v.live=durSec==null; return v;
+    });
     if(durSec!=null){for(const v of voices)v.release(at+durSec);return null;}
-    return {release:t=>voices.forEach(v=>v.release(t))};
+    return {release:t=>{if(pcHandle){pcHandle();pcHandle=null;}voices.forEach(v=>v.release(t));}};
   }
   arpTick(from,to){
     for(let pi=0;pi<10;pi++){
-      const p=S.presets[pi], arp=p.ply.find(sl=>sl.typ===2);
+      const p=S.presets[pi], ai=p.ply.findIndex(sl=>sl.typ===2), arp=ai>=0?p.ply[ai]:null;
+      const postChords=ai>=0?p.ply.filter((sl,i2)=>sl.typ===1&&i2>ai):[];
       const pool=this.arpPool[pi];
       if(pool.length>64)pool.splice(0,pool.length-64);
       if(!arp||!pool.length)continue;
@@ -840,14 +1073,22 @@ class Engine{
           pick=seq[i2%seq.length];
         }
         const bg=b+grooveOff(pi,b);
-        const v=this.noteOn(timeAt(bg),pi,pick.midi,pick.vel);
-        v.release(timeAt(bg+div*0.85));
+        let hits=[pick.midi];          // chord slots placed AFTER the arp chord every step
+        for(const cs of postChords){
+          const ch=CHORDS[clamp(Math.round(cs.p1),0,CHORDS.length-1)][1];
+          hits=hits.flatMap(m=>ch.map(o=>m+o));
+        }
+        for(const m of hits){
+          const v=this.noteOn(timeAt(bg),pi,m,pick.vel);
+          v.release(timeAt(bg+div*0.85));
+        }
       }
       // prune dead pool entries
       const now=posNow();
       this.arpPool[pi]=pool.filter(n2=>n2.until>now-8);
     }
   }
+  chokeSeq(pi){const n=AC.currentTime;for(const v of [...this.act[pi]])if(!v.live)v.kill(n);}
   allOff(){const n=AC.currentTime;for(const a of this.act)for(const v of [...a])v.kill(n);
     this.arpPool.forEach(p=>p.length=0);}
   click(at,accent){
@@ -861,26 +1102,142 @@ const engine=new Engine();
 
 /* value change entry point: address = (module, slot(-1=flat), param) */
 function applyParam(pi,mi,si,px,v){
-  const M=MODULES[mi]; if(!M||!M.id)return;
+  const M=MODULES[mi]; if(!M||!M.id||M.prs)return;
   const slot=M.flat?null:S.presets[pi][M.id][si];
   const specs=paramsFor(mi,slot); const spec=specs[px]; if(!spec)return;
   setV(S.presets[pi],mi,si,spec,v);
   if(M.id==='ply'&&spec.key==='typ'){        // sane defaults when a play slot changes type
     const sl2=S.presets[pi].ply[si];
-    if(v===1){sl2.p1=2;sl2.p2=0.01;sl2.p3=1;}
+    if(v===1){sl2.p1=2;sl2.p2=0.01;sl2.p3=0;}
     else if(v===2){sl2.p1=2;sl2.p2=0;sl2.p3=1;}
     else if(v===3){sl2.p1=0;sl2.p2=100;}
+    else if(v===4){sl2.p1=0;}
   }
   if(M.id==='amp'||M.id==='fx')engine.rebuildRack(pi);
   else if(M.id==='mix'||M.id==='lfo')engine.refresh(pi);
   else if(M.id==='flt'&&spec.key==='frq')engine.cutLive(pi,si);
   dirtySave=true;
 }
+/* ---------------- preset library ------------------------------------ */
+const LIBKEY='ten-lib-v1';
+function libAll(){try{const x=JSON.parse(localStorage.getItem(LIBKEY));
+  return Array.isArray(x)?x:(x&&x.items)||[];}catch(_){return[];}}
+function libStore(a){try{localStorage.setItem(LIBKEY,JSON.stringify({v:2,items:a}));}catch(_){} if(typeof prepCache!=='undefined')prepCache.clear();}
+function presetData(p){const {modLoop,...rest}=p;return JSON.parse(JSON.stringify(rest));}
+function mulberry32(a){return function(){let t=a+=0x6D2B79F5;t=Math.imul(t^t>>>15,t|1);
+  t^=t+Math.imul(t^t>>>7,t|61);return((t^t>>>14)>>>0)/4294967296;}}
+function libInit(){
+  const cur=libAll(), users=cur.filter(en=>!en.factory);
+  if(cur.length-users.length>=CATS.length*10)return;      // factory set already complete
+  const arr=PRESETS0().map(p=>({name:p.name,cat:p.cat,factory:true,data:presetData(p)}));
+  for(const cat of CATS){
+    const rnd=mulberry32(cat.split('').reduce((a2,ch)=>a2*31+ch.charCodeAt(0),7));
+    let i=arr.filter(en=>en.cat===cat).length, n=1;
+    while(i<10){
+      const p=genPreset(cat,rnd);
+      p.name=cat.slice(0,2).toUpperCase()+String(n++).padStart(2,'0');
+      arr.push({name:p.name,cat,factory:true,data:presetData(p)}); i++;
+    }
+  }
+  libStore(arr.concat(users));
+}
+function applyPresetData(pi,name,cat,data){
+  pushUndo('preset');
+  const p=basePreset(name); p.cat=cat;
+  for(const M of MODULES){
+    if(!M.id||M.prs)continue;
+    if(M.flat){if(data[M.id])Object.assign(p[M.id],data[M.id]);}
+    else if(Array.isArray(data[M.id]))data[M.id].forEach((sl,j)=>{if(sl)Object.assign(p[M.id][j],sl);});
+  }
+  p.tr=data.tr||0;
+  p.modLoop=S.presets[pi].modLoop;      // the channel's mod loop stays
+  S.presets[pi]=p;
+  engine.rebuildRack(pi); engine.refresh(pi);
+  dirty=true; dirtySave=true;
+}
+function scrollPreset(pi,dir){
+  const p=S.presets[pi], pool=libAll().filter(en=>en.cat===(p.cat||'misc'));
+  if(!pool.length){flash('no '+(p.cat||'misc')+' presets in library');return;}
+  let i=pool.findIndex(en=>en.name===p.name);
+  i=i<0?(dir>0?0:pool.length-1):fmod(i+dir,pool.length);
+  applyPresetData(pi,pool[i].name,pool[i].cat,pool[i].data);
+  flash(p.cat+' → '+pool[i].name);
+}
+function saveToLib(pi){
+  pushUndo('save');
+  const p=S.presets[pi], arr=libAll();
+  let name=p.name, n=2;
+  while(arr.some(en=>en.name===name))name=p.name.slice(0,3)+(n++);
+  arr.push({name,cat:p.cat||'misc',data:presetData(p)});
+  libStore(arr); p.name=name;
+  flash('saved to library: '+name+' ('+p.cat+')');
+  dirty=true; dirtySave=true;
+}
+function genPreset(cat,rnd){
+  const R=(a,b)=>a+rnd()*(b-a), RI=(a,b)=>Math.round(R(a,b));
+  const pick=a=>a[Math.floor(rnd()*a.length)];
+  const name=pick('BCDFGKLMPRSTVZ')+pick('AEIOU')+pick('BCDFGKLMPRSTVZ')+RI(0,9);
+  const p=basePreset(name); p.cat=cat;
+  const drum=cat==='drum';
+  p.osc[0].wav=drum?pick([0,0,1,4,4]):RI(0,8);
+  p.osc[0].ph=pick([0,0,0,90,180]); p.osc[0].phm=pick([0,0,1]);
+  const nOps=cat==='pad'||cat==='fx'?RI(1,3):RI(0,2);
+  for(let i=1;i<=nOps;i++)p.osc[i]={wav:RI(0,3),mode:pick([0,1,1,2]),dst:0,
+    rat:pick([0.5,1,1.5,2,2,3,3.5,4,7]),amt:+R(0.15,0.8).toFixed(2),fine:RI(-8,8)*5,ph:0,phm:0};
+  const env={drum:[0.001,R(0.05,0.3),0,R(0.03,0.12)],
+    bass:[0.003,R(0.1,0.3),R(0.3,0.7),0.1], keys:[0.002,R(0.2,0.5),R(0.3,0.6),R(0.2,0.4)],
+    pad:[R(0.2,0.8),0.5,R(0.6,0.9),R(0.5,1.5)], plk:[0.001,R(0.08,0.2),0,R(0.08,0.2)]}[cat]
+    ||[0.002,R(0.1,0.4),R(0,0.7),R(0.1,0.5)];
+  Object.assign(p.env[0],{a:env[0],d:env[1],s:env[2],r:env[3]});
+  p.flt[0]={typ:pick([1,1,1,2,3]),frq:Math.round(300*Math.pow(2,R(0,5.3))),q:+R(0.5,8).toFixed(1),gn:0};
+  if(rnd()<0.5)p.env[1]={dst:3,idx:1,amt:RI(6,18)*5,a:0.003,d:R(0.08,0.4),s:R(0,0.4),r:0.2};
+  if(drum&&p.osc[0].wav===0)p.env[2]={dst:2,idx:1,amt:RI(60,130),a:0.001,d:R(0.04,0.1),s:0,r:0.05};
+  if(rnd()<0.3)p.lfo[0]={dst:2,idx:1,wav:RI(0,3),rate:+R(0.2,6).toFixed(1),amt:RI(4,12)*5};
+  if(rnd()<0.35)p.amp[0]={typ:RI(1,9),drv:+R(0.15,0.6).toFixed(2),mix:+R(0.25,0.7).toFixed(2),par:0};
+  if(rnd()<0.5)p.fx[0]=rnd()<0.5
+    ?{typ:pick([1,2,4]),p1:+R(0.15,0.5).toFixed(2),p2:+R(0.2,0.5).toFixed(2),mix:+R(0.15,0.4).toFixed(2)}
+    :{typ:8,p1:+R(0.1,0.5).toFixed(2),p2:0,mix:1};
+  if(cat==='pad'||cat==='lead')Object.assign(p.vox,{uni:pick([1,3,5]),sprd:RI(6,15)*2});
+  if(cat==='bass'||drum)p.vox.mode=1;
+  p.mix.lvl=+R(0.65,0.85).toFixed(2);
+  return p;
+}
+function randomizeChannel(pi){
+  const cat=S.presets[pi].cat||'misc';
+  const p=genPreset(cat,Math.random);
+  applyPresetData(pi,p.name,cat,presetData(p));
+  flash('☆ new random '+cat+': '+p.name);
+}
+const PRSFIELDS=['prst','type','save','rnd'];
+function prsAction(d){
+  const pi=S.editSnd, p=S.presets[pi], f=PRSFIELDS[S.curParam]||'prst';
+  const kitSl=p.ply.find(sl=>sl.typ===4&&Math.round(sl.p1)===1);
+  if(f==='prst'&&kitSl&&S.prepFocus!=null){   // KIT: assign a library sound to the focused note
+    pushUndo('kit');
+    const pool=libAll().filter(en=>en.cat===(p.cat||'misc'));
+    if(!pool.length){flash('no presets in '+p.cat);return;}
+    p.prep=p.prep||{notes:{}};
+    const node=p.prep.notes[S.prepFocus]=p.prep.notes[S.prepFocus]||{};
+    let i=pool.findIndex(en=>en.name===node.preset);
+    i=i<0?(d>0?0:pool.length-1):fmod(i+d,pool.length);
+    node.preset=pool[i].name;
+    flash('kit: '+NN[S.prepFocus%12]+(Math.floor(S.prepFocus/12)-1)+' → '+pool[i].name);
+    dirty=true; dirtySave=true; return;
+  }
+  if(f==='prst')scrollPreset(pi,d);
+  else if(f==='type'){p.cat=CATS[fmod(CATS.indexOf(p.cat||'misc')+d,CATS.length)];
+    flash('channel type: '+p.cat); dirtySave=true;}
+  else if(f==='save')saveToLib(pi);
+  else randomizeChannel(pi);
+  dirty=true;
+}
+
 function curAddr(){ // resolved (mi,si,px) for the focused parameter in sound layers
   if(S.layer===3)return [S.curMod,S.curSlot,S.slotParam];
   return [S.curMod,MODULES[S.curMod].flat?-1:S.curSlot,S.curParam];
 }
 function adjustParam(d,m){
+  pushUndo('tweak');
   const [mi,si,px]=curAddr(); const M=MODULES[mi];
   if(!M.id){flash('reserved');return;}
   if(S.layer===2&&!M.flat){flash('enter → edit slots');return;}
@@ -888,6 +1245,18 @@ function adjustParam(d,m){
   const slot=M.flat?null:pre[M.id][si];
   const specs=paramsFor(mi,slot), spec=specs[px]; if(!spec)return;
   const ml=pre.modLoop;
+  /* prep mode: tweaks land on the focused note only (voice-level modules) */
+  const prepSl=pre.ply.find(sl2=>sl2.typ===4);
+  if(prepSl&&S.prepFocus!=null&&ml.state!=='edit'&&['osc','flt','env','lfo','vox'].includes(M.id)){
+    pre.prep=pre.prep||{notes:{}};
+    const node=pre.prep.notes[S.prepFocus]=pre.prep.notes[S.prepFocus]||{};
+    node.k=node.k||{};
+    const key=M.id+':'+(M.flat?'-':si)+':'+spec.key;
+    const base=node.k[key]!==undefined?node.k[key]:getV(pre,mi,si,spec);
+    node.k[key]=adjust(spec,base,d,m);
+    flash('prep '+NN[S.prepFocus%12]+(Math.floor(S.prepFocus/12)-1)+' · '+spec.lbl+' = '+fmtVal(spec,node.k[key]));
+    dirty=true; dirtySave=true; return;
+  }
   if(ml.state==='edit'&&S.layer>=2){
     const cell=cellOf(ml), t0=curCell(ml)*cell;
     let pt=ml.events.find(ev=>ev.m===mi&&(ev.s??-1)===si&&ev.p===px&&ev.t>=t0-1e-9&&ev.t<t0+cell-1e-9);
@@ -910,8 +1279,22 @@ function resetParam(){
   if(!M.id)return;
   if(S.layer===2&&!M.flat){flash('enter → edit slots');return;}
   const pre=S.presets[S.editSnd];
+  const prepSl=pre.ply.find(sl2=>sl2.typ===4);
+  if(prepSl&&S.prepFocus!=null&&pre.prep&&pre.prep.notes[S.prepFocus]){
+    const slot0=M.flat?null:pre[M.id][si];
+    const specs0=paramsFor(mi,slot0), spec0=specs0[px];
+    const key=M.id+':'+(M.flat?'-':si)+':'+(spec0&&spec0.key);
+    const node=pre.prep.notes[S.prepFocus];
+    if(node.k&&node.k[key]!==undefined){
+      pushUndo('prep clear');
+      delete node.k[key];
+      if(!Object.keys(node.k).length&&!node.preset)delete pre.prep.notes[S.prepFocus];
+      flash('prep override removed'); dirty=true; dirtySave=true; return;
+    }
+  }
   const slot=M.flat?null:pre[M.id][si];
   const specs=paramsFor(mi,slot), spec=specs[px]; if(!spec)return;
+  pushUndo('reset');
   let dv;
   if(M.flat)dv=basePreset('')[M.id][spec.key];
   else dv=RACK_MK[M.id](si)[spec.key];
@@ -953,15 +1336,20 @@ function spanDelete(lp,from,to,pred){
 }
 function eraseSweep(){
   if(!T.playing)return;
-  const now=posNow();
+  /* sweep to the scheduler's lookahead edge, not the playhead — so notes under
+     the hold are erased BEFORE they get queued, and the erasure is audible live */
+  const now=Math.max(posNow(),T.schedBeat);
   if(S.layer===1){
     const pat=S.patterns[S.editPat], anc=editAnchor();
     if(pat.state==='rec'){
       for(const c in pend){const p=pend[c];
+        if(CFG.overdub){p.sweep=now;continue;}       // overdub: held notes only add
         spanDelete(pat.lanes[p.lane],p.sweep-anc,now-anc,e=>(e.born||0)<p.bornAt);
+        engine.chokeSeq(p.lane);                     // silence what's being overwritten
         p.sweep=now;}
       if(eraseHold){
         spanDelete(pat.lanes[S.curPreset],eraseHold.sweep-anc,now-anc,e=>(e.born||0)<eraseHold.bornAt);
+        engine.chokeSeq(S.curPreset);
         eraseHold.sweep=now;}
     }
   }else if(S.layer>=2&&eraseHold){
@@ -1008,20 +1396,52 @@ function finalizeCaptures(force){
 }
 function diveIn(){
   if(S.layer===0){S.editPat=S.curPat;S.layer=1;}
-  else if(S.layer===1){S.editSnd=S.curPreset;S.layer=2;S.curParam=0;}
+  else if(S.layer===1){S.editSnd=S.curPreset;S.layer=2;S.curMod=0;S.curParam=0;}  // land on PRESET
   else if(S.layer===2){
     const M=MODULES[S.curMod];
-    if(M.slot){S.layer=3;S.slotParam=0;}
-    else flash(M.id?'no slots here':'reserved');
+    if(M.prs){
+      const p=S.presets[S.editSnd], pool=libAll().filter(en=>en.cat===(p.cat||'misc'));
+      S.libSel=Math.max(0,pool.findIndex(en=>en.name===p.name));
+      S.layer=3;
+    }
+    else if(M.slot){S.layer=3;S.slotParam=0;}
+    else flash('no slots here');
   }
   dirty=true;
 }
 function surface(){if(S.layer>0)S.layer--;dirty=true;}
 
+/* ---------------- undo / redo ---------------------------------------
+   Snapshot-based. Structural user actions push; mod-loop playback (which
+   also writes params through applyParam) never does. */
+const UNDO={stack:[],redo:[],lastLabel:'',lastAt:0};
+function pushUndo(label){
+  const now=performance.now();
+  if(label===UNDO.lastLabel&&now-UNDO.lastAt<1500){UNDO.lastAt=now;return;}  // collapse knob turns etc
+  UNDO.stack.push({label,snap:serialize()});
+  if(UNDO.stack.length>60)UNDO.stack.shift();
+  UNDO.redo.length=0; UNDO.lastLabel=label; UNDO.lastAt=now;
+}
+function doUndo(){
+  const u=UNDO.stack.pop();
+  if(!u){flash('nothing to undo');return;}
+  UNDO.redo.push({label:u.label,snap:serialize()});
+  load(u.snap); UNDO.lastLabel='';
+  flash('undo: '+u.label); dirty=true; dirtySave=true;
+}
+function doRedo(){
+  const u=UNDO.redo.pop();
+  if(!u){flash('nothing to redo');return;}
+  UNDO.stack.push({label:u.label,snap:serialize()});
+  load(u.snap); UNDO.lastLabel='';
+  flash('redo: '+u.label); dirty=true; dirtySave=true;
+}
+
 /* ---------------- keyboard ------------------------------------------ */
 document.addEventListener('keydown',e=>{
   if(e.metaKey||e.ctrlKey){
     if(e.code==='KeyE'){e.preventDefault();exportJSON();}
+    if(e.code==='KeyZ'){e.preventDefault();if(!e.repeat)(e.shiftKey?doRedo:doUndo)();}
     return;
   }
   AC.resume();
@@ -1029,11 +1449,49 @@ document.addEventListener('keydown',e=>{
   if(helpOpen){ if(c==='Escape'||e.key==='?'){helpOpen=false;dirty=true;} e.preventDefault(); return; }
   if(e.key==='?'){helpOpen=true;dirty=true;e.preventDefault();return;}
 
+  if(S.layer===-2){                            // MASTER FX rack
+    e.preventDefault();
+    const sl=S.master[S.mSlot||0];
+    const specs=FX_P(sl).concat([SP('route','rt','enum',{opts:['mstr','send']})]);
+    if(c==='Escape'||c==='Enter'){S.layer=0;dirty=true;}
+    else if(/^Digit\d$/.test(c)){const n2=+c.slice(5);S.mSlot=n2===0?9:n2-1;S.mParam=0;dirty=true;}
+    else if(c==='ArrowLeft'||c==='ArrowRight')
+      {S.mParam=fmod((S.mParam||0)+(c==='ArrowRight'?1:-1),specs.length);dirty=true;}
+    else if(c==='ArrowUp'||c==='ArrowDown'){
+      const spec=specs[clamp(S.mParam||0,0,specs.length-1)];
+      pushUndo('master');
+      sl[spec.key]=adjust(spec,sl[spec.key]??0,c==='ArrowUp'?1:-1,kmult(e));
+      if(spec.key==='typ'){sl.p1=0.3;sl.p2=0.3;sl.mix=0.5;S.mParam=0;}
+      engine.rebuildMaster(); dirty=true; dirtySave=true;
+    }
+    else if(c==='Backspace'&&!e.repeat){
+      pushUndo('master');
+      Object.assign(sl,{typ:0,rt:0,p1:0.3,p2:0.3,mix:0.3});
+      engine.rebuildMaster(); flash('master slot cleared'); dirty=true; dirtySave=true;
+    }
+    else if(c==='Space'&&!e.repeat)T.playing?stop():play();
+    return;
+  }
+  if(S.layer===-1){                            // SETTINGS layer
+    e.preventDefault();
+    if(c==='Escape'||c==='Enter'){S.layer=0;dirty=true;}
+    else if(c==='ArrowLeft'||c==='ArrowRight')
+      {S.setSel=fmod((S.setSel||0)+(c==='ArrowRight'?1:-1),SETTINGS.length);dirty=true;}
+    else if(c==='ArrowUp'||c==='ArrowDown')
+      {SETTINGS[S.setSel||0].a(c==='ArrowUp'?1:-1);saveCfg();dirty=true;}
+    else if(c==='Space'&&!e.repeat)T.playing?stop():play();
+    return;
+  }
+
   if(c==='Space'){e.preventDefault(); if(!e.repeat)T.playing?stop():play(); return;}
   if(c==='Tab'||c==='Backquote'){e.preventDefault();
     if(!e.repeat){const h=curHolder();
-      const was=h.state; h.state=h.state==='rec'?'on':'rec';
-      if(was==='rec')finalizeCaptures(true);
+      if(!CFG.latch){                       // momentary: rec only while held
+        if(h.state!=='rec'){pushUndo('take');h.state='rec';}
+      }else{
+        const was=h.state; h.state=h.state==='rec'?'on':'rec';
+        if(was==='rec')finalizeCaptures(true); else pushUndo('take');
+      }
       dirty=true;dirtySave=true;}
     return;}
   if(c==='Enter'){e.preventDefault(); if(!e.repeat)diveIn(); return;}
@@ -1041,14 +1499,25 @@ document.addEventListener('keydown',e=>{
     const h=curHolder();
     if(e.shiftKey)S.layer=0;
     else if(h.state==='edit')h.state='on';
+    else if(S.layer===0)S.layer=-1;            // up from arrange = session settings
     else surface();
     dirty=true; return;}
   if(c==='Slash'&&!e.repeat){e.preventDefault();
     const h=curHolder(); h.state=h.state==='edit'?'on':'edit';
     dirty=true; return;}
-  if(c==='Comma'){setBpm(T.bpm-(e.shiftKey?10:1));return;}
-  if(c==='Period'){setBpm(T.bpm+(e.shiftKey?10:1));return;}
+  if(c==='Comma'||c==='Period'){
+    const d=c==='Period'?1:-1;
+    if(S.layer===1&&!e.shiftKey){          // quick channel volume in the pattern layer
+      const p=S.presets[S.curPreset];
+      p.mix.lvl=clamp(Math.round((p.mix.lvl+d*0.05)*100)/100,0,1);
+      engine.refresh(S.curPreset);
+      flash(p.name+' vol '+Math.round(p.mix.lvl*100)+'%');
+      dirty=true; dirtySave=true; return;
+    }
+    setBpm(T.bpm+d*(e.shiftKey?10:1)); return;
+  }
   if(c==='KeyM'&&!e.repeat){S.metro=!S.metro;dirty=true;return;}
+  if(c==='KeyF'&&S.layer===0&&!e.repeat){S.layer=-2;S.mSlot=S.mSlot||0;S.mParam=0;dirty=true;return;}
   if(c==='KeyS'&&S.layer===0&&!e.repeat){
     const p=S.patterns[S.curPat]; p.sw=((p.sw||0)+1)%3;
     flash('P'+S.curPat+' switch mode: '+SWM[p.sw]);
@@ -1081,24 +1550,26 @@ document.addEventListener('keydown',e=>{
     dirty=true; dirtySave=true; return;}
 
   const lp=curLoop();
-  if(c==='Minus'||c==='Equal'){
+  if(c==='Minus'||c==='Equal'){        // loop length only — values live on the arrows
     const d=c==='Equal'?1:-1;
-    if(S.layer>=2){adjustParam(d,kmult(e));return;}
+    pushUndo('length');
     lp.inc(d); if(S.layer===1)lp.auto=false;
     dirty=true; dirtySave=true; return;
   }
-  if(c==='BracketLeft'){lp.halve(); if(S.layer===1)lp.auto=false; dirty=true;dirtySave=true;return;}
-  if(c==='BracketRight'){lp.double(!e.shiftKey); if(S.layer===1)lp.auto=false; dirty=true;dirtySave=true;return;}
-  if(c==='Backslash'){lp.cycleUnit(); if(S.layer===1)lp.auto=false; dirty=true;dirtySave=true;return;}
+  if(c==='BracketLeft'){pushUndo('length');lp.halve(); if(S.layer===1)lp.auto=false; dirty=true;dirtySave=true;return;}
+  if(c==='BracketRight'){pushUndo('length');lp.double(!e.shiftKey); if(S.layer===1)lp.auto=false; dirty=true;dirtySave=true;return;}
+  if(c==='Backslash'){pushUndo('length');lp.cycleUnit(); if(S.layer===1)lp.auto=false; dirty=true;dirtySave=true;return;}
 
   if(c==='Backspace'){e.preventDefault();
     if(e.repeat)return;
     if(S.layer===0&&e.shiftKey){          // clear everything inside the selected pattern
+      pushUndo('pattern clear');
       const p=S.patterns[S.curPat];
       p.lanes.forEach(l=>{l.clear();l.auto=true;delete l._cap;});
       flash('pattern '+S.curPat+' cleared (all lanes)');
       dirty=true; dirtySave=true; return;}
     if(inEdit()){
+      pushUndo('cell clear');
       const cell=cellOf(lp), t0=curCell(lp)*cell;
       if(S.layer===3)lp.clear(ev=>ev.m===S.curMod&&(ev.s??-1)===S.curSlot&&ev.t>=t0-1e-9&&ev.t<t0+cell-1e-9);
       else if(S.layer===2)lp.clear(ev=>ev.m===S.curMod&&ev.t>=t0-1e-9&&ev.t<t0+cell-1e-9);
@@ -1109,10 +1580,21 @@ document.addEventListener('keydown',e=>{
     if(recing&&!e.shiftKey){
       eraseHold={sweep:posNow(),bornAt:performance.now()};
       flash('erasing while held'); return;}
-    if(S.layer===0){lp.clear();flash('timeline cleared');}
-    else if(S.layer===1){lp.clear();lp.auto=true;flash('lane '+S.curPreset+' cleared');}
-    else if(S.layer===2&&e.shiftKey){curHolder().clear(ev=>ev.m===S.curMod);flash('mod points cleared');}
-    else if(S.layer===3&&e.shiftKey){curHolder().clear(ev=>ev.m===S.curMod&&(ev.s??-1)===S.curSlot);flash('slot mod points cleared');}
+    if(S.layer===0){pushUndo('timeline clear');lp.clear();flash('timeline cleared');}
+    else if(S.layer===1){pushUndo('lane clear');lp.clear();lp.auto=true;flash('lane '+S.curPreset+' cleared');}
+    else if(S.layer===3&&MODULES[S.curMod].prs){   // explorer: delete selected user preset
+      const p=S.presets[S.editSnd], pool=libAll().filter(en=>en.cat===(p.cat||'misc'));
+      const en=pool[S.libSel||0];
+      if(!en){flash('nothing selected');}
+      else if(en.factory){flash(en.name+' is a factory preset');}
+      else{
+        libStore(libAll().filter(x=>x.name!==en.name));
+        S.libSel=Math.max(0,(S.libSel||0)-1);
+        flash('deleted '+en.name+' from library');
+      }
+      dirty=true; return;}
+    else if(S.layer===2&&e.shiftKey){pushUndo('mod clear');curHolder().clear(ev=>ev.m===S.curMod);flash('mod points cleared');}
+    else if(S.layer===3&&e.shiftKey){pushUndo('mod clear');curHolder().clear(ev=>ev.m===S.curMod&&(ev.s??-1)===S.curSlot);flash('slot mod points cleared');}
     else {resetParam();return;}
     dirty=true; dirtySave=true; return;}
 
@@ -1120,6 +1602,7 @@ document.addEventListener('keydown',e=>{
     const n=+c.slice(5);
     if(S.layer===0){
       if(S.arr.state==='edit'){
+        pushUndo('place');
         const cell=cellOf(S.arr), t0=curCell(S.arr)*cell;
         S.arr.clear(ev=>ev.t>=t0-1e-9&&ev.t<t0+cell-1e-9);
         S.arr.events.push({t:t0,pattern:n});
@@ -1133,8 +1616,24 @@ document.addEventListener('keydown',e=>{
         S.arr.events.push({t,pattern:n}); dirtySave=true;
       }
     }
-    else if(S.layer===1)S.curPreset=n;
+    else if(S.layer===1){
+      const l2=S.patterns[S.editPat].lanes[n];
+      if(e.shiftKey){                      // shift+digit = solo toggle
+        l2.solo=!l2.solo;
+        flash('lane '+n+' '+S.presets[n].name+(l2.solo?' SOLO':' unsolo'));
+        dirtySave=true;
+      }else if(n===S.curPreset){           // same digit again = mute toggle
+        l2.mute=!l2.mute;
+        flash('lane '+n+' '+S.presets[n].name+(l2.mute?' MUTED':' on'));
+        dirtySave=true;
+      }else S.curPreset=n;
+    }
     else if(S.layer===2){S.curMod=n===0?9:n-1;S.curParam=0;S.curSlot=0;}
+    else if(MODULES[S.curMod].prs){        // explorer: digit loads the nth entry on the page
+      const p=S.presets[S.editSnd], pool=libAll().filter(en=>en.cat===(p.cat||'misc'));
+      const idx=Math.floor((S.libSel||0)/10)*10+(n===0?9:n-1);
+      if(pool[idx]){S.libSel=idx;applyPresetData(S.editSnd,pool[idx].name,pool[idx].cat,pool[idx].data);flash('loaded '+pool[idx].name);}
+    }
     else {S.curSlot=n===0?9:n-1;S.slotParam=0;}
     dirty=true; return;
   }
@@ -1148,8 +1647,11 @@ document.addEventListener('keydown',e=>{
     else if(S.layer===1)S.curPreset=fmod(S.curPreset+d,10);
     else if(S.layer===2){
       const M=MODULES[S.curMod];
-      const nP=M.flat?M.flat.length:1;
+      const nP=M.prs?PRSFIELDS.length:M.flat?M.flat.length:1;
       S.curParam=fmod(S.curParam+d,Math.max(1,nP));
+    }
+    else if(MODULES[S.curMod].prs){        // explorer: page
+      S.libSel=Math.max(0,(S.libSel||0)+d*10);
     }
     else{
       const pre=S.presets[S.editSnd], M=MODULES[S.curMod];
@@ -1159,9 +1661,27 @@ document.addEventListener('keydown',e=>{
     dirty=true; return;}
   if(c==='ArrowUp'||c==='ArrowDown'){e.preventDefault();
     const d=c==='ArrowUp'?1:-1;
+    if(S.layer===1&&e.shiftKey){scrollPreset(S.curPreset,d);return;}  // browse presets in category
     if(S.layer===1&&S.patterns[S.editPat].state==='edit'){
       S.curPreset=fmod(S.curPreset-d,10);dirty=true;return;}
+    if(S.layer>=2&&MODULES[S.curMod].prs){
+      if(S.layer===3){                    // explorer: move + load
+        const p=S.presets[S.editSnd], pool=libAll().filter(en=>en.cat===(p.cat||'misc'));
+        if(pool.length){
+          S.libSel=clamp((S.libSel||0)-d,0,pool.length-1);
+          const en=pool[S.libSel];
+          applyPresetData(S.editSnd,en.name,en.cat,en.data);
+        }
+        dirty=true; return;
+      }
+      prsAction(d); return;
+    }
     if(S.layer>=2){adjustParam(d,kmult(e));return;}
+    if(S.layer===1){                      // transpose the channel (kb register is z/x)
+      const p=S.presets[S.curPreset];
+      p.tr=clamp((p.tr||0)+d,-3,3);
+      flash(S.presets[S.curPreset].name+' transpose '+(p.tr>=0?'+':'')+p.tr+' oct');
+      dirty=true; dirtySave=true; return;}
     const oc=octCh(); S.octs[oc]=clamp(S.octs[oc]+d,-3,3); dirty=true; return;}
 
   if(c==='KeyZ'&&!e.repeat){const oc=octCh();S.octs[oc]=clamp(S.octs[oc]-1,-3,3);dirty=true;return;}
@@ -1173,6 +1693,7 @@ document.addEventListener('keydown',e=>{
     const midi=60+S.octs[pi]*12+NOTEKEYS[c];
     const pat=S.patterns[S.editPat];
     if(S.layer===1&&pat.state==='edit'){
+      pushUndo('step');
       const lane=pat.lanes[S.curPreset], cell=cellOf(lane), n=stepCells(lane);
       const t0=curCell(lane)*cell;
       const i=lane.events.findIndex(ev=>ev.midi===midi&&ev.t>=t0-1e-9&&ev.t<t0+cell-1e-9);
@@ -1186,28 +1707,44 @@ document.addEventListener('keydown',e=>{
       dirty=true; dirtySave=true; return;
     }
     let at=AC.currentTime+0.005;
-    if(S.layer===1&&pat.state==='rec'&&T.playing){
-      const lane=pat.lanes[pi];
-      const patEmpty=pat.lanes.every(l=>!l.events.length);
-      if(patEmpty&&!lane._cap){
+    const lane=(S.layer===1?pat:S.patterns[S.editPat]).lanes[pi];
+    const recording=S.layer===1&&pat.state==='rec'&&T.playing;
+    const patEmpty=pat.lanes.every(l=>!l.events.length);
+    {
+      if(recording&&patEmpty&&!lane._cap){
         T.startTime=at; T.startBeat=0; T.schedBeat=0;
         acts=[{pat:S.editPat,start:-1e9,anchor:0}];
-        startCapture(lane,0);
-        flash('● the ONE is set — listening…');
-        pend[c]={t0:0,sweep:0,bornAt:performance.now(),lane:pi,qt:0,midi};
+        if(lane.auto&&CFG.listen){startCapture(lane,0);flash('● the ONE is set — listening…');}
+        else if(lane.auto){lane.unit='B';lane.count=DEFLENS[CFG.defLen];lane.auto=false;
+          flash('● the ONE is set — '+lane.count+' bar loop');}
+        else flash('● the ONE is set');
+        pend[c]={t0:0,sweep:0,ts:0,bornAt:performance.now(),lane:pi,qt:0,midi};
       }else{
-        const t0=posNow();
-        const q=qnext(t0,0.25);                       // live quantize → NEXT 16th
+        /* live quantize applies whenever it's on — stopped or playing, rec or not */
+        const t0=gridNow();
+        const q=qnext(t0,0.25);                       // → NEXT 16th, never earlier
         let tr=t0+(q-t0)*lane.qlive;
-        if(S.hum)tr+=(Math.random()*2-1)*S.hum*0.12;
+        if(recording&&S.hum)tr+=(Math.random()*2-1)*S.hum*0.12;
         if(tr<t0)tr=t0;
-        at=Math.max(at,timeAt(tr));
-        if(lane.auto&&!lane._cap&&!lane.events.length)startCapture(lane,tr);
-        const qt=lane._cap?Math.max(0,tr-lane._cap.t0):fmod(tr-editAnchor(),lane.len);
-        pend[c]={t0,sweep:t0,bornAt:performance.now(),lane:pi,qt,midi};
+        /* monitor exactly where playback will put it: groove included, full
+           strength — playback applies the same groove to the stored note */
+        const heard=tr+grooveOff(pi,tr);
+        at=Math.max(at,gridTime(heard));
+        if(recording){
+          if(lane.auto&&!lane._cap&&!lane.events.length){
+            if(CFG.listen)startCapture(lane,tr);
+            else{lane.unit='B';lane.count=DEFLENS[CFG.defLen];lane.auto=false;}
+          }
+          const qt=lane._cap?Math.max(0,tr-lane._cap.t0):fmod(tr-editAnchor(),lane.len);
+          // qt stored straight (groove is a playback layer); ts = where it actually sounds
+          pend[c]={t0,sweep:t0,ts:heard,bornAt:performance.now(),lane:pi,qt,midi};
+        }
       }
     }
     liveV[c]=engine.trigger(at,pi,midi,0.9);
+    if(S.layer>=2&&S.presets[pi].ply.some(sl=>sl.typ===4)){
+      S.prepFocus=engine.lastMidi[pi];           // prep/kit: last played note = focus
+    }
     dirty=true; return;
   }
 });
@@ -1215,15 +1752,24 @@ document.addEventListener('keydown',e=>{
 document.addEventListener('keyup',e=>{
   const c=e.code;
   if(c==='Backspace')eraseHold=null;
-  if(liveV[c]){liveV[c]&&liveV[c].release&&liveV[c].release(AC.currentTime+0.005);delete liveV[c];}
+  if((c==='Tab'||c==='Backquote')&&!CFG.latch){   // momentary looper: release = rec off
+    const h=curHolder();
+    if(h.state==='rec'){h.state='on';finalizeCaptures(true);dirty=true;dirtySave=true;}
+  }
+  let relAt=AC.currentTime+0.005;
   if(pend[c]){
     const p=pend[c], lane=S.patterns[S.editPat].lanes[p.lane];
-    const dur=Math.max(0.1,(T.playing?posNow():p.t0+0.25)-p.t0);
+    /* length is measured from where the note SOUNDED (post-quantize), not from
+       the raw keypress — so the loop plays back the note you actually heard */
+    const relG=T.playing?gridNow():p.ts+0.25;
+    const dur=Math.max(0.05,relG-p.ts);
     lane.clear(ev=>ev.midi===p.midi&&Math.abs(ev.t-p.qt)<1e-6);
     lane.events.push({t:p.qt,midi:p.midi,vel:0.9,dur,born:performance.now()});
     if(lane._cap)lane._cap.lastEnd=Math.max(lane._cap.lastEnd,p.qt+dur);
+    relAt=Math.max(relAt,gridTime(p.ts+dur));   // hold the monitored note to that same length
     delete pend[c]; dirty=true; dirtySave=true;
   }
+  if(liveV[c]){liveV[c]&&liveV[c].release&&liveV[c].release(relAt);delete liveV[c];}
 });
 window.addEventListener('blur',()=>{
   eraseHold=null;
@@ -1233,7 +1779,7 @@ window.addEventListener('blur',()=>{
 
 /* ---------------- persistence + migration ---------------------------- */
 const LS='ten-v1';
-function serialize(){return JSON.stringify({v:5,bpm:T.bpm,metro:S.metro,hum:S.hum,grv:S.grv,octs:S.octs,
+function serialize(){return JSON.stringify({v:8,bpm:T.bpm,metro:S.metro,hum:S.hum,grv:S.grv,octs:S.octs,master:S.master,
   arr:S.arr,
   patterns:S.patterns.map(p=>({state:p.state==='edit'?'on':p.state,sw:p.sw||0,lanes:p.lanes})),
   presets:S.presets.map(p=>({...p,modLoop:p.modLoop.toJSON()}))});}
@@ -1261,15 +1807,18 @@ function convertV3Preset(sp,i){ // v3-and-earlier preset data -> v4 racks
 }
 function load(json){
   try{
-    const o=JSON.parse(json); if(!o||o.v<1||o.v>5)return false;
+    const o=JSON.parse(json); if(!o||o.v<1||o.v>8)return false;
     T.bpm=o.bpm||120; S.metro=!!o.metro; S.hum=o.hum??0;
     S.grv=o.grv||{typ:0,amt:0};
+    if(Array.isArray(o.master))S.master=o.master.map((m,i)=>({typ:0,rt:0,p1:0.3,p2:0.3,mix:0.3,...m}));
     S.octs=Array.isArray(o.octs)?o.octs.slice(0,10):Array.from({length:10},()=>0);
     S.arr=Looper.from(o.arr); S.arr.auto=false;
     if(o.v>=2){
       S.patterns=o.patterns.map(sp=>{
         const p=mkPattern(); p.state=['on','rec'].includes(sp.state)?sp.state:'on'; p.sw=sp.sw||0;
-        p.lanes=sp.lanes.map(Looper.from); return p;});
+        p.lanes=sp.lanes.map(Looper.from);
+        if(o.v<6)p.lanes.forEach(l=>{if(!l.qpost)l.qpost=1;});   // post-Q default became 100%
+        return p;});
     }else{
       S.patterns=o.patterns.map(sp=>{
         const p=mkPattern();
@@ -1289,12 +1838,19 @@ function load(json){
           else if(Array.isArray(sp[M.id]))sp[M.id].forEach((sl,j)=>{if(sl)Object.assign(p[M.id][j],sl);});
         }
         p.name=sp.name;
+        p.cat=sp.cat||(['drum','drum','drum','drum','bass','keys','chord','lead','pad','plk'][i]||'misc');
+        p.tr=sp.tr||0; p.prep=sp.prep||null;
         p.modLoop=Looper.from(sp.modLoop||{unit:'b',count:8}); p.modLoop.auto=false;
         if(o.v===4){  // module order changed in v5: ply 6->9, vox 8->7, mix 9->8
           const map={6:9,8:7,9:8};
           p.modLoop.events=p.modLoop.events
             .filter(ev=>ev.m!==7)
             .map(ev=>({...ev,m:map[ev.m]??ev.m}));
+        }
+        if(o.v<7){    // v7 inserted PRESET at module 1: osc..fx shift up one
+          p.modLoop.events=p.modLoop.events
+            .filter(ev=>ev.m!==6)
+            .map(ev=>({...ev,m:ev.m<6?ev.m+1:ev.m}));
         }
         return p;});
     }else{
@@ -1306,6 +1862,7 @@ function load(json){
         return p;});
     }
     for(let i=0;i<10;i++){engine.rebuildRack(i);engine.refresh(i);}
+    engine.rebuildMaster();
     return true;
   }catch(err){console.warn('load failed',err);return false;}
 }
@@ -1321,6 +1878,7 @@ document.addEventListener('drop',e=>{
   f.text().then(t=>{flash(load(t)?'session loaded':'load failed');dirty=true;dirtySave=true;});
 });
 if(!load(localStorage.getItem(LS)))demoContent();
+libInit();
 
 /* ---------------- render --------------------------------------------- */
 const screen=document.getElementById('screen');
@@ -1367,12 +1925,16 @@ function render(){
     sp('d',' │ cpu ')+sp(cpuLoad>60?'r':'a',cpuS)+sp('d','·'+nvS));
   const crumbs=['ARRANGE','PATTERN '+(S.layer>0?S.editPat:S.curPat),
     'SOUND '+(S.layer>1?S.editSnd:S.curPreset)+(S.layer>1?' '+S.presets[S.editSnd].name:''),
-    MODULES[S.curMod].name+' SLOTS'];
+    MODULES[S.curMod].prs?'LIBRARY':MODULES[S.curMod].name+' SLOTS'];
   L.push(sp('d','─'.repeat(W)));
-  L.push('  '+crumbs.slice(0,S.layer+1).map((cr,i)=>i===S.layer?sp('i',' '+cr+' '):sp('d',cr)).join(sp('d','  ›  ')));
+  if(S.layer===-2)L.push('  '+sp('i',' MASTER FX ')+sp('d','   sends + mix-bus inserts (dj fx) · esc/enter → back'));
+  else if(S.layer===-1)L.push('  '+sp('i',' SETTINGS ')+sp('d','   esc/enter → back to arrange'));
+  else L.push('  '+crumbs.slice(0,S.layer+1).map((cr,i)=>i===S.layer?sp('i',' '+cr+' '):sp('d',cr)).join(sp('d','  ›  ')));
   L.push('');
 
   if(helpOpen)renderHelp(L);
+  else if(S.layer===-2)renderMaster(L);
+  else if(S.layer===-1)renderSettings(L);
   else if(S.layer===0)renderArr(L,pos);
   else if(S.layer===1)renderPat(L,pos);
   else if(S.layer===2)renderSnd(L,pos);
@@ -1380,8 +1942,8 @@ function render(){
 
   L.push('');
   L.push(sp('d','─'.repeat(W)));
-  L.push('  loop: '+loopBadge()+'   '+sp('d','`/tab REC  / edit  -/= '+(S.layer>=2?'value':'len')+'  [ ]½/×2  \\ unit  ⌫ '+(S.layer>=2?'reset':'clear')));
-  L.push('  '+sp('d','space play   enter/esc layers   0-9 select   ↑↓/-/= values (⇧×10 ⌥×0.1)   ,/. bpm   ? help'));
+  L.push('  loop: '+loopBadge()+'   '+sp('d','`/tab REC  / edit  -/= len  [ ]½/×2  \\ unit  ⌫ '+(S.layer>=2?'reset':'clear')));
+  L.push('  '+sp('d','space play   enter/esc layers   0-9 select   ↑↓ values (⇧×10 ⌥×0.1)   ,/. bpm   ? help'));
   if(performance.now()<flashUntil)L.push('  '+sp('a','▸ '+flashMsg));
   screen.innerHTML=L.join('\n');
 }
@@ -1427,11 +1989,13 @@ function renderPat(L,pos){
   const pat=S.patterns[S.editPat];
   const edit=pat.state==='edit';
   const anc=editAnchor();
-  L.push('  '+sp('d','presets   (digits/←→ select · letters play · z/x octave · lanes loop independently)'));
+  L.push('  '+sp('d','presets   (digits select · again = mute · shift+digit = solo · shift+↑↓ = swap sound)'));
   let row='   ';
   for(let i=0;i<10;i++){
-    let cell=` ${i}${S.presets[i].name} `;
-    row+=(i===S.curPreset?sp('i',cell):sp('d',cell));
+    const m=pat.lanes[i].mute, so=pat.lanes[i].solo;
+    let cell=(so?'*':m?'‑':' ')+`${i}${S.presets[i].name}`+(so?'*':m?'‑':' ');
+    const cls=i===S.curPreset?(so?'ai':m?'ri':'i'):(so?'a':m?'r':'d');
+    row+=sp(cls,cell);
   }
   L.push(row);
   L.push('');
@@ -1447,7 +2011,8 @@ function renderPat(L,pos){
     const ph=T.playing?Math.floor(fmod(pos-anc,lane.len)/cell):-1;
     const cnt=(lane.count%1?lane.count.toFixed(1):lane.count)+({s:'st',b:'bt',B:'br'})[lane.unit];
     let lbl=` ${li}${S.presets[li].name} `;
-    L.push('  '+(li===S.curPreset?sp('a',lbl):sp('d',lbl))+sp('d',pad(lane.auto?'new':cnt,6))+' '+
+    L.push('  '+(lane.mute?sp('r',lbl):li===S.curPreset?sp('a',lbl):sp('d',lbl))+
+      sp('d',pad(lane.solo?'SOLO':lane.mute?'MUTE':lane.auto?'new':cnt,6))+' '+
       gridRow(lane,cell,ph,(a,b)=>{
         const hits=lane.events.filter(e=>e.t>=a-1e-9&&e.t<b-1e-9);
         if(!hits.length)return '·';
@@ -1464,9 +2029,10 @@ function renderPat(L,pos){
       sp('d','  ←→ move · ↑↓ lane · letters place (auto-advance) / re-press removes · ⌫ clear cell')+
       (here?'   '+sp('a','['+here+']'):''));
   }else{
-    const ql=pat.lanes[S.curPreset], oc=S.octs[S.curPreset];
-    L.push('  '+sp('d','oct ')+sp('a',(oc>=0?'+':'')+oc)+sp('d','(z/x·↑↓)')+
-      sp('d','   q:')+sp('a',Math.round(ql.qlive*100)+'/'+Math.round(ql.qpost*100)+'%')+sp('d',' live/post (q / Q)')+'   '+
+    const ql=pat.lanes[S.curPreset], oc=S.octs[S.curPreset], tr=S.presets[S.curPreset].tr||0;
+    L.push('  '+sp('d','kb ')+sp('a',(oc>=0?'+':'')+oc)+sp('d','(z/x)')+
+      sp('d',' tr ')+sp('a',(tr>=0?'+':'')+tr)+sp('d','(↑↓)')+
+      sp('d','   q:')+sp('a',Math.round(ql.qlive*100)+'/'+Math.round(ql.qpost*100)+'%')+sp('d',' live/post (q/Q · live always on)')+'   '+
       (pat.state==='rec'?(T.playing?sp('r','● REC — held notes replace lane · hold ⌫ = silence'):sp('r','● armed — press space')):
       sp('d','letters play live · tab = REC · / = edit'))+
       '   '+sp('d','enter → sound '+S.curPreset));
@@ -1480,8 +2046,24 @@ function renderSnd(L,pos){
   MODULES.forEach((m,i)=>{tabs+=(i===S.curMod?sp('i',` ${m.k}${m.name} `):sp('d',` ${m.k}${m.name} `));});
   L.push(tabs);
   L.push('');
+  prepLine(L,pre);
   const M=MODULES[S.curMod];
-  if(M.flat){
+  if(M.prs){
+    const p=pre, pool=libAll().filter(en=>en.cat===(p.cat||'misc'));
+    let lr='   ', vr='   ';
+    const vals=[p.name,p.cat||'misc','↕ keep','↕ roll'];
+    PRSFIELDS.forEach((lbl,i)=>{
+      const foc=i===S.curParam;
+      lr+=(foc?sp('a','▸'+pad(lbl,9)):sp('d',' '+pad(lbl,9)))+' ';
+      vr+=(foc?sp('i',' '+pad(vals[i],9)):' '+pad(vals[i],9))+' ';
+    });
+    L.push(lr); L.push(vr);
+    L.push('');
+    L.push('   '+sp('d','library: ')+sp('a',pool.length+' '+(p.cat||'misc'))+
+      sp('d','  ·  ←→ field · ↑↓ act (prst scrolls · save keeps · rnd = random from scratch)'));
+    L.push('   '+sp('d','shift+↑↓ in the pattern layer scrolls these too · enter → explore the library'));
+  }
+  else if(M.flat){
     let lr='   ', vr='   ';
     M.flat.forEach((pspec,i)=>{
       const foc=i===S.curParam;
@@ -1491,7 +2073,7 @@ function renderSnd(L,pos){
     });
     L.push(lr); L.push(vr);
     L.push('');
-    L.push('   '+sp('d','←→ param · ↑↓/-/= adjust · ⌫ reset'));
+    L.push('   '+sp('d','←→ param · ↑↓ adjust · ⌫ reset'));
   }else if(M.slot){
     let srow='   ';
     pre[M.id].forEach((sl,i)=>{
@@ -1513,11 +2095,24 @@ function renderSnd(L,pos){
   L.push('  '+sp('d','mod loop ('+M.name+'): '+evs.length+' pts'+
     (ml.state==='rec'?'  ● value moves while playing get recorded':'')));
   L.push('   '+gridRow(ml,cell2,phCell,(a,b)=>evs.some(e=>e.t>=a-1e-9&&e.t<b-1e-9)?'▪':'·',edit?curCell(ml):-1));
-  if(edit)L.push('  '+sp('i',' EDIT ')+' '+sp('a',(curCell(ml)+1)+'/'+stepCells(ml))+sp('d','  ↑↓/-/= set value at cursor · ⌫ clears cell'));
+  if(edit)L.push('  '+sp('i',' EDIT ')+' '+sp('a',(curCell(ml)+1)+'/'+stepCells(ml))+sp('d','  ↑↓ set value at cursor · ⌫ clears cell'));
 }
 
+function prepLine(L,pre){
+  const prepSl=pre.ply.find(sl=>sl.typ===4);
+  if(!prepSl)return;
+  const kit=Math.round(prepSl.p1)===1;
+  const f=S.prepFocus;
+  const has=f!=null&&pre.prep&&pre.prep.notes&&pre.prep.notes[f];
+  L.push('  '+sp('r','◆ '+(kit?'KIT':'PREP'))+
+    sp('d','  focus: ')+(f!=null?sp('a',NN[f%12]+(Math.floor(f/12)-1)+(has?' ●':'')):sp('d','play a note'))+
+    sp('d',kit?'  ·  PRST field assigns a sound to this note':'  ·  tweaks land on this note only · ⌫ removes an override'));
+  L.push('');
+}
 function renderSlots(L){
   const pre=S.presets[S.editSnd], M=MODULES[S.curMod];
+  if(M.prs){renderExplore(L,pre);return;}
+  prepLine(L,pre);
   if(!M.slot){L.push('   '+sp('d','no slots'));return;}
   const rackA=pre[M.id];
   let tabs='  ';
@@ -1586,7 +2181,7 @@ function renderSlots(L){
     evSlot.some(e=>e.t>=a-1e-9&&e.t<b-1e-9)?'▪':
     evMod.some(e=>e.t>=a-1e-9&&e.t<b-1e-9)?'∙':'·',mEdit?curCell(ml):-1));
   if(mEdit)L.push('  '+sp('i',' EDIT ')+' '+sp('a',(curCell(ml)+1)+'/'+stepCells(ml))+
-    sp('d','  ←→ cursor · ↑↓/-/= set point for focused param · ⌫ clear cell'));
+    sp('d','  ←→ cursor · ↑↓ set point for focused param · ⌫ clear cell'));
   L.push('');
   const hints={osc:'dest routes fm/ring at any op · phase + trig: rtrg = locked start, free = analog-style random',
     amp:'route: ser = in chain, par = side-branch summed in',
@@ -1595,21 +2190,92 @@ function renderSlots(L){
     lfo:'dest+slot# route: pitch · filt N · amp · pan · op N',
     fx:'serial chain top to bottom · verb = send to shared reverb',
     ply:'chord (±strum: + low→high, − high→low) · arp needs transport · grv = this part’s groove'};
-  L.push('   '+sp('d','digits pick slot · ←→ param · ↑↓/-/= value · ⌫ reset'));
+  L.push('   '+sp('d','digits pick slot · ←→ param · ↑↓ value · ⌫ reset'));
   L.push('   '+sp('d',hints[M.id]||''));
+}
+
+function renderExplore(L,pre){
+  const cat=pre.cat||'misc', pool=libAll().filter(en=>en.cat===cat);
+  S.libSel=clamp(S.libSel||0,0,Math.max(0,pool.length-1));
+  const page=Math.floor(S.libSel/10), pages=Math.max(1,Math.ceil(pool.length/10));
+  L.push('  '+sp('d','library / ')+sp('a',cat)+sp('d','  ·  '+pool.length+' presets · page '+(page+1)+'/'+pages));
+  L.push('');
+  if(!pool.length)L.push('   '+sp('d','(empty — save or randomize some '+cat+' sounds first)'));
+  for(let i=page*10;i<Math.min(pool.length,page*10+10);i++){
+    const en=pool[i], sel=i===S.libSel, loaded=en.name===pre.name;
+    L.push('   '+sp('d',((i%10+1)%10)+' ')+
+      (sel?sp('i',' '+pad(en.name,10)):sp(loaded?'a':'d',' '+pad(en.name,10)))+
+      (loaded?sp('a',' ● loaded'):'')+(en.factory?sp('d','  factory'):sp('d','  yours')));
+  }
+  L.push('');
+  L.push('   '+sp('d','digits/↑↓ load · ←→ page · letters audition · ⌫ delete (yours only) · esc back'));
+}
+
+function renderMaster(L){
+  let tabs='  ';
+  S.master.forEach((sl,i)=>{
+    const ab=sl.typ?XTYPES[sl.typ]:'···';
+    const lbl=` ${(i+1)%10}${ab}${sl.typ?(Math.round(sl.rt)===1?'ˢ':'ᵐ'):''} `;
+    tabs+=(i===(S.mSlot||0)?sp('i',lbl):(sl.typ?sp('a',lbl):sp('d',lbl)));
+  });
+  L.push(tabs);
+  L.push('');
+  const sl=S.master[S.mSlot||0];
+  const specs=FX_P(sl).concat([SP('route','rt','enum',{opts:['mstr','send']})]);
+  S.mParam=Math.min(S.mParam||0,specs.length-1);
+  let lr='   ', vr='   ';
+  specs.forEach((pspec,i)=>{
+    const foc=i===S.mParam;
+    const v=fmtVal(pspec,sl[pspec.key]??0);
+    lr+=(foc?sp('a','▸'+pad(pspec.lbl,9)):sp('d',' '+pad(pspec.lbl,9)))+' ';
+    vr+=(foc?sp('i',' '+pad(v,9)):' '+pad(v,9))+' ';
+  });
+  L.push(lr); L.push(vr);
+  L.push('');
+  L.push('   '+sp('d','digits pick slot · ←→ param · ↑↓ value · ⌫ clear slot'));
+  L.push('   '+sp('d','route: ˢsend = parallel bus (channels feed it via an fx \'send\' slot)'));
+  L.push('   '+sp('d','       ᵐmstr = insert on the whole mix — dj fx: roll · grs8 · tape · gate · comp'));
+  L.push('   '+sp('d','defaults: slot1 reverb send · slot2 delay send'));
+}
+
+function renderSettings(L){
+  L.push('  '+sp('d','session & default behaviors — these carry across sessions'));
+  L.push('');
+  let lr='   ', vr='   ';
+  SETTINGS.forEach((it,i)=>{
+    const foc=i===(S.setSel||0);
+    lr+=(foc?sp('a','▸'+pad(it.n,8)):sp('d',' '+pad(it.n,8)))+' ';
+    vr+=(foc?sp('i',' '+pad(it.v(),8)):' '+pad(it.v(),8))+' ';
+  });
+  L.push(lr); L.push(vr);
+  L.push('');
+  L.push('   '+sp('d','←→ item · ↑↓ change'));
+  L.push('');
+  L.push('   '+sp('d','looper  mmnt = hold tab to record, release to stop · latch = tab toggles'));
+  L.push('   '+sp('d','rec     ovwrt = held notes replace what’s under them · ovdub = notes only add'));
+  L.push('   '+sp('d','listen  off = new lanes skip listening and start at defLen bars'));
+  L.push('   '+sp('d','scale   on = non-drum notes snap to key+mode — or, if a PLAY chord slot has'));
+  L.push('   '+sp('d','        role=mstr, that channel’s held chord live-retunes every other channel'));
 }
 
 function renderHelp(L){
   const rows=[
     ['space','play / stop (restart from 0)'],
-    ['enter / esc','navigate layers: arrange › pattern › sound › module slots'],
-    ['` or tab','REC on/off for this layer’s loop'],
+    ['enter / esc','navigate layers: arrange › pattern › sound › module slots'],    ['` or tab','hold = REC (momentary default) · latch mode in settings makes it toggle'],
     ['/','EDIT mode on/off (step cursor) · esc leaves it'],
     ['0-9','arrange: pattern · pattern: preset · sound: module · slots: slot'],
-    ['a w s e d f t g y h u j k o l p ; \'','play notes · z/x octave'],
+    ['a w s e d f t g y h u j k o l p ; \'','play notes · z/x keyboard register'],
     ['← →','move focus / edit cursor'],
-    ['↑ ↓  or  - =','adjust focused value · shift=×10 · option=×0.1 · ↑↓ octave in pattern'],
-    ['q / shift+Q (in pattern)','lane LIVE quantize (push to next 16th) / POST quantize (playback)'],
+    ['↑ ↓','adjust focused value · shift=×10 · option=×0.1 · transpose in the pattern layer'],
+    ['- =','loop length ±1 unit — every layer, never parameter values'],
+    ['same digit again (pattern)','mute / unmute that channel’s lane'],
+    ['shift+digit (pattern)','solo / unsolo that channel (solos win over mutes)'],
+    ['z x','keyboard register — where your keys sit (per channel, playing only)'],
+    ['↑ ↓ (pattern)','transpose the channel ±1 octave — recorded notes included'],
+    ['shift+↑↓ (pattern)','swap the channel’s sound: prev/next library preset of its type'],
+    ['module 1 PRST','browse/type/save/randomize the channel’s sound · enter = library'],
+    ['q / shift+Q (in pattern)','lane LIVE quantize (pushes your playing to the next 16th — always on,'],
+    ['','even stopped or not recording) / POST quantize (playback, non-destructive)'],
     ['empty pattern + REC','your FIRST hit sets the one — transport retriggers on it'],
     ['empty lane + REC','lane listens, then suggests 1/2/4/8/16 bars'],
     ['hold a note (while REC)','replaces whatever was on that lane underneath'],
@@ -1619,8 +2285,12 @@ function renderHelp(L){
     ['[  ]  \\  - =','loop half / double+dup / unit / ±1 unit (arrange+pattern)'],
     ['s / h (in arrange)','pattern switch mode · global humanize'],
     ['g / shift+G (in arrange)','global groove amount % · groove type (sw16 sw8 rv16 rv8 push drag mpc drnk)'],
-    ['z x  or  ↑↓','octave — remembered PER CHANNEL (each part keeps its own)'],
     [', .','bpm −1/+1 (shift = ±10) · m metronome'],
+    ['cmd/ctrl+Z / +shift+Z','undo / redo — takes, clears, tweaks, preset loads, randomize'],
+    [', . (in pattern)','channel volume −/+ (shift = bpm as usual)'],
+    ['esc (from arrange)','SETTINGS: looper momentary/latch · overdub · listen · scale/key/mode'],
+    ['f (in arrange)','MASTER FX: 10 slots, send buses (verb/dly default) + mix inserts = dj fx'],
+    ['PLAY slot: prep/kit','per-note tweaks (prepared synth) or per-note sounds (kit) — normal by default'],
     ['ctrl/cmd+E','export session json · drop a json file anywhere to load'],
   ];
   for(const [k,d] of rows)L.push('   '+sp('a',pad(k,34))+' '+sp('d',d));
