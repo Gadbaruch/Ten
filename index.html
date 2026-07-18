@@ -89,7 +89,30 @@ const EDST=['off','amp','pitch','filt','op'];
 const LDST=['off','pitch','filt','amp','pan','op'];
 const LFOW=['sin','tri','sqr','saw'], LFOW_W=['sine','triangle','square','sawtooth'];
 const XTYPES=['off','dly','cho','fla','pha','trm','drv','crush','verb'];
-const PTYPES=['off','chord','arp'];
+const PTYPES=['off','chord','arp','grv'];
+/* groove templates: f(16th-index) -> -1..1, scaled by amt% * half a 16th */
+const GROOVES=[
+ {n:'sw16',f:i=>i%2===1?1:0},
+ {n:'sw8', f:i=>i%4===2?1:0},
+ {n:'rv16',f:i=>i%2===1?-1:0},
+ {n:'rv8', f:i=>i%4===2?-1:0},
+ {n:'push',f:i=>i%4===0?0:-0.5},
+ {n:'drag',f:i=>i%4===0?0:0.5},
+ {n:'mpc', f:i=>[0,0.6,0.15,0.8][i%4]},
+ {n:'drnk',f:i=>[0,0.7,-0.3,0.4,0.1,0.9,-0.2,0.5][i%8]},
+];
+function grooveOff(li,tGlobal){
+  const g=S.presets[li].ply.find(sl=>sl.typ===3);
+  let typ=S.grv.typ, amt=S.grv.amt;
+  if(g){
+    const src=Math.round(g.p1);
+    if(src>0){typ=src-1;amt=g.p2;}
+    else amt=amt*g.p2/100;
+  }
+  if(amt<0.5)return 0;
+  const idx=((Math.round(tGlobal/0.25)%16)+16)%16;
+  return GROOVES[typ].f(idx)*amt/100*0.125;
+}
 const CHORDS=[['oct',[0,12]],['5th',[0,7]],['maj',[0,4,7]],['min',[0,3,7]],['ma7',[0,4,7,11]],['mi7',[0,3,7,10]],['su4',[0,5,7]],['9th',[0,4,7,14]]];
 const ARPDIV=['1/4','1/8','1/16','1/32'], ARPDIVB=[1,0.5,0.25,0.125];
 const ARPMODE=['up','down','updn','rand'];
@@ -177,11 +200,14 @@ const PLY_P=sl=>{
   const base=[SP('type','typ','enum',{opts:PTYPES})];
   if(sl.typ===1)return base.concat([
     SP('chord','p1','enum',{opts:CHORDS.map(c=>c[0])}),
-    SP('strum','p2','lin',{min:0,max:0.06,step:0.005,fmt:v=>Math.round(v*1000)+'ms'})]);
+    SP('strum','p2','lin',{min:-0.06,max:0.06,step:0.005,fmt:v=>Math.round(v*1000)+'ms'})]);
   if(sl.typ===2)return base.concat([
     SP('div','p1','enum',{opts:ARPDIV}),
     SP('mode','p2','enum',{opts:ARPMODE}),
     SP('oct','p3','lin',{min:1,max:3,step:1})]);
+  if(sl.typ===3)return base.concat([
+    SP('src','p1','enum',{opts:['glob'].concat(GROOVES.map(g=>g.n))}),
+    SP('amt','p2','lin',{min:0,max:150,step:5,fmt:v=>v+'%'})]);
   return base;
 };
 
@@ -192,16 +218,16 @@ const MODULES=[
  {k:'4',id:'env',name:'ENV', slot:true,params:ENV_P,abbr:s=>s.dst?EDST[s.dst]:'···'},
  {k:'5',id:'lfo',name:'LFO', slot:true,params:LFO_P,abbr:s=>s.dst?LDST[s.dst]:'···'},
  {k:'6',id:'fx', name:'FX',  slot:true,params:FX_P, abbr:s=>s.typ?XTYPES[s.typ]:'···'},
- {k:'7',id:'ply',name:'PLAY',slot:true,params:PLY_P,abbr:s=>s.typ?PTYPES[s.typ]:'···'},
- {k:'8',id:null, name:'····'},
- {k:'9',id:'vox',name:'VOICE',flat:[SP('mode','mode','enum',{opts:MODE}),
+ {k:'7',id:null, name:'····'},
+ {k:'8',id:'vox',name:'VOICE',flat:[SP('mode','mode','enum',{opts:MODE}),
     SP('glide','glide','time',{min:0,max:0.5}),
     SP('uni','uni','lin',{min:1,max:7,step:1,fmt:v=>v+'v'}),
     SP('sprd','sprd','lin',{min:0,max:50,step:2,fmt:v=>v+'c'}),
     SP('wide','wide','lin',{min:0,max:1,step:0.05}),
     SP('slop','slop','time',{min:0,max:0.03})]},
- {k:'0',id:'mix',name:'MIX', flat:[SP('level','lvl','lin',{min:0,max:1,step:0.05}),
+ {k:'9',id:'mix',name:'MIX', flat:[SP('level','lvl','lin',{min:0,max:1,step:0.05}),
     SP('pan','pan','lin',{min:-1,max:1,step:0.1})]},
+ {k:'0',id:'ply',name:'PLAY',slot:true,params:PLY_P,abbr:s=>s.typ?PTYPES[s.typ]:'···'},
 ];
 const paramsFor=(mi,slot)=>{const M=MODULES[mi];return M.flat?M.flat:M.params(slot);};
 const slotOf=(pre,mi,si)=>pre[MODULES[mi].id][si];
@@ -209,7 +235,7 @@ const getV=(pre,mi,si,spec)=>MODULES[mi].flat?pre[MODULES[mi].id][spec.key]:slot
 const setV=(pre,mi,si,spec,v)=>{if(MODULES[mi].flat)pre[MODULES[mi].id][spec.key]=v;else slotOf(pre,mi,si)[spec.key]=v;};
 
 function adjust(spec,v,dir,m=1){
-  if(spec.type==='enum')return fmod(v+dir,spec.opts.length);
+  if(spec.type==='enum')return fmod(Math.round(v)+dir,spec.opts.length);
   if(spec.type==='freq')return clamp(v*Math.pow(1.12,dir*m),20,16000);
   if(spec.type==='time'){
     const lo=spec.min!==undefined?spec.min:0.001, hi=spec.max!==undefined?spec.max:8;
@@ -225,7 +251,7 @@ function adjust(spec,v,dir,m=1){
 }
 const kmult=e=>e.altKey?0.1:e.shiftKey?10:1;
 function fmtVal(spec,v){
-  if(spec.type==='enum')return spec.opts[v]??'?';
+  if(spec.type==='enum')return spec.opts[clamp(Math.round(v),0,spec.opts.length-1)]??'?';
   if(spec.fmt)return spec.fmt(v);
   if(spec.type==='freq')return fF(v);
   if(spec.type==='time')return fT(v);
@@ -282,8 +308,10 @@ const PRESETS0=()=>[
 const mkPattern=()=>({state:'on',sw:0,lanes:Array.from({length:10},()=>{const l=new Looper('s',16,'on');l.auto=true;return l;})});
 const S={
   metro:false, layer:0, hum:0,
+  grv:{typ:0,amt:0},                       // global groove: type + amount %
+  octs:Array.from({length:10},()=>0),      // octave per channel/preset
   curPat:0, editPat:0, curPreset:4, editSnd:4,
-  curMod:0, curParam:0, curSlot:0, slotParam:0, oct:0,
+  curMod:0, curParam:0, curSlot:0, slotParam:0,
   arr:new Looper('B',4,'on'),
   patterns:Array.from({length:10},mkPattern),
   presets:PRESETS0(),
@@ -355,6 +383,7 @@ function scheduleRange(from,to){
       lane.occur(s0-a.anchor,s1-a.anchor,(t,e)=>{
         let tt=t;
         if(lane.qpost>0.001)tt+=(Math.round(e.t/0.25)*0.25-e.t)*lane.qpost;
+        tt+=grooveOff(li,tt+a.anchor);
         engine.trigger(timeAt(tt+a.anchor),li,e.midi,e.vel||0.9,(e.dur||0.2)*spb());
       });
     }
@@ -781,7 +810,9 @@ class Engine{
       if(durSec!=null)return null;
       return {release:t=>{const b2=T.playing?beatsAt(t):1e9;for(const en of entries)en.until=Math.min(en.until,b2);}};
     }
-    const voices=midis.map((m,i)=>this.noteOn(at+i*strum,pi,m,vel));
+    midis.sort((a,b)=>a-b);
+    const nM=midis.length;   // negative strum rolls high -> low
+    const voices=midis.map((m,i)=>this.noteOn(at+(strum>=0?i*strum:(nM-1-i)*(-strum)),pi,m,vel));
     if(durSec!=null){for(const v of voices)v.release(at+durSec);return null;}
     return {release:t=>voices.forEach(v=>v.release(t))};
   }
@@ -808,8 +839,9 @@ class Engine{
           else if(mode==='updn'&&i2>=seq.length)i2=seq.length*2-2-i2;
           pick=seq[i2%seq.length];
         }
-        const v=this.noteOn(timeAt(b),pi,pick.midi,pick.vel);
-        v.release(timeAt(b+div*0.85));
+        const bg=b+grooveOff(pi,b);
+        const v=this.noteOn(timeAt(bg),pi,pick.midi,pick.vel);
+        v.release(timeAt(bg+div*0.85));
       }
       // prune dead pool entries
       const now=posNow();
@@ -833,6 +865,12 @@ function applyParam(pi,mi,si,px,v){
   const slot=M.flat?null:S.presets[pi][M.id][si];
   const specs=paramsFor(mi,slot); const spec=specs[px]; if(!spec)return;
   setV(S.presets[pi],mi,si,spec,v);
+  if(M.id==='ply'&&spec.key==='typ'){        // sane defaults when a play slot changes type
+    const sl2=S.presets[pi].ply[si];
+    if(v===1){sl2.p1=2;sl2.p2=0.01;sl2.p3=1;}
+    else if(v===2){sl2.p1=2;sl2.p2=0;sl2.p3=1;}
+    else if(v===3){sl2.p1=0;sl2.p2=100;}
+  }
   if(M.id==='amp'||M.id==='fx')engine.rebuildRack(pi);
   else if(M.id==='mix'||M.id==='lfo')engine.refresh(pi);
   else if(M.id==='flt'&&spec.key==='frq')engine.cutLive(pi,si);
@@ -896,6 +934,7 @@ const inEdit=()=>curHolder().state==='edit';
 const cellOf=lp=>S.layer===0?Math.max(1,cellSize(lp.len,64)):S.layer>=2?cellSize(lp.len,48):cellSize(lp.len,64);
 const stepCells=lp=>Math.ceil(lp.len/cellOf(lp)-1e-9);
 const curCell=lp=>Math.min(stepCur,stepCells(lp)-1);
+const octCh=()=>S.layer>=2?S.editSnd:S.curPreset;   // whose octave the keys edit
 const qz=(v,g)=>Math.round(v/g)*g;
 const qnext=(v,g)=>Math.ceil(v/g-1e-6)*g;   // live quantize: NEXT grid point
 function editAnchor(){
@@ -1030,6 +1069,16 @@ document.addEventListener('keydown',e=>{
     S.hum=hs[(hs.indexOf(S.hum)+1)%hs.length];
     flash('humanize '+Math.round(S.hum*100)+'%');
     dirty=true; dirtySave=true; return;}
+  if(c==='KeyG'&&S.layer===0&&!e.repeat){
+    if(e.shiftKey){
+      S.grv.typ=(S.grv.typ+1)%GROOVES.length;
+      flash('groove type: '+GROOVES[S.grv.typ].n);
+    }else{
+      const ga=[0,15,30,45,60,75];
+      S.grv.amt=ga[(ga.indexOf(S.grv.amt)+1)%ga.length];
+      flash('groove amount '+S.grv.amt+'%');
+    }
+    dirty=true; dirtySave=true; return;}
 
   const lp=curLoop();
   if(c==='Minus'||c==='Equal'){
@@ -1113,15 +1162,15 @@ document.addEventListener('keydown',e=>{
     if(S.layer===1&&S.patterns[S.editPat].state==='edit'){
       S.curPreset=fmod(S.curPreset-d,10);dirty=true;return;}
     if(S.layer>=2){adjustParam(d,kmult(e));return;}
-    S.oct=clamp(S.oct+d,-3,3); dirty=true; return;}
+    const oc=octCh(); S.octs[oc]=clamp(S.octs[oc]+d,-3,3); dirty=true; return;}
 
-  if(c==='KeyZ'&&!e.repeat){S.oct=clamp(S.oct-1,-3,3);dirty=true;return;}
-  if(c==='KeyX'&&!e.repeat){S.oct=clamp(S.oct+1,-3,3);dirty=true;return;}
+  if(c==='KeyZ'&&!e.repeat){const oc=octCh();S.octs[oc]=clamp(S.octs[oc]-1,-3,3);dirty=true;return;}
+  if(c==='KeyX'&&!e.repeat){const oc=octCh();S.octs[oc]=clamp(S.octs[oc]+1,-3,3);dirty=true;return;}
 
   if(c in NOTEKEYS&&!e.repeat&&S.layer>0){
     e.preventDefault();
-    const midi=60+S.oct*12+NOTEKEYS[c];
     const pi=S.layer===1?S.curPreset:S.editSnd;
+    const midi=60+S.octs[pi]*12+NOTEKEYS[c];
     const pat=S.patterns[S.editPat];
     if(S.layer===1&&pat.state==='edit'){
       const lane=pat.lanes[S.curPreset], cell=cellOf(lane), n=stepCells(lane);
@@ -1184,7 +1233,7 @@ window.addEventListener('blur',()=>{
 
 /* ---------------- persistence + migration ---------------------------- */
 const LS='ten-v1';
-function serialize(){return JSON.stringify({v:4,bpm:T.bpm,metro:S.metro,hum:S.hum,
+function serialize(){return JSON.stringify({v:5,bpm:T.bpm,metro:S.metro,hum:S.hum,grv:S.grv,octs:S.octs,
   arr:S.arr,
   patterns:S.patterns.map(p=>({state:p.state==='edit'?'on':p.state,sw:p.sw||0,lanes:p.lanes})),
   presets:S.presets.map(p=>({...p,modLoop:p.modLoop.toJSON()}))});}
@@ -1212,8 +1261,10 @@ function convertV3Preset(sp,i){ // v3-and-earlier preset data -> v4 racks
 }
 function load(json){
   try{
-    const o=JSON.parse(json); if(!o||o.v<1||o.v>4)return false;
+    const o=JSON.parse(json); if(!o||o.v<1||o.v>5)return false;
     T.bpm=o.bpm||120; S.metro=!!o.metro; S.hum=o.hum??0;
+    S.grv=o.grv||{typ:0,amt:0};
+    S.octs=Array.isArray(o.octs)?o.octs.slice(0,10):Array.from({length:10},()=>0);
     S.arr=Looper.from(o.arr); S.arr.auto=false;
     if(o.v>=2){
       S.patterns=o.patterns.map(sp=>{
@@ -1229,7 +1280,7 @@ function load(json){
         }
         return p;});
     }
-    if(o.v===4){
+    if(o.v>=4){
       S.presets=o.presets.map((sp,i)=>{
         const p=basePreset(sp.name||('P'+i));
         for(const M of MODULES){
@@ -1239,6 +1290,12 @@ function load(json){
         }
         p.name=sp.name;
         p.modLoop=Looper.from(sp.modLoop||{unit:'b',count:8}); p.modLoop.auto=false;
+        if(o.v===4){  // module order changed in v5: ply 6->9, vox 8->7, mix 9->8
+          const map={6:9,8:7,9:8};
+          p.modLoop.events=p.modLoop.events
+            .filter(ev=>ev.m!==7)
+            .map(ev=>({...ev,m:map[ev.m]??ev.m}));
+        }
         return p;});
     }else{
       S.presets=o.presets.map((sp,i)=>{
@@ -1302,10 +1359,12 @@ function render(){
   const bar=Math.floor(pos/4)+1, beat=Math.floor(fmod(pos,4))+1;
   const tState=(T.playing?sp('ai',' ▶ ')+sp('a',` ${(''+bar).padStart(3,'0')}.${beat}`):sp('d',' ■ stopped'))+sp('d','(space)');
   const nv=engine.act.reduce((a,x)=>a+x.length,0);
+  const cpuS=String(Math.min(99,Math.round(cpuLoad))).padStart(2,' ')+'%';
+  const nvS=String(Math.min(99,nv)).padStart(2,' ')+'v';
   L.push(sp('a','TEN')+sp('d',' ▐ keyboard groovebox')+' '.repeat(16)+tState+
-    sp('d',' │ ')+sp('a',T.bpm+'bpm')+sp('d','(,/.)')+
-    sp('d',' │ metro ')+(S.metro?sp('a','on'):sp('d','off'))+sp('d','(m)')+
-    sp('d',' │ cpu ')+sp(cpuLoad>60?'r':'a',Math.round(cpuLoad)+'%')+sp('d','·'+nv+'v'));
+    sp('d',' │ ')+sp('a',String(T.bpm).padStart(3,' ')+'bpm')+sp('d','(,/.)')+
+    sp('d',' │ metro ')+(S.metro?sp('a','on '):sp('d','off'))+sp('d','(m)')+
+    sp('d',' │ cpu ')+sp(cpuLoad>60?'r':'a',cpuS)+sp('d','·'+nvS));
   const crumbs=['ARRANGE','PATTERN '+(S.layer>0?S.editPat:S.curPat),
     'SOUND '+(S.layer>1?S.editSnd:S.curPreset)+(S.layer>1?' '+S.presets[S.editSnd].name:''),
     MODULES[S.curMod].name+' SLOTS'];
@@ -1359,6 +1418,7 @@ function renderArr(L,pos){
   },edit?curCell(arr):-1)+'   '+sp('d',cell>=4?'cell=bar':cell>=1?'cell=beat':'cell=16th'));
   L.push('');
   L.push('  '+sp('d','playing now: ')+sp('a','P'+(T.playing?actAt(pos).pat:S.curPat))+
+    sp('d','   groove ')+sp('a',GROOVES[S.grv.typ].n+'·'+S.grv.amt+'%')+sp('d',' (g/G)')+
     sp('d','   humanize ')+sp('a',Math.round(S.hum*100)+'%')+sp('d',' (h)')+
     sp('d','   enter → edit pattern '+S.curPat));
 }
@@ -1404,8 +1464,8 @@ function renderPat(L,pos){
       sp('d','  ←→ move · ↑↓ lane · letters place (auto-advance) / re-press removes · ⌫ clear cell')+
       (here?'   '+sp('a','['+here+']'):''));
   }else{
-    const ql=pat.lanes[S.curPreset];
-    L.push('  '+sp('d','oct ')+sp('a',(S.oct>=0?'+':'')+S.oct)+
+    const ql=pat.lanes[S.curPreset], oc=S.octs[S.curPreset];
+    L.push('  '+sp('d','oct ')+sp('a',(oc>=0?'+':'')+oc)+sp('d','(z/x·↑↓)')+
       sp('d','   q:')+sp('a',Math.round(ql.qlive*100)+'/'+Math.round(ql.qpost*100)+'%')+sp('d',' live/post (q / Q)')+'   '+
       (pat.state==='rec'?(T.playing?sp('r','● REC — held notes replace lane · hold ⌫ = silence'):sp('r','● armed — press space')):
       sp('d','letters play live · tab = REC · / = edit'))+
@@ -1534,7 +1594,7 @@ function renderSlots(L){
     env:'dest+slot# route anywhere: amp · pitch · filt N · op N level',
     lfo:'dest+slot# route: pitch · filt N · amp · pan · op N',
     fx:'serial chain top to bottom · verb = send to shared reverb',
-    ply:'chord fans out notes (strum staggers) · arp needs transport running'};
+    ply:'chord (±strum: + low→high, − high→low) · arp needs transport · grv = this part’s groove'};
   L.push('   '+sp('d','digits pick slot · ←→ param · ↑↓/-/= value · ⌫ reset'));
   L.push('   '+sp('d',hints[M.id]||''));
 }
@@ -1558,6 +1618,8 @@ function renderHelp(L){
     ['shift+backspace (in arrange)','clear ALL lanes of the selected pattern'],
     ['[  ]  \\  - =','loop half / double+dup / unit / ±1 unit (arrange+pattern)'],
     ['s / h (in arrange)','pattern switch mode · global humanize'],
+    ['g / shift+G (in arrange)','global groove amount % · groove type (sw16 sw8 rv16 rv8 push drag mpc drnk)'],
+    ['z x  or  ↑↓','octave — remembered PER CHANNEL (each part keeps its own)'],
     [', .','bpm −1/+1 (shift = ±10) · m metronome'],
     ['ctrl/cmd+E','export session json · drop a json file anywhere to load'],
   ];
