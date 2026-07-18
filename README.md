@@ -4,9 +4,16 @@ A keyboard-only, OP-1-style music system. Ten of everything: ten patterns, ten
 sound presets, ten sound modules — all living on the `0-9` keys, with meaning
 depending on which **layer** you're in.
 
-Open `index.html` (any static server, no build step). Everything autosaves to
-localStorage; `ctrl/cmd+E` exports a session JSON, drop a JSON on the page to
-load it (that's how we swap sessions between us for now).
+**Play it:** https://gadbaruch.github.io/Ten/ — or open `index.html` locally
+(any static server, no build step, zero dependencies).
+
+Everything autosaves to your browser; `ctrl/cmd+E` exports a session JSON and
+dropping a JSON on the page loads it — that's how we trade ideas for now.
+
+```
+git clone git@github.com:Gadbaruch/Ten.git && cd Ten
+npx serve -l 3031 .        # then open http://localhost:3031
+```
 
 ## The four layers
 
