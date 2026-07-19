@@ -13,23 +13,29 @@ onto the page to load it. `cmd+Z` / `cmd+shift+Z` undo/redo almost everything.
 ## Layers
 
 ```
-SETTINGS      esc from arrange — session defaults (persist across sessions)
-MASTER FX     f from arrange — 10 fx slots: send buses + mix inserts
-              (dj fx; a limiter guards slot 0 by default)
-ARRANGE       digits recall patterns · record/place pattern transitions
+SESSION       esc from arrange — 10 song slots (select + enter loads) + defaults
+ARRANGE       digits select parts · slots ARE song sections (0 intro … 9 outro)
+  │           the home row a s d f g h j k l ; = DJ pads (hold / shift-latch)
+  │           0,0 selects MASTER — the unique channel on the far right
+  ├─ MASTER 0   fx rack (sends + mix inserts, limiter stock) + dj pad editor
   └─ PATTERN  digits pick channel (again=mute, shift=solo) · letters play notes
       └─ SOUND    digits pick module — 1 PRST 2 OSC 3 AMP 4 FILT 5 ENV
-          └─ SLOTS    │       6 LFO 7 FX 8 VOICE 9 MIX 0 PLAY
-                      └─ every module is a 10-slot rack; digits pick a slot
+          └─ RACK     │       6 LFO 7 FX 8 VOICE 9 MIX 0 PLAY
+                      └─ every module is a 10-slot rack; digits pick a slot,
+                        the same digit again BYPASSES it
 ```
 
-`enter`/`esc` move between layers. `←→` walk every focusable field in a
-sound — fields, params, and occupied slots flow into each other
-(`shift+←→` jumps a whole module). `↑↓` adjust values (shift ×10, option
-×0.1), `-`/`=` resize loops, `⌫` resets/clears/deletes whatever is
-focused; in a pattern, **holding** `⌫` momentarily silences the channel
-(`shift+⌫` actually clears it). `b` taps tempo. `?` shows the full keymap
-in the app — that is the authoritative reference.
+The full ladder is always visible up top — you are the lit rung; `enter`
+goes deeper, `esc` goes up. `←→` walk every focusable field (`shift+←→`
+jumps modules/parts). `↑↓` adjust values (shift ×10, option ×0.1);
+`cmd+↑↓` tweaks the **last-played note only** (prepared-piano on any
+channel — `•` marks prepped params, `⌫` removes). `-`/`=` resize loops,
+`shift+-/=` nudge a loop's content. `q` toggles live quantize anywhere
+(`shift+Q` snaps a lane after the fact). `t` toggles the arrangement
+timeline (focus mode). `⌫` clears in context; **holding shift+⌫**
+re-initializes the whole layer you're on. `cmd+C/X/V` copy/cut/paste
+parts, channels, and rack slots. `b` taps tempo. `F1` shows the full
+keymap — that is the authoritative reference.
 
 ## Core ideas
 
@@ -39,9 +45,9 @@ early), a flat event list, REC (`tab`, momentary by default — hold to record)
 and EDIT (`/`, tracker-style step cursor). Pattern lanes are polymetric —
 each lane has its own independent length.
 
-**Recording feels like tape.** What you hear is what gets stored (live
-quantize pushes notes to the next 16th — per lane, works even when stopped,
-with a separate non-destructive POST quantize for playback). Held notes
+**Recording feels like tape.** What you hear is exactly what gets stored
+and played back (live quantize pushes notes to the next 16th — toggle it
+with `q`, snap a loose take later with `shift+Q`). Held notes
 replace what's under them audibly and immediately; while recording, hold
 `⌫` to record silence. The default looper mode is **retro capture**: TEN
 is always listening, so just play — then hit `tab` once and it grabs what
@@ -70,21 +76,39 @@ the same polymetric loop system as everything else. (Buffers currently
 live in memory only — they don't survive a reload yet.)
 
 **Presets.** Module 1 (PRST) is the first thing you see in a sound: browse
-the library within the channel's type, change type, save, randomize.
-`enter` opens the library explorer (90 seeded factory presets, 10 per
-category, + your saves). In the pattern layer `shift+↑↓` swaps the channel's
-sound without leaving the groove.
+the library within the channel's type (17 types — drums are split into
+kik/snr/hh/cymb/perc/tom/wood/zap, plus `kit` where every note maps to its
+own drum sound), change type, save, randomize with a `wild%` dial.
+`enter` opens the library explorer (170 factory presets + your saves) —
+browsing auditions safely: `enter` keeps, `esc` restores your sound.
 
-**Prep / Kit (per-note sounds).** Add a `prep` slot in PLAY: the last note
-you play in the sound layers becomes the *focus* — in `prep` mode your
-tweaks apply to that note only (prepared piano for synths); in `kit` mode
-the PRST field assigns a whole library preset to that note (drum kits).
-No prep slot = completely normal channel.
+**The `/` button makes music.** One key, three intensities, everywhere:
+`/` = musical variations of what's there · `shift+/` = a genuinely
+different style (own key, scale flavor, chord progression, groove
+language, bass/lead styles, fresh presets, role-based mixing and sends) ·
+`shift+option+/` = wild card. In ARRANGE it writes the section the slot
+stands for; in SESSION it generates a **whole song** — intro/build/drop/
+break patterns plus a dj-automated arrangement with the classic
+pre-drop buildup.
 
-**Global groove & scale.** `g`/`shift+G` in arrange: swing amount + type
-(sw16/sw8, reverse, push, drag, mpc, drunk). Settings layer: global scale
-(key + mode) snaps all non-drum channels; a chord-master channel overrides
-the scale with whatever chord is held.
+**DJ pads & automation.** The home row in arrange fires ten editable fx
+pads (hipass, buildup macro, lopass, synced ping-pong delay throw, verb
+wash, rolls, crush, tape, gate) — hold for momentary, shift to latch,
+tap a latched pad to unlatch. With arrangement REC on, held pads record
+as timed automation windows (`≈` on the timeline); in EDIT they toggle at
+the cursor. Edit the pads inside MASTER 0 with the same letters.
+
+**Smart mix.** On by default (`smix` in SESSION): per-channel + master
+spectrum analysers make slow, dead-banded trim decisions — harsh/bright
+channels come down, buried bass gets a nudge, loud outliers move toward
+the pack. It decides like a mix engineer, it never pumps like a
+compressor. There's also a `duck` sidechain fx (any channel following any
+other) — generated basslines ship with one following the kick.
+
+**Global groove & scale.** Groove type/amount/humanize/switch-mode live
+on the arrange arrows as params. Settings: global scale snaps all
+non-drum channels; a chord-master channel overrides the scale with
+whatever chord is held.
 
 ## For collaborators (and their LLMs)
 
@@ -114,7 +138,7 @@ top to bottom; each section is banner-commented in this order:
    decides meaning. All state lives in `S` (session) / `CFG` (defaults) /
    `T` (transport).
 8. **Persistence** — `serialize()`/`load()` with versioned migrations
-   (currently v9). Undo = snapshot stack of `serialize()`.
+   (currently v11). Undo = snapshot stack of `serialize()`.
 9. **Render** — full-screen `<pre>`, rebuilt at ~30fps from state. No DOM
    beyond one element.
 
