@@ -945,6 +945,7 @@ class Engine{
       this.rebuildRack(i); this.refresh(i);
     }
     this.rebuildMaster();
+    this.setDj([]);            // build the dj pass-through — without it the mix dead-ends
   }
   getIR(sec){
     const key=Math.round(sec*4);
