@@ -54,7 +54,11 @@ class Looper{
   }
   halve(){this.count=Math.max(0.25,this.count/2);}
   inc(d){this.count=clamp(Math.round((this.count+d)*4)/4,0.25,256);}
-  cycleUnit(){this.unit=UNIT_ORDER[(UNIT_ORDER.indexOf(this.unit)+1)%3];}
+  cycleUnit(){                         // keep the real length; only the ±unit grain changes
+    const L=this.len;
+    this.unit=UNIT_ORDER[(UNIT_ORDER.indexOf(this.unit)+1)%3];
+    this.count=clamp(Math.round(L/UNITS[this.unit]*4)/4,0.25,256);
+  }
   clear(pred){this.events=pred?this.events.filter(e=>!pred(e)):[];}
   occur(from,to,cb){
     const L=this.len; if(L<=0)return;
@@ -68,7 +72,7 @@ class Looper{
   toJSON(){return{unit:this.unit,count:this.count,state:this.state,events:this.events,auto:this.auto,
     qlive:this.qlive,qpost:this.qpost,mute:this.mute,solo:this.solo};}
   static from(o){
-    const st=o.state==='off'||o.state==='edit'?'on':(o.state||'on');
+    const st='on';                       // rec/edit are performance states — never persist
     const l=new Looper(o.unit,o.count,st);l.events=o.events||[];
     l.auto=o.auto!==undefined?o.auto:!l.events.length;
     l.qlive=o.qlive??1; l.qpost=o.qpost??1; l.mute=!!o.mute; l.solo=!!o.solo;
@@ -78,7 +82,7 @@ class Looper{
 const cycleState=h=>{h.state=h.state==='on'?'rec':h.state==='rec'?'edit':'on';};
 
 /* ---------------- slot racks: enums + defaults ----------------------- */
-const WAVES=['sin','tri','saw','sqr','nse','org','bel','vox','mtl'];
+const WAVES=['sin','tri','saw','sqr','nse','org','bel','vox','mtl','smp'];
 const OPMODE=['add','fm','ring'];
 const DEST=['prev','op1','op2','op3','op4','op5','op6','op7','op8','op9','op10'];
 const DTYPES=['off','soft','hard','fold','tube','fuzz','crush','sat','asym','rect'];
@@ -88,7 +92,7 @@ const FTYPE_W=[null,'lowpass','highpass','bandpass','notch','peaking','lowshelf'
 const EDST=['off','amp','pitch','filt','op'];
 const LDST=['off','pitch','filt','amp','pan','op'];
 const LFOW=['sin','tri','sqr','saw'], LFOW_W=['sine','triangle','square','sawtooth'];
-const XTYPES=['off','dly','cho','fla','pha','trm','drv','crush','verb','comp','gate','roll','tape','grs8','send'];
+const XTYPES=['off','dly','cho','fla','pha','trm','drv','crush','verb','comp','gate','roll','tape','grs8','send','limit'];
 const GPATS=[[1,1,1,1,0,0,0,0],[0,0,1,1,0,0,1,1],[1,0,1,0,1,0,1,0],[1,.7,.45,.3,.2,.12,.07,0],[1,0,0,1,0,0,1,0]];
 const PTYPES=['off','chord','arp','grv','prep'];
 /* groove templates: f(16th-index) -> -1..1, scaled by amt% * half a 16th */
@@ -126,19 +130,20 @@ const mkFlt =i=>(i===0?{typ:1,frq:9000,q:1,gn:0}:{typ:0,frq:2000,q:1,gn:0});
 const mkEnv =i=>(i===0?{dst:1,idx:1,amt:100,a:0.005,d:0.15,s:0.7,r:0.2}
                       :{dst:0,idx:1,amt:100,a:0.003,d:0.2,s:0,r:0.2});
 const mkLfo =()=>({dst:0,idx:1,wav:0,rate:5,amt:30});
-const mkFx  =()=>({typ:0,p1:0.3,p2:0.3,mix:0.3});
+const mkFx  =()=>({typ:0,p1:0.3,p2:0.3,p3:0.5,mix:0.3});
 const mkPly =()=>({typ:0,p1:2,p2:0,p3:1});
 const rack=(mk)=>Array.from({length:10},(_,i)=>mk(i));
 
-const CATS=['drum','bass','keys','chord','lead','pad','plk','fx','misc'];
+const CATS=['drum','bass','keys','chord','lead','pad','plk','fx','audio','misc'];
 
 /* ---------------- cross-session settings ----------------------------- */
 const SCALES=[['maj',[0,2,4,5,7,9,11]],['min',[0,2,3,5,7,8,10]],['dor',[0,2,3,5,7,9,10]],
   ['mix',[0,2,4,5,7,9,10]],['pmaj',[0,2,4,7,9]],['pmin',[0,3,5,7,10]],
   ['hmin',[0,2,3,5,7,8,11]],['chr',[0,1,2,3,4,5,6,7,8,9,10,11]]];
 const KEYN=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
-const CFG=Object.assign({latch:0,overdub:0,listen:1,defLen:1,scaleOn:0,key:0,scale:0},
+const CFG=Object.assign({looper:0,overdub:0,listen:1,defLen:1,scaleOn:0,key:0,scale:0},
   (()=>{try{return JSON.parse(localStorage.getItem('ten-cfg'))||{};}catch(_){return{};}})());
+if(CFG.looper===undefined)CFG.looper=0;   // retro is the default to try
 const saveCfg=()=>{try{localStorage.setItem('ten-cfg',JSON.stringify(CFG));}catch(_){}};
 const DEFLENS=[1,2,4,8];
 function snapToPCs(midi,pcs){          // nearest note whose pitch-class is allowed
@@ -155,8 +160,8 @@ const pcsNow=()=>heldPCs.size?[...heldPCs.keys()]:scalePCs();
 function addPC(pc){heldPCs.set(pc,(heldPCs.get(pc)||0)+1);}
 function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);else heldPCs.set(pc,n);}
 const SETTINGS=[
- {n:'looper', v:()=>CFG.latch?'latch':'mmnt',  a:()=>CFG.latch=CFG.latch?0:1},
- {n:'rec',    v:()=>CFG.overdub?'ovdub':'ovwrt',a:()=>CFG.overdub=CFG.overdub?0:1},
+ {n:'looper', v:()=>['retro','mmnt','latch'][CFG.looper||0], a:d=>CFG.looper=fmod((CFG.looper||0)+d,3)},
+ {n:'rec',    v:()=>['ovwrt','ovdub','smart'][CFG.overdub||0], a:d=>CFG.overdub=fmod((CFG.overdub||0)+d,3)},
  {n:'listen', v:()=>CFG.listen?'on':'off',     a:()=>CFG.listen=CFG.listen?0:1},
  {n:'defLen', v:()=>DEFLENS[CFG.defLen]+'bar', a:d=>CFG.defLen=clamp(CFG.defLen+d,0,3)},
  {n:'scale',  v:()=>CFG.scaleOn?'on':'off',    a:()=>CFG.scaleOn=CFG.scaleOn?0:1},
@@ -165,6 +170,7 @@ const SETTINGS=[
 ];
 function basePreset(name){return{
   name, cat:'misc', tr:0, prep:null,
+  au:{gain:0.9,semis:0,rate:1,st:0,en:1,fit:0},
   osc:rack(mkOsc), amp:rack(mkAmp), flt:rack(mkFlt), env:rack(mkEnv),
   lfo:rack(mkLfo), fx:rack(mkFx), ply:rack(mkPly),
   vox:{mode:0,glide:0,uni:1,sprd:12,wide:0.6,slop:0.008},
@@ -199,13 +205,13 @@ const FLT_P=()=>[
   SP('gain','gn','lin',{min:-18,max:18,step:1,fmt:v=>v+'dB'})];
 const ENV_P=()=>[
   SP('dest','dst','enum',{opts:EDST}),
-  SP('slot#','idx','lin',{min:1,max:10,step:1}),
+  SP('slot#','idx','lin',{min:0,max:10,step:1,fmt:v=>v?String(v):'all'}),
   SP('amt','amt','lin',{min:-200,max:200,step:5,fmt:v=>v+'%'}),
   SP('atk','a','time'),SP('dec','d','time'),
   SP('sus','s','lin',{min:0,max:1,step:0.05}),SP('rel','r','time')];
 const LFO_P=()=>[
   SP('dest','dst','enum',{opts:LDST}),
-  SP('slot#','idx','lin',{min:1,max:10,step:1}),
+  SP('slot#','idx','lin',{min:0,max:10,step:1,fmt:v=>v?String(v):'all'}),
   SP('wave','wav','enum',{opts:LFOW}),
   SP('rate','rate','time',{min:0.05,max:40,fmt:fHz}),
   SP('amt','amt','lin',{min:0,max:100,step:5,fmt:v=>v+'%'})];
@@ -227,7 +233,12 @@ const FX_P=sl=>{
     crush:[SP('crush','p1','lin',{min:0,max:1,step:0.05}),
          SP('-','p2','lin',{min:0,max:1,step:0.05}),SP('mix','mix','lin',{min:0,max:1,step:0.05})],
     verb:[SP('size','p1','lin',{min:0,max:1,step:0.05,fmt:v=>(0.3+v*4).toFixed(1)+'s'}),
+         SP('color','p2','lin',{min:0,max:1,step:0.05}),
+         SP('width','p3','lin',{min:0,max:1,step:0.05}),
          SP('mix','mix','lin',{min:0,max:1,step:0.05})],
+    limit:[SP('ceil','p1','lin',{min:0,max:1,step:0.05,fmt:v=>Math.round(-30+v*30)+'dB'}),
+         SP('rel','p2','lin',{min:0,max:1,step:0.05}),
+         SP('gain','mix','lin',{min:0,max:1,step:0.05})],
     comp:[SP('thresh','p1','lin',{min:0,max:1,step:0.05,fmt:v=>Math.round(-60+v*60)+'dB'}),
          SP('ratio','p2','lin',{min:0,max:1,step:0.05,fmt:v=>(1+v*19).toFixed(1)+':1'}),
          SP('makeup','mix','lin',{min:0,max:1,step:0.05})],
@@ -383,9 +394,10 @@ const S={
   curPat:0, editPat:0, curPreset:4, editSnd:4,
   curMod:0, curParam:0, curSlot:0, slotParam:0, libSel:0,
   master:Array.from({length:10},(_,i)=>
-    i===0?{typ:8,rt:1,p1:0.45,p2:0,mix:0.9}:      // send slot 1: reverb
-    i===1?{typ:1,rt:1,p1:0.27,p2:0.35,mix:0.8}:   // send slot 2: delay
-    {typ:0,rt:0,p1:0.3,p2:0.3,mix:0.3}),
+    i===0?{typ:8,rt:1,p1:0.45,p2:0.5,p3:0.7,mix:0.9}:   // send slot 1: reverb
+    i===1?{typ:1,rt:1,p1:0.27,p2:0.35,p3:0.5,mix:0.8}:  // send slot 2: delay
+    i===9?{typ:15,rt:0,p1:0.85,p2:0.3,p3:0.5,mix:0}:    // slot 0: safety limiter
+    {typ:0,rt:0,p1:0.3,p2:0.3,p3:0.5,mix:0.3}),
   arr:new Looper('B',4,'on'),
   patterns:Array.from({length:10},mkPattern),
   presets:PRESETS0(),
@@ -468,8 +480,14 @@ function scheduleRange(from,to){
     const anySolo=pat.lanes.some(l=>l.solo);
     for(let li=0;li<10;li++){
       const lane=pat.lanes[li];
+      if(isAudioCh(li)){
+        if((anySolo?!lane.solo:lane.mute)||(muteHold&&muteHold.lane===li))continue;
+        engine.audCycle(li,lane,a,s0,s1);
+        continue;
+      }
       if(!lane.events.length||lane._cap)continue;
       if(anySolo?!lane.solo:lane.mute)continue;
+      if(muteHold&&muteHold.lane===li)continue;
       lane.occur(s0-a.anchor,s1-a.anchor,(t,e)=>{
         let tt=t;
         if(lane.qpost>0.001)tt+=(Math.round(e.t/0.25)*0.25-e.t)*lane.qpost;
@@ -571,7 +589,7 @@ class Voice{
     const p=prepEffective(S.presets[pi],midi), ac=AC;
     this.pi=pi; this.midi=midi; this.p=p;
     this.released=false; this.killed=false; this.nodes=[]; this.startAt=at;
-    const ops=p.osc, rootW=ops[0].wav, isN=rootW===4;
+    const ops=p.osc, rootW=ops[0].wav, isS=rootW===9, isN=rootW===4||isS;
     const baseTarget=(isN?Math.pow(2,(midi-60)/12)
       :440*Math.pow(2,(midi-69)/12))*ops[0].rat*Math.pow(2,(ops[0].fine||0)/1200);
 
@@ -624,24 +642,20 @@ class Voice{
     const merge=ac.createGain(); merge.gain.value=1/Math.sqrt(uniN);
     const rootMods=[]; let firstSrc=null;
     this.opGains={};  // slot -> [gain nodes across uni] for op env/lfo
+    this.opPitch={}; this.opDet={};   // slot -> pitch params / mod-targets (per uni)
     for(let u=0;u<uniN;u++){
       const off=uniN===1?0:(u/(uniN-1))*2-1;
       const target=baseTarget*Math.pow(2,(p.vox.sprd||0)*off/1200);
       let src,pitchParam;
-      if(isN){src=ac.createBufferSource();src.buffer=E.noiseBuf;src.loop=true;pitchParam=src.playbackRate;}
+      if(isN){src=ac.createBufferSource();src.buffer=isS?(E.opSamples.get(pi+':0')||E.noiseBuf):E.noiseBuf;src.loop=true;pitchParam=src.playbackRate;}
       else{src=ac.createOscillator();E.setWave(src,rootW,ops[0].phm===1?Math.random()*360:ops[0].ph);pitchParam=src.frequency;}
-      if(pitchEnv){
-        const semis=pitchEnv.amt/100*24;
-        const peak=Math.max(target*Math.pow(2,semis/12),0.01);
-        const a=Math.max(0.001,pitchEnv.a);
-        if(a<=0.003)pitchParam.setValueAtTime(peak,at);          // drop starts AT the peak: no chirp
-        else{pitchParam.setValueAtTime(target,at);pitchParam.linearRampToValueAtTime(peak,at+a);}
-        pitchParam.setTargetAtTime(Math.max(target+(peak-target)*pitchEnv.s,0.01),at+Math.max(a,0.001),Math.max(0.005,pitchEnv.d/3));
-      }else if(p.vox.mode===1&&p.vox.glide>0.001&&E.lastPitch[pi]){
+      if(p.vox.mode===1&&p.vox.glide>0.001&&E.lastPitch[pi]&&!pitchEnv){
         pitchParam.setValueAtTime(E.lastPitch[pi]*(target/baseTarget),at);
         pitchParam.exponentialRampToValueAtTime(Math.max(target,0.01),at+p.vox.glide);
       }else pitchParam.setValueAtTime(target,at);
       rootMods.push(isN?src.playbackRate:src.detune);
+      (this.opPitch[0]=this.opPitch[0]||[]).push({pm:pitchParam,base:target});
+      (this.opDet[0]=this.opDet[0]||[]).push({pm:isN?src.playbackRate:src.detune,sc:isN?0.5:200});
       const sum=ac.createGain(); sum.gain.value=1;
       const g0=ac.createGain(); g0.gain.value=ops[0].amt;
       src.connect(g0);
@@ -652,8 +666,20 @@ class Voice{
         const wv=op.wav, fi=target*op.rat*Math.pow(2,(op.fine||0)/1200);
         let s2;
         if(wv===4){s2=ac.createBufferSource();s2.buffer=E.noiseBuf;s2.loop=true;}
+        else if(wv===9){                              // sampler op: pitch via playbackRate
+          s2=ac.createBufferSource();
+          s2.buffer=E.opSamples.get(pi+':'+i)||E.noiseBuf; s2.loop=true;
+          const ratio=Math.pow(2,(midi-60)/12)*op.rat*Math.pow(2,(op.fine||0)/1200);
+          s2.playbackRate.value=ratio;
+          (this.opPitch[i]=this.opPitch[i]||[]).push({pm:s2.playbackRate,base:ratio});
+          (this.opDet[i]=this.opDet[i]||[]).push({pm:s2.playbackRate,sc:0.5});
+        }
         else{s2=ac.createOscillator();E.setWave(s2,wv,op.phm===1?Math.random()*360:op.ph);s2.frequency.setValueAtTime(fi,at);}
-        built.push({i,s:s2,osc:wv!==4,f:fi,op});
+        built.push({i,s:s2,osc:wv!==4&&wv!==9,f:fi,op});
+        if(wv!==4&&wv!==9){
+          (this.opPitch[i]=this.opPitch[i]||[]).push({pm:s2.frequency,base:fi});
+          (this.opDet[i]=this.opDet[i]||[]).push({pm:s2.detune,sc:200});
+        }
         s2.start(at); this.nodes.push(s2);
       }
       const outN={0:g0};
@@ -703,6 +729,19 @@ class Voice{
     }
     E.lastPitch[pi]=baseTarget;
 
+    /* pitch envelopes: slot# picks WHICH op bends (0 = all) */
+    for(const pe of envs.filter(e2=>e2.dst===2)){
+      const ix=clamp(Math.round(pe.idx??0),0,10);
+      const tgs=ix===0?Object.values(this.opPitch).flat():(this.opPitch[ix-1]||[]);
+      for(const tg of tgs){
+        const semis=pe.amt/100*24, peak=Math.max(tg.base*Math.pow(2,semis/12),0.01);
+        const a=Math.max(0.001,pe.a);
+        tg.pm.cancelScheduledValues(at);
+        if(a<=0.003)tg.pm.setValueAtTime(peak,at);
+        else{tg.pm.setValueAtTime(tg.base,at);tg.pm.linearRampToValueAtTime(peak,at+a);}
+        tg.pm.setTargetAtTime(Math.max(tg.base+(peak-tg.base)*pe.s,0.01),at+Math.max(a,0.001),Math.max(0.005,pe.d/3));
+      }
+    }
     /* op-level envelopes */
     this.opEnvBase={};
     for(const e2 of opEnvs){
@@ -724,7 +763,15 @@ class Voice{
       const lo=ac.createOscillator(), lg=ac.createGain();
       lo.type=LFOW_W[lf.wav]; lo.frequency.value=lf.rate;
       const A=lf.amt/100;
-      if(lf.dst===1){lg.gain.value=isN?A*0.5:A*200; for(const rm of rootMods)lg.connect(rm);}
+      if(lf.dst===1){
+        const ix=clamp(Math.round(lf.idx??0),0,10);
+        const tgs=ix===0?Object.values(this.opDet).flat():(this.opDet[ix-1]||[]);
+        if(!tgs.length){continue;}
+        for(const tg of tgs){
+          const g2=ac.createGain(); g2.gain.value=A*tg.sc;
+          lo.connect(g2); g2.connect(tg.pm);
+        }
+      }
       else if(lf.dst===2){const bq=this.fNodes[clamp(Math.round(lf.idx),1,10)-1]; if(!bq){continue;} lg.gain.value=A*4800; lg.connect(bq.detune);}
       else if(lf.dst===3){lg.gain.value=A*this.amp*0.5; lg.connect(vca.gain);}
       else if(lf.dst===5){const gl=this.opGains[clamp(Math.round(lf.idx),1,10)-1]; if(!gl)continue; lg.gain.value=A*0.5; for(const g of gl)lg.connect(g.gain);}
@@ -778,12 +825,14 @@ class Engine{
       8:[1,0,0,0.8,0,0.7,0,0,0.9,0,0.6,0,0,0.8],
     };
     this.buses=[]; this.act=[]; this.lastPitch=[]; this.arpPool=[]; this.arpIdx=[];
+    this.audBuf=[]; this.audName=[]; this.audActive=[]; this.audRec=null;
+    this.opSamples=new Map();
     for(let i=0;i<10;i++){
       const vIn=ac.createGain(), busG=ac.createGain(), pan=ac.createStereoPanner();
       busG.connect(pan); pan.connect(this.mSum);
       this.buses.push({vIn,busG,pan,rack:[],panLfo:null});
       this.act.push([]); this.lastPitch.push(0); this.arpPool.push([]); this.arpIdx.push(0);
-      this.lastMidi.push(60);
+      this.lastMidi.push(60); this.audBuf.push(null); this.audName.push(''); this.audActive.push([]);
       this.rebuildRack(i); this.refresh(i);
     }
     this.rebuildMaster();
@@ -847,7 +896,24 @@ class Engine{
       else sh.connect(wet);
     }else if(t==='verb'){
       const cv=keep(ac.createConvolver()); cv.buffer=this.getIR(0.3+fx.p1*4);
-      cur.connect(cv); cv.connect(wet);
+      const tone=keep(ac.createBiquadFilter()); tone.type='lowpass';
+      tone.frequency.value=800*Math.pow(20,fx.p2??0.5);          // color: dark..bright
+      cur.connect(cv); cv.connect(tone);
+      const w=fx.p3??0.5, a2=w+(1-w)/2, b2=(1-w)/2;              // width: mono..full stereo
+      const sp2=keep(ac.createChannelSplitter(2)), mg=keep(ac.createChannelMerger(2));
+      const ll=keep(ac.createGain()), lr=keep(ac.createGain()), rl=keep(ac.createGain()), rr=keep(ac.createGain());
+      ll.gain.value=a2; lr.gain.value=b2; rl.gain.value=b2; rr.gain.value=a2;
+      tone.connect(sp2);
+      sp2.connect(ll,0); sp2.connect(lr,1); ll.connect(mg,0,0); lr.connect(mg,0,0);
+      sp2.connect(rl,0); sp2.connect(rr,1); rl.connect(mg,0,1); rr.connect(mg,0,1);
+      mg.connect(wet);
+    }else if(t==='limit'){
+      const cp=keep(ac.createDynamicsCompressor());
+      cp.threshold.value=-30+(fx.p1??0.75)*30; cp.ratio.value=20; cp.knee.value=0;
+      cp.attack.value=0.002; cp.release.value=0.05+(fx.p2??0.3)*0.3;
+      const mk=keep(ac.createGain()); mk.gain.value=1+(fx.mix??0)*1.5;
+      dry.gain.value=0; wet.gain.value=1;
+      cur.connect(cp); cp.connect(mk); mk.connect(wet);
     }else if(t==='comp'){
       const cp=keep(ac.createDynamicsCompressor());
       cp.threshold.value=-60+fx.p1*60; cp.ratio.value=1+fx.p2*19; cp.knee.value=12;
@@ -915,6 +981,7 @@ class Engine{
     return h;
   }
   setWave(osc,w,phDeg){
+    if(w>=9){osc.type='sine';return;}   // 'smp' handled as a buffer source elsewhere
     const ph=fmod(phDeg||0,360);
     if(ph<1&&w<4){osc.type=['sine','triangle','sawtooth','square'][w];return;}
     const key=w+':'+Math.round(ph/5);
@@ -1088,8 +1155,55 @@ class Engine{
       this.arpPool[pi]=pool.filter(n2=>n2.until>now-8);
     }
   }
-  chokeSeq(pi){const n=AC.currentTime;for(const v of [...this.act[pi]])if(!v.live)v.kill(n);}
+  audCycle(li,lane,act,s0,s1){
+    if(!this.audBuf[li])return;
+    const L=lane.len;
+    let t=act.anchor+Math.ceil((s0-act.anchor)/L-1e-9)*L;
+    if(t<s0-1e-6)t+=L;
+    for(;t<s1-1e-9;t+=L)this.audPlay(li,timeAt(t),L);
+  }
+  audPlay(pi,at,lenBeats){
+    const buf=this.audBuf[pi]; if(!buf)return;
+    const au=S.presets[pi].au||{};
+    const st=clamp(au.st??0,0,0.98), en=clamp(au.en??1,st+0.01,1);
+    const off=st*buf.duration, dur=(en-st)*buf.duration, loopSec=lenBeats*spb();
+    const rate=Math.round(au.fit)?dur/loopSec:(au.rate??1)*Math.pow(2,(au.semis??0)/12);
+    const src=AC.createBufferSource(); src.buffer=buf;
+    src.playbackRate.value=Math.max(0.05,rate);
+    const g=AC.createGain(); g.gain.value=au.gain??0.9;
+    src.connect(g); g.connect(this.buses[pi].vIn);
+    src.start(at,off); src.stop(at+Math.min(loopSec,dur/rate)+0.002);
+    const arr=this.audActive[pi]; arr.push(src);
+    src.onended=()=>{const i=arr.indexOf(src);if(i>=0)arr.splice(i,1);try{g.disconnect();}catch(_){}};
+  }
+  audRecStart(pi){
+    if(this.audRec)return;
+    if(!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia)){flash('no mic access in this browser');return;}
+    navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false}}).then(stm=>{
+      const src=AC.createMediaStreamSource(stm);
+      const sp3=AC.createScriptProcessor(4096,1,1);
+      const sink=AC.createGain(); sink.gain.value=0;
+      const chunks=[];
+      sp3.onaudioprocess=ev=>chunks.push(new Float32Array(ev.inputBuffer.getChannelData(0)));
+      src.connect(sp3); sp3.connect(sink); sink.connect(AC.destination);
+      this.audRec={pi,stm,src,sp3,sink,chunks,startBeat:gridNow()};
+      flash('● mic recording…'); dirty=true;
+    }).catch(err=>flash('mic: '+err.message));
+  }
+  audRecStop(){
+    const r=this.audRec; if(!r)return; this.audRec=null;
+    try{r.src.disconnect();r.sp3.disconnect();r.sink.disconnect();}catch(_){}
+    r.stm.getTracks().forEach(t2=>t2.stop());
+    const len=r.chunks.reduce((a2,c2)=>a2+c2.length,0);
+    if(len<AC.sampleRate*0.05){flash('mic take too short');return;}
+    const rec=new Float32Array(len); let o=0;
+    for(const c2 of r.chunks){rec.set(c2,o);o+=c2.length;}
+    audPlace(r.pi,rec,r.startBeat);
+  }
+  chokeSeq(pi){const n=AC.currentTime;for(const v of [...this.act[pi]])if(!v.live)v.kill(n);
+    for(const s2 of [...this.audActive[pi]]){try{s2.stop(n+0.01);}catch(_){}}}
   allOff(){const n=AC.currentTime;for(const a of this.act)for(const v of [...a])v.kill(n);
+    for(const arr of this.audActive)for(const s2 of [...arr]){try{s2.stop(n+0.01);}catch(_){}}
     this.arpPool.forEach(p=>p.length=0);}
   click(at,accent){
     const o=AC.createOscillator(),g=AC.createGain();
@@ -1128,9 +1242,11 @@ function mulberry32(a){return function(){let t=a+=0x6D2B79F5;t=Math.imul(t^t>>>1
   t^=t+Math.imul(t^t>>>7,t|61);return((t^t>>>14)>>>0)/4294967296;}}
 function libInit(){
   const cur=libAll(), users=cur.filter(en=>!en.factory);
-  if(cur.length-users.length>=CATS.length*10)return;      // factory set already complete
+  const need=CATS.filter(c2=>c2!=='audio').length*10;
+  if(cur.length-users.length>=need)return;                // factory set already complete
   const arr=PRESETS0().map(p=>({name:p.name,cat:p.cat,factory:true,data:presetData(p)}));
   for(const cat of CATS){
+    if(cat==='audio')continue;
     const rnd=mulberry32(cat.split('').reduce((a2,ch)=>a2*31+ch.charCodeAt(0),7));
     let i=arr.filter(en=>en.cat===cat).length, n=1;
     while(i<10){
@@ -1208,7 +1324,21 @@ function randomizeChannel(pi){
   applyPresetData(pi,p.name,cat,presetData(p));
   flash('☆ new random '+cat+': '+p.name);
 }
-const PRSFIELDS=['prst','type','save','rnd'];
+const PRSFIELDS=['type','prst','save','rnd'];
+const AUDF=[
+ SP('gain','gain','lin',{min:0,max:1,step:0.05}),
+ SP('pitch','semis','lin',{min:-24,max:24,step:1,fmt:v=>v+'st'}),
+ SP('rate','rate','lin',{min:0.25,max:4,step:0.05,fmt:v=>'\u00d7'+v}),
+ SP('start','st','lin',{min:0,max:0.98,step:0.01,fmt:v=>Math.round(v*100)+'%'}),
+ SP('end','en','lin',{min:0.02,max:1,step:0.01,fmt:v=>Math.round(v*100)+'%'}),
+ SP('fit','fit','enum',{opts:['off','on']}),
+];
+function audAction(d,m){
+  const pre=S.presets[S.editSnd], spec=AUDF[clamp(S.curParam,0,AUDF.length-1)];
+  pre.au[spec.key]=adjust(spec,pre.au[spec.key]??0,d,m);
+  flash('audio '+spec.lbl+' = '+fmtVal(spec,pre.au[spec.key]));
+  dirty=true; dirtySave=true;
+}
 function prsAction(d){
   const pi=S.editSnd, p=S.presets[pi], f=PRSFIELDS[S.curParam]||'prst';
   const kitSl=p.ply.find(sl=>sl.typ===4&&Math.round(sl.p1)===1);
@@ -1225,8 +1355,13 @@ function prsAction(d){
     dirty=true; dirtySave=true; return;
   }
   if(f==='prst')scrollPreset(pi,d);
-  else if(f==='type'){p.cat=CATS[fmod(CATS.indexOf(p.cat||'misc')+d,CATS.length)];
-    flash('channel type: '+p.cat); dirtySave=true;}
+  else if(f==='type'){
+    const cat=CATS[fmod(CATS.indexOf(p.cat||'misc')+d,CATS.length)];
+    const pool=libAll().filter(en=>en.cat===cat);
+    if(pool.length)applyPresetData(pi,pool[0].name,pool[0].cat,pool[0].data);
+    else p.cat=cat;
+    flash('channel type: '+cat+(pool.length?' → '+pool[0].name:''));
+    dirtySave=true;}
   else if(f==='save')saveToLib(pi);
   else randomizeChannel(pi);
   dirty=true;
@@ -1305,8 +1440,63 @@ function resetParam(){
 /* ---------------- edit / erase / capture helpers --------------------- */
 const NOTEKEYS={KeyA:0,KeyW:1,KeyS:2,KeyE:3,KeyD:4,KeyF:5,KeyT:6,KeyG:7,KeyY:8,
                 KeyH:9,KeyU:10,KeyJ:11,KeyK:12,KeyO:13,KeyL:14,KeyP:15,Semicolon:16,Quote:17};
-const liveV={}, pend={};
-let eraseHold=null, stepCur=0;
+const liveV={}, pend={}, rPend={};
+const retroBuf=Array.from({length:10},()=>[]);
+let eraseHold=null, muteHold=null, stepCur=0, taps=[];
+const isAudioCh=pi=>S.presets[pi].cat==='audio';
+function audPlace(pi,rec,startBeat){
+  const lane=S.patterns[S.editPat].lanes[pi], sr=AC.sampleRate;
+  const LATC=8192;                                  // script-processor latency fudge
+  if(lane.auto){                                    // fresh lane: loop length from the take
+    const bars=Math.max(0.25,(rec.length/sr)/spb()/4);
+    let p2=1; while(p2*1.25<bars)p2*=2; p2=Math.min(p2,16);
+    lane.unit='B'; lane.count=p2; lane.auto=false;
+  }
+  const L=lane.len, canvasLen=Math.max(256,Math.round(L*spb()*sr));
+  const cv=AC.createBuffer(1,canvasLen,sr), dst=cv.getChannelData(0);
+  const old=engine.audBuf[pi];
+  if(old){const os=old.getChannelData(0);
+    for(let i=0;i<canvasLen;i++)dst[i]=os[i%os.length]||0;}
+  const mode=CFG.overdub||0;                        // 0 overwrite 1 overdub 2 smart
+  const pos0=fmod(startBeat-editAnchor(),L)*spb()*sr-LATC;
+  const W2=1024; let env=0;
+  for(let i=0;i<rec.length;i++){
+    const di=((Math.round(pos0+i)%canvasLen)+canvasLen)%canvasLen;
+    if(mode===2){                                   // smart: duck the old under the new
+      if(i%W2===0){let s2=0;const e2=Math.min(i+W2,rec.length);
+        for(let j=i;j<e2;j++)s2+=rec[j]*rec[j];
+        const tgt=Math.sqrt(s2/W2)>0.02?1:0;
+        env+=(tgt-env)*(tgt>env?0.5:0.12);}
+      dst[di]=dst[di]*(1-0.85*env)+rec[i];
+    }else if(mode===1)dst[di]+=rec[i];
+    else dst[di]=rec[i];
+  }
+  engine.audBuf[pi]=cv; engine.audName[pi]='mic';
+  S.presets[pi].cat='audio';
+  flash('◉ audio: '+(L/4)+' bar loop ('+['overwrite','overdub','smart'][mode]+')');
+  dirty=true; dirtySave=true;
+}
+function retroCapture(){
+  const pi=S.curPreset, lane=S.patterns[S.editPat].lanes[pi];
+  const nowB=gridNow();
+  const recent=retroBuf[pi].filter(n=>n.t>nowB-64).sort((a,b)=>a.t-b.t);
+  if(!recent.length){flash('retro: play something first, then tab');return;}
+  let seg=[recent[recent.length-1]];                 // walk back until a gap > 2 bars
+  for(let i=recent.length-2;i>=0;i--){
+    if(seg[0].t-(recent[i].t+Math.min(recent[i].dur||0.25,0.5))>8)break;
+    seg.unshift(recent[i]);
+  }
+  pushUndo('retro');
+  const t0=seg[0].t;
+  let last=0; for(const n of seg)last=Math.max(last,n.t-t0+Math.min(n.dur||0.25,0.5));
+  const bars=Math.max(0.25,last/4);
+  let p2=1; while(p2*1.25<bars)p2*=2; p2=Math.min(p2,16);
+  const L=p2*4, off=fmod(t0-editAnchor(),L);
+  lane.unit='B'; lane.count=p2; lane.auto=false; delete lane._cap;
+  lane.events=seg.map(n=>({t:fmod(n.t-t0+off,L),midi:n.midi,vel:0.9,dur:n.dur||0.25,born:performance.now()}));
+  flash('◉ retro: '+p2+' bar'+(p2>1?'s':'')+' · '+seg.length+' notes');
+  dirty=true; dirtySave=true;
+}
 let helpOpen=false, dirty=true, dirtySave=false, flashMsg='', flashUntil=0;
 const flash=m=>{flashMsg=m;flashUntil=performance.now()+1800;dirty=true;};
 
@@ -1343,7 +1533,7 @@ function eraseSweep(){
     const pat=S.patterns[S.editPat], anc=editAnchor();
     if(pat.state==='rec'){
       for(const c in pend){const p=pend[c];
-        if(CFG.overdub){p.sweep=now;continue;}       // overdub: held notes only add
+        if((CFG.overdub||0)===1){p.sweep=now;continue;}  // overdub: held notes only add
         spanDelete(pat.lanes[p.lane],p.sweep-anc,now-anc,e=>(e.born||0)<p.bornAt);
         engine.chokeSeq(p.lane);                     // silence what's being overwritten
         p.sweep=now;}
@@ -1455,8 +1645,14 @@ document.addEventListener('keydown',e=>{
     const specs=FX_P(sl).concat([SP('route','rt','enum',{opts:['mstr','send']})]);
     if(c==='Escape'||c==='Enter'){S.layer=0;dirty=true;}
     else if(/^Digit\d$/.test(c)){const n2=+c.slice(5);S.mSlot=n2===0?9:n2-1;S.mParam=0;dirty=true;}
-    else if(c==='ArrowLeft'||c==='ArrowRight')
-      {S.mParam=fmod((S.mParam||0)+(c==='ArrowRight'?1:-1),specs.length);dirty=true;}
+    else if(c==='ArrowLeft'||c==='ArrowRight'){
+      const d2=c==='ArrowRight'?1:-1, np=(S.mParam||0)+d2;
+      if(e.shiftKey||np<0||np>=specs.length){
+        S.mSlot=fmod((S.mSlot||0)+d2,10);
+        const s2=FX_P(S.master[S.mSlot]).length+1;
+        S.mParam=(e.shiftKey||d2>0)?0:s2-1;
+      }else S.mParam=np;
+      dirty=true;}
     else if(c==='ArrowUp'||c==='ArrowDown'){
       const spec=specs[clamp(S.mParam||0,0,specs.length-1)];
       pushUndo('master');
@@ -1485,13 +1681,18 @@ document.addEventListener('keydown',e=>{
 
   if(c==='Space'){e.preventDefault(); if(!e.repeat)T.playing?stop():play(); return;}
   if(c==='Tab'||c==='Backquote'){e.preventDefault();
-    if(!e.repeat){const h=curHolder();
-      if(!CFG.latch){                       // momentary: rec only while held
-        if(h.state!=='rec'){pushUndo('take');h.state='rec';}
-      }else{
+    if(!e.repeat){
+      const h=curHolder(), mode=CFG.looper||0;
+      if(S.layer===1&&isAudioCh(S.curPreset)){          // audio channel: tab = mic record
+        if(engine.audRec)engine.audRecStop();
+        else{pushUndo('audio take');engine.audRecStart(S.curPreset);}
+      }
+      else if(mode===0&&S.layer===1)retroCapture();      // retro: grab what you just played
+      else if(mode===2){                                 // latch
         const was=h.state; h.state=h.state==='rec'?'on':'rec';
         if(was==='rec')finalizeCaptures(true); else pushUndo('take');
       }
+      else if(h.state!=='rec'){pushUndo('take');h.state='rec';}   // momentary arm
       dirty=true;dirtySave=true;}
     return;}
   if(c==='Enter'){e.preventDefault(); if(!e.repeat)diveIn(); return;}
@@ -1517,6 +1718,15 @@ document.addEventListener('keydown',e=>{
     setBpm(T.bpm+d*(e.shiftKey?10:1)); return;
   }
   if(c==='KeyM'&&!e.repeat){S.metro=!S.metro;dirty=true;return;}
+  if(c==='KeyB'&&!e.repeat){                        // tap tempo
+    const n2=performance.now();
+    taps=taps.filter(t2=>n2-t2<3000); taps.push(n2);
+    if(taps.length>=2){
+      const iv=(taps[taps.length-1]-taps[0])/(taps.length-1);
+      setBpm(Math.round(60000/iv));
+      flash('tap → '+T.bpm+'bpm ('+taps.length+')');
+    }else flash('tap…');
+    return;}
   if(c==='KeyF'&&S.layer===0&&!e.repeat){S.layer=-2;S.mSlot=S.mSlot||0;S.mParam=0;dirty=true;return;}
   if(c==='KeyS'&&S.layer===0&&!e.repeat){
     const p=S.patterns[S.curPat]; p.sw=((p.sw||0)+1)%3;
@@ -1581,7 +1791,12 @@ document.addEventListener('keydown',e=>{
       eraseHold={sweep:posNow(),bornAt:performance.now()};
       flash('erasing while held'); return;}
     if(S.layer===0){pushUndo('timeline clear');lp.clear();flash('timeline cleared');}
-    else if(S.layer===1){pushUndo('lane clear');lp.clear();lp.auto=true;flash('lane '+S.curPreset+' cleared');}
+    else if(S.layer===1){
+      if(e.shiftKey){pushUndo('lane clear');lp.clear();lp.auto=true;flash('lane '+S.curPreset+' cleared');}
+      else if(T.playing){muteHold={lane:S.curPreset};engine.chokeSeq(S.curPreset);
+        flash('holding '+S.presets[S.curPreset].name+' silent — ⇧⌫ clears');return;}
+      else{flash('⇧⌫ clears the lane');return;}
+    }
     else if(S.layer===3&&MODULES[S.curMod].prs){   // explorer: delete selected user preset
       const p=S.presets[S.editSnd], pool=libAll().filter(en=>en.cat===(p.cat||'misc'));
       const en=pool[S.libSel||0];
@@ -1646,9 +1861,26 @@ document.addEventListener('keydown',e=>{
     else if(S.layer===0)S.curPat=fmod(S.curPat+d,10);
     else if(S.layer===1)S.curPreset=fmod(S.curPreset+d,10);
     else if(S.layer===2){
-      const M=MODULES[S.curMod];
-      const nP=M.prs?PRSFIELDS.length:M.flat?M.flat.length:1;
-      S.curParam=fmod(S.curParam+d,Math.max(1,nP));
+      const pre2=S.presets[S.editSnd], stops=[];
+      MODULES.forEach((M2,mi2)=>{
+        if(M2.prs)PRSFIELDS.forEach((_,pi2)=>stops.push([mi2,pi2,0]));
+        else if(M2.flat)M2.flat.forEach((_,pi2)=>stops.push([mi2,pi2,0]));
+        else if(M2.slot){
+          if(M2.id==='osc'&&isAudioCh(S.editSnd)){AUDF.forEach((_,pi2)=>stops.push([mi2,pi2,0]));return;}
+          const act2=[];
+          pre2[M2.id].forEach((sl2,si2)=>{if(M2.abbr(sl2)!=='···')act2.push(si2);});
+          if(!act2.length)act2.push(0);
+          act2.forEach(si2=>stops.push([mi2,0,si2]));   // each ACTIVE slot is a stop
+        }else stops.push([mi2,0,0]);
+      });
+      let idx=stops.findIndex(st=>st[0]===S.curMod&&
+        (MODULES[S.curMod].slot&&!(MODULES[S.curMod].id==='osc'&&isAudioCh(S.editSnd))?st[2]===S.curSlot:st[1]===S.curParam));
+      if(idx<0)idx=stops.findIndex(st=>st[0]===S.curMod);
+      if(idx<0)idx=0;
+      if(e.shiftKey){const cm=S.curMod;let j=idx,g=0;
+        do{j=fmod(j+d,stops.length);g++;}while(stops[j][0]===cm&&g<stops.length);idx=j;}
+      else idx=fmod(idx+d,stops.length);
+      S.curMod=stops[idx][0]; S.curParam=stops[idx][1]; S.curSlot=stops[idx][2];
     }
     else if(MODULES[S.curMod].prs){        // explorer: page
       S.libSel=Math.max(0,(S.libSel||0)+d*10);
@@ -1656,14 +1888,27 @@ document.addEventListener('keydown',e=>{
     else{
       const pre=S.presets[S.editSnd], M=MODULES[S.curMod];
       const specs=paramsFor(S.curMod,pre[M.id][S.curSlot]);
-      S.slotParam=fmod(S.slotParam+d,specs.length);
+      const np=S.slotParam+d;
+      if(e.shiftKey||np<0||np>=specs.length){  // ran off the end: next slot, same strip
+        S.curSlot=fmod(S.curSlot+d,10);
+        const s2=paramsFor(S.curMod,pre[M.id][S.curSlot]);
+        S.slotParam=(e.shiftKey||d>0)?0:s2.length-1;
+      }else S.slotParam=np;
     }
     dirty=true; return;}
   if(c==='ArrowUp'||c==='ArrowDown'){e.preventDefault();
     const d=c==='ArrowUp'?1:-1;
     if(S.layer===1&&e.shiftKey){scrollPreset(S.curPreset,d);return;}  // browse presets in category
+    if(S.layer===1&&e.altKey){
+      const p=S.presets[S.curPreset];
+      p.mix.lvl=clamp(Math.round((p.mix.lvl+d*0.05)*100)/100,0,1);
+      engine.refresh(S.curPreset);
+      flash(p.name+' vol '+Math.round(p.mix.lvl*100)+'%');
+      dirty=true; dirtySave=true; return;}
     if(S.layer===1&&S.patterns[S.editPat].state==='edit'){
       S.curPreset=fmod(S.curPreset-d,10);dirty=true;return;}
+    if(S.layer===2&&MODULES[S.curMod].id==='osc'&&isAudioCh(S.editSnd)){
+      pushUndo('audio'); audAction(d,kmult(e)); return;}
     if(S.layer>=2&&MODULES[S.curMod].prs){
       if(S.layer===3){                    // explorer: move + load
         const p=S.presets[S.editSnd], pool=libAll().filter(en=>en.cat===(p.cat||'misc'));
@@ -1691,6 +1936,7 @@ document.addEventListener('keydown',e=>{
     e.preventDefault();
     const pi=S.layer===1?S.curPreset:S.editSnd;
     const midi=60+S.octs[pi]*12+NOTEKEYS[c];
+    if(isAudioCh(pi)){flash('audio channel — tab records mic, drop a file to load a clip');return;}
     const pat=S.patterns[S.editPat];
     if(S.layer===1&&pat.state==='edit'){
       pushUndo('step');
@@ -1730,6 +1976,7 @@ document.addEventListener('keydown',e=>{
            strength — playback applies the same groove to the stored note */
         const heard=tr+grooveOff(pi,tr);
         at=Math.max(at,gridTime(heard));
+        if(S.layer===1)rPend[c]={pi,ts:tr,midi};   // retro memory hears everything
         if(recording){
           if(lane.auto&&!lane._cap&&!lane.events.length){
             if(CFG.listen)startCapture(lane,tr);
@@ -1751,8 +1998,15 @@ document.addEventListener('keydown',e=>{
 
 document.addEventListener('keyup',e=>{
   const c=e.code;
-  if(c==='Backspace')eraseHold=null;
-  if((c==='Tab'||c==='Backquote')&&!CFG.latch){   // momentary looper: release = rec off
+  if(c==='Backspace'){eraseHold=null;muteHold=null;}
+  if(rPend[c]){
+    const r=rPend[c];
+    retroBuf[r.pi].push({t:r.ts,midi:r.midi,dur:Math.max(0.05,gridNow()-r.ts)});
+    if(retroBuf[r.pi].length>96)retroBuf[r.pi].shift();
+    delete rPend[c];
+  }
+  if((c==='Tab'||c==='Backquote')&&(CFG.looper||0)!==2){   // momentary release = rec off
+    if(engine.audRec)engine.audRecStop();
     const h=curHolder();
     if(h.state==='rec'){h.state='on';finalizeCaptures(true);dirty=true;dirtySave=true;}
   }
@@ -1779,7 +2033,7 @@ window.addEventListener('blur',()=>{
 
 /* ---------------- persistence + migration ---------------------------- */
 const LS='ten-v1';
-function serialize(){return JSON.stringify({v:8,bpm:T.bpm,metro:S.metro,hum:S.hum,grv:S.grv,octs:S.octs,master:S.master,
+function serialize(){return JSON.stringify({v:9,bpm:T.bpm,metro:S.metro,hum:S.hum,grv:S.grv,octs:S.octs,master:S.master,
   arr:S.arr,
   patterns:S.patterns.map(p=>({state:p.state==='edit'?'on':p.state,sw:p.sw||0,lanes:p.lanes})),
   presets:S.presets.map(p=>({...p,modLoop:p.modLoop.toJSON()}))});}
@@ -1807,15 +2061,16 @@ function convertV3Preset(sp,i){ // v3-and-earlier preset data -> v4 racks
 }
 function load(json){
   try{
-    const o=JSON.parse(json); if(!o||o.v<1||o.v>8)return false;
+    const o=JSON.parse(json); if(!o||o.v<1||o.v>9)return false;
     T.bpm=o.bpm||120; S.metro=!!o.metro; S.hum=o.hum??0;
     S.grv=o.grv||{typ:0,amt:0};
-    if(Array.isArray(o.master))S.master=o.master.map((m,i)=>({typ:0,rt:0,p1:0.3,p2:0.3,mix:0.3,...m}));
+    if(Array.isArray(o.master))S.master=o.master.map((m,i)=>({typ:0,rt:0,p1:0.3,p2:0.3,p3:0.5,mix:0.3,...m}));
+    if(o.v<9&&S.master[9]&&!S.master[9].typ)S.master[9]={typ:15,rt:0,p1:0.85,p2:0.3,p3:0.5,mix:0};
     S.octs=Array.isArray(o.octs)?o.octs.slice(0,10):Array.from({length:10},()=>0);
     S.arr=Looper.from(o.arr); S.arr.auto=false;
     if(o.v>=2){
       S.patterns=o.patterns.map(sp=>{
-        const p=mkPattern(); p.state=['on','rec'].includes(sp.state)?sp.state:'on'; p.sw=sp.sw||0;
+        const p=mkPattern(); p.state='on'; p.sw=sp.sw||0;
         p.lanes=sp.lanes.map(Looper.from);
         if(o.v<6)p.lanes.forEach(l=>{if(!l.qpost)l.qpost=1;});   // post-Q default became 100%
         return p;});
@@ -1840,6 +2095,7 @@ function load(json){
         p.name=sp.name;
         p.cat=sp.cat||(['drum','drum','drum','drum','bass','keys','chord','lead','pad','plk'][i]||'misc');
         p.tr=sp.tr||0; p.prep=sp.prep||null;
+        p.au=Object.assign({gain:0.9,semis:0,rate:1,st:0,en:1,fit:0},sp.au||{});
         p.modLoop=Looper.from(sp.modLoop||{unit:'b',count:8}); p.modLoop.auto=false;
         if(o.v===4){  // module order changed in v5: ply 6->9, vox 8->7, mix 9->8
           const map={6:9,8:7,9:8};
@@ -1875,6 +2131,23 @@ function exportJSON(){
 document.addEventListener('dragover',e=>e.preventDefault());
 document.addEventListener('drop',e=>{
   e.preventDefault(); const f=e.dataTransfer.files[0]; if(!f)return;
+  if(/audio|\.(wav|mp3|aiff?|m4a|ogg|flac)$/i.test((f.type||'')+f.name)){
+    f.arrayBuffer().then(ab=>AC.decodeAudioData(ab)).then(buf=>{
+      if(S.layer>=3&&MODULES[S.curMod]&&MODULES[S.curMod].id==='osc'&&!isAudioCh(S.editSnd)){
+        engine.opSamples.set(S.editSnd+':'+S.curSlot,buf);
+        S.presets[S.editSnd].osc[S.curSlot].wav=WAVES.indexOf('smp');
+        flash('sample → op '+((S.curSlot+1)%10)+' · '+f.name.slice(0,20));
+      }else{
+        const pi=S.layer>=2?S.editSnd:S.curPreset;
+        pushUndo('audio drop');
+        engine.audBuf[pi]=buf; engine.audName[pi]=f.name.slice(0,18);
+        S.presets[pi].cat='audio';
+        flash('audio → channel '+pi+' · '+f.name.slice(0,20)+' ('+buf.duration.toFixed(1)+'s)');
+      }
+      dirty=true; dirtySave=true;
+    }).catch(()=>flash('could not decode that audio file'));
+    return;
+  }
   f.text().then(t=>{flash(load(t)?'session loaded':'load failed');dirty=true;dirtySave=true;});
 });
 if(!load(localStorage.getItem(LS)))demoContent();
@@ -1895,7 +2168,7 @@ function stateBadge(st){
 function loopBadge(){
   const h=curHolder(), lp=curLoop();
   const cnt=(lp.count%1?lp.count.toFixed(2):lp.count)+'';
-  const lane=S.layer===1?sp('d',' lane ')+sp('a',S.curPreset+S.presets[S.curPreset].name)+' ':' ';
+  const lane=S.layer===1?sp('d',' lane ')+sp('a',S.curPreset+pad(S.presets[S.curPreset].name,5))+' ':' ';
   const len=lp._cap?sp('r','listening…'):sp('a',cnt+'×'+UNIT_NAMES[lp.unit])+sp('d',' ('+(Math.round(lp.len*100)/100)+'b)');
   return stateBadge(h.state)+lane+len;
 }
@@ -1993,7 +2266,7 @@ function renderPat(L,pos){
   let row='   ';
   for(let i=0;i<10;i++){
     const m=pat.lanes[i].mute, so=pat.lanes[i].solo;
-    let cell=(so?'*':m?'‑':' ')+`${i}${S.presets[i].name}`+(so?'*':m?'‑':' ');
+    let cell=(so?'*':m?'‑':' ')+`${i}${pad(S.presets[i].name,5)}`+(so?'*':m?'‑':' ');
     const cls=i===S.curPreset?(so?'ai':m?'ri':'i'):(so?'a':m?'r':'d');
     row+=sp(cls,cell);
   }
@@ -2003,14 +2276,22 @@ function renderPat(L,pos){
   for(let i=0;i<10;i++)if(i===S.curPreset||pat.lanes[i].events.length)lanes.push(i);
   for(const li of lanes){
     const lane=pat.lanes[li];
+    if(isAudioCh(li)){
+      const cnt2=(lane.count%1?lane.count.toFixed(1):lane.count)+({s:'st',b:'bt',B:'br'})[lane.unit];
+      L.push('  '+(li===S.curPreset?sp('a',` ${li}${pad(S.presets[li].name,5)} `):sp('d',` ${li}${pad(S.presets[li].name,5)} `))+
+        sp('d',pad(lane.solo?'SOLO':lane.mute?'MUTE':cnt2,6))+' '+
+        (engine.audBuf[li]?sp('a','≈≈≈ '+(engine.audName[li]||'clip')+' ≈≈≈'):sp('d','≈ no clip — drop audio or tab-record'))+
+        (engine.audRec&&engine.audRec.pi===li?sp('r','  ● REC'):''));
+      continue;
+    }
     if(lane._cap){
-      L.push('  '+sp('a',` ${li}${S.presets[li].name} `)+sp('r','● listening — play; loop length suggests itself after a bar of silence'));
+      L.push('  '+sp('a',` ${li}${pad(S.presets[li].name,5)} `)+sp('r','● listening — play; loop length suggests itself after a bar of silence'));
       continue;
     }
     const cell=cellSize(lane.len,64);
     const ph=T.playing?Math.floor(fmod(pos-anc,lane.len)/cell):-1;
     const cnt=(lane.count%1?lane.count.toFixed(1):lane.count)+({s:'st',b:'bt',B:'br'})[lane.unit];
-    let lbl=` ${li}${S.presets[li].name} `;
+    let lbl=` ${li}${pad(S.presets[li].name,5)} `;
     L.push('  '+(lane.mute?sp('r',lbl):li===S.curPreset?sp('a',lbl):sp('d',lbl))+
       sp('d',pad(lane.solo?'SOLO':lane.mute?'MUTE':lane.auto?'new':cnt,6))+' '+
       gridRow(lane,cell,ph,(a,b)=>{
@@ -2048,10 +2329,28 @@ function renderSnd(L,pos){
   L.push('');
   prepLine(L,pre);
   const M=MODULES[S.curMod];
-  if(M.prs){
+  if(M.id==='osc'&&isAudioCh(S.editSnd)){
+    const buf=engine.audBuf[S.editSnd];
+    L.push('  '+sp('a','≈ AUDIO CHANNEL  ')+(buf
+      ?sp('d','clip: ')+sp('a',(engine.audName[S.editSnd]||'clip')+' · '+buf.duration.toFixed(2)+'s')
+      :sp('r','no clip — drop an audio file here, or hold tab to record the mic')));
+    L.push('');
+    let lr='   ', vr='   ';
+    AUDF.forEach((pspec,i)=>{
+      const foc=i===S.curParam;
+      const v=fmtVal(pspec,pre.au[pspec.key]??0);
+      lr+=(foc?sp('a','▸'+pad(pspec.lbl,8)):sp('d',' '+pad(pspec.lbl,8)))+' ';
+      vr+=(foc?sp('i',' '+pad(v,8)):' '+pad(v,8))+' ';
+    });
+    L.push(lr); L.push(vr);
+    L.push('');
+    L.push('   '+sp('d','loops in sync with this channel’s lane length · fit stretches trim to the loop'));
+    L.push('   '+sp('d','tab = mic record (ovwrt/ovdub/smart in settings) · amp/filt/env/fx still apply'));
+  }
+  else if(M.prs){
     const p=pre, pool=libAll().filter(en=>en.cat===(p.cat||'misc'));
     let lr='   ', vr='   ';
-    const vals=[p.name,p.cat||'misc','↕ keep','↕ roll'];
+    const vals=[p.cat||'misc',p.name,'↕ keep','↕ roll'];
     PRSFIELDS.forEach((lbl,i)=>{
       const foc=i===S.curParam;
       lr+=(foc?sp('a','▸'+pad(lbl,9)):sp('d',' '+pad(lbl,9)))+' ';
@@ -2073,7 +2372,7 @@ function renderSnd(L,pos){
     });
     L.push(lr); L.push(vr);
     L.push('');
-    L.push('   '+sp('d','←→ param · ↑↓ adjust · ⌫ reset'));
+    L.push('   '+sp('d','←→ flows through params → next module · shift+←→ jumps module · ↑↓ adjust · ⌫ reset'));
   }else if(M.slot){
     let srow='   ';
     pre[M.id].forEach((sl,i)=>{
@@ -2190,7 +2489,7 @@ function renderSlots(L){
     lfo:'dest+slot# route: pitch · filt N · amp · pan · op N',
     fx:'serial chain top to bottom · verb = send to shared reverb',
     ply:'chord (±strum: + low→high, − high→low) · arp needs transport · grv = this part’s groove'};
-  L.push('   '+sp('d','digits pick slot · ←→ param · ↑↓ value · ⌫ reset'));
+  L.push('   '+sp('d','←→ flows params → next slot · shift+←→ jumps slot · digits pick slot · ↑↓ value'));
   L.push('   '+sp('d',hints[M.id]||''));
 }
 
@@ -2232,7 +2531,7 @@ function renderMaster(L){
   });
   L.push(lr); L.push(vr);
   L.push('');
-  L.push('   '+sp('d','digits pick slot · ←→ param · ↑↓ value · ⌫ clear slot'));
+  L.push('   '+sp('d','←→ flows params → next slot · shift+←→ jumps slot · ↑↓ value · ⌫ clear'));
   L.push('   '+sp('d','route: ˢsend = parallel bus (channels feed it via an fx \'send\' slot)'));
   L.push('   '+sp('d','       ᵐmstr = insert on the whole mix — dj fx: roll · grs8 · tape · gate · comp'));
   L.push('   '+sp('d','defaults: slot1 reverb send · slot2 delay send'));
