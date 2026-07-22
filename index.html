@@ -281,12 +281,12 @@ const LFO_P=()=>[
   SP('amt','amt','lin',{min:0,max:100,step:5,fmt:v=>v+'%'})];
 const MOD_P=sl=>{                    // unified: source picks which extra fields show
   const s=Math.round(sl.src||0);
-  if(s===0)return [SP('src','src','enum',{opts:MSRC})];
   const tgtFmt=v=>sl.tgt?tgtLabel(sl.tgt):MDST[clamp(Math.round(v),0,MDST.length-1)];
   const base=[SP('src','src','enum',{opts:MSRC}),
     SP('dest','dst','enum',{opts:MDST,fmt:tgtFmt}),
     SP('slot#','idx','lin',{min:0,max:10,step:1,fmt:v=>v?String(v):'all'}),
     SP('amt','amt','lin',{min:s>=3?0:-200,max:200,step:5,fmt:v=>v+'%'})];
+  if(s===0)return base;             // off: still show target fields so params navigate (set src to activate)
   if(s===1)return base.concat([SP('atk','a','time'),SP('dec','d','time'),
     SP('sus','s','lin',{min:0,max:1,step:0.05}),SP('rel','r','time'),
     SP('curve','crv','enum',{opts:['lin','exp','log']})]);
@@ -1004,8 +1004,8 @@ class Voice{
     for(const fe of this.fEnvs)fe.node.setTargetAtTime(fe.base,at,Math.max(0.005,fe.r/3));
     this._end(at+this.rel*4+0.1);
   }
-  kill(at,fast){
-    if(this._sib)for(const s of this._sib)s.kill(at,fast);
+  kill(at,fast,withSib){       // per-layer mono steal kills one voice; withSib only for whole-note stops
+    if(withSib&&this._sib)for(const s of this._sib)s.kill(at,fast,true);
     if(this.killed)return; this.killed=true; this.released=true;
     const g=this.vca.gain;
     g.cancelScheduledValues(at);
@@ -1448,8 +1448,7 @@ class Engine{
   noteOn(at,pi,midi,vel){
     const p=S.presets[pi], stk=p.stk;
     this.applyBusPreps(pi,midi);
-    if(p.vox.mode===1)for(const v of [...this.act[pi]])v.kill(Math.max(AC.currentTime+0.001,at-0.004),true);
-    else if(this.act[pi].length>=14)this.act[pi][0].kill(at);
+    if(this.act[pi].length>=16)this.act[pi][0].kill(at,false,true);   // channel poly cap (whole note)
     /* stacking: build one voice per active layer (base = layer 0) */
     let entries=[null];
     if(stk&&stk.on&&stk.layers.length){
@@ -1458,11 +1457,15 @@ class Engine{
         entries=[hit||null];
       }else entries=[null,...stk.layers.filter(L=>!L.mute)];  // stack: all together
     }
+    const killAt=Math.max(AC.currentTime+0.001,at-0.004);
     const voices=entries.map(L=>{
+      const lid=L||'base', vx=(L?L.vox:p.vox)||{};
+      if(vx.mode===1)                                    // VOICE is per-layer: mono steals only its own layer
+        for(const v of [...this.act[pi]])if(v._lid===lid)v.kill(killAt,true);
       let pre;
       if(L){pre=layerPreset(p,L); pre._lvl=L.lvl;}
       else pre=prepEffective(p,midi);
-      const v=new Voice(this,at,pi,midi,vel,pre);
+      const v=new Voice(this,at,pi,midi,vel,pre); v._lid=lid;
       this.act[pi].push(v);
       return v;
     });
