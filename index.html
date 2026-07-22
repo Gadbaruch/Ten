@@ -1758,6 +1758,7 @@ function setPresetData(pi,name,cat,data){   // same, no undo — for composite g
   }
   if(data.stk&&data.stk.layers)p.stk={on:data.stk.on||0,mode:data.stk.mode||0,sel:0,layers:data.stk.layers.map(L=>foldMod(L))};
   modToRoutes(p);      // v13 library entries carry flat mod slots → routes
+  p.mod.forEach(m=>{if(m.routes)m.routes=JSON.parse(JSON.stringify(m.routes));});  // no aliasing with the library
   p.tr=data.tr||0;
   p.modLoop=S.presets[pi].modLoop;      // the channel's mod loop stays
   S.presets[pi]=p;
@@ -1781,6 +1782,28 @@ function saveToLib(pi){
   libStore(arr); p.name=name;
   flash('saved to library: '+name+' ('+p.cat+')');
   dirty=true; dirtySave=true;
+}
+/* post-fold generation spice: exploit routes + expressive sources + stacking */
+function genSpice(p,cat,wild,H){
+  const {R,RI,P,pick}=H;
+  const spare=()=>p.mod.find(m2=>!m2.src);
+  const add=o=>{const m2=spare(); if(m2){Object.assign(m2,o);return m2;}};
+  if(isDrumCat(cat)){                        // velocity → level: hits breathe with your playing
+    add({src:3,rsel:0,routes:[{dst:1,idx:0,amt:RI(50,90),min:0,max:1,tgt:null}]});
+    if(wild>0.5&&P(0.3))add({src:3,rsel:0,routes:[{dst:3,idx:1,amt:RI(20,50),min:0,max:1,tgt:null}]});
+  }else{
+    if(P(0.5))add({src:4,rsel:0,routes:[{dst:3,idx:1,amt:RI(25,60),min:0,max:1,tgt:null}]});   // keytrack opens the filter
+    if(P(0.4))add({src:3,rsel:0,routes:[{dst:1,idx:0,amt:RI(30,60),min:0,max:1,tgt:null}]});   // velocity dynamics
+  }
+  if(wild>0.55&&P(0.3))                       // S&H sparkle per note
+    add({src:5,rsel:0,rate:+R(2,12).toFixed(1),routes:[{dst:pick([2,3]),idx:1,amt:RI(8,30),min:0,max:1,tgt:null}]});
+  const lm=p.mod.find(m2=>m2.src===2);        // give an lfo a second target (pan drift)
+  if(lm&&lm.routes.length<3&&P(0.35))lm.routes.push({dst:4,idx:0,amt:RI(15,40),min:0,max:1,tgt:null});
+  if((cat==='pad'||cat==='lead'||cat==='keys')&&wild>0.6&&P(0.3)){   // wild: stacked sub layer
+    const L=mkLayer('SUB',60);
+    L.osc[0].wav=pick([0,3]); L.osc[0].rat=0.5; L.lvl=+R(0.4,0.6).toFixed(2);
+    p.stk={on:1,mode:0,sel:0,layers:[L]};
+  }
 }
 function genPreset(cat,rnd,wild=0.5){
   const R=(a,b)=>a+rnd()*(b-a), RI=(a,b)=>Math.round(R(a,b));
@@ -1836,6 +1859,9 @@ function genPreset(cat,rnd,wild=0.5){
     if(wild>0.45&&P(0.3))p.fx[0]=p.fx[0].typ?p.fx[0]:{typ:pick([7,8,12]),p1:+R(0.1,0.4).toFixed(2),p2:+R(0.1,0.4).toFixed(2),mix:+R(0.1,0.3).toFixed(2)};
     if(wild>0.6&&P(0.25))p.lfo[1]={dst:1,idx:1,wav:RI(0,3),rate:+R(4,30).toFixed(1),amt:RI(10,40)};
     p.vox.mode=1;
+    foldMod(p);
+    /* new architecture: velocity shapes drum level (and sometimes tone) */
+    genSpice(p,cat,wild,{R,RI,P,pick});
     return p;
   }
   /* root wave: canonical per type when tame, anything goes when wild */
@@ -1873,7 +1899,9 @@ function genPreset(cat,rnd,wild=0.5){
   if(cat==='bass'){p.vox.mode=1;
     p.fx[9]={typ:16,p1:0,p2:+R(0.4,0.65).toFixed(2),p3:0.3,mix:1};}  // duck: follow ch 1's kick
   p.mix.lvl=+R(cat==='fx'?0.45:0.65,cat==='fx'?0.65:0.85).toFixed(2);
-  return foldMod(p);
+  foldMod(p);
+  genSpice(p,cat,wild,{R,RI,P,pick});
+  return p;
 }
 /* ---- '/' random button: beat / lane / slot generators ---------------- */
 function genPCs(){const sc=CFG.scaleOn?SCALES[CFG.scale][1]:[0,3,5,7,10];
@@ -2336,11 +2364,11 @@ function randSlotHere(mutate,wild){
   const holder=modHolder(pre,M.id);
   const si=M.flat?-1:S.curSlot;
   const spec0=paramsFor(mi,M.flat?null:holder[M.id][si])[0];
-  if(!mutate&&!M.flat&&spec0&&spec0.key==='typ')   // roll the type first, then params against fresh specs
+  if(!mutate&&!M.flat&&spec0&&(spec0.key==='typ'||spec0.key==='src'))   // roll the type/source first
     writeParam(S.editSnd,mi,si,0,1+Math.floor(Math.random()*(spec0.opts.length-1)));
   const specs=paramsFor(mi,M.flat?null:holder[M.id][si]);
   specs.forEach((spec,px)=>{
-    if(spec.key==='typ')return;
+    if(spec.key==='typ'||spec.key==='src'||spec.key==='_rt')return;   // never randomize the route selector
     const curV=getV(holder,mi,si,spec);
     let v;
     if(spec.type==='enum'){
@@ -2528,7 +2556,7 @@ function _prsAction(d){
     if(!s.on){s.on=1;if(!s.layers.length)addLayer(p);}
     if(d>0&&s.sel>=s.layers.length){if(addLayer(p)){s.sel=s.layers.length;if(s.mode===1)assignZones(p);}}
     else s.sel=fmod(s.sel+d,s.layers.length+1);
-    flash('editing L'+(s.sel+1)+' — OSC/FILT/ENV/LFO/VOICE now edit this layer');
+    flash('editing L'+(s.sel+1)+' — OSC/FILT/MOD/VOICE now edit this layer');
     dirty=true; dirtySave=true;}
   else randomizeChannel(pi);
   dirty=true;
@@ -3150,7 +3178,10 @@ document.addEventListener('keydown',e=>{
         flash('editing L'+(tgt+1));dirtySave=true;}
       else flash('no layer '+tgt+' — add via the PRST layer field');
     }
-    else if(S.layer===2){S.curMod=n===0?9:n-1;S.curParam=0;S.curSlot=0;}
+    else if(S.layer===2){
+      const mi2=n===0?9:n-1;
+      if(!MODULES[mi2].id){flash('reserved for future modules');return;}
+      S.curMod=mi2;S.curParam=0;S.curSlot=0;}
     else if(MODULES[S.curMod].prs){        // explorer: digit loads the nth entry on the page
       const p=S.presets[S.editSnd], pool=libAll().filter(en=>en.cat===(p.cat||'misc'));
       const idx=Math.floor((S.libSel||0)/10)*10+(n===0?9:n-1);
@@ -3196,7 +3227,7 @@ document.addEventListener('keydown',e=>{
           pre2[M2.id].forEach((sl2,si2)=>{if(M2.abbr(sl2)!=='···')act2.push(si2);});
           if(!act2.length)act2.push(0);
           act2.forEach(si2=>stops.push([mi2,0,si2]));   // each ACTIVE slot is a stop
-        }else stops.push([mi2,0,0]);
+        }else if(M2.id)stops.push([mi2,0,0]);
       });
       let idx=stops.findIndex(st=>st[0]===S.curMod&&
         (MODULES[S.curMod].slot&&!(MODULES[S.curMod].id==='osc'&&isAudioCh(S.editSnd))?st[2]===S.curSlot:st[1]===S.curParam));
@@ -3721,7 +3752,7 @@ function renderSnd(L,pos){
   const pre=S.presets[S.editSnd], ml=pre.modLoop;
   const edit=ml.state==='edit';
   let tabs='  ';
-  MODULES.forEach((m,i)=>{tabs+=(i===S.curMod?sp('i',` ${m.k}${m.name} `):sp('d',` ${m.k}${m.name} `));});
+  MODULES.forEach((m,i)=>{if(!m.id)return;tabs+=(i===S.curMod?sp('i',` ${m.k}${m.name} `):sp('d',` ${m.k}${m.name} `));});
   L.push(tabs);
   L.push('');
   prepLine(L,pre);
@@ -4019,7 +4050,7 @@ function renderHelp(L){
     ['/ (session layer)','generate a whole SONG: intro/build/drop/break + dj-automated arrangement'],
     ['dj pads + arr REC/EDIT','held pads record as timed fx windows (≈) · in edit they toggle at the cursor'],
     ['a s d f g h j k l ; (arrange)','DJ pads — hold = momentary fx · shift = latch · edit them inside MASTER 0'],
-    ['0-9','arrange: pattern · pattern: preset · sound: module · slots: slot'],
+    ['0-9','arrange: part · pattern: channel · sound: module · rack: slot (same digit = bypass)'],
     ['a w s e d f t g y h u j k o l p ; \'','play notes · z/x keyboard register'],
     ['← →','move focus / edit cursor'],
     ['↑ ↓','adjust focused value · option=×0.1 · transpose in the pattern layer'],
@@ -4031,7 +4062,9 @@ function renderHelp(L){
     ['z x','keyboard register — where your keys sit (per channel, playing only)'],
     ['↑ ↓ (pattern)','transpose the channel ±1 octave — recorded notes included'],
     ['shift+↑↓ (pattern)','swap the channel’s sound: prev/next library preset of its type'],
-    ['module 1 PRST','browse/type/save/randomize the channel’s sound · enter = library'],
+    ['module 1 PRST','browse/type/save/randomize · stack/layer fields · enter = library'],
+    ['module 4 MOD','one source (env/lfo/vel/key/rnd) → routes: each target has own amt+range'],
+    ['cmd+C on a MOD slot','arm it · then cmd+V on a filter/osc/mix param maps a route there'],
     ['q','live quantize ON/OFF (global) — what you hear is exactly what records'],
     ['shift+Q (in pattern)','snap the selected lane to the grid now (for takes recorded with q off)'],
     ['empty pattern + REC','your FIRST hit sets the one — transport retriggers on it'],
