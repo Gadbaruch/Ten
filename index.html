@@ -160,8 +160,8 @@ const mkEnv =i=>(i===0?{dst:1,idx:1,amt:100,a:0.005,d:0.15,s:0.7,r:0.2,crv:0}
                       :{dst:0,idx:1,amt:100,a:0.003,d:0.2,s:0,r:0.2,crv:0});
 const mkLfo =()=>({dst:0,idx:1,wav:0,rate:5,amt:30});
 /* unified modulation slot: one source (env/lfo/vel/key/rnd) → one or more routes.
-   Each route = a target (dst enum or learned tgt) + amount + range (min..max). */
-const mkRoute=()=>({dst:0,idx:1,amt:100,min:0,max:1,tgt:null});
+   Each route = a target (dst enum or learned tgt) + amount + center bias. */
+const mkRoute=()=>({dst:0,idx:1,amt:100,ctr:0,tgt:null});
 const mkMod =i=>({src:0,rsel:0,routes:[mkRoute()],a:0.005,d:0.15,s:0.7,r:0.2,crv:0,wav:0,rate:5,ph:0});
 const modRt=m=>{m.routes=m.routes||[mkRoute()];return m.routes[clamp(Math.round(m.rsel||0),0,m.routes.length-1)];};
 const ENV2MD={1:1,2:2,3:3,4:5};   // engine env-dst → MDST (amp/pitch/filt/op)
@@ -170,16 +170,19 @@ const LFO2MD={1:2,2:3,3:1,4:4,5:5}; // engine lfo-dst → MDST (pitch/filt/amp/p
 /* v13 mod slot {dst,idx,amt,tgt} → v14 {routes:[{dst,idx,amt,min,max,tgt}]} */
 function modToRoutes(p){
   const fix=slot=>{if(slot&&slot.mod)for(const m of slot.mod)if(m&&('dst' in m)){
-    m.routes=[{dst:m.dst||0,idx:m.idx??1,amt:m.amt??100,min:0,max:1,tgt:m.tgt||null}]; m.rsel=0;
+    m.routes=[{dst:m.dst||0,idx:m.idx??1,amt:m.amt??100,ctr:0,tgt:m.tgt||null}]; m.rsel=0;
     delete m.dst;delete m.idx;delete m.amt;delete m.tgt;}};
-  fix(p);
-  if(p.stk&&p.stk.layers)p.stk.layers.forEach(fix);
+  const fixC=slot=>{if(slot&&slot.mod)for(const m of slot.mod)if(m&&m.routes)   // v14 min/max → center
+    for(const rt of m.routes){if(!('ctr' in rt))rt.ctr=0;delete rt.min;delete rt.max;}};
+  const layers=(p.stk&&p.stk.layers)||[];
+  fix(p); layers.forEach(fix);
+  fixC(p); layers.forEach(fixC);
   return p;
 }
 function foldMod(p){
   if(!p||p._folded)return p;
   const out=[];
-  const R=(dst,idx,amt)=>({dst,idx:idx??1,amt,min:0,max:1,tgt:null});
+  const R=(dst,idx,amt)=>({dst,idx:idx??1,amt,ctr:0,tgt:null});
   for(const e of (p.env||[]))if(e&&e.dst>0&&Math.abs(e.amt)>0.5&&ENV2MD[e.dst])
     out.push({src:1,rsel:0,routes:[R(ENV2MD[e.dst],e.idx,e.amt)],a:e.a,d:e.d,s:e.s,r:e.r,crv:e.crv||0,wav:0,rate:5,ph:0});
   for(const l of (p.lfo||[]))if(l&&l.dst>0&&l.amt>0.5&&LFO2MD[l.dst])
@@ -303,7 +306,7 @@ const MOD_P=sl=>{                    // unified: source picks which extra fields
     SP('dest','dst','enum',{opts:MDST,fmt:tgtFmt, get:m=>modRt(m).dst, set:(m,v)=>{modRt(m).dst=v;modRt(m).tgt=null;}}),
     SP('slot#','idx','lin',{min:0,max:10,step:1,fmt:v=>v?String(v):'all', get:m=>modRt(m).idx, set:(m,v)=>modRt(m).idx=v}),
     SP('amt','amt','lin',{min:s>=3?0:-200,max:200,step:5,fmt:v=>v+'%', get:m=>modRt(m).amt, set:(m,v)=>modRt(m).amt=v}),
-    SP('range','max','lin',{min:0,max:1,step:0.05,fmt:v=>Math.round(v*100)+'%', get:m=>modRt(m).max, set:(m,v)=>modRt(m).max=v})];
+    SP('center','ctr','lin',{min:-100,max:100,step:5,fmt:v=>(v>0?'+':'')+v+'%', get:m=>modRt(m).ctr||0, set:(m,v)=>modRt(m).ctr=v})];
   if(s===0)return base.slice(0,5);  // off: src+route+dest+slot#+amt navigate; set src to activate
   if(s===1)return base.concat([SP('atk','a','time'),SP('dec','d','time'),
     SP('sus','s','lin',{min:0,max:1,step:0.05}),SP('rel','r','time'),
@@ -1011,6 +1014,22 @@ class Voice{
             const g2=ac.createGain();g2.gain.value=tg.sc*6;cs.connect(g2);g2.connect(tg.pm);}
           cs.start(at);this.nodes.push(cs);
         }
+      }
+    }
+    /* center: a per-route DC bias on the target (independent of the source) */
+    for(const m of md){
+      if(m.off||!m.src||!m.routes)continue;
+      for(const rt of m.routes){
+        const c=(rt.ctr||0)/100; if(!c||!rt.dst)continue;
+        if(rt.dst===3){const bq=this.fNodes[clamp(Math.round(rt.idx),1,10)-1];
+          if(bq){const cs=ac.createConstantSource();cs.offset.value=clamp(c*2400,-4800,4800);
+            cs.connect(bq.detune);cs.start(at);this.nodes.push(cs);}}
+        else if(rt.dst===1){const cs=ac.createConstantSource();cs.offset.value=c*this.amp;
+          cs.connect(vca.gain);cs.start(at);this.nodes.push(cs);}
+        else if(rt.dst===2){const cs=ac.createConstantSource();cs.offset.value=c;
+          for(const tg of Object.values(this.opDet).flat()){if(tg.sc<1)continue;
+            const g2=ac.createGain();g2.gain.value=tg.sc*12;cs.connect(g2);g2.connect(tg.pm);}
+          cs.start(at);this.nodes.push(cs);}
       }
     }
     if(fHead||this.fPar.length){
@@ -1789,16 +1808,16 @@ function genSpice(p,cat,wild,H){
   const spare=()=>p.mod.find(m2=>!m2.src);
   const add=o=>{const m2=spare(); if(m2){Object.assign(m2,o);return m2;}};
   if(isDrumCat(cat)){                        // velocity → level: hits breathe with your playing
-    add({src:3,rsel:0,routes:[{dst:1,idx:0,amt:RI(50,90),min:0,max:1,tgt:null}]});
-    if(wild>0.5&&P(0.3))add({src:3,rsel:0,routes:[{dst:3,idx:1,amt:RI(20,50),min:0,max:1,tgt:null}]});
+    add({src:3,rsel:0,routes:[{dst:1,idx:0,amt:RI(50,90),ctr:0,tgt:null}]});
+    if(wild>0.5&&P(0.3))add({src:3,rsel:0,routes:[{dst:3,idx:1,amt:RI(20,50),ctr:0,tgt:null}]});
   }else{
-    if(P(0.5))add({src:4,rsel:0,routes:[{dst:3,idx:1,amt:RI(25,60),min:0,max:1,tgt:null}]});   // keytrack opens the filter
-    if(P(0.4))add({src:3,rsel:0,routes:[{dst:1,idx:0,amt:RI(30,60),min:0,max:1,tgt:null}]});   // velocity dynamics
+    if(P(0.5))add({src:4,rsel:0,routes:[{dst:3,idx:1,amt:RI(25,60),ctr:0,tgt:null}]});   // keytrack opens the filter
+    if(P(0.4))add({src:3,rsel:0,routes:[{dst:1,idx:0,amt:RI(30,60),ctr:0,tgt:null}]});   // velocity dynamics
   }
   if(wild>0.55&&P(0.3))                       // S&H sparkle per note
-    add({src:5,rsel:0,rate:+R(2,12).toFixed(1),routes:[{dst:pick([2,3]),idx:1,amt:RI(8,30),min:0,max:1,tgt:null}]});
+    add({src:5,rsel:0,rate:+R(2,12).toFixed(1),routes:[{dst:pick([2,3]),idx:1,amt:RI(8,30),ctr:0,tgt:null}]});
   const lm=p.mod.find(m2=>m2.src===2);        // give an lfo a second target (pan drift)
-  if(lm&&lm.routes.length<3&&P(0.35))lm.routes.push({dst:4,idx:0,amt:RI(15,40),min:0,max:1,tgt:null});
+  if(lm&&lm.routes.length<3&&P(0.35))lm.routes.push({dst:4,idx:0,amt:RI(15,40),ctr:0,tgt:null});
   if((cat==='pad'||cat==='lead'||cat==='keys')&&wild>0.6&&P(0.3)){   // wild: stacked sub layer
     const L=mkLayer('SUB',60);
     L.osc[0].wav=pick([0,3]); L.osc[0].rat=0.5; L.lvl=+R(0.4,0.6).toFixed(2);
@@ -2255,8 +2274,8 @@ function modLearnOp(op){
     pushUndo('mod route');
     const m=modLearn.holder.mod[modLearn.si];
     m.routes=m.routes||[mkRoute()];
-    if(m.routes.length===1&&!m.routes[0].dst)m.routes[0]={dst:tg.dst,idx:tg.idx,amt:60,min:0,max:1,tgt:null};
-    else if(m.routes.length<8)m.routes.push({dst:tg.dst,idx:tg.idx,amt:60,min:0,max:1,tgt:null});
+    if(m.routes.length===1&&!m.routes[0].dst)m.routes[0]={dst:tg.dst,idx:tg.idx,amt:60,ctr:0,tgt:null};
+    else if(m.routes.length<8)m.routes.push({dst:tg.dst,idx:tg.idx,amt:60,ctr:0,tgt:null});
     else {flash('max 8 routes');modLearn=null;return true;}
     m.rsel=m.routes.length-1;
     flash('◎ '+MSRC[m.src]+' → '+tg.label+' mapped ('+m.routes.length+' route'+(m.routes.length>1?'s':'')+')');
@@ -2439,23 +2458,23 @@ function prsFieldDefs(){
   const stkF={k:'stack',v:()=>!p.stk||!p.stk.on?'off':(p.stk.mode?'split':'stack')};
   const layF={k:'layer',v:()=>{const n=p.stk?p.stk.layers.length:0;
     return !n?'+add':'L'+((p.stk.sel||0)+1)+'/'+(n+1);}};   // L1..L(N+1), L1 = the channel sound
-  if(L)return [    // layer inspector — 'stack' & 'layer' stay in the same (last-two) spots as base
+  if(L)return [    // layer inspector — row 1 = the layer's sound & zone, row 2 = mix + stack
     {k:'sound',v:()=>L.name},
     {k:'root', v:()=>_zn(L.root)},
     {k:'lo',   v:()=>_zn(L.lo)},
     {k:'hi',   v:()=>_zn(L.hi)},
-    {k:'level',v:()=>Math.round(L.lvl*100)+'%'},
+    {k:'level',v:()=>Math.round(L.lvl*100)+'%',br:true},
     {k:'pan',  v:()=>L.pan===0?'C':(L.pan>0?'R':'L')+Math.round(Math.abs(L.pan)*100)},
     {k:'mute', v:()=>L.mute?'MUTE':'on'},
     stkF, layF];
   const fN=S.prepFocus, fNode=fN!=null&&p.prep&&p.prep.notes&&p.prep.notes[fN];
-  return [
+  return [    // row 1 = sound identity, row 2 = stacking
     {k:'type', v:()=>p.cat||'misc'},
     {k:'prst', v:()=>fNode&&fNode.preset?'•'+fNode.preset:p.name},
     {k:'save', v:()=>'↕ keep'},
     {k:'rnd',  v:()=>'↕ roll'},
     {k:'wild', v:()=>(CFG.wild??50)+'%'},
-    stkF, layF];
+    Object.assign(stkF,{br:true}), layF];
 }
 const PRSFIELDS=['type','prst','save','rnd','wild'];   // legacy stops reference (nav uses prsFieldDefs)
 const AUDF=[
@@ -3423,7 +3442,7 @@ window.addEventListener('blur',()=>{
 
 /* ---------------- persistence + migration ---------------------------- */
 const LS='ten-v1';
-function serialize(){return JSON.stringify({v:14,bpm:T.bpm,metro:S.metro,hum:S.hum,grv:S.grv,octs:S.octs,master:S.master,dj:S.dj,arrOn:S.arrOn!==false,
+function serialize(){return JSON.stringify({v:15,bpm:T.bpm,metro:S.metro,hum:S.hum,grv:S.grv,octs:S.octs,master:S.master,dj:S.dj,arrOn:S.arrOn!==false,
   arr:S.arr,
   patterns:S.patterns.map(p=>({state:p.state==='edit'?'on':p.state,sw:p.sw||0,lanes:p.lanes})),
   presets:S.presets.map(p=>({...p,modLoop:p.modLoop.toJSON()}))});}
@@ -3451,7 +3470,7 @@ function convertV3Preset(sp,i){ // v3-and-earlier preset data -> v4 racks
 }
 function load(json){
   try{
-    const o=JSON.parse(json); if(!o||o.v<1||o.v>14)return false;
+    const o=JSON.parse(json); if(!o||o.v<1||o.v>15)return false;
     T.bpm=o.bpm||120; S.metro=!!o.metro; S.hum=o.hum??0;
     S.grv=o.grv||{typ:0,amt:0};
     if(Array.isArray(o.master))S.master=o.master.map((m,i)=>({typ:0,rt:0,p1:0.3,p2:0.3,p3:0.5,mix:0.3,...m}));
@@ -3491,7 +3510,7 @@ function load(json){
           if(sp.env)p.env=sp.env; if(sp.lfo)p.lfo=sp.lfo; if(sp.amp)p.amp=sp.amp;
           p._folded=false; foldMod(p);
         }else p._folded=true;          // v13 already carries a mod rack
-        if(o.v<14)modToRoutes(p);      // v14: mod slots gained a routes[] list
+        if(o.v<15)modToRoutes(p);      // v14 routes[], v15 min/max→center
         p.modLoop=Looper.from(sp.modLoop||{unit:'b',count:8}); p.modLoop.auto=false;
         if(o.v<13)p.modLoop.events=[]; // module indices changed — drop stale automation
         if(o.v===4){  // module order changed in v5: ply 6->9, vox 8->7, mix 9->8
@@ -3781,6 +3800,7 @@ function renderSnd(L,pos){
     S.curParam=Math.min(S.curParam,defs.length-1);
     let lr='   ', vr='   ';
     defs.forEach((fd,i)=>{
+      if(fd.br){L.push(lr);L.push(vr);L.push('');lr='   ';vr='   ';}   // start a new field row
       const foc=i===S.curParam, v=fd.v();
       lr+=(foc?sp('a','▸'+pad(fd.k,9)):sp('d',' '+pad(fd.k,9)))+' ';
       vr+=(foc?sp('i',' '+pad(v,9)):' '+pad(v,9))+' ';
