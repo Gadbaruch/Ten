@@ -92,6 +92,11 @@ const FTYPES=['off','lp','hp','bp','ntc','peq','lsh','hsh'];
 const FTYPE_W=[null,'lowpass','highpass','bandpass','notch','peaking','lowshelf','highshelf'];
 const EDST=['off','amp','pitch','filt','op'];
 const LDST=['off','pitch','filt','amp','pan','op'];
+/* unified MOD rack: one source per slot, one target enum */
+const MSRC=['off','env','lfo','vel','key','rnd'];
+const MDST=['off','amp','pitch','filt','pan','op'];   // + learned tgt address overrides this
+const MD2ENV={1:1,2:2,3:3,5:4};                        // MDST → the engine's env-dst numbering
+const MD2LFO={2:1,3:2,1:3,4:4,5:5};                    // MDST → the engine's lfo-dst numbering
 const LFOW=['sin','tri','sqr','saw'], LFOW_W=['sine','triangle','square','sawtooth'];
 const XTYPES=['off','dly','cho','fla','pha','trm','drv','crush','verb','comp','gate','roll','tape','grs8','send','limit','duck','amix','hp','lp','bld','dist'];
 const GPATS=[[1,1,1,1,0,0,0,0],[0,0,1,1,0,0,1,1],[1,0,1,0,1,0,1,0],[1,.7,.45,.3,.2,.12,.07,0],[1,0,0,1,0,0,1,0]];
@@ -154,6 +159,26 @@ const mkFlt =i=>(i===0?{typ:1,frq:9000,q:1,gn:0,par:0}:{typ:0,frq:2000,q:1,gn:0,
 const mkEnv =i=>(i===0?{dst:1,idx:1,amt:100,a:0.005,d:0.15,s:0.7,r:0.2,crv:0}
                       :{dst:0,idx:1,amt:100,a:0.003,d:0.2,s:0,r:0.2,crv:0});
 const mkLfo =()=>({dst:0,idx:1,wav:0,rate:5,amt:30});
+/* unified modulation slot: src picks env/lfo/vel/key/rnd; one target */
+const mkMod =i=>({src:0,dst:0,idx:1,amt:i===0?100:100,a:0.005,d:0.15,s:0.7,r:0.2,crv:0,wav:0,rate:5,ph:0,tgt:null});
+const ENV2MD={1:1,2:2,3:3,4:5};   // engine env-dst → MDST (amp/pitch/filt/op)
+const LFO2MD={1:2,2:3,3:1,4:4,5:5}; // engine lfo-dst → MDST (pitch/filt/amp/pan/op)
+/* fold the legacy env/lfo/amp authoring format into the unified mod rack + dist fx (once) */
+function foldMod(p){
+  if(!p||p._folded)return p;
+  const out=[];
+  for(const e of (p.env||[]))if(e&&e.dst>0&&Math.abs(e.amt)>0.5&&ENV2MD[e.dst])
+    out.push({src:1,dst:ENV2MD[e.dst],idx:e.idx??1,amt:e.amt,a:e.a,d:e.d,s:e.s,r:e.r,crv:e.crv||0,wav:0,rate:5,ph:0,tgt:null});
+  for(const l of (p.lfo||[]))if(l&&l.dst>0&&l.amt>0.5&&LFO2MD[l.dst])
+    out.push({src:2,dst:LFO2MD[l.dst],idx:l.idx??1,amt:l.amt,wav:l.wav||0,rate:l.rate||5,ph:0,a:0.005,d:0.15,s:0.7,r:0.2,crv:0,tgt:null});
+  const distI=XTYPES.indexOf('dist');
+  if(p.fx)for(const a of (p.amp||[]))if(a&&a.typ)      // amp distortion → a dist fx slot (channel-level only)
+    for(let i=0;i<10;i++)if(!p.fx[i].typ){p.fx[i]={typ:distI,p1:a.drv,p2:0,p3:Math.max(0,a.typ-1),mix:a.mix};break;}
+  p.mod=rack(mkMod);
+  out.slice(0,10).forEach((m,i)=>{p.mod[i]=Object.assign(mkMod(i),m);});
+  p._folded=true;
+  return p;
+}
 const mkFx  =()=>({typ:0,p1:0.3,p2:0.3,p3:0.5,mix:0.3});
 const mkPly =()=>({typ:0,p1:2,p2:0,p3:1,p4:60});
 const rack=(mk)=>Array.from({length:10},(_,i)=>mk(i));
@@ -199,22 +224,22 @@ function basePreset(name){return{
   name, cat:'misc', tr:0, prep:null,
   au:{gain:0.9,semis:0,rate:1,st:0,en:1,fit:0,src:0},
   osc:rack(mkOsc), amp:rack(mkAmp), flt:rack(mkFlt), env:rack(mkEnv),
-  lfo:rack(mkLfo), fx:rack(mkFx), ply:rack(mkPly),
+  lfo:rack(mkLfo), mod:rack(mkMod), fx:rack(mkFx), ply:rack(mkPly),
   vox:{mode:0,glide:0,uni:1,sprd:12,wide:0.6,slop:0.008},
   mix:{lvl:0.8,pan:0},
   stk:{on:0,mode:0,sel:0,layers:[]},   // preset stacking: off = normal single sound (no cost)
   modLoop:new Looper('b',8,'on'),
 };}
 /* a stack layer = a full sound-preset's voice modules + zone/mix meta */
-function mkLayer(name,root){const b=basePreset(name||'LYR');
+function mkLayer(name,root){const b=foldMod(basePreset(name||'LYR'));
   return {name:b.name,root:root??60,lo:0,hi:127,lvl:0.8,pan:0,mute:0,
-    osc:b.osc,amp:b.amp,flt:b.flt,env:b.env,lfo:b.lfo,vox:b.vox};}
+    osc:b.osc,flt:b.flt,mod:b.mod,vox:b.vox};}
 /* the sound-module view of a layer (or the base preset) for Voice building */
-function layerPreset(base,L){return L?{...base,osc:L.osc,amp:L.amp,flt:L.flt,env:L.env,lfo:L.lfo,vox:L.vox,mix:{lvl:L.lvl,pan:L.pan}}:base;}
-const LAYERMODS=new Set(['osc','flt','env','lfo','vox']);   // voice-level per-layer; amp/fx/ply/mix are channel-shared
+function layerPreset(base,L){return L?{...base,osc:L.osc,flt:L.flt,mod:L.mod,vox:L.vox,mix:{lvl:L.lvl,pan:L.pan}}:base;}
+const LAYERMODS=new Set(['osc','flt','mod','vox']);   // voice-level per-layer; amp/fx/ply/mix are channel-shared
 function edLayer(p){return (p.stk&&p.stk.on&&p.stk.sel>0&&p.stk.layers[p.stk.sel-1])?p.stk.layers[p.stk.sel-1]:null;}
 function modHolder(p,modId){const L=edLayer(p);return (L&&LAYERMODS.has(modId))?L:p;}
-const RACK_MK={osc:mkOsc,amp:mkAmp,flt:mkFlt,env:mkEnv,lfo:mkLfo,fx:mkFx,ply:mkPly};
+const RACK_MK={osc:mkOsc,amp:mkAmp,flt:mkFlt,env:mkEnv,lfo:mkLfo,mod:mkMod,fx:mkFx,ply:mkPly};
 
 /* ---------------- param specs ---------------------------------------- */
 const fHz=v=>v>=1?v.toFixed(1)+'Hz':(v*1000).toFixed(0)+'mHz';
@@ -254,6 +279,24 @@ const LFO_P=()=>[
   SP('wave','wav','enum',{opts:LFOW}),
   SP('rate','rate','time',{min:0.05,max:40,fmt:fHz}),
   SP('amt','amt','lin',{min:0,max:100,step:5,fmt:v=>v+'%'})];
+const MOD_P=sl=>{                    // unified: source picks which extra fields show
+  const s=Math.round(sl.src||0);
+  if(s===0)return [SP('src','src','enum',{opts:MSRC})];
+  const tgtFmt=v=>sl.tgt?tgtLabel(sl.tgt):MDST[clamp(Math.round(v),0,MDST.length-1)];
+  const base=[SP('src','src','enum',{opts:MSRC}),
+    SP('dest','dst','enum',{opts:MDST,fmt:tgtFmt}),
+    SP('slot#','idx','lin',{min:0,max:10,step:1,fmt:v=>v?String(v):'all'}),
+    SP('amt','amt','lin',{min:s>=3?0:-200,max:200,step:5,fmt:v=>v+'%'})];
+  if(s===1)return base.concat([SP('atk','a','time'),SP('dec','d','time'),
+    SP('sus','s','lin',{min:0,max:1,step:0.05}),SP('rel','r','time'),
+    SP('curve','crv','enum',{opts:['lin','exp','log']})]);
+  if(s===2)return base.concat([SP('wave','wav','enum',{opts:LFOW}),
+    SP('rate','rate','time',{min:0.05,max:40,fmt:fHz}),
+    SP('phase','ph','lin',{min:0,max:355,step:5,fmt:v=>v+'°'})]);
+  if(s===5)return base.concat([SP('rate','rate','time',{min:0.05,max:40,fmt:fHz})]);  // rnd = S&H rate
+  return base;                       // vel / key: just amount
+};
+function tgtLabel(t){return (MODULES[t.m]?MODULES[t.m].name.toLowerCase():'?')+(t.s>=0?(t.s+1):'')+'·'+t.p;}
 const FX_P=sl=>{
   const t=XTYPES[sl.typ], base=[SP('type','typ','enum',{opts:XTYPES})];
   const tail={
@@ -348,19 +391,19 @@ const PLY_P=sl=>{
 const MODULES=[
  {k:'1',id:'prs',name:'PRST',prs:true},
  {k:'2',id:'osc',name:'OSC', slot:true,params:OSC_P,abbr:s=>s.amt>0.001?WAVES[s.wav]:'···'},
- {k:'3',id:'amp',name:'AMP', slot:true,params:AMP_P,abbr:s=>s.typ?DTYPES[s.typ]:'···'},
- {k:'4',id:'flt',name:'FILT',slot:true,params:FLT_P,abbr:s=>s.typ?FTYPES[s.typ]:'···'},
- {k:'5',id:'env',name:'ENV', slot:true,params:ENV_P,abbr:s=>s.dst?EDST[s.dst]:'···'},
- {k:'6',id:'lfo',name:'LFO', slot:true,params:LFO_P,abbr:s=>s.dst?LDST[s.dst]:'···'},
- {k:'7',id:'fx', name:'FX',  slot:true,params:FX_P, abbr:s=>s.typ?XTYPES[s.typ]:'···'},
- {k:'8',id:'vox',name:'VOICE',flat:[SP('mode','mode','enum',{opts:MODE}),
+ {k:'3',id:'flt',name:'FILT',slot:true,params:FLT_P,abbr:s=>s.typ?FTYPES[s.typ]:'···'},
+ {k:'4',id:'mod',name:'MOD', slot:true,params:MOD_P,abbr:s=>s.src?(MSRC[s.src]+'→'+(s.tgt?'·':MDST[s.dst||0])):'···'},
+ {k:'5',id:'fx', name:'FX',  slot:true,params:FX_P, abbr:s=>s.typ?XTYPES[s.typ]:'···'},
+ {k:'6',id:'vox',name:'VOICE',flat:[SP('mode','mode','enum',{opts:MODE}),
     SP('glide','glide','time',{min:0,max:0.5}),
     SP('uni','uni','lin',{min:1,max:7,step:1,fmt:v=>v+'v'}),
     SP('sprd','sprd','lin',{min:0,max:50,step:2,fmt:v=>v+'c'}),
     SP('wide','wide','lin',{min:0,max:1,step:0.05}),
     SP('slop','slop','time',{min:0,max:0.03})]},
- {k:'9',id:'mix',name:'MIX', flat:[SP('level','lvl','lin',{min:0,max:1,step:0.05}),
+ {k:'7',id:'mix',name:'MIX', flat:[SP('level','lvl','lin',{min:0,max:1,step:0.05}),
     SP('pan','pan','lin',{min:-1,max:1,step:0.1})]},
+ {k:'8',id:null,name:'—'},
+ {k:'9',id:null,name:'—'},
  {k:'0',id:'ply',name:'PLAY',slot:true,params:PLY_P,abbr:s=>s.typ?PTYPES[s.typ]:'···'},
 ];
 const paramsFor=(mi,slot)=>{const M=MODULES[mi];return M.flat?M.flat:M.params(slot);};
@@ -455,7 +498,7 @@ const PRESETS0=()=>[
    p.env[3]={dst:4,idx:2,amt:100,a:0.001,d:0.08,s:0,r:0.1};
    p.flt[0].frq=1400;
    p.fx[0]={typ:1,p1:0.27,p2:0.3,mix:0.3};}),
-];
+].map(foldMod);
 
 /* ---------------- state ---------------------------------------------- */
 const mkPattern=()=>({state:'on',sw:0,lanes:Array.from({length:10},()=>{const l=new Looper('s',16,'on');l.auto=true;return l;})});
@@ -679,10 +722,14 @@ function prepEffective(p,midi){
           if(M.flat){if(en.data[M.id])Object.assign(kp[M.id],en.data[M.id]);}
           else if(Array.isArray(en.data[M.id]))en.data[M.id].forEach((sl,j)=>{if(sl)Object.assign(kp[M.id][j],sl);});
         }
+        if(!en.data.mod&&(en.data.env||en.data.lfo||en.data.amp)){   // legacy kit sound → fold
+          if(en.data.env)kp.env=en.data.env; if(en.data.lfo)kp.lfo=en.data.lfo; if(en.data.amp)kp.amp=en.data.amp;
+          kp._folded=false; foldMod(kp);
+        }
         prepCache.set(pr.preset,kp);
       }
     }
-    if(kp)eff={...p,osc:kp.osc,flt:kp.flt,env:kp.env,lfo:kp.lfo,vox:kp.vox};
+    if(kp)eff={...p,osc:kp.osc,flt:kp.flt,mod:kp.mod,vox:kp.vox};
   }
   if(pr.k&&Object.keys(pr.k).length){     // …and hand tweaks apply ON TOP (kit notes are editable)
     if(eff===p)eff={...p};
@@ -725,7 +772,12 @@ class Voice{
     this.amp=clamp(vel,0,1)*0.85*(p._lvl!=null?p._lvl:1);   // layer level folds into voice gain
 
     /* envelopes: routable rack. amp env = first dst:amp; default safety env otherwise */
-    const envs=p.env.filter(e2=>e2.dst>0&&!e2.off&&Math.abs(e2.amt)>0.5);
+    /* unified MOD rack → the engine's existing env / lfo scheduling, re-sourced */
+    const md=p.mod||[];
+    const envs=md.filter(m=>!m.off&&m.src===1&&MD2ENV[m.dst]&&Math.abs(m.amt)>0.5)
+      .map(m=>({dst:MD2ENV[m.dst],idx:m.idx,amt:m.amt,a:m.a,d:m.d,s:m.s,r:m.r,crv:m.crv}));
+    const lfoList=md.filter(m=>!m.off&&m.src===2&&MD2LFO[m.dst]&&m.amt>0.5)
+      .map(m=>({dst:MD2LFO[m.dst],idx:m.idx,wav:m.wav,rate:m.rate,amt:m.amt,ph:m.ph}));
     const ampEnv=envs.find(e2=>e2.dst===1&&Math.round(e2.idx||0)<=1);
     const aA=Math.max(0.001,ampEnv?ampEnv.a:0.003); this.aA=aA;
     const aS=ampEnv?ampEnv.s:1, aD=ampEnv?ampEnv.d:0.1;
@@ -890,8 +942,8 @@ class Voice{
     }
 
     /* LFO rack (per voice: pitch/filt/amp/op) */
-    for(const lf of p.lfo){
-      if(lf.dst===0||lf.dst===4||lf.amt<0.5||lf.off)continue;
+    for(const lf of lfoList){
+      if(lf.dst===0||lf.dst===4||lf.amt<0.5)continue;   // pan handled at bus level
       const lo=ac.createOscillator(), lg=ac.createGain();
       lo.type=LFOW_W[lf.wav]; lo.frequency.value=lf.rate;
       const A=lf.amt/100;
@@ -908,6 +960,26 @@ class Voice{
       else if(lf.dst===3){lg.gain.value=A*this.amp*0.5; lg.connect(vca.gain);}
       else if(lf.dst===5){const gl=this.opGains[clamp(Math.round(lf.idx),1,10)-1]; if(!gl)continue; lg.gain.value=A*0.5; for(const g of gl)lg.connect(g.gain);}
       lo.connect(lg); lo.start(at); this.nodes.push(lo);
+    }
+    /* vel / key / rnd sources: a per-note constant into the target (filt cutoff · amp) */
+    for(const m of md){
+      if(m.off||!m.dst||m.src<3||m.src>5)continue;
+      const A=(m.amt||0)/100;
+      const v=m.src===3?clamp(vel,0,1):m.src===4?clamp((midi-60)/24,-2,2):(Math.random()*2-1);
+      const k=v*A;
+      if(m.dst===3){                             // filter cutoff (cents)
+        const bq=this.fNodes[clamp(Math.round(m.idx),1,10)-1];
+        if(bq){const cs=ac.createConstantSource();cs.offset.value=clamp(k*4800,-9600,9600);
+          cs.connect(bq.detune);cs.start(at);this.nodes.push(cs);}
+      }else if(m.dst===1){                       // amp
+        const cs=ac.createConstantSource();cs.offset.value=k*this.amp*0.7;
+        cs.connect(vca.gain);cs.start(at);this.nodes.push(cs);
+      }else if(m.dst===2){                        // pitch (osc detune)
+        const cs=ac.createConstantSource();cs.offset.value=k;
+        for(const tg of Object.values(this.opDet).flat()){if(tg.sc<1)continue;
+          const g2=ac.createGain();g2.gain.value=tg.sc*6;cs.connect(g2);g2.connect(tg.pm);}
+        cs.start(at);this.nodes.push(cs);
+      }
     }
     if(fHead||this.fPar.length){
       const fsum=ac.createGain();
@@ -1294,27 +1366,8 @@ class Engine{
     const keep=n=>{b.rack.push(n);return n;};
     const ig=keep(ac.createGain()); b.rackIn=ig; b.vIn.connect(ig);
     let cur=ig;
-    // AMP distortion rack (ser/par)
-    const parTaps=[];
-    for(const d of p.amp){
-      if(!d.typ||d.off)continue;
-      const sh=keep(ac.createWaveShaper()); sh.curve=distCurve(d.typ,d.drv); sh.oversample='2x';
-      if(DROUTE[d.par]==='par'){
-        const g=keep(ac.createGain()); g.gain.value=d.mix;
-        cur.connect(sh); sh.connect(g); parTaps.push(g);
-      }else{
-        const dry=keep(ac.createGain()), wet=keep(ac.createGain()), out=keep(ac.createGain());
-        dry.gain.value=1-d.mix; wet.gain.value=d.mix;
-        cur.connect(dry); cur.connect(sh); sh.connect(wet);
-        dry.connect(out); wet.connect(out); cur=out;
-      }
-    }
-    if(parTaps.length){
-      const out=keep(ac.createGain()); cur.connect(out);
-      for(const g of parTaps)g.connect(out);
-      cur=out;
-    }
     // FX chain (per channel): real units inline; 'send' taps to a master send slot
+    // (distortion is now the 'dist' fx type — the AMP module is gone)
     this.followers=this.followers.filter(f=>f.owner!==pi);
     this.grossList=this.grossList.filter(f=>f.owner!==pi);
     this.duckList=this.duckList.filter(f=>f.owner!==pi);
@@ -1342,7 +1395,7 @@ class Engine{
     b.busG.gain.setTargetAtTime(p.mix.lvl,n,0.02);
     b.pan.pan.setTargetAtTime(p.mix.pan,n,0.02);
     // pan LFO (bus level)
-    const pl=p.lfo.find(l=>l.dst===4&&l.amt>0.5&&!l.off);
+    const pl=(p.mod||[]).find(m=>m.src===2&&m.dst===4&&m.amt>0.5&&!m.off);   // lfo→pan (MDST pan=4)
     if(pl&&!b.panLfo){
       const lo=AC.createOscillator(), lg=AC.createGain();
       lo.type=LFOW_W[pl.wav]; lo.frequency.value=pl.rate; lg.gain.value=pl.amt/100;
@@ -1602,8 +1655,8 @@ function applyParam(pi,mi,si,px,v){
     else if(v===10){sl2.p1=0;}
   }
   if(M.id==='fx'&&spec.key==='typ'&&XTYPES[v]==='dist'){const s2=S.presets[pi].fx[si];s2.p1=0.35;s2.p3=0;s2.mix=0.6;}
-  if(M.id==='amp'||M.id==='fx')engine.rebuildRack(pi);
-  else if(M.id==='mix'||M.id==='lfo')engine.refresh(pi);
+  if(M.id==='fx')engine.rebuildRack(pi);
+  else if(M.id==='mix'||M.id==='mod')engine.refresh(pi);   // mod→pan lives at bus level
   else if(M.id==='flt'&&spec.key==='frq')engine.cutLive(pi,si);
   dirtySave=true;
 }
@@ -1660,6 +1713,13 @@ function setPresetData(pi,name,cat,data){   // same, no undo — for composite g
     if(M.flat){if(data[M.id])Object.assign(p[M.id],data[M.id]);}
     else if(Array.isArray(data[M.id]))data[M.id].forEach((sl,j)=>{if(sl)Object.assign(p[M.id][j],sl);});
   }
+  if(!data.mod&&(data.env||data.lfo||data.amp)){        // legacy library entry → fold
+    if(data.env)p.env=JSON.parse(JSON.stringify(data.env));
+    if(data.lfo)p.lfo=JSON.parse(JSON.stringify(data.lfo));
+    if(data.amp)p.amp=JSON.parse(JSON.stringify(data.amp));
+    p._folded=false; foldMod(p);
+  }
+  if(data.stk&&data.stk.layers)p.stk={on:data.stk.on||0,mode:data.stk.mode||0,sel:0,layers:data.stk.layers.map(L=>foldMod(L))};
   p.tr=data.tr||0;
   p.modLoop=S.presets[pi].modLoop;      // the channel's mod loop stays
   S.presets[pi]=p;
@@ -1775,7 +1835,7 @@ function genPreset(cat,rnd,wild=0.5){
   if(cat==='bass'){p.vox.mode=1;
     p.fx[9]={typ:16,p1:0,p2:+R(0.4,0.65).toFixed(2),p3:0.3,mix:1};}  // duck: follow ch 1's kick
   p.mix.lvl=+R(cat==='fx'?0.45:0.65,cat==='fx'?0.65:0.85).toFixed(2);
-  return p;
+  return foldMod(p);
 }
 /* ---- '/' random button: beat / lane / slot generators ---------------- */
 function genPCs(){const sc=CFG.scaleOn?SCALES[CFG.scale][1]:[0,3,5,7,10];
@@ -2157,11 +2217,11 @@ function clipboardOp(op){
 }
 /* init states: a clean, deterministic starting sound per channel type */
 function initPreset(cat){
-  if(cat==='audio'){const p=basePreset('INIT');p.cat='audio';return p;}
+  if(cat==='audio'){const p=foldMod(basePreset('INIT'));p.cat='audio';return p;}
   if(cat==='kit'){const p=basePreset('INIT');p.cat='kit';
     const pool=libAll().filter(en=>DRUMCATS.includes(en.cat));
     if(pool.length)p.prep={notes:kitNotes(pool,mulberry32(7))};
-    Object.assign(p.osc[0],{wav:0,rat:0.5}); p.vox.mode=1; return p;}
+    Object.assign(p.osc[0],{wav:0,rat:0.5}); p.vox.mode=1; return foldMod(p);}
   const p=genPreset(cat,mulberry32(cat.charCodeAt(0)*7+3),0.12);
   p.name='INIT'; return p;
 }
@@ -3252,7 +3312,7 @@ window.addEventListener('blur',()=>{
 
 /* ---------------- persistence + migration ---------------------------- */
 const LS='ten-v1';
-function serialize(){return JSON.stringify({v:12,bpm:T.bpm,metro:S.metro,hum:S.hum,grv:S.grv,octs:S.octs,master:S.master,dj:S.dj,arrOn:S.arrOn!==false,
+function serialize(){return JSON.stringify({v:13,bpm:T.bpm,metro:S.metro,hum:S.hum,grv:S.grv,octs:S.octs,master:S.master,dj:S.dj,arrOn:S.arrOn!==false,
   arr:S.arr,
   patterns:S.patterns.map(p=>({state:p.state==='edit'?'on':p.state,sw:p.sw||0,lanes:p.lanes})),
   presets:S.presets.map(p=>({...p,modLoop:p.modLoop.toJSON()}))});}
@@ -3280,7 +3340,7 @@ function convertV3Preset(sp,i){ // v3-and-earlier preset data -> v4 racks
 }
 function load(json){
   try{
-    const o=JSON.parse(json); if(!o||o.v<1||o.v>12)return false;
+    const o=JSON.parse(json); if(!o||o.v<1||o.v>13)return false;
     T.bpm=o.bpm||120; S.metro=!!o.metro; S.hum=o.hum??0;
     S.grv=o.grv||{typ:0,amt:0};
     if(Array.isArray(o.master))S.master=o.master.map((m,i)=>({typ:0,rt:0,p1:0.3,p2:0.3,p3:0.5,mix:0.3,...m}));
@@ -3315,8 +3375,13 @@ function load(json){
         p.cat=sp.cat||(['kik','snr','hh','perc','bass','keys','chord','lead','pad','plk'][i]||'misc');
         p.tr=sp.tr||0; p.prep=sp.prep||null;
         p.au=Object.assign({gain:0.9,semis:0,rate:1,st:0,en:1,fit:0,src:0},sp.au||{});
-        if(sp.stk&&sp.stk.layers)p.stk={on:sp.stk.on||0,mode:sp.stk.mode||0,sel:sp.stk.sel||0,layers:sp.stk.layers};
+        if(sp.stk&&sp.stk.layers)p.stk={on:sp.stk.on||0,mode:sp.stk.mode||0,sel:sp.stk.sel||0,layers:sp.stk.layers.map(L=>foldMod(L))};
+        if(o.v<13){                    // env+lfo+amp → mod rack + dist fx
+          if(sp.env)p.env=sp.env; if(sp.lfo)p.lfo=sp.lfo; if(sp.amp)p.amp=sp.amp;
+          p._folded=false; foldMod(p);
+        }else p._folded=true;          // v13 already carries a mod rack
         p.modLoop=Looper.from(sp.modLoop||{unit:'b',count:8}); p.modLoop.auto=false;
+        if(o.v<13)p.modLoop.events=[]; // module indices changed — drop stale automation
         if(o.v===4){  // module order changed in v5: ply 6->9, vox 8->7, mix 9->8
           const map={6:9,8:7,9:8};
           p.modLoop.events=p.modLoop.events
@@ -3740,16 +3805,11 @@ function renderSlots(L){
         :`  +${(i+1)%10}${WAVES[o.wav]}`;
       sum+=(i===S.curSlot?sp('a',seg):sp('d',seg));
     });
-  }else if(M.id==='env'){
-    rackA.forEach((e2,i)=>{
-      if(!e2.dst)return;
-      const seg=`  ${(i+1)%10}→${EDST[e2.dst]}${e2.dst===3||e2.dst===4?e2.idx:''}`;
-      sum+=(i===S.curSlot?sp('a',seg):sp('d',seg));
-    });
-  }else if(M.id==='lfo'){
-    rackA.forEach((e2,i)=>{
-      if(!e2.dst)return;
-      const seg=`  ${(i+1)%10}→${LDST[e2.dst]}${e2.dst===2||e2.dst===5?e2.idx:''}`;
+  }else if(M.id==='mod'){
+    rackA.forEach((m2,i)=>{
+      if(!m2.src)return;
+      const tgt=m2.tgt?tgtLabel(m2.tgt):MDST[m2.dst||0]+((m2.dst===3||m2.dst===5)?m2.idx:'');
+      const seg=`  ${(i+1)%10}${MSRC[m2.src]}→${tgt}`;
       sum+=(i===S.curSlot?sp('a',seg):sp('d',seg));
     });
   }else{
@@ -3775,11 +3835,9 @@ function renderSlots(L){
     sp('d','  ←→ cursor · ↑↓ set point for focused param · ⌫ clear cell'));
   L.push('');
   const hints={osc:'dest routes fm/ring at any op · phase + trig: rtrg = locked start, free = analog-style random',
-    amp:'route: ser = in chain, par = side-branch summed in',
     flt:'peq/lsh/hsh use gain — stack EQ bands alongside filters',
-    env:'dest+slot# route anywhere: amp · pitch · filt N · op N level',
-    lfo:'dest+slot# route: pitch · filt N · amp · pan · op N',
-    fx:'serial chain top to bottom · verb = send to shared reverb',
+    mod:'src = env/lfo/vel/key/rnd · dest = amp/pitch/filt/pan/op (slot# targets one) · cmd+C then cmd+V learns any param',
+    fx:'serial chain top to bottom · verb = send to shared reverb · dist = the old amp distortions',
     ply:'chord (±strum: + low→high, − high→low) · arp needs transport · grv = this part’s groove'};
   L.push('   '+sp('d','←→ flows params → next slot · shift+←→ jumps slot · digits pick slot · ↑↓ value'));
   L.push('   '+sp('d',hints[M.id]||''));

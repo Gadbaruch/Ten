@@ -19,8 +19,8 @@ ARRANGE       digits select parts · slots ARE song sections (0 intro … 9 outr
   │           0,0 selects MASTER — the unique channel on the far right
   ├─ MASTER 0   fx rack (sends + mix inserts, limiter stock) + dj pad editor
   └─ PATTERN  digits pick channel (again=mute, shift=solo) · letters play notes
-      └─ SOUND    digits pick module — 1 PRST 2 OSC 3 AMP 4 FILT 5 ENV
-          └─ RACK     │       6 LFO 7 FX 8 VOICE 9 MIX 0 PLAY
+      └─ SOUND    digits pick module — 1 PRST 2 OSC 3 FILT 4 MOD
+          └─ RACK     │       5 FX 6 VOICE 7 MIX 0 PLAY
                       └─ every module is a 10-slot rack; digits pick a slot,
                         the same digit again BYPASSES it
 ```
@@ -58,14 +58,17 @@ momentary/latch REC modes are in settings. An empty pattern's first hit
 
 **Sound = racks.** Every module is 10 slots: operators (add/fm/ring with
 free dest routing, phase + rtrg/free trig, incl. an `smp` sampler wave —
-drop an audio file on an op), distortions (serial/parallel), filters incl.
-EQ bands, routable envelopes (amp is just env slot 1; pitch drops, filter
-sweeps, op-level FM motion — slot# targets one op, 0 = all), routable
-LFOs, an fx chain (delay/chorus/flanger/phaser/trem/drive/crush/verb/comp/
-gate/roll/tape/grs8/send), and PLAY: chord (with strum ±, or `mstr` role =
-its held chord live-retunes all other channels), arp (slot order matters:
-arp→chord chords every step), groove (follow global or own), prep/kit
-(below).
+drop an audio file on an op), filters incl. EQ bands, a **MOD** rack, an
+**FX** chain, and **PLAY**. The MOD rack unifies modulation — each slot
+picks a *source* (env / lfo / velocity / key-track / random-S&H) and a
+*target* (amp / pitch / filter / pan / op level; slot# targets one, 0 =
+all). The amp envelope is just a MOD slot (env → amp). The FX chain runs
+delay/chorus/flanger/phaser/trem/drive/crush/**dist** (the nine former
+AMP distortion curves)/verb/comp/gate/roll/tape/grs8/send/limit/duck/hp/
+lp/bld. PLAY: chord (with strum ±, or `mstr` role = its held chord
+live-retunes all other channels), arp (slot order matters: arp→chord
+chords every step), groove, prep/kit, plus rev / random-playhead /
+velocity / chance / euclid / nudge.
 
 **Audio channels.** Set a channel's type to `audio` and it becomes a
 looping audio track: drag a file onto it, or record straight in from the
@@ -148,7 +151,7 @@ top to bottom; each section is banner-commented in this order:
    decides meaning. All state lives in `S` (session) / `CFG` (defaults) /
    `T` (transport).
 8. **Persistence** — `serialize()`/`load()` with versioned migrations
-   (currently v11). Undo = snapshot stack of `serialize()`.
+   (currently v13). Undo = snapshot stack of `serialize()`.
 9. **Render** — full-screen `<pre>`, rebuilt at ~30fps from state. No DOM
    beyond one element.
 
