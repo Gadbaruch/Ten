@@ -211,6 +211,9 @@ function mkLayer(name,root){const b=basePreset(name||'LYR');
     osc:b.osc,amp:b.amp,flt:b.flt,env:b.env,lfo:b.lfo,vox:b.vox};}
 /* the sound-module view of a layer (or the base preset) for Voice building */
 function layerPreset(base,L){return L?{...base,osc:L.osc,amp:L.amp,flt:L.flt,env:L.env,lfo:L.lfo,vox:L.vox,mix:{lvl:L.lvl,pan:L.pan}}:base;}
+const LAYERMODS=new Set(['osc','flt','env','lfo','vox']);   // voice-level per-layer; amp/fx/ply/mix are channel-shared
+function edLayer(p){return (p.stk&&p.stk.on&&p.stk.sel>0&&p.stk.layers[p.stk.sel-1])?p.stk.layers[p.stk.sel-1]:null;}
+function modHolder(p,modId){const L=edLayer(p);return (L&&LAYERMODS.has(modId))?L:p;}
 const RACK_MK={osc:mkOsc,amp:mkAmp,flt:mkFlt,env:mkEnv,lfo:mkLfo,fx:mkFx,ply:mkPly};
 
 /* ---------------- param specs ---------------------------------------- */
@@ -1564,6 +1567,16 @@ class Engine{
 }
 const engine=new Engine();
 
+/* UI write: routes to the selected stack layer for voice modules, else the channel */
+function writeParam(pi,mi,si,px,v){
+  const p=S.presets[pi], M=MODULES[mi]; if(!M||!M.id||M.prs)return;
+  const holder=modHolder(p,M.id);
+  if(holder===p){applyParam(pi,mi,si,px,v);return;}
+  const slot=M.flat?null:holder[M.id][si];
+  const spec=paramsFor(mi,slot)[px]; if(!spec)return;
+  setV(holder,mi,si,spec,v);      // layer voice-modules read fresh on the next note — no rebuild
+  dirtySave=true;
+}
 /* value change entry point: address = (module, slot(-1=flat), param) */
 function applyParam(pi,mi,si,px,v){
   const M=MODULES[mi]; if(!M||!M.id||M.prs)return;
@@ -2175,14 +2188,15 @@ function randSlotHere(mutate,wild){
   if(!M.id){flash('reserved');return;}
   if(M.prs){randomizeChannel(S.editSnd,wild?90:undefined);return;}
   pushUndo('rand slot');
+  const holder=modHolder(pre,M.id);
   const si=M.flat?-1:S.curSlot;
-  const spec0=paramsFor(mi,M.flat?null:pre[M.id][si])[0];
+  const spec0=paramsFor(mi,M.flat?null:holder[M.id][si])[0];
   if(!mutate&&!M.flat&&spec0&&spec0.key==='typ')   // roll the type first, then params against fresh specs
-    applyParam(S.editSnd,mi,si,0,1+Math.floor(Math.random()*(spec0.opts.length-1)));
-  const specs=paramsFor(mi,M.flat?null:pre[M.id][si]);
+    writeParam(S.editSnd,mi,si,0,1+Math.floor(Math.random()*(spec0.opts.length-1)));
+  const specs=paramsFor(mi,M.flat?null:holder[M.id][si]);
   specs.forEach((spec,px)=>{
     if(spec.key==='typ')return;
-    const curV=getV(pre,mi,si,spec);
+    const curV=getV(holder,mi,si,spec);
     let v;
     if(spec.type==='enum'){
       if(mutate)return;                            // mutate keeps types/modes
@@ -2204,7 +2218,7 @@ function randSlotHere(mutate,wild){
       v=+v.toFixed(4);
       if(!isFinite(v))return;
     }
-    applyParam(S.editSnd,mi,si,px,v);
+    writeParam(S.editSnd,mi,si,px,v);
   });
   engine.rebuildRack(S.editSnd); engine.refresh(S.editSnd);
   flash((mutate?'~ mutated ':'☆ randomized ')+M.name+(M.flat?'':' slot '+(si+1)%10));
@@ -2245,7 +2259,31 @@ function randomizeChannel(pi,wildOverride){
   applyPresetData(pi,p.name,cat,presetData(p));
   flash('☆ new random '+cat+' @'+w+'%: '+p.name);
 }
-const PRSFIELDS=['type','prst','save','rnd','wild'];
+const _zn=v=>NN[((Math.round(v)%12)+12)%12]+(Math.floor(Math.round(v)/12)-1);
+/* PRST fields adapt: base preset fields, or the selected stack layer's inspector */
+function prsFieldDefs(){
+  const p=S.presets[S.editSnd], L=edLayer(p);
+  if(L)return [
+    {k:'layer',v:()=>'L'+p.stk.sel+'/'+p.stk.layers.length},
+    {k:'sound',v:()=>L.name},
+    {k:'root', v:()=>_zn(L.root)},
+    {k:'lo',   v:()=>_zn(L.lo)},
+    {k:'hi',   v:()=>_zn(L.hi)},
+    {k:'level',v:()=>Math.round(L.lvl*100)+'%'},
+    {k:'pan',  v:()=>L.pan===0?'C':(L.pan>0?'R':'L')+Math.round(Math.abs(L.pan)*100)},
+    {k:'mute', v:()=>L.mute?'MUTE':'on'}];
+  const fN=S.prepFocus, fNode=fN!=null&&p.prep&&p.prep.notes&&p.prep.notes[fN];
+  const nL=p.stk?p.stk.layers.length:0;
+  return [
+    {k:'type', v:()=>p.cat||'misc'},
+    {k:'prst', v:()=>fNode&&fNode.preset?'•'+fNode.preset:p.name},
+    {k:'save', v:()=>'↕ keep'},
+    {k:'rnd',  v:()=>'↕ roll'},
+    {k:'wild', v:()=>(CFG.wild??50)+'%'},
+    {k:'stack',v:()=>!p.stk||!p.stk.on?'off':(p.stk.mode?'split':'stack')},
+    {k:'layer',v:()=>nL?('L0/'+nL):'+add'}];
+}
+const PRSFIELDS=['type','prst','save','rnd','wild'];   // legacy stops reference (nav uses prsFieldDefs)
 const AUDF=[
  SP('gain','gain','lin',{min:0,max:1,step:0.05}),
  SP('pitch','semis','lin',{min:-24,max:24,step:1,fmt:v=>v+'st'}),
@@ -2261,8 +2299,39 @@ function audAction(d,m){
   flash('audio '+spec.lbl+' = '+fmtVal(spec,pre.au[spec.key]));
   dirty=true; dirtySave=true;
 }
+function stkInit(p){if(!p.stk)p.stk={on:0,mode:0,sel:0,layers:[]};return p.stk;}
+function addLayer(p){                 // new layer seeded from the current base sound
+  const s=stkInit(p); if(s.layers.length>=7){flash('max 7 layers');return false;}
+  const d=presetData(p), L=mkLayer('L'+(s.layers.length+1),60);
+  L.osc=JSON.parse(JSON.stringify(d.osc)); L.flt=JSON.parse(JSON.stringify(d.flt));
+  L.env=JSON.parse(JSON.stringify(d.env)); L.lfo=JSON.parse(JSON.stringify(d.lfo));
+  L.vox=JSON.parse(JSON.stringify(d.vox));
+  s.layers.push(L); return true;
+}
 function prsAction(d){
-  const pi=S.editSnd, p=S.presets[pi], f=PRSFIELDS[S.curParam]||'prst';
+  const pi=S.editSnd, p=S.presets[pi];
+  const defs=prsFieldDefs(), f=(defs[S.curParam]||defs[0]).k;
+  const L=edLayer(p);
+  if(L){                             // ---- editing a stack layer ----
+    pushUndo('layer');
+    if(f==='layer')p.stk.sel=fmod(p.stk.sel+d,p.stk.layers.length+1);   // 0..N (0=base)
+    else if(f==='sound'){            // drop a library preset into this layer
+      const pool=libAll(); if(!pool.length)return;
+      let i=pool.findIndex(en=>en.name===L.name); i=i<0?(d>0?0:pool.length-1):fmod(i+d,pool.length);
+      const en=pool[i], kp=basePreset(en.name);
+      for(const M of MODULES){if(!M.id||M.prs)continue;
+        if(M.flat){if(en.data[M.id])Object.assign(kp[M.id],en.data[M.id]);}
+        else if(Array.isArray(en.data[M.id]))en.data[M.id].forEach((sl,j)=>{if(sl)Object.assign(kp[M.id][j],sl);});}
+      L.name=en.name; L.osc=kp.osc;L.flt=kp.flt;L.env=kp.env;L.lfo=kp.lfo;L.vox=kp.vox;
+      flash('layer '+p.stk.sel+' → '+en.name);}
+    else if(f==='root')L.root=clamp(L.root+d,0,127);
+    else if(f==='lo')L.lo=clamp(L.lo+d,0,L.hi);
+    else if(f==='hi')L.hi=clamp(L.hi+d,L.lo,127);
+    else if(f==='level')L.lvl=clamp(+(L.lvl+d*0.05).toFixed(2),0,1);
+    else if(f==='pan')L.pan=clamp(+(L.pan+d*0.1).toFixed(1),-1,1);
+    else if(f==='mute')L.mute=L.mute?0:1;
+    dirty=true; dirtySave=true; return;
+  }
   const kitMode=p.cat==='kit'||p.ply.some(sl=>sl.typ===4&&!sl.off&&Math.round(sl.p1)===1);
   if(f==='prst'&&kitMode&&S.prepFocus!=null){   // KIT: assign a library sound to the focused note
     pushUndo('kit');
@@ -2289,8 +2358,29 @@ function prsAction(d){
   else if(f==='wild'){
     CFG.wild=clamp((CFG.wild??50)+d*5,0,100); saveCfg();
     flash('rnd wildness '+CFG.wild+'% — low = tame/typical, high = more slots & motion');}
+  else if(f==='stack'){              // off → stack → split
+    pushUndo('stack');
+    const s=stkInit(p);
+    let st=(s.on?(s.mode?2:1):0)+d; st=fmod(st,3);
+    s.on=st>0?1:0; s.mode=st===2?1:0;
+    if(s.on&&!s.layers.length)addLayer(p);
+    if(s.mode===1)assignZones(p);    // split: lay layers across the keyboard
+    flash('stack: '+['off','stack (all together)','split (key zones — MPC/kit)'][st]);
+    dirty=true; dirtySave=true;}
+  else if(f==='layer'){              // select / add a layer to edit
+    pushUndo('layer');
+    const s=stkInit(p);
+    if(!s.on){s.on=1;if(!s.layers.length)addLayer(p);}
+    if(d>0&&s.sel>=s.layers.length){if(addLayer(p))s.sel=s.layers.length;}
+    else s.sel=fmod(s.sel+d,s.layers.length+1);
+    flash(s.sel?'editing layer '+s.sel+' — OSC/FILT/ENV/LFO/VOICE now edit this layer':'editing base sound');
+    dirty=true; dirtySave=true;}
   else randomizeChannel(pi);
   dirty=true;
+}
+function assignZones(p){              // spread layers (+base) evenly across the keyboard
+  const s=p.stk, n=s.layers.length+1, span=Math.floor(72/n);
+  s.layers.forEach((L,i)=>{L.lo=36+(i+1)*span;L.hi=(i+2)<n?36+(i+2)*span-1:96;L.root=L.lo;});
 }
 
 function curAddr(){ // resolved (mi,si,px) for the focused parameter in sound layers
@@ -2323,20 +2413,20 @@ function adjustParam(d,m){
   const [mi,si,px]=curAddr(); const M=MODULES[mi];
   if(!M.id){flash('reserved');return;}
   if(S.layer===2&&!M.flat){flash('enter → edit slots');return;}
-  const pre=S.presets[S.editSnd];
-  const slot=M.flat?null:pre[M.id][si];
+  const pre=S.presets[S.editSnd], holder=modHolder(pre,M.id);
+  const slot=M.flat?null:holder[M.id][si];
   const specs=paramsFor(mi,slot), spec=specs[px]; if(!spec)return;
   const ml=pre.modLoop;
-  if(ml.state==='edit'&&S.layer>=2){
+  if(ml.state==='edit'&&S.layer>=2&&holder===pre){   // mod-loop records channel params only
     const cell=cellOf(ml), t0=curCell(ml)*cell;
     let pt=ml.events.find(ev=>ev.m===mi&&(ev.s??-1)===si&&ev.p===px&&ev.t>=t0-1e-9&&ev.t<t0+cell-1e-9);
     if(!pt){pt={t:t0,m:mi,s:si,p:px,v:getV(pre,mi,si,spec)};ml.events.push(pt);}
     pt.v=adjust(spec,pt.v,d,m);
     applyParam(S.editSnd,mi,si,px,pt.v);
   }else{
-    const nv=adjust(spec,getV(pre,mi,si,spec),d,m);
-    applyParam(S.editSnd,mi,si,px,nv);
-    if(ml.state==='rec'&&T.playing){
+    const nv=adjust(spec,getV(holder,mi,si,spec),d,m);
+    writeParam(S.editSnd,mi,si,px,nv);
+    if(ml.state==='rec'&&T.playing&&holder===pre){
       const t=fmod(qz(fmod(posNow(),ml.len),0.25),ml.len);
       ml.clear(ev=>ev.m===mi&&(ev.s??-1)===si&&ev.p===px&&Math.abs(ev.t-t)<1e-6);
       ml.events.push({t,m:mi,s:si,p:px,v:nv});
@@ -2361,13 +2451,14 @@ function resetParam(){
       flash('prep override removed'); dirty=true; dirtySave=true; return;
     }
   }
-  const slot=M.flat?null:pre[M.id][si];
+  const holder=modHolder(pre,M.id);
+  const slot=M.flat?null:holder[M.id][si];
   const specs=paramsFor(mi,slot), spec=specs[px]; if(!spec)return;
   pushUndo('reset');
   let dv;
   if(M.flat)dv=basePreset('')[M.id][spec.key];
   else dv=RACK_MK[M.id](si)[spec.key];
-  applyParam(S.editSnd,mi,si,px,dv);
+  writeParam(S.editSnd,mi,si,px,dv);
   flash(spec.lbl+' reset'); dirty=true;
 }
 
@@ -2549,6 +2640,7 @@ function diveIn(){
   else if(S.layer===1){S.editSnd=S.curPreset;S.layer=2;S.curMod=0;S.curParam=0;}  // land on PRESET
   else if(S.layer===2){
     const M=MODULES[S.curMod];
+    if(M.prs&&edLayer(S.presets[S.editSnd])){flash('layer selected — use the sound field · shift+1 = base');return;}
     if(M.prs){
       const p=S.presets[S.editSnd], pool=libAll().filter(en=>en.cat===(p.cat||'misc'));
       S.libSel=Math.max(0,pool.findIndex(en=>en.name===p.name));
@@ -2813,6 +2905,14 @@ document.addEventListener('keydown',e=>{
   if(c==='Backspace'){e.preventDefault();
     if(e.repeat)return;
     if(e.shiftKey){clearTimeout(delHoldTimer);delHoldTimer=setTimeout(layerInit,800);}
+    if(S.layer>=2&&!e.shiftKey&&MODULES[S.curMod].prs){   // remove the selected stack layer
+      const p=S.presets[S.editSnd], L=edLayer(p);
+      if(L){pushUndo('layer del');
+        p.stk.layers.splice(p.stk.sel-1,1);
+        p.stk.sel=Math.min(p.stk.sel,p.stk.layers.length);
+        if(!p.stk.layers.length)p.stk.on=0;
+        flash('layer removed'); dirty=true; dirtySave=true; return;}
+    }
     if(S.layer===0&&e.shiftKey){          // clear everything inside the selected pattern
       pushUndo('pattern clear');
       const p=S.patterns[S.curPat];
@@ -2886,6 +2986,12 @@ document.addEventListener('keydown',e=>{
         dirtySave=true;
       }else S.curPreset=n;
     }
+    else if(S.layer>=2&&e.shiftKey){       // shift+digit = select stack layer (1=base, 2=L1…)
+      const p=S.presets[S.editSnd], s=stkInit(p), tgt=n===0?9:n-1;
+      if(tgt<=s.layers.length){if(tgt>0)s.on=1; s.sel=tgt;
+        flash(tgt?'editing layer '+tgt:'editing base sound');dirtySave=true;}
+      else flash('no layer '+tgt+' — add via the PRST layer field');
+    }
     else if(S.layer===2){S.curMod=n===0?9:n-1;S.curParam=0;S.curSlot=0;}
     else if(MODULES[S.curMod].prs){        // explorer: digit loads the nth entry on the page
       const p=S.presets[S.editSnd], pool=libAll().filter(en=>en.cat===(p.cat||'misc'));
@@ -2924,7 +3030,7 @@ document.addEventListener('keydown',e=>{
     else if(S.layer===2){
       const pre2=S.presets[S.editSnd], stops=[];
       MODULES.forEach((M2,mi2)=>{
-        if(M2.prs)PRSFIELDS.forEach((_,pi2)=>stops.push([mi2,pi2,0]));
+        if(M2.prs)prsFieldDefs().forEach((_,pi2)=>stops.push([mi2,pi2,0]));
         else if(M2.flat)M2.flat.forEach((_,pi2)=>stops.push([mi2,pi2,0]));
         else if(M2.slot){
           if(M2.id==='osc'&&isAudioCh(S.editSnd)){AUDF.forEach((_,pi2)=>stops.push([mi2,pi2,0]));return;}
@@ -3475,22 +3581,19 @@ function renderSnd(L,pos){
     L.push('   '+sp('d','tab = record from input (mic, or mstr = resample the master mix) · modes in settings'));
   }
   else if(M.prs){
-    const p=pre, pool=libAll().filter(en=>en.cat===(p.cat||'misc'));
+    const p=pre, defs=prsFieldDefs(), onLayer=!!edLayer(p);
+    S.curParam=Math.min(S.curParam,defs.length-1);
     let lr='   ', vr='   ';
-    const fN=S.prepFocus, fNode=fN!=null&&p.prep&&p.prep.notes&&p.prep.notes[fN];
-    const vals=[p.cat||'misc',
-      fNode&&fNode.preset?'•'+fNode.preset:p.name,   // kit: the focused note's own sound
-      '↕ keep','↕ roll',(CFG.wild??50)+'%'];
-    PRSFIELDS.forEach((lbl,i)=>{
-      const foc=i===S.curParam;
-      lr+=(foc?sp('a','▸'+pad(lbl,9)):sp('d',' '+pad(lbl,9)))+' ';
-      vr+=(foc?sp('i',' '+pad(vals[i],9)):' '+pad(vals[i],9))+' ';
+    defs.forEach((fd,i)=>{
+      const foc=i===S.curParam, v=fd.v();
+      lr+=(foc?sp('a','▸'+pad(fd.k,9)):sp('d',' '+pad(fd.k,9)))+' ';
+      vr+=(foc?sp('i',' '+pad(v,9)):' '+pad(v,9))+' ';
     });
     L.push(lr); L.push(vr);
+    stackStrip(L,p);
     L.push('');
-    L.push('   '+sp('d','library: ')+sp('a',pool.length+' '+(p.cat||'misc'))+
-      sp('d','  ·  ←→ field · ↑↓ act (prst scrolls · save keeps · rnd = new random · wild = how far)'));
-    L.push('   '+sp('d','shift+↑↓ in the pattern layer scrolls these too · enter → explore the library'));
+    if(onLayer)L.push('   '+sp('d','←→ field · ↑↓ set · sound = drop a library preset in · ⌫ removes this layer'));
+    else L.push('   '+sp('d','←→ field · ↑↓ act · stack = off/stack/split · layer = add & edit · enter → library'));
   }
   else if(M.flat){
     let lr='   ', vr='   ';
@@ -3530,7 +3633,21 @@ function renderSnd(L,pos){
 
 /* param display: when a note is focused, show its EFFECTIVE value in place,
    with a • marking params that carry a per-note override */
+function stackStrip(L,p){            // visual row of layers when stacking is on
+  if(!p.stk||!p.stk.on)return;
+  const sel=p.stk.sel, mode=p.stk.mode?'split':'stack';
+  let row='   '+sp('d',pad(mode,7));
+  const cell=(i,lbl,mut)=>i===sel?sp('i',' '+lbl+' '):(mut?sp('d',' '+lbl+' '):sp('a',' '+lbl+' '));
+  row+=cell(0,'L0 base',0);
+  p.stk.layers.forEach((Ly,i)=>{
+    const z=p.stk.mode?_zn(Ly.lo)+'–'+_zn(Ly.hi):Math.round(Ly.lvl*100)+'%';
+    row+=cell(i+1,'L'+(i+1)+' '+Ly.name+(Ly.mute?'×':'')+' '+z,Ly.mute);
+  });
+  L.push(row);
+}
 function prepDisp(pre,mi,si,spec){
+  const holder=modHolder(pre,MODULES[mi].id);
+  if(holder!==pre)return {v:getV(holder,mi,si,spec),dot:false};   // editing a layer
   const f=S.prepFocus;
   if(f==null||!pre.prep||!pre.prep.notes||!pre.prep.notes[f])
     return {v:getV(pre,mi,si,spec),dot:false};
@@ -3555,7 +3672,7 @@ function renderSlots(L){
   if(M.prs){renderExplore(L,pre);return;}
   prepLine(L,pre);
   if(!M.slot){L.push('   '+sp('d','no slots'));return;}
-  const rackA=pre[M.id];
+  const rackA=modHolder(pre,M.id)[M.id];
   let tabs='  ';
   rackA.forEach((sl,i)=>{
     const ab=M.abbr(sl);
