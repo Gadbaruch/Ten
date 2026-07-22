@@ -464,9 +464,9 @@ function fmtVal(spec,v){
 /* ---------------- factory presets ------------------------------------ */
 function mkP(name,cat,fn){const p=basePreset(name);p.cat=cat;fn(p);return p;}
 const PRESETS0=()=>[
- mkP('KCK','kik',p=>{Object.assign(p.osc[0],{wav:0,rat:0.5,ph:90});
-   Object.assign(p.env[0],{a:0.001,d:0.28,s:0,r:0.05});
-   p.env[2]={dst:2,idx:1,amt:95,a:0.001,d:0.06,s:0,r:0.05};
+ mkP('KCK','kik',p=>{Object.assign(p.osc[0],{wav:0,rat:0.25,ph:90});
+   Object.assign(p.env[0],{a:0.001,d:0.24,s:0,r:0.05});
+   p.env[2]={dst:2,idx:1,amt:55,a:0.001,d:0.05,s:0,r:0.05};
    p.amp[0]={typ:4,drv:0.35,mix:0.5,par:0};
    p.flt[0].frq=2400; p.vox.mode=1; p.mix.lvl=0.95;}),
  mkP('SNR','snr',p=>{p.osc[0].wav=4;
@@ -815,6 +815,7 @@ class Voice{
     const aA=Math.max(0.001,ampEnv?ampEnv.a:0.003); this.aA=aA;
     const aS=ampEnv?ampEnv.s:1, aD=ampEnv?ampEnv.d:0.1;
     this.rel=ampEnv?ampEnv.r:0.05;
+    this.oneShot=ampEnv&&aS<=0.001;        // sustain 0 = percussive: play the full decay, ignore note-off
     const aScale=ampEnv?clamp(Math.abs(ampEnv.amt)/100,0,2):1;
     const aPeak=this.amp*aScale, aCrv=Math.round(ampEnv?ampEnv.crv||0:0);
     vca.gain.setValueAtTime(0,at);
@@ -826,6 +827,7 @@ class Voice{
       vca.gain.setValueCurveAtTime(arr,at,aA);
     }else vca.gain.linearRampToValueAtTime(aPeak,at+aA);
     vca.gain.setTargetAtTime(aPeak*aS,at+aA,Math.max(0.005,aD/3));
+    if(this.oneShot)this._end(at+aA+Math.max(aD,0.03)*5+0.05);   // free the voice after the one-shot rings out
     this.fEnvs=[];
     for(const e2 of envs){
       if(e2.dst===3){ // filter slot freq
@@ -1047,6 +1049,7 @@ class Voice{
   release(at){
     if(this._sib)for(const s of this._sib)s.release(at);
     if(this.released)return; this.released=true;
+    if(this.oneShot)return;              // percussive: the decay is the release — don't clip it
     at=Math.max(at,this.startAt+0.005);
     const g=this.vca.gain, aEnd=this.startAt+this.aA;
     g.cancelScheduledValues(at);
@@ -1832,9 +1835,9 @@ function genPreset(cat,rnd,wild=0.5){
   const p=basePreset(name); p.cat=cat;
   /* dedicated drum recipes — tame = archetypal; wild extras added below */
   const DRGEN={
-    kik:()=>{Object.assign(p.osc[0],{wav:0,rat:0.5,ph:90});
-      Object.assign(p.env[0],{a:0.001,d:R(0.15,0.45),s:0,r:0.05});
-      p.env[2]={dst:2,idx:1,amt:RI(60,130),a:0.001,d:R(0.04,0.09),s:0,r:0.05};
+    kik:()=>{Object.assign(p.osc[0],{wav:0,rat:pick([0.25,0.25,0.2,0.125]),ph:90}); // ~50–65Hz fundamental
+      Object.assign(p.env[0],{a:0.001,d:R(0.12,0.3),s:0,r:0.05});
+      p.env[2]={dst:2,idx:1,amt:RI(30,70),a:0.001,d:R(0.03,0.07),s:0,r:0.05};        // punch, not boing
       if(P(0.45))p.amp[0]={typ:4,drv:+R(0.2,0.5).toFixed(2),mix:0.5,par:0};
       p.flt[0]={typ:1,frq:RI(1500,4000),q:1,gn:0}; p.mix.lvl=+R(0.85,1).toFixed(2);},
     snr:()=>{p.osc[0].wav=4;
@@ -1857,7 +1860,7 @@ function genPreset(cat,rnd,wild=0.5){
       p.flt[0]={typ:pick([1,3]),frq:RI(800,4000),q:+R(1,6).toFixed(1),gn:0};
       if(P(0.4))p.env[2]={dst:2,idx:1,amt:RI(-60,80),a:0.001,d:0.05,s:0,r:0.05};
       p.mix.lvl=+R(0.55,0.75).toFixed(2);},
-    tom:()=>{Object.assign(p.osc[0],{wav:0,rat:pick([0.75,1,1.25])});
+    tom:()=>{Object.assign(p.osc[0],{wav:0,rat:pick([0.375,0.5,0.625])});
       Object.assign(p.env[0],{a:0.001,d:R(0.15,0.35),s:0,r:0.1});
       p.env[2]={dst:2,idx:1,amt:RI(25,60),a:0.001,d:R(0.08,0.2),s:0,r:0.05};
       p.mix.lvl=+R(0.7,0.85).toFixed(2);},
