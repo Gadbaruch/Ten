@@ -811,6 +811,18 @@ class Voice{
           lfoList.push({dst:MD2LFO[rt.dst],idx:rt.idx,wav:m.wav,rate:m.rate,amt:rt.amt,ph:m.ph});
       }
     }
+    /* amp-target mods (vel/key/rnd/center) scale the envelope PEAK — never a DC
+       floor on the gain node, or the note could never fall to silence */
+    let ampBias=0;
+    for(const m of md){ if(m.off||!m.src||!m.routes)continue;
+      for(const rt of m.routes){ if(rt.dst!==1)continue;
+        const A=(rt.amt||0)/100;
+        if(m.src===3)ampBias+=clamp(vel,0,1)*A;
+        else if(m.src===4)ampBias+=clamp((midi-60)/24,-2,2)*A;
+        else if(m.src===5)ampBias+=(Math.random()*2-1)*A;
+        ampBias+=(rt.ctr||0)/100;
+      }}
+    if(ampBias)this.amp=clamp(this.amp*(1+ampBias),0,this.amp*3);
     const ampEnv=envs.find(e2=>e2.dst===1&&Math.round(e2.idx||0)<=1);
     const aA=Math.max(0.001,ampEnv?ampEnv.a:0.003); this.aA=aA;
     const aS=ampEnv?ampEnv.s:1, aD=ampEnv?ampEnv.d:0.1;
@@ -1007,15 +1019,13 @@ class Voice{
           const bq=this.fNodes[clamp(Math.round(rt.idx),1,10)-1];
           if(bq){const cs=ac.createConstantSource();cs.offset.value=clamp(k*4800,-9600,9600);
             cs.connect(bq.detune);cs.start(at);this.nodes.push(cs);}
-        }else if(rt.dst===1){                     // amp
-          const cs=ac.createConstantSource();cs.offset.value=k*this.amp*0.7;
-          cs.connect(vca.gain);cs.start(at);this.nodes.push(cs);
         }else if(rt.dst===2){                     // pitch (osc detune)
           const cs=ac.createConstantSource();cs.offset.value=k;
           for(const tg of Object.values(this.opDet).flat()){if(tg.sc<1)continue;
             const g2=ac.createGain();g2.gain.value=tg.sc*6;cs.connect(g2);g2.connect(tg.pm);}
           cs.start(at);this.nodes.push(cs);
         }
+        // amp (dst 1) handled by ampBias scaling the envelope peak — never DC on the gain
       }
     }
     /* center: a per-route DC bias on the target (independent of the source) */
@@ -1026,8 +1036,6 @@ class Voice{
         if(rt.dst===3){const bq=this.fNodes[clamp(Math.round(rt.idx),1,10)-1];
           if(bq){const cs=ac.createConstantSource();cs.offset.value=clamp(c*2400,-4800,4800);
             cs.connect(bq.detune);cs.start(at);this.nodes.push(cs);}}
-        else if(rt.dst===1){const cs=ac.createConstantSource();cs.offset.value=c*this.amp;
-          cs.connect(vca.gain);cs.start(at);this.nodes.push(cs);}
         else if(rt.dst===2){const cs=ac.createConstantSource();cs.offset.value=c;
           for(const tg of Object.values(this.opDet).flat()){if(tg.sc<1)continue;
             const g2=ac.createGain();g2.gain.value=tg.sc*12;cs.connect(g2);g2.connect(tg.pm);}
@@ -1810,12 +1818,12 @@ function genSpice(p,cat,wild,H){
   const {R,RI,P,pick}=H;
   const spare=()=>p.mod.find(m2=>!m2.src);
   const add=o=>{const m2=spare(); if(m2){Object.assign(m2,o);return m2;}};
-  if(isDrumCat(cat)){                        // velocity → level: hits breathe with your playing
-    add({src:3,rsel:0,routes:[{dst:1,idx:0,amt:RI(50,90),ctr:0,tgt:null}]});
-    if(wild>0.5&&P(0.3))add({src:3,rsel:0,routes:[{dst:3,idx:1,amt:RI(20,50),ctr:0,tgt:null}]});
+  // (velocity already scales amp inherently — mod routes add TONE motion, not level)
+  if(isDrumCat(cat)){                        // velocity opens the filter — harder hits brighter
+    if(wild>0.4&&P(0.4))add({src:3,rsel:0,routes:[{dst:3,idx:1,amt:RI(20,50),ctr:0,tgt:null}]});
   }else{
     if(P(0.5))add({src:4,rsel:0,routes:[{dst:3,idx:1,amt:RI(25,60),ctr:0,tgt:null}]});   // keytrack opens the filter
-    if(P(0.4))add({src:3,rsel:0,routes:[{dst:1,idx:0,amt:RI(30,60),ctr:0,tgt:null}]});   // velocity dynamics
+    if(P(0.4))add({src:3,rsel:0,routes:[{dst:3,idx:1,amt:RI(20,45),ctr:0,tgt:null}]});   // velocity → cutoff
   }
   if(wild>0.55&&P(0.3))                       // S&H sparkle per note
     add({src:5,rsel:0,rate:+R(2,12).toFixed(1),routes:[{dst:pick([2,3]),idx:1,amt:RI(8,30),ctr:0,tgt:null}]});
