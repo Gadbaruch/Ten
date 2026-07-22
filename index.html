@@ -95,7 +95,7 @@ const LDST=['off','pitch','filt','amp','pan','op'];
 const LFOW=['sin','tri','sqr','saw'], LFOW_W=['sine','triangle','square','sawtooth'];
 const XTYPES=['off','dly','cho','fla','pha','trm','drv','crush','verb','comp','gate','roll','tape','grs8','send','limit','duck','amix','hp','lp','bld'];
 const GPATS=[[1,1,1,1,0,0,0,0],[0,0,1,1,0,0,1,1],[1,0,1,0,1,0,1,0],[1,.7,.45,.3,.2,.12,.07,0],[1,0,0,1,0,0,1,0]];
-const PTYPES=['off','chord','arp','grv','prep','rev','rndp','vel','chc','euc'];
+const PTYPES=['off','chord','arp','grv','prep','rev','rndp','vel','chc','euc','nudge'];
 /* groove templates: f(16th-index) -> -1..1, scaled by amt% * half a 16th */
 const GROOVES=[
  {n:'sw16',f:i=>i%2===1?1:0},
@@ -139,7 +139,7 @@ const djName=i=>S.dj&&S.dj[i]&&S.dj[i].typ?XTYPES[S.dj[i].typ]:'off';
 const mkMaster=()=>Array.from({length:10},(_,i)=>
   i===0?{typ:8,rt:1,p1:0.45,p2:0.5,p3:0.7,mix:0.9}:   // send slot 1: reverb
   i===1?{typ:1,rt:1,p1:0.27,p2:0.35,p3:0.5,mix:0.8}:  // send slot 2: delay
-  i===9?{typ:15,rt:0,p1:0.85,p2:0.3,p3:0.5,mix:0}:    // slot 0: safety limiter
+  i===9?{typ:15,rt:0,p1:0.95,p2:0.3,p3:0.5,mix:0}:    // slot 0: transparent safety limiter (~-1.5dB)
   {typ:0,rt:0,p1:0.3,p2:0.3,p3:0.5,mix:0.3});
 const CHORDS=[['oct',[0,12]],['5th',[0,7]],['maj',[0,4,7]],['min',[0,3,7]],['ma7',[0,4,7,11]],['mi7',[0,3,7,10]],['su4',[0,5,7]],['9th',[0,4,7,14]]];
 const ARPDIV=['1/4','1/4.','1/4T','1/8','1/8.','1/8T','1/16','1/16.','1/16T','1/32'],
@@ -151,8 +151,8 @@ const SWM=['sync','rstrt','wait'];
 const mkOsc =i=>({wav:i?0:2,mode:0,dst:0,rat:1,amt:i?0:1,fine:0,ph:0,phm:0});
 const mkAmp =()=>({typ:0,drv:0.3,mix:1,par:0});
 const mkFlt =i=>(i===0?{typ:1,frq:9000,q:1,gn:0,par:0}:{typ:0,frq:2000,q:1,gn:0,par:0});
-const mkEnv =i=>(i===0?{dst:1,idx:1,amt:100,a:0.005,d:0.15,s:0.7,r:0.2}
-                      :{dst:0,idx:1,amt:100,a:0.003,d:0.2,s:0,r:0.2});
+const mkEnv =i=>(i===0?{dst:1,idx:1,amt:100,a:0.005,d:0.15,s:0.7,r:0.2,crv:0}
+                      :{dst:0,idx:1,amt:100,a:0.003,d:0.2,s:0,r:0.2,crv:0});
 const mkLfo =()=>({dst:0,idx:1,wav:0,rate:5,amt:30});
 const mkFx  =()=>({typ:0,p1:0.3,p2:0.3,p3:0.5,mix:0.3});
 const mkPly =()=>({typ:0,p1:2,p2:0,p3:1,p4:60});
@@ -202,8 +202,15 @@ function basePreset(name){return{
   lfo:rack(mkLfo), fx:rack(mkFx), ply:rack(mkPly),
   vox:{mode:0,glide:0,uni:1,sprd:12,wide:0.6,slop:0.008},
   mix:{lvl:0.8,pan:0},
+  stk:{on:0,mode:0,sel:0,layers:[]},   // preset stacking: off = normal single sound (no cost)
   modLoop:new Looper('b',8,'on'),
 };}
+/* a stack layer = a full sound-preset's voice modules + zone/mix meta */
+function mkLayer(name,root){const b=basePreset(name||'LYR');
+  return {name:b.name,root:root??60,lo:0,hi:127,lvl:0.8,pan:0,mute:0,
+    osc:b.osc,amp:b.amp,flt:b.flt,env:b.env,lfo:b.lfo,vox:b.vox};}
+/* the sound-module view of a layer (or the base preset) for Voice building */
+function layerPreset(base,L){return L?{...base,osc:L.osc,amp:L.amp,flt:L.flt,env:L.env,lfo:L.lfo,vox:L.vox,mix:{lvl:L.lvl,pan:L.pan}}:base;}
 const RACK_MK={osc:mkOsc,amp:mkAmp,flt:mkFlt,env:mkEnv,lfo:mkLfo,fx:mkFx,ply:mkPly};
 
 /* ---------------- param specs ---------------------------------------- */
@@ -236,7 +243,8 @@ const ENV_P=()=>[
   SP('slot#','idx','lin',{min:0,max:10,step:1,fmt:v=>v?String(v):'all'}),
   SP('amt','amt','lin',{min:-200,max:200,step:5,fmt:v=>v+'%'}),
   SP('atk','a','time'),SP('dec','d','time'),
-  SP('sus','s','lin',{min:0,max:1,step:0.05}),SP('rel','r','time')];
+  SP('sus','s','lin',{min:0,max:1,step:0.05}),SP('rel','r','time'),
+  SP('curve','crv','enum',{opts:['lin','exp','log']})];
 const LFO_P=()=>[
   SP('dest','dst','enum',{opts:LDST}),
   SP('slot#','idx','lin',{min:0,max:10,step:1,fmt:v=>v?String(v):'all'}),
@@ -251,11 +259,14 @@ const FX_P=sl=>{
          SP('mode','p3','enum',{opts:['free','sync','pong','s+pong']}),
          SP('mix','mix','lin',{min:0,max:1,step:0.05})],
     cho:[SP('rate','p1','lin',{min:0,max:1,step:0.05,fmt:v=>(0.1+v*4).toFixed(1)+'Hz'}),
-         SP('depth','p2','lin',{min:0,max:1,step:0.05}),SP('mix','mix','lin',{min:0,max:1,step:0.05})],
+         SP('depth','p2','lin',{min:0,max:1,step:0.05}),
+         SP('width','p3','lin',{min:0,max:1,step:0.05}),SP('mix','mix','lin',{min:0,max:1,step:0.05})],
     fla:[SP('rate','p1','lin',{min:0,max:1,step:0.05,fmt:v=>(0.05+v*2).toFixed(2)+'Hz'}),
-         SP('fdbk','p2','lin',{min:0,max:0.9,step:0.05}),SP('mix','mix','lin',{min:0,max:1,step:0.05})],
+         SP('fdbk','p2','lin',{min:0,max:0.9,step:0.05}),
+         SP('width','p3','lin',{min:0,max:1,step:0.05}),SP('mix','mix','lin',{min:0,max:1,step:0.05})],
     pha:[SP('rate','p1','lin',{min:0,max:1,step:0.05,fmt:v=>(0.05+v*3).toFixed(2)+'Hz'}),
-         SP('depth','p2','lin',{min:0,max:1,step:0.05}),SP('mix','mix','lin',{min:0,max:1,step:0.05})],
+         SP('depth','p2','lin',{min:0,max:1,step:0.05}),
+         SP('width','p3','lin',{min:0,max:1,step:0.05}),SP('mix','mix','lin',{min:0,max:1,step:0.05})],
     trm:[SP('rate','p1','lin',{min:0,max:1,step:0.05,fmt:v=>(0.5+v*15).toFixed(1)+'Hz'}),
          SP('depth','p2','lin',{min:0,max:1,step:0.05}),SP('mix','mix','lin',{min:0,max:1,step:0.05})],
     drv:[SP('drive','p1','lin',{min:0,max:1,step:0.05}),
@@ -323,6 +334,8 @@ const PLY_P=sl=>{
     SP('steps','p2','lin',{min:2,max:16,step:1}),
     SP('rot','p3','lin',{min:0,max:15,step:1}),
     SP('note','p4','lin',{min:24,max:96,step:1,fmt:v=>NN[Math.round(v)%12]+(Math.floor(Math.round(v)/12)-1)})]);
+  if(sl.typ===10)return base.concat([
+    SP('shift','p1','lin',{min:-60,max:60,step:1,fmt:v=>(v>0?'+':'')+v+'ms'})]);   // timing nudge
   return base;    // rev needs no params
 };
 
@@ -548,9 +561,12 @@ function scheduleRange(from,to){
       const ply2=S.presets[li].ply;
       const revS=ply2.some(sl=>sl.typ===5&&!sl.off), rndS=ply2.find(sl=>sl.typ===6&&!sl.off);
       const velS=ply2.find(sl=>sl.typ===7&&!sl.off), chcS=ply2.find(sl=>sl.typ===8&&!sl.off), eucS=ply2.find(sl=>sl.typ===9&&!sl.off);
+      const nudS=ply2.find(sl=>sl.typ===10&&!sl.off);
+      const nudB=nudS?((nudS.p1||0)/1000)/spb():0;   // ms timing shift → beats
       if((!lane.events.length&&!eucS)||lane._cap)continue;
       if(anySolo?!lane.solo:lane.mute)continue;
       if(muteHold&&muteHold.lane===li)continue;
+      if(liveMute[li]>0)continue;         // live overwrite: recorded notes yield to what you play
       const L2=lane.len, f0=s0-a.anchor, f1=s1-a.anchor;
       const h2=x=>{const v=Math.sin(x*127.1+li*311.7)*43758.5453;return v-Math.floor(v);};
       const emit=(t,e,cyc)=>{
@@ -558,7 +574,7 @@ function scheduleRange(from,to){
         let v=e.vel||0.9;
         if(velS)v=Math.max(0.05,v*(1-clamp(velS.p1??50,0,100)/100*h2(e.t*5.7+cyc*9.1)));
         let tt=t;                        // playback = exactly what you heard (post-Q is gone)
-        tt+=grooveOff(li,tt+a.anchor);
+        tt+=grooveOff(li,tt+a.anchor)+nudB;
         engine.trigger(timeAt(tt+a.anchor),li,e.midi,v,(e.dur||0.2)*spb());
       };
       if(revS||rndS){                                 // playhead transforms: expand by cycle
@@ -580,7 +596,7 @@ function scheduleRange(from,to){
           if(k*sl2<f0-1e-9)continue;
           const i2=((k%steps)+steps+rot)%steps;
           if(((i2*hits)%steps)<hits){
-            const tt=k*sl2+grooveOff(li,k*sl2+a.anchor);
+            const tt=k*sl2+grooveOff(li,k*sl2+a.anchor)+nudB;
             engine.trigger(timeAt(tt+a.anchor),li,root,0.85,sl2*0.5*spb());
           }
         }
@@ -675,8 +691,8 @@ function prepEffective(p,midi){
 }
 
 class Voice{
-  constructor(E,at,pi,midi,vel){
-    const p=prepEffective(S.presets[pi],midi), ac=AC;
+  constructor(E,at,pi,midi,vel,preOverride){
+    const p=preOverride||prepEffective(S.presets[pi],midi), ac=AC;
     this.pi=pi; this.midi=midi; this.p=p;
     this.released=false; this.killed=false; this.nodes=[]; this.startAt=at;
     const ops=p.osc, rootW=ops[0].wav, isS=rootW===9, isN=rootW===4||isS;
@@ -700,7 +716,7 @@ class Voice{
       this.fNodes[i]=bq; fBase[i]=clamp(f.frq,20,16000);
     }
     const vca=ac.createGain(); this.vca=vca;
-    this.amp=clamp(vel,0,1)*0.85;
+    this.amp=clamp(vel,0,1)*0.85*(p._lvl!=null?p._lvl:1);   // layer level folds into voice gain
 
     /* envelopes: routable rack. amp env = first dst:amp; default safety env otherwise */
     const envs=p.env.filter(e2=>e2.dst>0&&!e2.off&&Math.abs(e2.amt)>0.5);
@@ -709,9 +725,16 @@ class Voice{
     const aS=ampEnv?ampEnv.s:1, aD=ampEnv?ampEnv.d:0.1;
     this.rel=ampEnv?ampEnv.r:0.05;
     const aScale=ampEnv?clamp(Math.abs(ampEnv.amt)/100,0,2):1;
+    const aPeak=this.amp*aScale, aCrv=Math.round(ampEnv?ampEnv.crv||0:0);
     vca.gain.setValueAtTime(0,at);
-    vca.gain.linearRampToValueAtTime(this.amp*aScale,at+aA);
-    vca.gain.setTargetAtTime(this.amp*aScale*aS,at+aA,Math.max(0.005,aD/3));
+    if(aCrv&&aA>0.004){                    // exp = punchy (convex) · log = soft (concave)
+      const N=24, arr=new Float32Array(N);
+      for(let i=0;i<N;i++){const x=i/(N-1);
+        arr[i]=(aCrv===1?x*x:Math.sqrt(x))*aPeak;}
+      arr[N-1]=aPeak;
+      vca.gain.setValueCurveAtTime(arr,at,aA);
+    }else vca.gain.linearRampToValueAtTime(aPeak,at+aA);
+    vca.gain.setTargetAtTime(aPeak*aS,at+aA,Math.max(0.005,aD/3));
     this.fEnvs=[];
     for(const e2 of envs){
       if(e2.dst===3){ // filter slot freq
@@ -734,6 +757,14 @@ class Voice{
     const uniN=clamp(Math.round(p.vox.uni||1),1,7);
     const merge=ac.createGain(); merge.gain.value=1/Math.sqrt(uniN);
     const rootMods=[]; let firstSrc=null;
+    /* portamento ratio shared by EVERY operator (not just op 0) */
+    const glideOn=p.vox.mode===1&&p.vox.glide>0.001&&E.lastPitch[pi]&&!pitchEnv;
+    const glR=glideOn?E.lastPitch[pi]/baseTarget:1;
+    const setF=(param,val)=>{                       // glide-or-set any frequency param
+      if(glideOn){param.setValueAtTime(Math.max(val*glR,0.01),at);
+        param.exponentialRampToValueAtTime(Math.max(val,0.01),at+p.vox.glide);}
+      else param.setValueAtTime(val,at);
+    };
     this.opGains={};  // slot -> [gain nodes across uni] for op env/lfo
     this.opPitch={}; this.opDet={};   // slot -> pitch params / mod-targets (per uni)
     for(let u=0;u<uniN;u++){
@@ -742,10 +773,8 @@ class Voice{
       let src,pitchParam;
       if(isN){src=ac.createBufferSource();src.buffer=isS?(E.opSamples.get(pi+':0')||E.noiseBuf):E.noiseBuf;src.loop=true;pitchParam=src.playbackRate;}
       else{src=ac.createOscillator();E.setWave(src,rootW,ops[0].phm===1?Math.random()*360:ops[0].ph);pitchParam=src.frequency;}
-      if(p.vox.mode===1&&p.vox.glide>0.001&&E.lastPitch[pi]&&!pitchEnv){
-        pitchParam.setValueAtTime(E.lastPitch[pi]*(target/baseTarget),at);
-        pitchParam.exponentialRampToValueAtTime(Math.max(target,0.01),at+p.vox.glide);
-      }else pitchParam.setValueAtTime(target,at);
+      if(isN)pitchParam.setValueAtTime(target,at);   // noise/sample rate param: no glide
+      else setF(pitchParam,target);
       rootMods.push(isN?src.playbackRate:src.detune);
       (this.opPitch[0]=this.opPitch[0]||[]).push({pm:pitchParam,base:target});
       (this.opDet[0]=this.opDet[0]||[]).push({pm:isN?src.playbackRate:src.detune,sc:isN?0.5:200});
@@ -767,7 +796,7 @@ class Voice{
           (this.opPitch[i]=this.opPitch[i]||[]).push({pm:s2.playbackRate,base:ratio});
           (this.opDet[i]=this.opDet[i]||[]).push({pm:s2.playbackRate,sc:0.5});
         }
-        else{s2=ac.createOscillator();E.setWave(s2,wv,op.phm===1?Math.random()*360:op.ph);s2.frequency.setValueAtTime(fi,at);}
+        else{s2=ac.createOscillator();E.setWave(s2,wv,op.phm===1?Math.random()*360:op.ph);setF(s2.frequency,fi);}
         built.push({i,s:s2,osc:wv!==4&&wv!==9,f:fi,op});
         if(wv!==4&&wv!==9){
           (this.opPitch[i]=this.opPitch[i]||[]).push({pm:s2.frequency,base:fi});
@@ -887,6 +916,7 @@ class Voice{
       try{vca.disconnect();}catch(_){}};
   }
   release(at){
+    if(this._sib)for(const s of this._sib)s.release(at);
     if(this.released)return; this.released=true;
     at=Math.max(at,this.startAt+0.005);
     const g=this.vca.gain, aEnd=this.startAt+this.aA;
@@ -897,6 +927,7 @@ class Voice{
     this._end(at+this.rel*4+0.1);
   }
   kill(at,fast){
+    if(this._sib)for(const s of this._sib)s.kill(at,fast);
     if(this.killed)return; this.killed=true; this.released=true;
     const g=this.vca.gain;
     g.cancelScheduledValues(at);
@@ -990,24 +1021,40 @@ class Engine{
         cur.connect(dl); dl.connect(fb); fb.connect(dl); dl.connect(wet);
       }
     }else if(t==='cho'||t==='fla'){
-      const dl=keep(ac.createDelay(0.1));
-      dl.delayTime.value=t==='cho'?0.018:0.004;
-      const lo=keep(ac.createOscillator()), lg=keep(ac.createGain());
-      lo.frequency.value=t==='cho'?0.1+fx.p1*4:0.05+fx.p1*2;
-      lg.gain.value=(t==='cho'?0.006:0.002)*(t==='cho'?fx.p2:1);
-      lo.connect(lg); lg.connect(dl.delayTime); lo.start();
-      cur.connect(dl);
-      if(t==='fla'){const fb=keep(ac.createGain()); fb.gain.value=fx.p2; dl.connect(fb); fb.connect(dl);}
-      dl.connect(wet);
+      const rate=t==='cho'?0.1+fx.p1*4:0.05+fx.p1*2;
+      const base=t==='cho'?0.018:0.004, depth=(t==='cho'?0.006:0.002)*(t==='cho'?fx.p2:1);
+      const width=clamp(fx.p3??0,0,1);
+      const mrg=keep(ac.createChannelMerger(2));
+      const build=(phase,chan)=>{                    // one voice; two in anti-phase = stereo
+        const dl=keep(ac.createDelay(0.1)); dl.delayTime.value=base;
+        const lo=keep(ac.createOscillator()), lg=keep(ac.createGain());
+        lo.frequency.value=rate; lg.gain.value=depth;
+        lo.connect(lg); lg.connect(dl.delayTime);
+        try{lo.start(ac.currentTime+phase/rate);}catch(_){lo.start();}
+        cur.connect(dl);
+        if(t==='fla'){const fb=keep(ac.createGain()); fb.gain.value=fx.p2; dl.connect(fb); fb.connect(dl);}
+        dl.connect(mrg,0,chan);
+      };
+      if(width>0.02){build(0,0); build(0.5,1);}       // L / R, half-cycle apart
+      else{build(0,0); build(0,1);}
+      mrg.connect(wet);
     }else if(t==='pha'){
+      const width=clamp(fx.p3??0,0,1);
+      const mrg=keep(ac.createChannelMerger(2));
+      const branch=(lfoPhase,chan)=>{
       let ph=cur;
       const lo=keep(ac.createOscillator()), lg=keep(ac.createGain());
-      lo.frequency.value=0.05+fx.p1*3; lg.gain.value=fx.p2*2000; lo.connect(lg); lo.start();
+      lo.frequency.value=0.05+fx.p1*3; lg.gain.value=fx.p2*2000; lo.connect(lg);
+      try{lo.start(ac.currentTime+lfoPhase/(0.05+fx.p1*3));}catch(_){lo.start();}
       for(let i2=0;i2<4;i2++){
         const ap=keep(ac.createBiquadFilter()); ap.type='allpass'; ap.frequency.value=400+i2*400;
         lg.connect(ap.detune); ph.connect(ap); ph=ap;
       }
-      ph.connect(wet);
+      ph.connect(mrg,0,chan);
+      };
+      if(width>0.02){branch(0,0); branch(0.5,1);}     // stereo: LFOs half-cycle apart
+      else{branch(0,0); branch(0,1);}
+      mrg.connect(wet);
     }else if(t==='trm'){
       const g=keep(ac.createGain()); g.gain.value=1-fx.p2*0.9;
       const lo=keep(ac.createOscillator()), lg=keep(ac.createGain());
@@ -1036,8 +1083,8 @@ class Engine{
       mg.connect(wet);
     }else if(t==='limit'){
       const cp=keep(ac.createDynamicsCompressor());
-      cp.threshold.value=-30+(fx.p1??0.75)*30; cp.ratio.value=20; cp.knee.value=0;
-      cp.attack.value=0.002; cp.release.value=0.05+(fx.p2??0.3)*0.3;
+      cp.threshold.value=-30+(fx.p1??0.75)*30; cp.ratio.value=20; cp.knee.value=2;
+      cp.attack.value=0.003; cp.release.value=0.02+(fx.p2??0.3)*0.12;  // fast release = recovers between hits, no pump
       const mk=keep(ac.createGain()); mk.gain.value=1+(fx.mix??0)*1.5;
       dry.gain.value=0; wet.gain.value=1;
       cur.connect(cp); cp.connect(mk); mk.connect(wet);
@@ -1336,13 +1383,28 @@ class Engine{
     for(const t2 of touched)setV(p,t2.mi,t2.si,t2.spec,t2.base);   // stored preset stays clean
   }
   noteOn(at,pi,midi,vel){
-    const p=S.presets[pi];
+    const p=S.presets[pi], stk=p.stk;
     this.applyBusPreps(pi,midi);
     if(p.vox.mode===1)for(const v of [...this.act[pi]])v.kill(Math.max(AC.currentTime+0.001,at-0.004),true);
     else if(this.act[pi].length>=14)this.act[pi][0].kill(at);
-    const v=new Voice(this,at,pi,midi,vel);
-    this.act[pi].push(v);
-    return v;
+    /* stacking: build one voice per active layer (base = layer 0) */
+    let entries=[null];
+    if(stk&&stk.on&&stk.layers.length){
+      if(stk.mode===1){                                  // split/kit: the pressed note picks its zone
+        const hit=stk.layers.find(L=>!L.mute&&midi>=L.lo&&midi<=L.hi);
+        entries=[hit||null];
+      }else entries=[null,...stk.layers.filter(L=>!L.mute)];  // stack: all together
+    }
+    const voices=entries.map(L=>{
+      let pre;
+      if(L){pre=layerPreset(p,L); pre._lvl=L.lvl;}
+      else pre=prepEffective(p,midi);
+      const v=new Voice(this,at,pi,midi,vel,pre);
+      this.act[pi].push(v);
+      return v;
+    });
+    const head=voices[0]; if(voices.length>1)head._sib=voices.slice(1);
+    return head;
   }
   /* PLAY rack: chord fanout + arp pool. Sequencer & live both come through here. */
   trigger(at,pi,midi,vel,durSec){
@@ -1517,6 +1579,7 @@ function applyParam(pi,mi,si,px,v){
     else if(v===6||v===7){sl2.p1=50;}
     else if(v===8){sl2.p1=100;}
     else if(v===9){sl2.p1=4;sl2.p2=8;sl2.p3=0;sl2.p4=60;}
+    else if(v===10){sl2.p1=0;}
   }
   if(M.id==='amp'||M.id==='fx')engine.rebuildRack(pi);
   else if(M.id==='mix'||M.id==='lfo')engine.refresh(pi);
@@ -2311,9 +2374,10 @@ function resetParam(){
 /* ---------------- edit / erase / capture helpers --------------------- */
 const NOTEKEYS={KeyA:0,KeyW:1,KeyS:2,KeyE:3,KeyD:4,KeyF:5,KeyT:6,KeyG:7,KeyY:8,
                 KeyH:9,KeyU:10,KeyJ:11,KeyK:12,KeyO:13,KeyL:14,KeyP:15,Semicolon:16,Quote:17};
-const liveV={}, pend={}, rPend={};
+const liveV={}, pend={}, rPend={}, nlive={};
 const retroBuf=Array.from({length:10},()=>[]);
 let eraseHold=null, muteHold=null, stepCur=0, taps=[];
+const liveMute=Array.from({length:10},()=>0);   // >0 = a live key overrides recorded notes on this lane
 const isAudioCh=pi=>S.presets[pi].cat==='audio';
 function audPlace(pi,rec,startBeat,name='mic'){
   const lane=S.patterns[S.editPat].lanes[pi], sr=AC.sampleRate;
@@ -2649,7 +2713,7 @@ document.addEventListener('keydown',e=>{
     }
     if(e.shiftKey)S.layer=0;
     else if(h.state==='edit')h.state='on';
-    else if(S.layer===0)S.layer=-1;            // up from arrange = session settings
+    else if(S.layer===0){S.layer=-1;S.sessSel=null;}  // up from arrange = session (nothing preselected)
     else surface();
     dirty=true; return;}
   if(c==='KeyP'&&!e.repeat&&(S.layer===0||e.shiftKey)){e.preventDefault();
@@ -2956,6 +3020,11 @@ document.addEventListener('keydown',e=>{
     let at=AC.currentTime+0.005;
     const lane=(S.layer===1?pat:S.patterns[S.editPat]).lanes[pi];
     const recording=S.layer===1&&pat.state==='rec'&&T.playing;
+    /* overwrite mode, playing live but NOT recording: your live notes still
+       silence the recorded lane underneath — same feel as recording, minus the write */
+    if(S.layer===1&&!recording&&(CFG.overdub||0)===0&&T.playing){
+      liveMute[pi]++; engine.chokeSeq(pi); nlive[c]=pi;
+    }
     const patEmpty=pat.lanes.every(l=>!l.events.length);
     {
       if(recording&&patEmpty&&!lane._cap){
@@ -3048,6 +3117,7 @@ document.addEventListener('keyup',e=>{
     relAt=Math.max(relAt,gridTime(p.ts+dur));   // hold the monitored note to that same length
     delete pend[c]; dirty=true; dirtySave=true;
   }
+  if(nlive[c]!=null){liveMute[nlive[c]]=Math.max(0,liveMute[nlive[c]]-1);delete nlive[c];}
   if(liveV[c]){liveV[c]&&liveV[c].release&&liveV[c].release(relAt);delete liveV[c];}
 });
 window.addEventListener('blur',()=>{
@@ -3058,7 +3128,7 @@ window.addEventListener('blur',()=>{
 
 /* ---------------- persistence + migration ---------------------------- */
 const LS='ten-v1';
-function serialize(){return JSON.stringify({v:11,bpm:T.bpm,metro:S.metro,hum:S.hum,grv:S.grv,octs:S.octs,master:S.master,dj:S.dj,arrOn:S.arrOn!==false,
+function serialize(){return JSON.stringify({v:12,bpm:T.bpm,metro:S.metro,hum:S.hum,grv:S.grv,octs:S.octs,master:S.master,dj:S.dj,arrOn:S.arrOn!==false,
   arr:S.arr,
   patterns:S.patterns.map(p=>({state:p.state==='edit'?'on':p.state,sw:p.sw||0,lanes:p.lanes})),
   presets:S.presets.map(p=>({...p,modLoop:p.modLoop.toJSON()}))});}
@@ -3086,7 +3156,7 @@ function convertV3Preset(sp,i){ // v3-and-earlier preset data -> v4 racks
 }
 function load(json){
   try{
-    const o=JSON.parse(json); if(!o||o.v<1||o.v>11)return false;
+    const o=JSON.parse(json); if(!o||o.v<1||o.v>12)return false;
     T.bpm=o.bpm||120; S.metro=!!o.metro; S.hum=o.hum??0;
     S.grv=o.grv||{typ:0,amt:0};
     if(Array.isArray(o.master))S.master=o.master.map((m,i)=>({typ:0,rt:0,p1:0.3,p2:0.3,p3:0.5,mix:0.3,...m}));
@@ -3121,6 +3191,7 @@ function load(json){
         p.cat=sp.cat||(['kik','snr','hh','perc','bass','keys','chord','lead','pad','plk'][i]||'misc');
         p.tr=sp.tr||0; p.prep=sp.prep||null;
         p.au=Object.assign({gain:0.9,semis:0,rate:1,st:0,en:1,fit:0,src:0},sp.au||{});
+        if(sp.stk&&sp.stk.layers)p.stk={on:sp.stk.on||0,mode:sp.stk.mode||0,sel:sp.stk.sel||0,layers:sp.stk.layers};
         p.modLoop=Looper.from(sp.modLoop||{unit:'b',count:8}); p.modLoop.auto=false;
         if(o.v===4){  // module order changed in v5: ply 6->9, vox 8->7, mix 9->8
           const map={6:9,8:7,9:8};
