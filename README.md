@@ -151,7 +151,7 @@ top to bottom; each section is banner-commented in this order:
    decides meaning. All state lives in `S` (session) / `CFG` (defaults) /
    `T` (transport).
 8. **Persistence** — `serialize()`/`load()` with versioned migrations
-   (currently v13). Undo = snapshot stack of `serialize()`.
+   (currently v14). Undo = snapshot stack of `serialize()`.
 9. **Render** — full-screen `<pre>`, rebuilt at ~30fps from state. No DOM
    beyond one element.
 
