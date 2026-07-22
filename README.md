@@ -89,10 +89,10 @@ browsing auditions safely: `enter` keeps, `esc` restores your sound.
 between `off` (one sound, zero overhead), `stack` (all layers play
 together — layered patches: saw + sub + bell), and `split` (each layer
 owns a key zone — MPC pads, drum kits, keyboard splits). Add/select
-layers with the `layer` field or `shift+digit` (`shift+1` = base). With a
+layers with the `layer` field or `shift+digit` (`shift+1` = L1). With a
 layer selected, PRST becomes its inspector (drop a library preset in, set
-root/zone/level/pan/mute) and OSC/FILT/ENV/LFO/VOICE edit *that layer*;
-AMP, FX, PLAY and MIX stay shared at the channel. `⌫` on PRST removes the
+root/zone/level/pan/mute) and OSC/FILT/MOD/VOICE edit *that layer*;
+FX, PLAY and MIX stay shared at the channel. `⌫` on PRST removes the
 selected layer.
 
 **The `/` button makes music.** One key, three intensities, everywhere:
