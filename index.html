@@ -93,7 +93,7 @@ const FTYPE_W=[null,'lowpass','highpass','bandpass','notch','peaking','lowshelf'
 const EDST=['off','amp','pitch','filt','op'];
 const LDST=['off','pitch','filt','amp','pan','op'];
 const LFOW=['sin','tri','sqr','saw'], LFOW_W=['sine','triangle','square','sawtooth'];
-const XTYPES=['off','dly','cho','fla','pha','trm','drv','crush','verb','comp','gate','roll','tape','grs8','send','limit','duck','amix','hp','lp','bld'];
+const XTYPES=['off','dly','cho','fla','pha','trm','drv','crush','verb','comp','gate','roll','tape','grs8','send','limit','duck','amix','hp','lp','bld','dist'];
 const GPATS=[[1,1,1,1,0,0,0,0],[0,0,1,1,0,0,1,1],[1,0,1,0,1,0,1,0],[1,.7,.45,.3,.2,.12,.07,0],[1,0,0,1,0,0,1,0]];
 const PTYPES=['off','chord','arp','grv','prep','rev','rndp','vel','chc','euc','nudge'];
 /* groove templates: f(16th-index) -> -1..1, scaled by amt% * half a 16th */
@@ -308,6 +308,9 @@ const FX_P=sl=>{
     bld:[SP('hp','p1','lin',{min:0,max:1,step:0.02,fmt:v=>Math.round(40*Math.pow(200,v))+'Hz'}),
          SP('wet','p2','lin',{min:0,max:1,step:0.05}),
          SP('time','p3','enum',{opts:['1/16','1/8','1/8.','1/4']})],
+    dist:[SP('type','p3','enum',{opts:DTYPES.slice(1)}),   // the old AMP distortions, now an fx
+         SP('drive','p1','lin',{min:0,max:1,step:0.05}),
+         SP('mix','mix','lin',{min:0,max:1,step:0.05})],
   };
   return base.concat(tail[t]||[]);
 };
@@ -1071,6 +1074,10 @@ class Engine{
       if(t==='drv'){const tone=keep(ac.createBiquadFilter());tone.type='lowpass';
         tone.frequency.value=800+fx.p2*10000; sh.connect(tone); tone.connect(wet);}
       else sh.connect(wet);
+    }else if(t==='dist'){                    // all AMP distortion curves, as an fx (dry/wet mix)
+      const sh=keep(ac.createWaveShaper());
+      sh.curve=distCurve(clamp(Math.round(fx.p3||0),0,8)+1,fx.p1); sh.oversample='2x';  // p3 0..8 → DTYPES 1..9
+      cur.connect(sh); sh.connect(wet);
     }else if(t==='verb'){
       const cv=keep(ac.createConvolver()); cv.buffer=this.getIR(0.3+fx.p1*4);
       const tone=keep(ac.createBiquadFilter()); tone.type='lowpass';
@@ -1594,6 +1601,7 @@ function applyParam(pi,mi,si,px,v){
     else if(v===9){sl2.p1=4;sl2.p2=8;sl2.p3=0;sl2.p4=60;}
     else if(v===10){sl2.p1=0;}
   }
+  if(M.id==='fx'&&spec.key==='typ'&&XTYPES[v]==='dist'){const s2=S.presets[pi].fx[si];s2.p1=0.35;s2.p3=0;s2.mix=0.6;}
   if(M.id==='amp'||M.id==='fx')engine.rebuildRack(pi);
   else if(M.id==='mix'||M.id==='lfo')engine.refresh(pi);
   else if(M.id==='flt'&&spec.key==='frq')engine.cutLive(pi,si);
@@ -2263,25 +2271,26 @@ const _zn=v=>NN[((Math.round(v)%12)+12)%12]+(Math.floor(Math.round(v)/12)-1);
 /* PRST fields adapt: base preset fields, or the selected stack layer's inspector */
 function prsFieldDefs(){
   const p=S.presets[S.editSnd], L=edLayer(p);
-  if(L)return [
-    {k:'layer',v:()=>'L'+p.stk.sel+'/'+p.stk.layers.length},
+  const stkF={k:'stack',v:()=>!p.stk||!p.stk.on?'off':(p.stk.mode?'split':'stack')};
+  const layF={k:'layer',v:()=>{const n=p.stk?p.stk.layers.length:0;
+    return !n?'+add':'L'+((p.stk.sel||0)+1)+'/'+(n+1);}};   // L1..L(N+1), L1 = the channel sound
+  if(L)return [    // layer inspector — 'stack' & 'layer' stay in the same (last-two) spots as base
     {k:'sound',v:()=>L.name},
     {k:'root', v:()=>_zn(L.root)},
     {k:'lo',   v:()=>_zn(L.lo)},
     {k:'hi',   v:()=>_zn(L.hi)},
     {k:'level',v:()=>Math.round(L.lvl*100)+'%'},
     {k:'pan',  v:()=>L.pan===0?'C':(L.pan>0?'R':'L')+Math.round(Math.abs(L.pan)*100)},
-    {k:'mute', v:()=>L.mute?'MUTE':'on'}];
+    {k:'mute', v:()=>L.mute?'MUTE':'on'},
+    stkF, layF];
   const fN=S.prepFocus, fNode=fN!=null&&p.prep&&p.prep.notes&&p.prep.notes[fN];
-  const nL=p.stk?p.stk.layers.length:0;
   return [
     {k:'type', v:()=>p.cat||'misc'},
     {k:'prst', v:()=>fNode&&fNode.preset?'•'+fNode.preset:p.name},
     {k:'save', v:()=>'↕ keep'},
     {k:'rnd',  v:()=>'↕ roll'},
     {k:'wild', v:()=>(CFG.wild??50)+'%'},
-    {k:'stack',v:()=>!p.stk||!p.stk.on?'off':(p.stk.mode?'split':'stack')},
-    {k:'layer',v:()=>nL?('L0/'+nL):'+add'}];
+    stkF, layF];
 }
 const PRSFIELDS=['type','prst','save','rnd','wild'];   // legacy stops reference (nav uses prsFieldDefs)
 const AUDF=[
@@ -2309,12 +2318,21 @@ function addLayer(p){                 // new layer seeded from the current base 
   s.layers.push(L); return true;
 }
 function prsAction(d){
+  const f0=(prsFieldDefs()[S.curParam]||{}).k;
+  _prsAction(d);
+  const ni=prsFieldDefs().findIndex(x=>x.k===f0);   // keep the cursor on the same field after a view switch
+  if(ni>=0)S.curParam=ni;
+}
+function _prsAction(d){
   const pi=S.editSnd, p=S.presets[pi];
   const defs=prsFieldDefs(), f=(defs[S.curParam]||defs[0]).k;
   const L=edLayer(p);
   if(L){                             // ---- editing a stack layer ----
     pushUndo('layer');
-    if(f==='layer')p.stk.sel=fmod(p.stk.sel+d,p.stk.layers.length+1);   // 0..N (0=base)
+    if(f==='layer'){                 // 0..N (0=base); up past the last adds a new layer
+      if(d>0&&p.stk.sel>=p.stk.layers.length){if(addLayer(p)){p.stk.sel=p.stk.layers.length;if(p.stk.mode===1)assignZones(p);}}
+      else p.stk.sel=fmod(p.stk.sel+d,p.stk.layers.length+1);
+    }
     else if(f==='sound'){            // drop a library preset into this layer
       const pool=libAll(); if(!pool.length)return;
       let i=pool.findIndex(en=>en.name===L.name); i=i<0?(d>0?0:pool.length-1):fmod(i+d,pool.length);
@@ -2371,9 +2389,9 @@ function prsAction(d){
     pushUndo('layer');
     const s=stkInit(p);
     if(!s.on){s.on=1;if(!s.layers.length)addLayer(p);}
-    if(d>0&&s.sel>=s.layers.length){if(addLayer(p))s.sel=s.layers.length;}
+    if(d>0&&s.sel>=s.layers.length){if(addLayer(p)){s.sel=s.layers.length;if(s.mode===1)assignZones(p);}}
     else s.sel=fmod(s.sel+d,s.layers.length+1);
-    flash(s.sel?'editing layer '+s.sel+' — OSC/FILT/ENV/LFO/VOICE now edit this layer':'editing base sound');
+    flash('editing L'+(s.sel+1)+' — OSC/FILT/ENV/LFO/VOICE now edit this layer');
     dirty=true; dirtySave=true;}
   else randomizeChannel(pi);
   dirty=true;
@@ -2640,7 +2658,7 @@ function diveIn(){
   else if(S.layer===1){S.editSnd=S.curPreset;S.layer=2;S.curMod=0;S.curParam=0;}  // land on PRESET
   else if(S.layer===2){
     const M=MODULES[S.curMod];
-    if(M.prs&&edLayer(S.presets[S.editSnd])){flash('layer selected — use the sound field · shift+1 = base');return;}
+    if(M.prs&&edLayer(S.presets[S.editSnd])){flash('layer selected — use the sound field · shift+1 = L1');return;}
     if(M.prs){
       const p=S.presets[S.editSnd], pool=libAll().filter(en=>en.cat===(p.cat||'misc'));
       S.libSel=Math.max(0,pool.findIndex(en=>en.name===p.name));
@@ -2989,7 +3007,7 @@ document.addEventListener('keydown',e=>{
     else if(S.layer>=2&&e.shiftKey){       // shift+digit = select stack layer (1=base, 2=L1…)
       const p=S.presets[S.editSnd], s=stkInit(p), tgt=n===0?9:n-1;
       if(tgt<=s.layers.length){if(tgt>0)s.on=1; s.sel=tgt;
-        flash(tgt?'editing layer '+tgt:'editing base sound');dirtySave=true;}
+        flash('editing L'+(tgt+1));dirtySave=true;}
       else flash('no layer '+tgt+' — add via the PRST layer field');
     }
     else if(S.layer===2){S.curMod=n===0?9:n-1;S.curParam=0;S.curSlot=0;}
@@ -3561,6 +3579,7 @@ function renderSnd(L,pos){
   L.push(tabs);
   L.push('');
   prepLine(L,pre);
+  layerBanner(L,pre);
   const M=MODULES[S.curMod];
   if(M.id==='osc'&&isAudioCh(S.editSnd)){
     const buf=engine.audBuf[S.editSnd];
@@ -3638,12 +3657,24 @@ function stackStrip(L,p){            // visual row of layers when stacking is on
   const sel=p.stk.sel, mode=p.stk.mode?'split':'stack';
   let row='   '+sp('d',pad(mode,7));
   const cell=(i,lbl,mut)=>i===sel?sp('i',' '+lbl+' '):(mut?sp('d',' '+lbl+' '):sp('a',' '+lbl+' '));
-  row+=cell(0,'L0 base',0);
+  row+=cell(0,'L1 '+p.name,0);      // L1 IS the channel sound (no separate "base")
   p.stk.layers.forEach((Ly,i)=>{
     const z=p.stk.mode?_zn(Ly.lo)+'–'+_zn(Ly.hi):Math.round(Ly.lvl*100)+'%';
-    row+=cell(i+1,'L'+(i+1)+' '+Ly.name+(Ly.mute?'×':'')+' '+z,Ly.mute);
+    row+=cell(i+1,'L'+(i+2)+' '+Ly.name+(Ly.mute?'×':'')+' '+z,Ly.mute);
   });
   L.push(row);
+}
+/* which sound a layer edit is landing on, shown in the sound view */
+function layerBanner(L,pre){
+  if(!pre.stk||!pre.stk.on)return;
+  const sel=pre.stk.sel, M=MODULES[S.curMod];
+  const name=sel===0?pre.name:(pre.stk.layers[sel-1]||{}).name;
+  const num='L'+(sel+1);
+  if(M.prs)return;
+  if(LAYERMODS.has(M.id))
+    L.push('  '+sp('r','◆ editing '+num)+sp('a',' '+name)+sp('d',' — this layer only (⇧digit or PRST layer field to switch)'));
+  else
+    L.push('  '+sp('d','◆ '+M.name+' is channel-shared — applies to all layers'));
 }
 function prepDisp(pre,mi,si,spec){
   const holder=modHolder(pre,MODULES[mi].id);
@@ -3671,6 +3702,7 @@ function renderSlots(L){
   const pre=S.presets[S.editSnd], M=MODULES[S.curMod];
   if(M.prs){renderExplore(L,pre);return;}
   prepLine(L,pre);
+  layerBanner(L,pre);
   if(!M.slot){L.push('   '+sp('d','no slots'));return;}
   const rackA=modHolder(pre,M.id)[M.id];
   let tabs='  ';
