@@ -60,9 +60,14 @@ momentary/latch REC modes are in settings. An empty pattern's first hit
 free dest routing, phase + rtrg/free trig, incl. an `smp` sampler wave —
 drop an audio file on an op), filters incl. EQ bands, a **MOD** rack, an
 **FX** chain, and **PLAY**. The MOD rack unifies modulation — each slot
-picks a *source* (env / lfo / velocity / key-track / random-S&H) and a
-*target* (amp / pitch / filter / pan / op level; slot# targets one, 0 =
-all). The amp envelope is just a MOD slot (env → amp). The FX chain runs
+picks a *source* (env / lfo / velocity / key-track / random-S&H) and fans
+it out to one or more *routes*, each with its own *target* (amp / pitch /
+filter / pan / op level; slot# targets one, 0 = all), *amount* and
+*range*. So a single LFO can sweep the filter, wobble pan and bend pitch
+at once, each at its own depth. Add routes with the `route` field or the
+**learn** gesture: `cmd+C` on a MOD slot arms it, then `cmd+V` on any
+filter/osc/mix param maps a route to that target. The amp envelope is
+just a MOD slot (env → amp). The FX chain runs
 delay/chorus/flanger/phaser/trem/drive/crush/**dist** (the nine former
 AMP distortion curves)/verb/comp/gate/roll/tape/grs8/send/limit/duck/hp/
 lp/bld. PLAY: chord (with strum ±, or `mstr` role = its held chord
