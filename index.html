@@ -317,7 +317,7 @@ const MOD_P=sl=>{                    // unified: source picks which extra fields
   if(s===5)return base.concat([SP('rate','rate','time',{min:0.05,max:40,fmt:fHz})]);  // rnd = S&H rate
   return base;                       // vel / key: target + amount + range
 };
-function tgtLabel(t){return (MODULES[t.m]?MODULES[t.m].name.toLowerCase():'?')+(t.s>=0?(t.s+1):'')+'·'+t.p;}
+function tgtLabel(t){return (t.mod||'?')+((t.s??-1)>=0?(t.s+1):'')+'·'+(t.key||'?');}
 const FX_P=sl=>{
   const t=XTYPES[sl.typ], base=[SP('type','typ','enum',{opts:XTYPES})];
   const tail={
@@ -805,6 +805,7 @@ class Voice{
     for(const m of md){
       if(m.off||!m.routes)continue;
       for(const rt of m.routes){
+        if(rt.tgt)continue;                      // learned addresses handled separately below
         if(m.src===1&&MD2ENV[rt.dst]&&Math.abs(rt.amt)>0.5)
           envs.push({dst:MD2ENV[rt.dst],idx:rt.idx,amt:rt.amt,a:m.a,d:m.d,s:m.s,r:m.r,crv:m.crv});
         else if(m.src===2&&MD2LFO[rt.dst]&&rt.amt>0.5)
@@ -1042,10 +1043,35 @@ class Voice{
           cs.start(at);this.nodes.push(cs);}
       }
     }
-    if(fHead||this.fPar.length){
+    /* learned targets (cmd+C/V): route the source onto any resolvable live param */
+    for(const m of md){
+      if(m.off||!m.src||!m.routes)continue;
+      for(const rt of m.routes){
+        if(!rt.tgt)continue;
+        const rp=this._modParam(rt.tgt); if(!rp||!rp.params.length)continue;
+        const A=(rt.amt||0)/100, dep=rp.cents?A*4800:A*(rp.range||1), cbias=(rt.ctr||0)/100;
+        const cAmt=rp.cents?cbias*2400:cbias*(rp.range||1);
+        for(const param of rp.params){
+          if(m.src===1){                             // env → param
+            const base=rp.cents?0:param.value, peak=base+dep, a=Math.max(0.001,m.a);
+            param.cancelScheduledValues(at); param.setValueAtTime(base,at);
+            param.linearRampToValueAtTime(peak,at+a);
+            param.setTargetAtTime(base+(peak-base)*m.s,at+a,Math.max(0.005,m.d/3));
+          }else if(m.src===2){                       // lfo → param
+            const lo=ac.createOscillator(), lg=ac.createGain();
+            lo.type=LFOW_W[m.wav]; lo.frequency.value=m.rate; lg.gain.value=dep*0.5;
+            lo.connect(lg); lg.connect(param); lo.start(at); this.nodes.push(lo);
+          }else{                                     // vel / key / rnd → param (constant)
+            const vv=m.src===3?clamp(vel,0,1):m.src===4?clamp((midi-60)/24,-2,2):(Math.random()*2-1);
+            const cs=ac.createConstantSource(); cs.offset.value=vv*dep; cs.connect(param); cs.start(at); this.nodes.push(cs);
+          }
+          if(cAmt){const cs=ac.createConstantSource(); cs.offset.value=cAmt; cs.connect(param); cs.start(at); this.nodes.push(cs);}
+        }
+      }
+    }
+    if(fHead||this.fPar.length){                      // par filters sum WITH the serial chain, no dry bleed
       const fsum=ac.createGain();
       if(fHead){merge.connect(fHead); fTail.connect(fsum);}
-      else merge.connect(fsum);                       // par-only: dry passes + branches add
       for(const bq of this.fPar){merge.connect(bq); bq.connect(fsum);}
       fsum.connect(vca);
     }else merge.connect(vca);
@@ -1065,6 +1091,20 @@ class Voice{
     g.setTargetAtTime(0,at,Math.max(0.005,this.rel/3));
     for(const fe of this.fEnvs)fe.node.setTargetAtTime(fe.base,at,Math.max(0.005,fe.r/3));
     this._end(at+this.rel*4+0.1);
+  }
+  _modParam(tgt){              // learned target → the live AudioParam(s) to modulate
+    if(!tgt)return null;
+    if(tgt.mod==='flt'){
+      const bq=this.fNodes[tgt.s]; if(!bq)return null;
+      if(tgt.key==='q') return {params:[bq.Q],    range:14};
+      if(tgt.key==='gn')return {params:[bq.gain], range:18};
+      if(tgt.key==='frq')return {params:[bq.detune], cents:true};
+    }
+    if(tgt.mod==='osc'){
+      if(tgt.key==='pitch'){const pd=this.opDet[tgt.s]; if(pd&&pd.length)return {params:pd.filter(x=>x.sc>=1).map(x=>x.pm), cents:true};}
+      if(tgt.key==='amt'||tgt.key==='level'){const gl=this.opGains[tgt.s]; if(gl&&gl.length)return {params:gl.map(g=>g.gain), range:1};}
+    }
+    return null;
   }
   kill(at,fast,withSib){       // per-layer mono steal kills one voice; withSib only for whole-note stops
     if(withSib&&this._sib)for(const s of this._sib)s.kill(at,fast,true);
@@ -2257,16 +2297,27 @@ function genSong(crazy){
 let CLIP=null;
 /* MOD learn: cmd+C on a mod slot arms it, cmd+V on a target param adds a route there */
 let modLearn=null;
-function learnTarget(){          // infer an MDST target from where the cursor is
+function focusedKey(){           // the param key under the cursor in the sound layer
+  const M=MODULES[S.curMod]; if(!M||!M.id||M.prs)return null;
+  const pre=S.presets[S.editSnd];
+  const specs=paramsFor(S.curMod,M.flat?null:modHolder(pre,M.id)[M.id][S.curSlot]);
+  return (specs[S.layer===3?S.slotParam:S.curParam]||{}).key;
+}
+function learnTarget(){          // resolve the focused param → a mod target (dst enum or a learned address)
   if(S.layer<2)return null;
-  const M=MODULES[S.curMod]; if(!M||!M.id)return null;
-  const si=(S.layer===3?S.curSlot:S.curSlot)+1;
-  if(M.id==='flt')return {dst:3,idx:si,label:'filt'+si};                 // filter cutoff
-  if(M.id==='osc'){const key=paramsFor(S.curMod,S.presets[S.editSnd].osc[S.curSlot])[S.slotParam];
-    if(key&&key.key==='amt')return {dst:5,idx:si,label:'op'+si};         // op level
-    return {dst:2,idx:0,label:'pitch'};}                                 // pitch
-  if(M.id==='mix'){const k=M.flat[S.curParam];
-    return k&&k.key==='pan'?{dst:4,idx:0,label:'pan'}:{dst:1,idx:0,label:'amp'};}
+  const M=MODULES[S.curMod]; if(!M||!M.id||M.prs)return null;
+  const si=S.curSlot, k=focusedKey();
+  if(M.id==='flt'){
+    if(k==='q') return {tgt:{mod:'flt',s:si,key:'q'}, label:'flt'+(si+1)+' rez'};
+    if(k==='gn')return {tgt:{mod:'flt',s:si,key:'gn'},label:'flt'+(si+1)+' gain'};
+    return {dst:3,idx:si+1,label:'flt'+(si+1)+' cut'};                    // freq → MDST cutoff
+  }
+  if(M.id==='osc'){
+    if(k==='amt')return {dst:5,idx:si+1,label:'op'+(si+1)+' lvl'};
+    if(k==='rat'||k==='fine')return {tgt:{mod:'osc',s:si,key:'pitch'},label:'op'+(si+1)+' pitch'};
+    return {dst:2,idx:0,label:'pitch'};
+  }
+  if(M.id==='mix')return k==='pan'?{dst:4,idx:0,label:'pan'}:{dst:1,idx:0,label:'amp'};
   return null;
 }
 function modLearnOp(op){
@@ -2276,17 +2327,18 @@ function modLearnOp(op){
     const m=holder.mod[S.curSlot];
     if(!m.src){flash('set a source first, then cmd+C to arm this mod');return true;}
     modLearn={pi:S.editSnd,holder,si:S.curSlot};
-    flash('◎ mod armed — go to a param (filter/pitch/op/amp/pan) and cmd+V to route it');
+    flash('◎ mod armed — go to a filter/osc/mix param and cmd+V to route it there');
     return true;
   }
   if(op==='paste'&&modLearn){
     const tg=learnTarget();
-    if(!tg){flash('point at a filter / osc / mix param, then cmd+V');modLearn=null;return true;}
+    if(!tg){flash('that param can’t be modulated — point at a filter/osc/mix value, then cmd+V');modLearn=null;return true;}
     pushUndo('mod route');
     const m=modLearn.holder.mod[modLearn.si];
+    const route=tg.tgt?{dst:0,idx:1,amt:60,ctr:0,tgt:tg.tgt}:{dst:tg.dst,idx:tg.idx,amt:60,ctr:0,tgt:null};
     m.routes=m.routes||[mkRoute()];
-    if(m.routes.length===1&&!m.routes[0].dst)m.routes[0]={dst:tg.dst,idx:tg.idx,amt:60,ctr:0,tgt:null};
-    else if(m.routes.length<8)m.routes.push({dst:tg.dst,idx:tg.idx,amt:60,ctr:0,tgt:null});
+    if(m.routes.length===1&&!m.routes[0].dst&&!m.routes[0].tgt)m.routes[0]=route;
+    else if(m.routes.length<8)m.routes.push(route);
     else {flash('max 8 routes');modLearn=null;return true;}
     m.rsel=m.routes.length-1;
     flash('◎ '+MSRC[m.src]+' → '+tg.label+' mapped ('+m.routes.length+' route'+(m.routes.length>1?'s':'')+')');
@@ -2716,7 +2768,7 @@ function audPlace(pi,rec,startBeat,name='mic'){
   dirty=true; dirtySave=true;
 }
 function retroCapture(){
-  const pi=S.curPreset, lane=S.patterns[S.editPat].lanes[pi];
+  const pi=S.layer>=2?S.editSnd:S.curPreset, lane=S.patterns[S.editPat].lanes[pi];
   const nowB=gridNow();
   const recent=retroBuf[pi].filter(n=>n.t>nowB-64).sort((a,b)=>a.t-b.t);
   if(!recent.length){flash('retro: play something first, then tab');return;}
@@ -2726,6 +2778,7 @@ function retroCapture(){
     seg.unshift(recent[i]);
   }
   pushUndo('retro');
+  retroBuf[pi]=[];                                    // consume: a second tab can't re-grab the same take
   if(lane.events.length&&!lane.auto){
     /* the lane already loops: what you HEARD was old loop + new playing — merge, don't replace */
     const L=lane.len;
@@ -2741,10 +2794,18 @@ function retroCapture(){
   let last=0; for(const n of seg)last=Math.max(last,n.t-t0+Math.min(n.dur||0.25,0.5));
   const bars=Math.max(0.25,last/4);
   let p2=1; while(p2*1.25<bars)p2*=2; p2=Math.min(p2,8);
-  const L=p2*4, off=fmod(t0-editAnchor(),L);
+  const L=p2*4;
   lane.unit='B'; lane.count=p2; lane.auto=false; delete lane._cap;
-  lane.events=seg.map(n=>({t:fmod(n.t-t0+off,L),midi:n.midi,vel:0.9,dur:n.dur||0.25,born:performance.now()}));
-  flash('◉ retro: '+p2+' bar'+(p2>1?'s':'')+' · '+seg.length+' notes');
+  const patEmpty=S.patterns[S.editPat].lanes.every(l=>l===lane||!l.events.length);
+  lane.events=seg.map(n=>({t:fmod(n.t-t0,L),midi:n.midi,vel:0.9,dur:n.dur||0.25,born:performance.now()}));
+  if(patEmpty){                                       // first note becomes the ONE — loop plays from beat 0
+    T.startTime=AC.currentTime+0.06; T.startBeat=0; T.schedBeat=0; T.playing=true;
+    acts=[{pat:S.editPat,start:-1e9,anchor:0}];
+  }else{                                              // other lanes already run: wrap from your entry phase
+    const off=fmod(t0-editAnchor(),L);
+    if(off>1e-9)for(const e of lane.events)e.t=fmod(e.t+off,L);
+  }
+  flash('◉ retro: '+p2+' bar'+(p2>1?'s':'')+' · '+seg.length+' notes'+(patEmpty?' · first note = the 1':''));
   dirty=true; dirtySave=true;
 }
 let helpOpen=false, dirty=true, dirtySave=false, flashMsg='', flashUntil=0;
@@ -2815,31 +2876,44 @@ function startCapture(lane,t0){
   lane.unit='B'; lane.count=64;
   flash('listening… loop length will be suggested');
 }
-function finalizeCapture(lane){
+function finalizeCapture(lane,forceLen){
   const cap=lane._cap; if(!cap)return;
   delete lane._cap;
   if(!lane.events.length){lane.unit=cap.prevUnit;lane.count=cap.prevCount;return;}
-  let last=0;   // cap long releases so a held last note doesn't stretch the estimate
-  for(const e of lane.events)last=Math.max(last,e.t+Math.min(e.dur||0.25,0.5));
-  const bars=Math.max(0.25,last/4);
-  let p2=1;     // allow 25% overhang to truncate instead of doubling the loop
-  while(p2*1.25<bars)p2*=2; p2=Math.min(p2,16);
+  let p2;
+  if(forceLen){p2=Math.max(1,Math.round(forceLen/4));}
+  else{
+    let last=0;   // cap long releases so a held last note doesn't stretch the estimate
+    for(const e of lane.events)last=Math.max(last,e.t+Math.min(e.dur||0.25,0.5));
+    const bars=Math.max(0.25,last/4);
+    p2=1;         // allow 25% overhang to truncate instead of doubling the loop
+    while(p2*1.25<bars)p2*=2; p2=Math.min(p2,16);
+  }
   const L=p2*4;
-  // keep each note's phase against the running grid: the take wraps
-  // around from where you started playing, one loop-length later
+  // keep each note's phase against the running grid; drop anything past the loop
   const off=fmod((cap.t0||0)-(cap.anchor||0),L);
-  if(off>1e-9)for(const e of lane.events)e.t=fmod(e.t+off,L);
+  lane.events=lane.events.filter(e=>e.t<L+0.5).map(e=>({...e,t:fmod(e.t+off,L)}));
   lane.unit='B'; lane.count=p2; lane.auto=false;
   flash('loop set: '+p2+' bar'+(p2>1?'s':'')+' from your entry');
   dirtySave=true;
 }
+/* predictive listen: finalize the moment a squared-bar loop passes with nothing
+   played into the next downbeat — no more waiting a full bar of silence */
 function finalizeCaptures(force){
-  for(const pat of S.patterns)for(const lane of pat.lanes){
-    if(!lane._cap)continue;
+  for(const pat of S.patterns)for(let li=0;li<pat.lanes.length;li++){
+    const lane=pat.lanes[li]; if(!lane._cap)continue;
     if(force){finalizeCapture(lane);continue;}
-    const held=Object.values(pend).some(p=>p.lane===pat.lanes.indexOf(lane));
-    const idleFrom=lane._cap.t0+lane._cap.lastEnd;
-    if(!held&&lane.events.length&&posNow()-idleFrom>4)finalizeCapture(lane);
+    if(!lane.events.length)continue;
+    const held=Object.values(pend).some(p=>p.lane===li);
+    const cap=lane._cap, elapsed=posNow()-cap.t0;
+    let done=false;
+    for(const L of [4,8,16,32]){                 // 1,2,4,8 bars
+      if(elapsed<L+0.9)break;                     // playhead not yet past this loop's downbeat
+      if(!held&&!lane.events.some(e=>e.t>=L-0.15)){finalizeCapture(lane,L);done=true;break;}
+    }
+    if(done)continue;
+    let lastEnd=0; for(const e of lane.events)lastEnd=Math.max(lastEnd,e.t+Math.min(e.dur||0.25,0.5));
+    if(!held&&elapsed-lastEnd>Math.max(1,Math.min(3,lastEnd*0.4)))finalizeCapture(lane);  // adaptive fallback
   }
 }
 function diveIn(){
@@ -2996,17 +3070,18 @@ document.addEventListener('keydown',e=>{
   if(c==='Space'){e.preventDefault(); if(!e.repeat)T.playing?stop():play(); return;}
   if(c==='Tab'||c==='Backquote'){e.preventDefault();
     if(!e.repeat){
-      const h=curHolder(), mode=CFG.looper||0;
-      if(S.layer===1&&isAudioCh(S.curPreset)){          // audio channel: tab = mic record
+      const mode=CFG.looper||0, noteCh=S.layer>=2?S.editSnd:S.curPreset;
+      if(S.layer>=1&&isAudioCh(noteCh)){                 // audio channel: tab = mic record
         if(engine.audRec)engine.audRecStop();
-        else{pushUndo('audio take');engine.audRecStart(S.curPreset);}
+        else{pushUndo('audio take');engine.audRecStart(noteCh);}
       }
-      else if(mode===0&&S.layer===1)retroCapture();      // retro: grab what you just played
-      else if(mode===2){                                 // latch
-        const was=h.state; h.state=h.state==='rec'?'on':'rec';
-        if(was==='rec')finalizeCaptures(true); else pushUndo('take');
+      else if(mode===0&&S.layer>=1)retroCapture();       // retro: grab what you just played (notes)
+      else if(S.layer>=1){                               // pattern rec — notes, in pattern AND sound layers
+        const pat=S.patterns[S.editPat];
+        if(mode===2){const was=pat.state;pat.state=pat.state==='rec'?'on':'rec';   // latch
+          if(was==='rec')finalizeCaptures(true); else pushUndo('take');}
+        else if(pat.state!=='rec'){pushUndo('take');pat.state='rec';}              // momentary arm
       }
-      else if(h.state!=='rec'){pushUndo('take');h.state='rec';}   // momentary arm
       dirty=true;dirtySave=true;}
     return;}
   if(c==='Enter'){e.preventDefault(); if(!e.repeat)diveIn(); return;}
@@ -3133,6 +3208,7 @@ document.addEventListener('keydown',e=>{
       pushUndo('pattern clear');
       const p=S.patterns[S.curPat];
       p.lanes.forEach(l=>{l.clear();l.auto=true;delete l._cap;});
+      retroBuf.forEach(b=>b.length=0);
       flash('pattern '+S.curPat+' cleared (all lanes)');
       dirty=true; dirtySave=true; return;}
     if(inEdit()){
@@ -3149,7 +3225,7 @@ document.addEventListener('keydown',e=>{
       flash('erasing while held'); return;}
     if(S.layer===0){pushUndo('timeline clear');lp.clear();flash('timeline cleared');}
     else if(S.layer===1){
-      if(e.shiftKey){pushUndo('lane clear');lp.clear();lp.auto=true;flash('lane '+S.curPreset+' cleared');}
+      if(e.shiftKey){pushUndo('lane clear');lp.clear();lp.auto=true;retroBuf[S.curPreset]=[];flash('lane '+S.curPreset+' cleared');}
       else if(T.playing){muteHold={lane:S.curPreset};engine.chokeSeq(S.curPreset);
         flash('holding '+S.presets[S.curPreset].name+' silent — ⇧⌫ clears');return;}
       else{flash('⇧⌫ clears the lane');return;}
@@ -3272,12 +3348,12 @@ document.addEventListener('keydown',e=>{
       S.libSel=Math.max(0,(S.libSel||0)+d*10);
     }
     else{
-      const pre=S.presets[S.editSnd], M=MODULES[S.curMod];
-      const specs=paramsFor(S.curMod,pre[M.id][S.curSlot]);
+      const pre=S.presets[S.editSnd], M=MODULES[S.curMod], hold=modHolder(pre,M.id);
+      const specs=paramsFor(S.curMod,hold[M.id][S.curSlot]);   // same holder the render uses
       const np=S.slotParam+d;
       if(e.shiftKey||np<0||np>=specs.length){  // ran off the end: next slot, same strip
         S.curSlot=fmod(S.curSlot+d,10);
-        const s2=paramsFor(S.curMod,pre[M.id][S.curSlot]);
+        const s2=paramsFor(S.curMod,hold[M.id][S.curSlot]);
         S.slotParam=(e.shiftKey||d>0)?0:s2.length-1;
       }else S.slotParam=np;
     }
@@ -3344,7 +3420,7 @@ document.addEventListener('keydown',e=>{
     }
     let at=AC.currentTime+0.005;
     const lane=(S.layer===1?pat:S.patterns[S.editPat]).lanes[pi];
-    const recording=S.layer===1&&pat.state==='rec'&&T.playing;
+    const recording=S.layer>=1&&pat.state==='rec'&&T.playing;   // record into the channel's lane from sound layer too
     /* overwrite mode, playing live but NOT recording: your live notes still
        silence the recorded lane underneath — same feel as recording, minus the write */
     if(S.layer===1&&!recording&&(CFG.overdub||0)===0&&T.playing){
@@ -3371,7 +3447,7 @@ document.addEventListener('keydown',e=>{
            strength — playback applies the same groove to the stored note */
         const heard=tr+grooveOff(pi,tr);
         at=Math.max(at,gridTime(heard));
-        if(S.layer===1)rPend[c]={pi,ts:tr,midi};   // retro memory hears everything
+        if(S.layer>=1)rPend[c]={pi,ts:tr,midi};   // retro memory hears everything
         if(recording){
           if(lane.auto&&!lane._cap&&!lane.events.length){
             if(CFG.listen)startCapture(lane,tr);
@@ -3426,8 +3502,8 @@ document.addEventListener('keyup',e=>{
   }
   if((c==='Tab'||c==='Backquote')&&(CFG.looper||0)!==2){   // momentary release = rec off
     if(engine.audRec)engine.audRecStop();
-    const h=curHolder();
-    if(h.state==='rec'){h.state='on';finalizeCaptures(true);dirty=true;dirtySave=true;}
+    const pat=S.layer>=1?S.patterns[S.editPat]:null;      // pattern rec (notes), pattern + sound layers
+    if(pat&&pat.state==='rec'){pat.state='on';finalizeCaptures(true);dirty=true;dirtySave=true;}
   }
   let relAt=AC.currentTime+0.005;
   if(pend[c]){
@@ -3785,6 +3861,20 @@ function renderSnd(L,pos){
   MODULES.forEach((m,i)=>{if(!m.id)return;tabs+=(i===S.curMod?sp('i',` ${m.k}${m.name} `):sp('d',` ${m.k}${m.name} `));});
   L.push(tabs);
   L.push('');
+  // this channel's pattern lane — visible (and recordable) from the sound layer
+  {const pat=S.patterns[S.editPat], lane=pat.lanes[S.editSnd];
+   const rec=pat.state==='rec'&&T.playing, cap=lane._cap;
+   if(!isAudioCh(S.editSnd)){
+     const cell=cellSize(lane.len,48), anc=editAnchor();
+     const ph=T.playing?Math.floor(fmod(pos-anc,lane.len)/cell):-1;
+     const cnt=lane.auto?'new':(lane.count%1?lane.count.toFixed(1):lane.count)+({s:'st',b:'bt',B:'br'})[lane.unit];
+     L.push('  '+sp(rec?'r':'d','pattern '+S.editPat+(rec?' ●REC':cap?' ○listen':'')+' ')+sp('d',pad(cnt,5))+'  '+
+       (cap?sp('r','listening — play; loop sets itself'):
+        gridRow(lane,cell,ph,(a,b)=>{const hits=lane.events.filter(e=>e.t>=a-1e-9&&e.t<b-1e-9);
+          return !hits.length?'·':hits.length>1?'≡':PCH[hits[0].midi%12];},-1))+
+       sp('d','  · tab '+(rec?'stops':'records')));
+     L.push('');
+   }}
   prepLine(L,pre);
   layerBanner(L,pre);
   const M=MODULES[S.curMod];
