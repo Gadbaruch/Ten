@@ -551,6 +551,26 @@ function demoContent(){
 
 /* ---------------- transport + activations ---------------------------- */
 const AC=new (window.AudioContext||window.webkitAudioContext)({latencyHint:'interactive'});
+/* real audio-thread load: a worklet measures its render duty-cycle (busy vs idle
+   between quanta) on the audio thread and reports % — this is the DSP meter */
+let dspLoad=0, dspOn=false;
+(function meter(){
+  if(!AC.audioWorklet)return;
+  // when the audio thread keeps up, process() lands ~one quantum apart; under load
+  // the callback timing gets jittery — mean |gap - quantum| / quantum is the load signal
+  const code=`class M extends AudioWorkletProcessor{constructor(){super();this.l=-1;this.q=128/sampleRate*1000;this.j=0;this.n=0;this.a=0;}
+    process(){const t=(typeof performance!=='undefined'&&performance.now)?performance.now():currentTime*1000;
+      if(this.l>=0){const d=t-this.l; if(d>0&&d<200){this.j+=Math.abs(d-this.q);this.n++;this.a+=d;}
+        if(this.a>=300&&this.n){this.port.postMessage(Math.min(100,this.j/this.n/this.q*100)); this.j=0;this.n=0;this.a=0;}}
+      this.l=t; return true;}}
+    registerProcessor('ten-load',M);`;
+  const url=URL.createObjectURL(new Blob([code],{type:'application/javascript'}));
+  AC.audioWorklet.addModule(url).then(()=>{
+    const n=new AudioWorkletNode(AC,'ten-load',{numberOfOutputs:1,outputChannelCount:[1]});
+    n.port.onmessage=e=>{dspLoad=dspLoad*0.6+e.data*0.4; dspOn=true;};
+    const z=AC.createGain(); z.gain.value=0; n.connect(z); z.connect(AC.destination);  // pulled every quantum, silent
+  }).catch(()=>{});
+})();
 const T={bpm:120,playing:false,startTime:0,startBeat:0,schedBeat:0};
 const spb=()=>60/T.bpm;
 const beatsAt=t=>T.startBeat+(t-T.startTime)/spb();
@@ -840,7 +860,7 @@ class Voice{
       vca.gain.setValueCurveAtTime(arr,at,aA);
     }else vca.gain.linearRampToValueAtTime(aPeak,at+aA);
     vca.gain.setTargetAtTime(aPeak*aS,at+aA,Math.max(0.005,aD/3));
-    if(this.oneShot)this._end(at+aA+Math.max(aD,0.03)*5+0.05);   // free the voice after the one-shot rings out
+    this._oneShotEnd=at+aA+Math.max(aD,0.03)*5+0.05;   // scheduled after the nodes exist (see end of ctor)
     this.fEnvs=[];
     for(const e2 of envs){
       if(e2.dst===3){ // filter slot freq
@@ -1079,6 +1099,7 @@ class Voice{
     this.src=firstSrc;
     firstSrc.onended=()=>{const a=E.act[pi],i=a.indexOf(this); if(i>=0)a.splice(i,1);
       try{vca.disconnect();}catch(_){}};
+    if(this.oneShot)this._end(this._oneShotEnd);   // percussive: self-free once the nodes exist
   }
   release(at){
     if(this._sib)for(const s of this._sib)s.release(at);
@@ -3705,12 +3726,13 @@ function render(){
   const bar=Math.floor(pos/4)+1, beat=Math.floor(fmod(pos,4))+1;
   const tState=(T.playing?sp('ai',' ▶ ')+sp('a',` ${(''+bar).padStart(3,'0')}.${beat}`):sp('d',' ■ stopped'))+sp('d','(space)');
   const nv=engine.act.reduce((a,x)=>a+x.length,0);
-  const cpuS=String(Math.min(99,Math.round(cpuLoad))).padStart(2,' ')+'%';
+  const dsp=dspOn?dspLoad:cpuLoad;             // audio-thread DSP % (falls back to main-thread if no worklet)
+  const cpuS=String(Math.min(99,Math.round(dsp))).padStart(2,' ')+'%';
   const nvS=String(Math.min(99,nv)).padStart(2,' ')+'v';
   L.push(sp('a','TEN')+sp('d',' ▐ keyboard groovebox')+' '.repeat(16)+tState+
     sp('d',' │ ')+sp('a',String(T.bpm).padStart(3,' ')+'bpm')+sp('d','(,/.)')+
     sp('d',' │ metro ')+(S.metro?sp('a','on '):sp('d','off'))+sp('d','(m)')+
-    sp('d',' │ cpu ')+sp(cpuLoad>60?'r':'a',cpuS)+sp('d','·'+nvS));
+    sp('d',' │ '+(dspOn?'dsp ':'cpu ')+' ')+sp(dsp>70?'r':dsp>45?'a':'d',cpuS)+sp('d','·'+nvS));
   L.push(sp('d','─'.repeat(W)));
   {const path=[                                 // the whole ladder, always visible — you are the lit rung
     {t:'SESSION',on:S.layer===-1},
