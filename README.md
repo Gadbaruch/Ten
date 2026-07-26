@@ -59,8 +59,7 @@ momentary/latch REC modes are in settings. An empty pattern's first hit
 **Sound = racks.** Every module is 10 slots: operators (add/fm/ring with
 free dest routing, phase + rtrg/free trig, incl. an `smp` sampler wave —
 drop an audio file on an op), filters incl. EQ bands, a **MOD** rack, an
-**FX** chain, and **PLAY**. Filters have a **track** amount so the cutoff
-follows the note — without it a patch turns muddy low and thin up high. The MOD rack unifies modulation — each slot
+**FX** chain, and **PLAY**. The MOD rack unifies modulation — each slot
 picks a *source* (env / lfo / velocity / key-track / random-S&H) and fans
 it out to one or more *routes*, each with its own *target* (amp / pitch /
 filter / pan / op level; slot# targets one, 0 = all), *amount* and
