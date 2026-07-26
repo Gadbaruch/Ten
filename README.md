@@ -73,7 +73,11 @@ AMP distortion curves)/verb/comp/gate/roll/tape/grs8/send/limit/duck/hp/
 lp/bld. PLAY: chord (with strum ±, or `mstr` role = its held chord
 live-retunes all other channels), arp (slot order matters: arp→chord
 chords every step), groove, prep, plus rev / random-playhead /
-velocity / chance / euclid / nudge / humanize (±ms jitter) / flam (grace hits).
+velocity / chance / euclid / nudge / humanize (±ms jitter) / flam (grace
+hits). Every PLAY slot carries a **scope** (channel-wide, or just this pad
+on a kit) and a **stage**: `post` = a playback effect, `pre` = the recorder
+captures its output, so recording a held chord or an arp writes the notes
+you actually hear.
 
 **Audio channels.** Set a channel's type to `audio` and it becomes a
 looping audio track: drag a file onto it, or record straight in from the

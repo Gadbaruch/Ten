@@ -196,7 +196,7 @@ function foldMod(p){
   return p;
 }
 const mkFx  =()=>({typ:0,p1:0.3,p2:0.3,p3:0.5,mix:0.3});
-const mkPly =()=>({typ:0,p1:2,p2:0,p3:1,p4:60});
+const mkPly =()=>({typ:0,p1:2,p2:0,p3:1,p4:60,p5:0,p6:0});   // p5 scope(chan/pad) · p6 stage(post/pre)
 const rack=(mk)=>Array.from({length:10},(_,i)=>mk(i));
 
 const DRUMCATS=['kik','snr','hh','cymb','perc','tom','wood','zap'];
@@ -384,41 +384,38 @@ const FX_P=sl=>{
   };
   return base.concat(tail[t]||[]);
 };
+const PLY_SCOPE=[SP('scope','p5','enum',{opts:['chan','pad']}),
+                 SP('stage','p6','enum',{opts:['post','pre']})];   // pre = the recorder captures the output
 const PLY_P=sl=>{
   const base=[SP('type','typ','enum',{opts:PTYPES})];
-  if(sl.typ===1)return base.concat([
+  const T=(...a)=>base.concat(a,PLY_SCOPE);
+  if(sl.typ===1)return T(
     SP('chord','p1','enum',{opts:CHORDS.map(c=>c[0])}),
     SP('strum','p2','lin',{min:-0.06,max:0.06,step:0.005,fmt:v=>Math.round(v*1000)+'ms'}),
-    SP('role','p3','enum',{opts:['play','mstr']})]);
-  if(sl.typ===2)return base.concat([
+    SP('role','p3','enum',{opts:['play','mstr']}));
+  if(sl.typ===2)return T(
     SP('div','p1','enum',{opts:ARPDIV}),
     SP('mode','p2','enum',{opts:ARPMODE}),
-    SP('oct','p3','lin',{min:1,max:3,step:1})]);
-  if(sl.typ===3)return base.concat([
+    SP('oct','p3','lin',{min:1,max:3,step:1}));
+  if(sl.typ===3)return T(
     SP('src','p1','enum',{opts:['glob'].concat(GROOVES.map(g=>g.n))}),
-    SP('amt','p2','lin',{min:0,max:150,step:5,fmt:v=>v+'%'})]);
-  if(sl.typ===4)return base.concat([
-    SP('mode','p1','enum',{opts:['prep','kit']})]);
-  if(sl.typ===6)return base.concat([
-    SP('amt','p1','lin',{min:0,max:100,step:5,fmt:v=>v+'%'})]);
-  if(sl.typ===7)return base.concat([
-    SP('amt','p1','lin',{min:0,max:100,step:5,fmt:v=>v+'%'})]);
-  if(sl.typ===8)return base.concat([
-    SP('chance','p1','lin',{min:0,max:100,step:5,fmt:v=>v+'%'})]);
-  if(sl.typ===9)return base.concat([
+    SP('amt','p2','lin',{min:0,max:150,step:5,fmt:v=>v+'%'}));
+  if(sl.typ===4)return T(SP('mode','p1','enum',{opts:['prep','kit']}));
+  if(sl.typ===6)return T(SP('amt','p1','lin',{min:0,max:100,step:5,fmt:v=>v+'%'}));
+  if(sl.typ===7)return T(SP('amt','p1','lin',{min:0,max:100,step:5,fmt:v=>v+'%'}));
+  if(sl.typ===8)return T(SP('chance','p1','lin',{min:0,max:100,step:5,fmt:v=>v+'%'}));
+  if(sl.typ===9)return T(
     SP('hits','p1','lin',{min:1,max:16,step:1}),
     SP('steps','p2','lin',{min:2,max:16,step:1}),
     SP('rot','p3','lin',{min:0,max:15,step:1}),
-    SP('note','p4','lin',{min:24,max:96,step:1,fmt:v=>NN[Math.round(v)%12]+(Math.floor(Math.round(v)/12)-1)})]);
-  if(sl.typ===10)return base.concat([
-    SP('shift','p1','lin',{min:-60,max:60,step:1,fmt:v=>(v>0?'+':'')+v+'ms'})]);   // timing nudge
-  if(sl.typ===11)return base.concat([
-    SP('range','p1','lin',{min:0,max:80,step:1,fmt:v=>'\u00b1'+v+'ms'})]);        // humanize timing
-  if(sl.typ===12)return base.concat([
+    SP('note','p4','lin',{min:24,max:96,step:1,fmt:v=>NN[Math.round(v)%12]+(Math.floor(Math.round(v)/12)-1)}));
+  if(sl.typ===10)return T(SP('shift','p1','lin',{min:-60,max:60,step:1,fmt:v=>(v>0?'+':'')+v+'ms'}));
+  if(sl.typ===11)return T(SP('range','p1','lin',{min:0,max:80,step:1,fmt:v=>'\u00b1'+v+'ms'}));
+  if(sl.typ===12)return T(
     SP('gap','p1','lin',{min:5,max:120,step:1,fmt:v=>v+'ms'}),
     SP('hits','p2','lin',{min:1,max:3,step:1,fmt:v=>'+'+Math.round(v)}),
-    SP('level','p3','lin',{min:0,max:1,step:0.05,fmt:v=>Math.round(v*100)+'%'})]); // flam / ruff
-  return base;    // rev needs no params
+    SP('level','p3','lin',{min:0,max:1,step:0.05,fmt:v=>Math.round(v*100)+'%'}));
+  return sl.typ?T():base;    // off = just the type field
 };
 
 const MODULES=[
@@ -665,12 +662,21 @@ function scheduleRange(from,to){
         engine.audCycle(li,lane,a,s0,s1,fresh);
         continue;
       }
-      const ply2=S.presets[li].ply;
-      const revS=ply2.some(sl=>sl.typ===5&&!sl.off), rndS=ply2.find(sl=>sl.typ===6&&!sl.off);
-      const velS=ply2.find(sl=>sl.typ===7&&!sl.off), chcS=ply2.find(sl=>sl.typ===8&&!sl.off), eucS=ply2.find(sl=>sl.typ===9&&!sl.off);
-      const nudS=ply2.find(sl=>sl.typ===10&&!sl.off);
-      const nudB=nudS?((nudS.p1||0)/1000)/spb():0;   // ms timing shift → beats
-      const hmzS=ply2.find(sl=>sl.typ===11&&!sl.off), flamS=ply2.find(sl=>sl.typ===12&&!sl.off);
+      /* PLAY effects resolve PER NOTE: the channel rack plus (on kits) the
+         played pad's own rack. A slot's `scope` says which notes it touches. */
+      const chP=S.presets[li], kitCh=isKit(chP);
+      const plyCache={};
+      const plyFor=midi=>{
+        const pc=kitCh?pcOf(midi):-1;
+        if(plyCache[pc])return plyCache[pc];
+        let list=chP.ply.filter(sl=>sl.typ&&!sl.off&&(!kitCh||Math.round(sl.p5||0)===0));
+        if(kitCh){const K=kitSlot(chP,midi);
+          if(K)list=list.concat(K.ply.filter(sl=>sl.typ&&!sl.off));}
+        const g=t=>list.find(sl=>sl.typ===t);
+        return plyCache[pc]={rev:!!g(5),rnd:g(6),vel:g(7),chc:g(8),euc:g(9),nud:g(10),hmz:g(11),flam:g(12)};
+      };
+      const laneP=plyFor(lane.events.length?lane.events[0].midi:60);
+      const revS=laneP.rev, rndS=laneP.rnd, eucS=laneP.euc;   // lane-shape effects use the first note's set
       if((!lane.events.length&&!eucS)||lane._cap)continue;
       if(anySolo?!lane.solo:lane.mute)continue;
       if(muteHold&&muteHold.lane===li)continue;
@@ -678,6 +684,9 @@ function scheduleRange(from,to){
       const L2=lane.len, f0=s0-a.anchor, f1=s1-a.anchor;
       const h2=x=>{const v=Math.sin(x*127.1+li*311.7)*43758.5453;return v-Math.floor(v);};
       const emit=(t,e,cyc)=>{
+        const P=plyFor(e.midi);                       // this pad's (or the channel's) effects
+        const chcS=P.chc, velS=P.vel, hmzS=P.hmz, flamS=P.flam;
+        const nudB=P.nud?((P.nud.p1||0)/1000)/spb():0;
         if(chcS&&h2(e.t*7.13+cyc*3.7)>clamp(chcS.p1??100,0,100)/100)return;
         let v=e.vel||0.9;
         if(velS)v=Math.max(0.05,v*(1-clamp(velS.p1??50,0,100)/100*h2(e.t*5.7+cyc*9.1)));
@@ -713,7 +722,7 @@ function scheduleRange(from,to){
           if(k*sl2<f0-1e-9)continue;
           const i2=((k%steps)+steps+rot)%steps;
           if(((i2*hits)%steps)<hits){
-            const tt=k*sl2+grooveOff(li,k*sl2+a.anchor)+nudB;
+            const tt=k*sl2+grooveOff(li,k*sl2+a.anchor)+(laneP.nud?((laneP.nud.p1||0)/1000)/spb():0);
             engine.trigger(timeAt(tt+a.anchor),li,root,0.85,sl2*0.5*spb());
           }
         }
@@ -1638,15 +1647,18 @@ class Engine{
        master channel) or to the global scale. masters define, they don't follow */
     if(CFG.scaleOn&&!isDrumCat(p.cat)&&!isMaster)midi=snapToPCs(midi,pcsNow());
     this.lastMidi[pi]=midi;
-    let midis=[midi], strum=0;
+    let midis=[midi], strum=0, chordPre=false;
     const arpIdx=p.ply.findIndex(sl=>sl.typ===2&&!sl.off&&T.playing);
     for(let i2=0;i2<p.ply.length;i2++){  // chord slots BEFORE the arp expand pre-pool
       const sl=p.ply[i2];
       if(sl.typ===1&&!sl.off&&(arpIdx<0||i2<arpIdx)){
         const ch=CHORDS[clamp(Math.round(sl.p1),0,CHORDS.length-1)][1];
         midis=midis.flatMap(m=>ch.map(o=>m+o)); strum=sl.p2||0;
+        if(Math.round(sl.p6||0)===1)chordPre=true;   // stage=pre: record the chord, not the root
       }
     }
+    if(chordPre&&durSec==null&&T.playing)         // live play: write every chord note into the lane
+      for(const m of midis)recPlayNote(pi,posNow(),m,vel,0.25);
     let pcHandle=null;
     if(isMaster){                       // this channel's held notes define the chord
       const pcs=[...new Set(midis.map(m=>((m%12)+12)%12))];
@@ -1705,7 +1717,8 @@ class Engine{
         for(const m of hits){
           const v=this.noteOn(timeAt(bg),pi,m,pick.vel);
           v.release(timeAt(bg+div*0.85));
-          recPlayNote(pi,bg,m,pick.vel,div*0.85);   // recording captures the ARP output, not the held note
+          if(Math.round(arp.p6||0)===1)             // stage=pre: the recorder captures the arp output
+            recPlayNote(pi,bg,m,pick.vel,div*0.85);
         }
       }
       // prune dead pool entries
@@ -3497,7 +3510,8 @@ document.addEventListener('keydown',e=>{
         at=Math.max(at,gridTime(heard));
         if(S.layer>=1)rPend[c]={pi,ts:tr,midi};   // retro memory hears everything
         /* an active arp generates the notes — record ITS output (recPlayNote), not the held note */
-        const arpOn=T.playing&&S.presets[pi].ply.some(sl=>sl.typ===2&&!sl.off);
+        const plyOf=isKit(S.presets[pi])?(kitSlot(S.presets[pi],midi)||{ply:[]}).ply:S.presets[pi].ply;
+        const arpOn=T.playing&&plyOf.some(sl=>(sl.typ===2||sl.typ===1)&&!sl.off&&Math.round(sl.p6||0)===1);
         if(recording&&arpOn&&lane.auto&&!lane._cap&&!lane.events.length){   // arp: still start the listen window
           if(CFG.listen)startCapture(lane,tr);
           else{lane.unit='B';lane.count=DEFLENS[CFG.defLen];lane.auto=false;}
