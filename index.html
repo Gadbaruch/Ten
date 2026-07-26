@@ -1566,8 +1566,24 @@ class Engine{
   /* bus-level per-note overrides (amp/fx/mix live on the channel, not the voice):
      on each hit, reshape the channel rack to the note's values — mono-minded and
      gloriously wrong for chords (last note wins), by design */
+  /* kit pads own their whole chain — swap the channel's bus modules (fx/mix) to
+     the pad's before the rack is rebuilt, so each pad gets its own fx + level */
+  applyKitBus(pi,midi){
+    const p=S.presets[pi]; if(!isKit(p))return;
+    const K=kitSlot(p,midi); if(!K)return;
+    const sig='kit'+pcOf(midi);
+    this.prepSig=this.prepSig||{};
+    if(this.prepSig[pi]===sig)return;
+    const bFx=p.fx, bMix=p.mix;
+    p.fx=K.fx; p.mix=K.mix;                    // build the rack from THIS pad
+    this._inPrep=true; this.rebuildRack(pi); this._inPrep=false;
+    this.prepSig[pi]=sig;
+    p.fx=bFx; p.mix=bMix;                      // channel data stays untouched
+  }
   applyBusPreps(pi,midi){
-    const p=S.presets[pi]; if(!p.prep||!p.prep.notes)return;
+    const p=S.presets[pi];
+    if(isKit(p))return this.applyKitBus(pi,midi);
+    if(!p.prep||!p.prep.notes)return;
     const keys=new Set();
     for(const m2 in p.prep.notes)for(const key in (p.prep.notes[m2].k||{})){
       const id=key.split(':')[0];
@@ -1612,8 +1628,11 @@ class Engine{
   }
   /* PLAY rack: chord fanout + arp pool. Sequencer & live both come through here. */
   trigger(at,pi,midi,vel,durSec){
-    const p=S.presets[pi];
-    midi+=(p.tr||0)*12;                 // channel transpose: live AND playback
+    const chan=S.presets[pi];
+    midi+=(chan.tr||0)*12;              // channel transpose: live AND playback
+    /* kit pads carry their own PLAY rack (chord/arp/flam/humanize per pad) */
+    const kp=isKit(chan)?kitSlot(chan,midi):null;
+    const p=kp?{...chan,ply:kp.ply}:chan;
     const isMaster=p.ply.some(sl=>sl.typ===1&&!sl.off&&Math.round(sl.p3)===1);
     /* global scaling: snap non-drum channels to the held chord (from a chord-
        master channel) or to the global scale. masters define, they don't follow */
@@ -2556,17 +2575,19 @@ const _zn=v=>NN[((Math.round(v)%12)+12)%12]+(Math.floor(Math.round(v)/12)-1);
 /* PRST fields: a kit channel edits the focused pitch-class slot, else the channel */
 function prsFieldDefs(){
   const p=S.presets[S.editSnd], K=edKit(p);
-  if(K)return [    // kit slot inspector: this pad IS a whole preset chain
-    {k:'pad',  v:()=>NN[pcOf(S.prepFocus)]},
-    {k:'type', v:()=>K.cat||'kik'},
+  const chType={k:'type',v:()=>p.cat||'misc'};   // ALWAYS first — this is how you leave kit mode
+  if(K)return [    // kit: channel type, then which pad, then that pad's own chain
+    chType,
+    {k:'pad',  v:()=>NN[pcOf(S.prepFocus)]+(Math.floor(S.prepFocus/12)-1)},
+    {k:'sound',v:()=>K.cat||'kik'},
     {k:'prst', v:()=>K.name},
     {k:'save', v:()=>'↕ keep'},
-    {k:'rnd',  v:()=>'↕ roll'},
-    {k:'level',v:()=>Math.round((K.mix?K.mix.lvl:0.8)*100)+'%',br:true},
+    {k:'rnd',  v:()=>'↕ roll',br:true},
+    {k:'level',v:()=>Math.round((K.mix?K.mix.lvl:0.8)*100)+'%'},
     {k:'pan',  v:()=>{const pn=K.mix?K.mix.pan:0;return pn===0?'C':(pn>0?'R':'L')+Math.round(Math.abs(pn)*100);}},
     {k:'wild', v:()=>(CFG.wild??50)+'%'}];
   return [
-    {k:'type', v:()=>p.cat||'misc'},
+    chType,
     {k:'prst', v:()=>p.name},
     {k:'save', v:()=>'↕ keep'},
     {k:'rnd',  v:()=>'↕ roll'},
@@ -2612,10 +2633,17 @@ function _prsAction(d){
   const pi=S.editSnd, p=S.presets[pi];
   const defs=prsFieldDefs(), f=(defs[S.curParam]||defs[0]).k;
   const K=edKit(p);
-  if(K){                             // ---- editing one kit pad (a whole preset chain) ----
+  if(K&&f!=='type'){                 // ---- editing one kit pad (a whole preset chain) ----
     pushUndo('kit pad');
     const kcat=K.cat||'kik';
-    if(f==='type'){                  // this pad's instrument type
+    if(f==='pad'){                   // step through the 12 pads with the arrows
+      const base=Math.floor(S.prepFocus/12)*12;
+      S.prepFocus=base+fmod(pcOf(S.prepFocus)+d,12);
+      engine.lastMidi[pi]=S.prepFocus;
+      flash('pad '+NN[pcOf(S.prepFocus)]+' — '+(kitSlot(p,S.prepFocus).name));
+      dirty=true; return;
+    }
+    if(f==='sound'){                 // this pad's instrument type
       const cat=CATS[fmod(CATS.indexOf(kcat)+d,CATS.length)];
       if(cat==='kit'||cat==='audio'){dirty=true;return;}
       const pool=libAll().filter(en=>en.cat===cat);
