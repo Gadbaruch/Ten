@@ -1679,6 +1679,21 @@ class Engine{
        master channel) or to the global scale. masters define, they don't follow */
     if(CFG.scaleOn&&!isDrumCat(p.cat)&&!isMaster)midi=snapToPCs(midi,pcsNow());
     this.lastMidi[pi]=midi;
+    /* LIVE playing gets the note-level PLAY effects too (the sequencer applies its
+       own copies to recorded notes; durSec!=null means it came from the scheduler) */
+    if(durSec==null){
+      const g=t=>p.ply.find(sl=>sl.typ===t&&!sl.off);
+      const chc=g(8), vl=g(7), hz=g(11), fl=g(12);
+      if(chc&&Math.random()>clamp(chc.p1??100,0,100)/100)return null;      // chance
+      if(vl)vel=Math.max(0.05,vel*(1-clamp(vl.p1??50,0,100)/100*Math.random()));
+      if(hz)at+=Math.max(0,(Math.random()*2-1)*((hz.p1||0)/1000));         // humanize
+      if(fl){                                                             // flam: grace hits first
+        const gap=(fl.p1||25)/1000, n=clamp(Math.round(fl.p2??1),1,3), lv=fl.p3??0.6;
+        at+=gap*n;                                    // push the main hit back so graces fit
+        for(let i=n;i>=1;i--)
+          this.trigger(at-gap*i,pi,midi-(chan.tr||0)*12,Math.max(0.05,vel*lv),0.08);
+      }
+    }
     let midis=[midi], strum=0, chordPre=false;
     const arpIdx=p.ply.findIndex(sl=>sl.typ===2&&!sl.off&&T.playing);
     for(let i2=0;i2<p.ply.length;i2++){  // chord slots BEFORE the arp expand pre-pool
@@ -1718,11 +1733,15 @@ class Engine{
   }
   arpTick(from,to){
     for(let pi=0;pi<10;pi++){
-      const p=S.presets[pi], ai=p.ply.findIndex(sl=>sl.typ===2&&!sl.off), arp=ai>=0?p.ply[ai]:null;
-      const postChords=ai>=0?p.ply.filter((sl,i2)=>sl.typ===1&&!sl.off&&i2>ai):[];
+      const p=S.presets[pi];
       const pool=this.arpPool[pi];
       if(pool.length>64)pool.splice(0,pool.length-64);
-      if(!arp||!pool.length)continue;
+      if(!pool.length)continue;
+      /* kits: the arp lives on the PAD of the notes in the pool, not the channel */
+      const rack=isKit(p)?((kitSlot(p,pool[0].midi)||{}).ply||[]):p.ply;
+      const ai=rack.findIndex(sl=>sl.typ===2&&!sl.off), arp=ai>=0?rack[ai]:null;
+      const postChords=ai>=0?rack.filter((sl,i2)=>sl.typ===1&&!sl.off&&i2>ai):[];
+      if(!arp)continue;
       const div=ARPDIVB[clamp(Math.round(arp.p1),0,ARPDIVB.length-1)];
       const octs=clamp(Math.round(arp.p3),1,3);
       for(let b=Math.ceil(from/div-1e-9)*div;b<to-1e-9;b+=div){
