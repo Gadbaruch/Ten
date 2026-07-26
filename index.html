@@ -100,7 +100,7 @@ const MD2LFO={2:1,3:2,1:3,4:4,5:5};                    // MDST → the engine's 
 const LFOW=['sin','tri','sqr','saw'], LFOW_W=['sine','triangle','square','sawtooth'];
 const XTYPES=['off','dly','cho','fla','pha','trm','drv','crush','verb','comp','gate','roll','tape','grs8','send','limit','duck','amix','hp','lp','bld','dist'];
 const GPATS=[[1,1,1,1,0,0,0,0],[0,0,1,1,0,0,1,1],[1,0,1,0,1,0,1,0],[1,.7,.45,.3,.2,.12,.07,0],[1,0,0,1,0,0,1,0]];
-const PTYPES=['off','chord','arp','grv','prep','rev','rndp','vel','chc','euc','nudge'];
+const PTYPES=['off','chord','arp','grv','prep','rev','rndp','vel','chc','euc','nudge','hmnz','flam'];
 /* groove templates: f(16th-index) -> -1..1, scaled by amt% * half a 16th */
 const GROOVES=[
  {n:'sw16',f:i=>i%2===1?1:0},
@@ -174,7 +174,7 @@ function modToRoutes(p){
     delete m.dst;delete m.idx;delete m.amt;delete m.tgt;}};
   const fixC=slot=>{if(slot&&slot.mod)for(const m of slot.mod)if(m&&m.routes)   // v14 min/max → center
     for(const rt of m.routes){if(!('ctr' in rt))rt.ctr=0;delete rt.min;delete rt.max;}};
-  const layers=(p.stk&&p.stk.layers)||[];
+  const layers=(p.kit||[]).filter(Boolean);
   fix(p); layers.forEach(fix);
   fixC(p); layers.forEach(fixC);
   return p;
@@ -243,18 +243,24 @@ function basePreset(name){return{
   lfo:rack(mkLfo), mod:rack(mkMod), fx:rack(mkFx), ply:rack(mkPly),
   vox:{mode:0,glide:0,uni:1,sprd:12,wide:0.6,slop:0.008},
   mix:{lvl:0.8,pan:0},
-  stk:{on:0,mode:0,sel:0,layers:[]},   // preset stacking: off = normal single sound (no cost)
+  kit:null,        // kit channels: 12 full preset chains, one per pitch class (built on demand)
   modLoop:new Looper('b',8,'on'),
 };}
-/* a stack layer = a full sound-preset's voice modules + zone/mix meta */
-function mkLayer(name,root){const b=foldMod(basePreset(name||'LYR'));
-  return {name:b.name,root:root??60,lo:0,hi:127,lvl:0.8,pan:0,mute:0,
-    osc:b.osc,flt:b.flt,mod:b.mod,vox:b.vox};}
-/* the sound-module view of a layer (or the base preset) for Voice building */
-function layerPreset(base,L){return L?{...base,osc:L.osc,flt:L.flt,mod:L.mod,vox:L.vox,mix:{lvl:L.lvl,pan:L.pan}}:base;}
-const LAYERMODS=new Set(['osc','flt','mod','vox']);   // voice-level per-layer; amp/fx/ply/mix are channel-shared
-function edLayer(p){return (p.stk&&p.stk.on&&p.stk.sel>0&&p.stk.layers[p.stk.sel-1])?p.stk.layers[p.stk.sel-1]:null;}
-function modHolder(p,modId){const L=edLayer(p);return (L&&LAYERMODS.has(modId))?L:p;}
+/* KIT channels: 12 pitch classes, each a COMPLETE independent preset chain.
+   Octaves just transpose — C2/C3/C4 all play kit slot 0 at different pitches.
+   The last note you played is the slot you see and edit. */
+const isKit=p=>(p&&p.cat==='kit');
+const pcOf=m=>((Math.round(m)%12)+12)%12;
+function kitSlot(p,midi){            // the full preset for this pitch class (lazily created)
+  if(!isKit(p))return null;
+  if(!p.kit)p.kit=new Array(12).fill(null);
+  const i=pcOf(midi);
+  if(!p.kit[i]){const b=foldMod(basePreset(NN[i]));b.cat='kik';delete b.kit;p.kit[i]=b;}
+  return p.kit[i];
+}
+/* which preset the sound layer is editing: a kit's focused slot, else the channel */
+function edKit(p){return isKit(p)&&S.prepFocus!=null?kitSlot(p,S.prepFocus):null;}
+function modHolder(p,modId){const K=edKit(p);return K||p;}
 const RACK_MK={osc:mkOsc,amp:mkAmp,flt:mkFlt,env:mkEnv,lfo:mkLfo,mod:mkMod,fx:mkFx,ply:mkPly};
 
 /* ---------------- param specs ---------------------------------------- */
@@ -406,6 +412,12 @@ const PLY_P=sl=>{
     SP('note','p4','lin',{min:24,max:96,step:1,fmt:v=>NN[Math.round(v)%12]+(Math.floor(Math.round(v)/12)-1)})]);
   if(sl.typ===10)return base.concat([
     SP('shift','p1','lin',{min:-60,max:60,step:1,fmt:v=>(v>0?'+':'')+v+'ms'})]);   // timing nudge
+  if(sl.typ===11)return base.concat([
+    SP('range','p1','lin',{min:0,max:80,step:1,fmt:v=>'\u00b1'+v+'ms'})]);        // humanize timing
+  if(sl.typ===12)return base.concat([
+    SP('gap','p1','lin',{min:5,max:120,step:1,fmt:v=>v+'ms'}),
+    SP('hits','p2','lin',{min:1,max:3,step:1,fmt:v=>'+'+Math.round(v)}),
+    SP('level','p3','lin',{min:0,max:1,step:0.05,fmt:v=>Math.round(v*100)+'%'})]); // flam / ruff
   return base;    // rev needs no params
 };
 
@@ -658,6 +670,7 @@ function scheduleRange(from,to){
       const velS=ply2.find(sl=>sl.typ===7&&!sl.off), chcS=ply2.find(sl=>sl.typ===8&&!sl.off), eucS=ply2.find(sl=>sl.typ===9&&!sl.off);
       const nudS=ply2.find(sl=>sl.typ===10&&!sl.off);
       const nudB=nudS?((nudS.p1||0)/1000)/spb():0;   // ms timing shift → beats
+      const hmzS=ply2.find(sl=>sl.typ===11&&!sl.off), flamS=ply2.find(sl=>sl.typ===12&&!sl.off);
       if((!lane.events.length&&!eucS)||lane._cap)continue;
       if(anySolo?!lane.solo:lane.mute)continue;
       if(muteHold&&muteHold.lane===li)continue;
@@ -670,6 +683,15 @@ function scheduleRange(from,to){
         if(velS)v=Math.max(0.05,v*(1-clamp(velS.p1??50,0,100)/100*h2(e.t*5.7+cyc*9.1)));
         let tt=t;                        // playback = exactly what you heard (post-Q is gone)
         tt+=grooveOff(li,tt+a.anchor)+nudB;
+        if(hmzS){const rng=(hmzS.p1||0)/1000/spb();   // humanize: ± ms of timing jitter per hit
+          tt+=(h2(e.t*13.7+cyc*4.3)*2-1)*rng;}
+        if(flamS){                                    // flam/ruff: grace hits before the main note
+          const gap=(flamS.p1||25)/1000/spb(), n=clamp(Math.round(flamS.p2??1),1,3), lv=flamS.p3??0.6;
+          for(let g=n;g>=1;g--){
+            const gt=tt-gap*g; if(timeAt(gt+a.anchor)<AC.currentTime)continue;   // don't schedule in the past
+            engine.trigger(timeAt(gt+a.anchor),li,e.midi,Math.max(0.05,v*lv),(e.dur||0.2)*0.5*spb());
+          }
+        }
         engine.trigger(timeAt(tt+a.anchor),li,e.midi,v,(e.dur||0.2)*spb());
       };
       if(revS||rndS){                                 // playhead transforms: expand by cycle
@@ -1571,31 +1593,22 @@ class Engine{
     for(const t2 of touched)setV(p,t2.mi,t2.si,t2.spec,t2.base);   // stored preset stays clean
   }
   noteOn(at,pi,midi,vel){
-    const p=S.presets[pi], stk=p.stk;
+    const p=S.presets[pi];
     this.applyBusPreps(pi,midi);
     if(this.act[pi].length>=16)this.act[pi][0].kill(at,false,true);   // channel poly cap (whole note)
-    /* stacking: build one voice per active layer (base = layer 0) */
-    let entries=[null];
-    if(stk&&stk.on&&stk.layers.length){
-      if(stk.mode===1){                                  // split/kit: the pressed note picks its zone
-        const hit=stk.layers.find(L=>!L.mute&&midi>=L.lo&&midi<=L.hi);
-        entries=[hit||null];
-      }else entries=[null,...stk.layers.filter(L=>!L.mute)];  // stack: all together
+    /* kit channels: the pitch class picks a whole independent preset chain;
+       octaves transpose it (C2/C3/C4 = the same instrument, different pitch) */
+    const K=isKit(p)?kitSlot(p,midi):null;
+    const pre=K?K:prepEffective(p,midi);
+    const lid=K?pcOf(midi):'ch';
+    const vx=pre.vox||{};
+    if(vx.mode===1){                                     // mono steals only its own kit slot
+      const killAt=Math.max(AC.currentTime+0.001,at-0.004);
+      for(const v of [...this.act[pi]])if(v._lid===lid)v.kill(killAt,true);
     }
-    const killAt=Math.max(AC.currentTime+0.001,at-0.004);
-    const voices=entries.map(L=>{
-      const lid=L||'base', vx=(L?L.vox:p.vox)||{};
-      if(vx.mode===1)                                    // VOICE is per-layer: mono steals only its own layer
-        for(const v of [...this.act[pi]])if(v._lid===lid)v.kill(killAt,true);
-      let pre;
-      if(L){pre=layerPreset(p,L); pre._lvl=L.lvl;}
-      else pre=prepEffective(p,midi);
-      const v=new Voice(this,at,pi,midi,vel,pre); v._lid=lid;
-      this.act[pi].push(v);
-      return v;
-    });
-    const head=voices[0]; if(voices.length>1)head._sib=voices.slice(1);
-    return head;
+    const v=new Voice(this,at,pi,midi,vel,pre); v._lid=lid;
+    this.act[pi].push(v);
+    return v;
   }
   /* PLAY rack: chord fanout + arp pool. Sequencer & live both come through here. */
   trigger(at,pi,midi,vel,durSec){
@@ -1673,6 +1686,7 @@ class Engine{
         for(const m of hits){
           const v=this.noteOn(timeAt(bg),pi,m,pick.vel);
           v.release(timeAt(bg+div*0.85));
+          recPlayNote(pi,bg,m,pick.vel,div*0.85);   // recording captures the ARP output, not the held note
         }
       }
       // prune dead pool entries
@@ -1781,6 +1795,8 @@ function applyParam(pi,mi,si,px,v){
     else if(v===8){sl2.p1=100;}
     else if(v===9){sl2.p1=4;sl2.p2=8;sl2.p3=0;sl2.p4=60;}
     else if(v===10){sl2.p1=0;}
+    else if(v===11){sl2.p1=12;}                     // humanize ±12ms
+    else if(v===12){sl2.p1=25;sl2.p2=1;sl2.p3=0.6;} // flam: 25ms, 1 grace hit, 60% level
   }
   if(M.id==='fx'&&spec.key==='typ'&&XTYPES[v]==='dist'){const s2=S.presets[pi].fx[si];s2.p1=0.35;s2.p3=0;s2.mix=0.6;}
   if(M.id==='fx')engine.rebuildRack(pi);
@@ -1824,7 +1840,7 @@ function libInit(){
     while(i<10){
       const p=basePreset('KT'+String(n++).padStart(2,'0')); p.cat='kit';
       Object.assign(p.osc[0],{wav:0,rat:0.5}); Object.assign(p.env[0],{a:0.001,d:0.25,s:0,r:0.05});
-      p.vox.mode=1; p.prep={notes:kitNotes(pool,rnd)};
+      p.vox.mode=1; p.kit=kitPads(rnd,0.25);
       arr.push({name:p.name,cat:'kit',factory:true,data:presetData(p)}); i++;
     }
   }
@@ -1847,7 +1863,7 @@ function setPresetData(pi,name,cat,data){   // same, no undo — for composite g
     if(data.amp)p.amp=JSON.parse(JSON.stringify(data.amp));
     p._folded=false; foldMod(p);
   }
-  if(data.stk&&data.stk.layers)p.stk={on:data.stk.on||0,mode:data.stk.mode||0,sel:0,layers:data.stk.layers.map(L=>foldMod(L))};
+  if(Array.isArray(data.kit))p.kit=data.kit.map(k=>k?modToRoutes(foldMod(k)):null);
   modToRoutes(p);      // v13 library entries carry flat mod slots → routes
   p.mod.forEach(m=>{if(m.routes)m.routes=JSON.parse(JSON.stringify(m.routes));});  // no aliasing with the library
   p.tr=data.tr||0;
@@ -1890,11 +1906,6 @@ function genSpice(p,cat,wild,H){
     add({src:5,rsel:0,rate:+R(2,12).toFixed(1),routes:[{dst:pick([2,3]),idx:1,amt:RI(8,30),ctr:0,tgt:null}]});
   const lm=p.mod.find(m2=>m2.src===2);        // give an lfo a second target (pan drift)
   if(lm&&lm.routes.length<3&&P(0.35))lm.routes.push({dst:4,idx:0,amt:RI(15,40),ctr:0,tgt:null});
-  if((cat==='pad'||cat==='lead'||cat==='keys')&&wild>0.6&&P(0.3)){   // wild: stacked sub layer
-    const L=mkLayer('SUB',60);
-    L.osc[0].wav=pick([0,3]); L.osc[0].rat=0.5; L.lvl=+R(0.4,0.6).toFixed(2);
-    p.stk={on:1,mode:0,sel:0,layers:[L]};
-  }
 }
 function genPreset(cat,rnd,wild=0.5){
   const R=(a,b)=>a+rnd()*(b-a), RI=(a,b)=>Math.round(R(a,b));
@@ -1989,7 +2000,7 @@ function genPreset(cat,rnd,wild=0.5){
   if(cat==='pad'||cat==='lead'||cat==='chord')Object.assign(p.vox,{uni:pick(wild>0.5?[3,5,7]:[1,3,5]),sprd:RI(6,15)*2});
   if(cat==='bass'){p.vox.mode=1;
     p.fx[9]={typ:16,p1:0,p2:+R(0.4,0.65).toFixed(2),p3:0.3,mix:1};}  // duck: follow ch 1's kick
-  p.mix.lvl=+R(cat==='fx'?0.45:0.65,cat==='fx'?0.65:0.85).toFixed(2);
+  p.mix.lvl=+R(0.1,0.2).toFixed(2);   // non-drum sounds generate quiet (~15%)
   foldMod(p);
   genSpice(p,cat,wild,{R,RI,P,pick});
   return p;
@@ -2215,9 +2226,9 @@ function sortChannels(){
 /* role mixing template: where each instrument SITS in a healthy mix */
 const MIXT={kik:{lvl:0.95,pan:0},snr:{lvl:0.75,pan:0.05},hh:{lvl:0.4,pan:0.22},cymb:{lvl:0.32,pan:-0.2},
  tom:{lvl:0.58,pan:-0.15},perc:{lvl:0.48,pan:-0.3},wood:{lvl:0.42,pan:0.3},zap:{lvl:0.45,pan:0.25},
- kit:{lvl:0.85,pan:0},bass:{lvl:0.85,pan:0},chord:{lvl:0.48,pan:-0.1},pad:{lvl:0.42,pan:0},
- keys:{lvl:0.52,pan:0.15},lead:{lvl:0.62,pan:-0.05},plk:{lvl:0.5,pan:0.2},fx:{lvl:0.38,pan:0},
- misc:{lvl:0.55,pan:0}};
+ kit:{lvl:0.85,pan:0},bass:{lvl:0.3,pan:0},chord:{lvl:0.16,pan:-0.1},pad:{lvl:0.15,pan:0},
+ keys:{lvl:0.18,pan:0.15},lead:{lvl:0.2,pan:-0.05},plk:{lvl:0.18,pan:0.2},fx:{lvl:0.14,pan:0},
+ misc:{lvl:0.18,pan:0}};
 function sendBuses(){                          // which master send slots hold verb / dly
   let verb=0,dly=0;
   S.master.forEach((fx,i)=>{if(!fx.typ||Math.round(fx.rt)!==1)return;
@@ -2229,9 +2240,9 @@ function mixChannel(pi){                       // template levels + pans + taste
   p.mix.lvl=T2.lvl; p.mix.pan=T2.pan;
   const {verb,dly}=sendBuses();
   const want=[];                               // [bus, amt]
-  if(verb&&['snr','hh','cymb','pad','chord','keys','perc'].includes(cat))
-    want.push([verb,cat==='pad'?0.22:0.13]);
-  if(dly&&['lead','plk','keys'].includes(cat))want.push([dly,0.09]);
+  if(verb&&['snr','cymb','pad','keys'].includes(cat)&&Math.random()<0.35)
+    want.push([verb,cat==='pad'?0.16:0.09]);   // reverb used sparingly — it washes everything together
+  if(dly&&['lead','plk'].includes(cat)&&Math.random()<0.4)want.push([dly,0.08]);
   for(const [bus,amt] of want){
     let sl=p.fx.find(f2=>XTYPES[f2.typ]==='send'&&Math.round(f2.p1)===bus);
     if(!sl)for(const i2 of [8,7,6])if(!p.fx[i2].typ){sl=p.fx[i2];break;}
@@ -2253,8 +2264,7 @@ function genBeat(pat,mutate,ctx,section){
         made++;
         if(!C['_snd'+pi]){                     // fresh preset per channel, once per song context
           C['_snd'+pi]=1;
-          if(cat==='kit'){const pool=libAll().filter(en=>DRUMCATS.includes(en.cat));
-            if(pool.length)S.presets[pi].prep={notes:kitNotes(pool,Math.random)};}
+          if(cat==='kit')S.presets[pi].kit=kitPads(Math.random,clamp(CFG.wild??50,0,100)/100);
           else{const wild=(core?0.3:0.45)*(C.crazy?2.1:1), np=genPreset(cat,Math.random,Math.min(0.95,wild));
             setPresetData(pi,np.name,cat,presetData(np));}
           mixChannel(pi);
@@ -2428,7 +2438,7 @@ function initPreset(cat){
   if(cat==='audio'){const p=foldMod(basePreset('INIT'));p.cat='audio';return p;}
   if(cat==='kit'){const p=basePreset('INIT');p.cat='kit';
     const pool=libAll().filter(en=>DRUMCATS.includes(en.cat));
-    if(pool.length)p.prep={notes:kitNotes(pool,mulberry32(7))};
+    p.kit=kitPads(mulberry32(7),0.2);
     Object.assign(p.osc[0],{wav:0,rat:0.5}); p.vox.mode=1; return foldMod(p);}
   const p=genPreset(cat,mulberry32(cat.charCodeAt(0)*7+3),0.12);
   p.name='INIT'; return p;
@@ -2507,7 +2517,11 @@ function drumCatOf(d){        // guess a subtype for a legacy 'drum' preset
   if(pd)return 'tom';
   return 'perc';
 }
-function kitNotes(pool,rnd){   // map every playable midi to a drum preset name
+function kitPads(rnd,wild){    // 12 complete pad chains, one per pitch class
+  const lanes=['kik','snr','hh','hh','perc','tom','cymb','wood','zap','perc','snr','kik'];
+  return lanes.map((c,i)=>{const kp=genPreset(c,rnd,wild??0.3);kp.cat=c;kp.name=NN[i];delete kp.kit;return kp;});
+}
+function kitNotes(pool,rnd){   // (legacy) map every playable midi to a drum preset name
   const byCat={}; for(const en of pool)(byCat[en.cat]=byCat[en.cat]||[]).push(en);
   const lanes=['kik','snr','hh','hh','perc','tom','cymb','wood','zap','perc','snr','kik'];
   const notes={};
@@ -2518,47 +2532,45 @@ function kitNotes(pool,rnd){   // map every playable midi to a drum preset name
   return notes;
 }
 function randomizeKit(pi){
-  const pool=libAll().filter(en=>DRUMCATS.includes(en.cat));
-  if(!pool.length){flash('no drum presets in the library yet');return;}
-  pushUndo('preset');
   const p=S.presets[pi];
-  p.prep={notes:kitNotes(pool,Math.random)};
-  if(typeof prepCache!=='undefined')prepCache.clear();
-  flash('☆ new random kit ('+Object.keys(p.prep.notes).length+' notes mapped)');
+  pushUndo('preset');
+  const lanes=['kik','snr','hh','hh','perc','tom','cymb','wood','zap','perc','snr','kik'];
+  p.kit=lanes.map((c,i)=>{const kp=genPreset(c,Math.random,clamp(CFG.wild??50,0,100)/100);
+    kp.cat=c; kp.name=NN[i]; delete kp.kit; return kp;});
+  engine.rebuildRack(pi);
+  flash('☆ new random kit — 12 pads');
   dirty=true; dirtySave=true;
 }
 function randomizeChannel(pi,wildOverride){
   const cat=S.presets[pi].cat||'misc';
   if(cat==='kit')return randomizeKit(pi);   // kit: reroll the whole note map
   const w=clamp(wildOverride??CFG.wild??50,0,100);
+  const keepLvl=S.presets[pi].mix.lvl, keepPan=S.presets[pi].mix.pan;   // volume is yours, not the dice's
   const p=genPreset(cat,Math.random,w/100);
   applyPresetData(pi,p.name,cat,presetData(p));
+  S.presets[pi].mix.lvl=keepLvl; S.presets[pi].mix.pan=keepPan;
+  engine.refresh(pi);
   flash('☆ new random '+cat+' @'+w+'%: '+p.name);
 }
 const _zn=v=>NN[((Math.round(v)%12)+12)%12]+(Math.floor(Math.round(v)/12)-1);
-/* PRST fields adapt: base preset fields, or the selected stack layer's inspector */
+/* PRST fields: a kit channel edits the focused pitch-class slot, else the channel */
 function prsFieldDefs(){
-  const p=S.presets[S.editSnd], L=edLayer(p);
-  const stkF={k:'stack',v:()=>!p.stk||!p.stk.on?'off':(p.stk.mode?'split':'stack')};
-  const layF={k:'layer',v:()=>{const n=p.stk?p.stk.layers.length:0;
-    return !n?'+add':'L'+((p.stk.sel||0)+1)+'/'+(n+1);}};   // L1..L(N+1), L1 = the channel sound
-  if(L)return [    // layer inspector — row 1 = the layer's sound & zone, row 2 = mix + stack
-    {k:'sound',v:()=>L.name},
-    {k:'root', v:()=>_zn(L.root)},
-    {k:'lo',   v:()=>_zn(L.lo)},
-    {k:'hi',   v:()=>_zn(L.hi)},
-    {k:'level',v:()=>Math.round(L.lvl*100)+'%',br:true},
-    {k:'pan',  v:()=>L.pan===0?'C':(L.pan>0?'R':'L')+Math.round(Math.abs(L.pan)*100)},
-    {k:'mute', v:()=>L.mute?'MUTE':'on'},
-    stkF, layF];
-  const fN=S.prepFocus, fNode=fN!=null&&p.prep&&p.prep.notes&&p.prep.notes[fN];
-  return [    // row 1 = sound identity, row 2 = stacking
-    {k:'type', v:()=>p.cat||'misc'},
-    {k:'prst', v:()=>fNode&&fNode.preset?'•'+fNode.preset:p.name},
+  const p=S.presets[S.editSnd], K=edKit(p);
+  if(K)return [    // kit slot inspector: this pad IS a whole preset chain
+    {k:'pad',  v:()=>NN[pcOf(S.prepFocus)]},
+    {k:'type', v:()=>K.cat||'kik'},
+    {k:'prst', v:()=>K.name},
     {k:'save', v:()=>'↕ keep'},
     {k:'rnd',  v:()=>'↕ roll'},
-    {k:'wild', v:()=>(CFG.wild??50)+'%'},
-    Object.assign(stkF,{br:true}), layF];
+    {k:'level',v:()=>Math.round((K.mix?K.mix.lvl:0.8)*100)+'%',br:true},
+    {k:'pan',  v:()=>{const pn=K.mix?K.mix.pan:0;return pn===0?'C':(pn>0?'R':'L')+Math.round(Math.abs(pn)*100);}},
+    {k:'wild', v:()=>(CFG.wild??50)+'%'}];
+  return [
+    {k:'type', v:()=>p.cat||'misc'},
+    {k:'prst', v:()=>p.name},
+    {k:'save', v:()=>'↕ keep'},
+    {k:'rnd',  v:()=>'↕ roll'},
+    {k:'wild', v:()=>(CFG.wild??50)+'%'}];
 }
 const PRSFIELDS=['type','prst','save','rnd','wild'];   // legacy stops reference (nav uses prsFieldDefs)
 const AUDF=[
@@ -2576,61 +2588,55 @@ function audAction(d,m){
   flash('audio '+spec.lbl+' = '+fmtVal(spec,pre.au[spec.key]));
   dirty=true; dirtySave=true;
 }
-function stkInit(p){if(!p.stk)p.stk={on:0,mode:0,sel:0,layers:[]};return p.stk;}
-function addLayer(p){                 // new layer seeded from the current base sound
-  const s=stkInit(p); if(s.layers.length>=7){flash('max 7 layers');return false;}
-  const d=presetData(p), L=mkLayer('L'+(s.layers.length+1),60);
-  L.osc=JSON.parse(JSON.stringify(d.osc)); L.flt=JSON.parse(JSON.stringify(d.flt));
-  L.env=JSON.parse(JSON.stringify(d.env)); L.lfo=JSON.parse(JSON.stringify(d.lfo));
-  L.vox=JSON.parse(JSON.stringify(d.vox));
-  s.layers.push(L); return true;
-}
-function prsAction(d){
-  const f0=(prsFieldDefs()[S.curParam]||{}).k;
-  _prsAction(d);
-  const ni=prsFieldDefs().findIndex(x=>x.k===f0);   // keep the cursor on the same field after a view switch
-  if(ni>=0)S.curParam=ni;
+function libToPreset(en){          // a library entry → a complete preset object
+  const kp=basePreset(en.name);
+  for(const M of MODULES){if(!M.id||M.prs)continue;
+    if(M.flat){if(en.data[M.id])Object.assign(kp[M.id],en.data[M.id]);}
+    else if(Array.isArray(en.data[M.id]))en.data[M.id].forEach((sl,j)=>{if(sl)Object.assign(kp[M.id][j],sl);});}
+  if(!en.data.mod&&(en.data.env||en.data.lfo||en.data.amp)){
+    if(en.data.env)kp.env=JSON.parse(JSON.stringify(en.data.env));
+    if(en.data.lfo)kp.lfo=JSON.parse(JSON.stringify(en.data.lfo));
+    if(en.data.amp)kp.amp=JSON.parse(JSON.stringify(en.data.amp));
+    kp._folded=false; foldMod(kp);
+  }
+  modToRoutes(kp); kp.cat=en.cat; delete kp.kit;
+  return kp;
 }
 function _prsAction(d){
   const pi=S.editSnd, p=S.presets[pi];
   const defs=prsFieldDefs(), f=(defs[S.curParam]||defs[0]).k;
-  const L=edLayer(p);
-  if(L){                             // ---- editing a stack layer ----
-    pushUndo('layer');
-    if(f==='layer'){                 // 0..N (0=base); up past the last adds a new layer
-      if(d>0&&p.stk.sel>=p.stk.layers.length){if(addLayer(p)){p.stk.sel=p.stk.layers.length;if(p.stk.mode===1)assignZones(p);}}
-      else p.stk.sel=fmod(p.stk.sel+d,p.stk.layers.length+1);
+  const K=edKit(p);
+  if(K){                             // ---- editing one kit pad (a whole preset chain) ----
+    pushUndo('kit pad');
+    const kcat=K.cat||'kik';
+    if(f==='type'){                  // this pad's instrument type
+      const cat=CATS[fmod(CATS.indexOf(kcat)+d,CATS.length)];
+      if(cat==='kit'||cat==='audio'){dirty=true;return;}
+      const pool=libAll().filter(en=>en.cat===cat);
+      if(pool.length){const kp=libToPreset(pool[0]);kp.cat=cat;p.kit[pcOf(S.prepFocus)]=kp;}
+      else K.cat=cat;
+      flash('pad '+NN[pcOf(S.prepFocus)]+': '+cat);
     }
-    else if(f==='sound'){            // drop a library preset into this layer
-      const pool=libAll(); if(!pool.length)return;
-      let i=pool.findIndex(en=>en.name===L.name); i=i<0?(d>0?0:pool.length-1):fmod(i+d,pool.length);
-      const en=pool[i], kp=basePreset(en.name);
-      for(const M of MODULES){if(!M.id||M.prs)continue;
-        if(M.flat){if(en.data[M.id])Object.assign(kp[M.id],en.data[M.id]);}
-        else if(Array.isArray(en.data[M.id]))en.data[M.id].forEach((sl,j)=>{if(sl)Object.assign(kp[M.id][j],sl);});}
-      L.name=en.name; L.osc=kp.osc;L.flt=kp.flt;L.env=kp.env;L.lfo=kp.lfo;L.vox=kp.vox;
-      flash('layer '+p.stk.sel+' → '+en.name);}
-    else if(f==='root')L.root=clamp(L.root+d,0,127);
-    else if(f==='lo')L.lo=clamp(L.lo+d,0,L.hi);
-    else if(f==='hi')L.hi=clamp(L.hi+d,L.lo,127);
-    else if(f==='level')L.lvl=clamp(+(L.lvl+d*0.05).toFixed(2),0,1);
-    else if(f==='pan')L.pan=clamp(+(L.pan+d*0.1).toFixed(1),-1,1);
-    else if(f==='mute')L.mute=L.mute?0:1;
-    dirty=true; dirtySave=true; return;
-  }
-  const kitMode=p.cat==='kit'||p.ply.some(sl=>sl.typ===4&&!sl.off&&Math.round(sl.p1)===1);
-  if(f==='prst'&&kitMode&&S.prepFocus!=null){   // KIT: assign a library sound to the focused note
-    pushUndo('kit');
-    const pool=p.cat==='kit'?libAll().filter(en=>DRUMCATS.includes(en.cat))
-                            :libAll().filter(en=>en.cat===(p.cat||'misc'));
-    if(!pool.length){flash('no presets to assign');return;}
-    p.prep=p.prep||{notes:{}};
-    const node=p.prep.notes[S.prepFocus]=p.prep.notes[S.prepFocus]||{};
-    let i=pool.findIndex(en=>en.name===node.preset);
-    i=i<0?(d>0?0:pool.length-1):fmod(i+d,pool.length);
-    node.preset=pool[i].name;
-    flash('kit: '+NN[S.prepFocus%12]+(Math.floor(S.prepFocus/12)-1)+' → '+pool[i].name);
-    dirty=true; dirtySave=true; return;
+    else if(f==='prst'){             // browse sounds for this pad
+      const pool=libAll().filter(en=>en.cat===kcat);
+      if(!pool.length){flash('no '+kcat+' presets');return;}
+      let i=pool.findIndex(en=>en.name===K.name); i=i<0?(d>0?0:pool.length-1):fmod(i+d,pool.length);
+      const kp=libToPreset(pool[i]); kp.cat=kcat;
+      kp.mix.lvl=K.mix.lvl; kp.mix.pan=K.mix.pan;     // pad level/pan are yours
+      p.kit[pcOf(S.prepFocus)]=kp;
+      flash('pad '+NN[pcOf(S.prepFocus)]+' → '+pool[i].name);
+    }
+    else if(f==='save'){const arr=libAll();let nm=K.name,n2=2;
+      while(arr.some(en=>en.name===nm))nm=K.name.slice(0,3)+(n2++);
+      arr.push({name:nm,cat:kcat,data:presetData(K)});libStore(arr);K.name=nm;
+      flash('pad saved to library: '+nm);}
+    else if(f==='rnd'){const np=genPreset(kcat,Math.random,clamp(CFG.wild??50,0,100)/100);
+      np.cat=kcat; np.mix.lvl=K.mix.lvl; np.mix.pan=K.mix.pan;
+      p.kit[pcOf(S.prepFocus)]=np; flash('☆ pad '+NN[pcOf(S.prepFocus)]+': '+np.name);}
+    else if(f==='level')K.mix.lvl=clamp(+(K.mix.lvl+d*0.05).toFixed(2),0,1);
+    else if(f==='pan')K.mix.pan=clamp(+(K.mix.pan+d*0.1).toFixed(1),-1,1);
+    else if(f==='wild'){CFG.wild=clamp((CFG.wild??50)+d*5,0,100);saveCfg();}
+    engine.rebuildRack(pi); dirty=true; dirtySave=true; return;
   }
   if(f==='prst')scrollPreset(pi,d);
   else if(f==='type'){
@@ -2644,29 +2650,8 @@ function _prsAction(d){
   else if(f==='wild'){
     CFG.wild=clamp((CFG.wild??50)+d*5,0,100); saveCfg();
     flash('rnd wildness '+CFG.wild+'% — low = tame/typical, high = more slots & motion');}
-  else if(f==='stack'){              // off → stack → split
-    pushUndo('stack');
-    const s=stkInit(p);
-    let st=(s.on?(s.mode?2:1):0)+d; st=fmod(st,3);
-    s.on=st>0?1:0; s.mode=st===2?1:0;
-    if(s.on&&!s.layers.length)addLayer(p);
-    if(s.mode===1)assignZones(p);    // split: lay layers across the keyboard
-    flash('stack: '+['off','stack (all together)','split (key zones — MPC/kit)'][st]);
-    dirty=true; dirtySave=true;}
-  else if(f==='layer'){              // select / add a layer to edit
-    pushUndo('layer');
-    const s=stkInit(p);
-    if(!s.on){s.on=1;if(!s.layers.length)addLayer(p);}
-    if(d>0&&s.sel>=s.layers.length){if(addLayer(p)){s.sel=s.layers.length;if(s.mode===1)assignZones(p);}}
-    else s.sel=fmod(s.sel+d,s.layers.length+1);
-    flash('editing L'+(s.sel+1)+' — OSC/FILT/MOD/VOICE now edit this layer');
-    dirty=true; dirtySave=true;}
   else randomizeChannel(pi);
   dirty=true;
-}
-function assignZones(p){              // spread layers (+base) evenly across the keyboard
-  const s=p.stk, n=s.layers.length+1, span=Math.floor(72/n);
-  s.layers.forEach((L,i)=>{L.lo=36+(i+1)*span;L.hi=(i+2)<n?36+(i+2)*span-1:96;L.root=L.lo;});
 }
 
 function curAddr(){ // resolved (mi,si,px) for the focused parameter in sound layers
@@ -2850,6 +2835,23 @@ const curCell=lp=>Math.min(stepCur,stepCells(lp)-1);
 const octCh=()=>S.layer>=2?S.editSnd:S.curPreset;   // whose octave the keys edit
 const qz=(v,g)=>Math.round(v/g)*g;
 const qnext=(v,g)=>Math.ceil(v/g-1e-6)*g;   // live quantize: NEXT grid point
+/* PLAY-generated notes (arp) write into the lane while recording, so a held
+   chord records as the arpeggio you actually hear — not the source note */
+function recPlayNote(pi,tBeat,midi,vel,durBeats){
+  const pat=S.patterns[S.editPat];
+  if(!T.playing||pat.state!=='rec')return;
+  const lane=pat.lanes[pi];
+  if(lane._cap){
+    const t=Math.max(0,tBeat-lane._cap.t0);
+    lane.events.push({t,midi,vel:vel||0.9,dur:durBeats||0.2,born:performance.now()});
+    lane._cap.lastEnd=Math.max(lane._cap.lastEnd,t+(durBeats||0.2));
+  }else{
+    const L=lane.len, t=fmod(tBeat-editAnchor(),L);
+    lane.clear(ev=>ev.midi===midi&&Math.abs(ev.t-t)<1e-6);
+    lane.events.push({t,midi,vel:vel||0.9,dur:durBeats||0.2,born:performance.now()});
+  }
+  dirty=true; dirtySave=true;
+}
 function editAnchor(){
   if(!T.playing)return 0;
   const a=actAt(posNow());
@@ -2948,7 +2950,6 @@ function diveIn(){
   else if(S.layer===1){S.editSnd=S.curPreset;S.layer=2;S.curMod=0;S.curParam=0;}  // land on PRESET
   else if(S.layer===2){
     const M=MODULES[S.curMod];
-    if(M.prs&&edLayer(S.presets[S.editSnd])){flash('layer selected — use the sound field · shift+1 = L1');return;}
     if(M.prs){
       const p=S.presets[S.editSnd], pool=libAll().filter(en=>en.cat===(p.cat||'misc'));
       S.libSel=Math.max(0,pool.findIndex(en=>en.name===p.name));
@@ -3217,13 +3218,11 @@ document.addEventListener('keydown',e=>{
   if(c==='Backspace'){e.preventDefault();
     if(e.repeat)return;
     if(e.shiftKey){clearTimeout(delHoldTimer);delHoldTimer=setTimeout(layerInit,800);}
-    if(S.layer>=2&&!e.shiftKey&&MODULES[S.curMod].prs){   // remove the selected stack layer
-      const p=S.presets[S.editSnd], L=edLayer(p);
-      if(L){pushUndo('layer del');
-        p.stk.layers.splice(p.stk.sel-1,1);
-        p.stk.sel=Math.min(p.stk.sel,p.stk.layers.length);
-        if(!p.stk.layers.length)p.stk.on=0;
-        flash('layer removed'); dirty=true; dirtySave=true; return;}
+    if(S.layer>=2&&!e.shiftKey&&MODULES[S.curMod].prs){   // reset the focused kit pad
+      const p=S.presets[S.editSnd], K=edKit(p);
+      if(K){pushUndo('kit pad');
+        p.kit[pcOf(S.prepFocus)]=null; kitSlot(p,S.prepFocus);
+        flash('pad '+NN[pcOf(S.prepFocus)]+' reset'); dirty=true; dirtySave=true; return;}
     }
     if(S.layer===0&&e.shiftKey){          // clear everything inside the selected pattern
       pushUndo('pattern clear');
@@ -3298,12 +3297,6 @@ document.addEventListener('keydown',e=>{
         flash('lane '+n+' '+S.presets[n].name+(l2.mute?' MUTED':' on'));
         dirtySave=true;
       }else S.curPreset=n;
-    }
-    else if(S.layer>=2&&e.shiftKey){       // shift+digit = select stack layer (1=base, 2=L1…)
-      const p=S.presets[S.editSnd], s=stkInit(p), tgt=n===0?9:n-1;
-      if(tgt<=s.layers.length){if(tgt>0)s.on=1; s.sel=tgt;
-        flash('editing L'+(tgt+1));dirtySave=true;}
-      else flash('no layer '+tgt+' — add via the PRST layer field');
     }
     else if(S.layer===2){
       const mi2=n===0?9:n-1;
@@ -3469,7 +3462,13 @@ document.addEventListener('keydown',e=>{
         const heard=tr+grooveOff(pi,tr);
         at=Math.max(at,gridTime(heard));
         if(S.layer>=1)rPend[c]={pi,ts:tr,midi};   // retro memory hears everything
-        if(recording){
+        /* an active arp generates the notes — record ITS output (recPlayNote), not the held note */
+        const arpOn=T.playing&&S.presets[pi].ply.some(sl=>sl.typ===2&&!sl.off);
+        if(recording&&arpOn&&lane.auto&&!lane._cap&&!lane.events.length){   // arp: still start the listen window
+          if(CFG.listen)startCapture(lane,tr);
+          else{lane.unit='B';lane.count=DEFLENS[CFG.defLen];lane.auto=false;}
+        }
+        if(recording&&!arpOn){
           if(lane.auto&&!lane._cap&&!lane.events.length){
             if(CFG.listen)startCapture(lane,tr);
             else{lane.unit='B';lane.count=DEFLENS[CFG.defLen];lane.auto=false;}
@@ -3550,7 +3549,7 @@ window.addEventListener('blur',()=>{
 
 /* ---------------- persistence + migration ---------------------------- */
 const LS='ten-v1';
-function serialize(){return JSON.stringify({v:15,bpm:T.bpm,metro:S.metro,hum:S.hum,grv:S.grv,octs:S.octs,master:S.master,dj:S.dj,arrOn:S.arrOn!==false,
+function serialize(){return JSON.stringify({v:16,bpm:T.bpm,metro:S.metro,hum:S.hum,grv:S.grv,octs:S.octs,master:S.master,dj:S.dj,arrOn:S.arrOn!==false,
   arr:S.arr,
   patterns:S.patterns.map(p=>({state:p.state==='edit'?'on':p.state,sw:p.sw||0,lanes:p.lanes})),
   presets:S.presets.map(p=>({...p,modLoop:p.modLoop.toJSON()}))});}
@@ -3578,7 +3577,7 @@ function convertV3Preset(sp,i){ // v3-and-earlier preset data -> v4 racks
 }
 function load(json){
   try{
-    const o=JSON.parse(json); if(!o||o.v<1||o.v>15)return false;
+    const o=JSON.parse(json); if(!o||o.v<1||o.v>16)return false;
     T.bpm=o.bpm||120; S.metro=!!o.metro; S.hum=o.hum??0;
     S.grv=o.grv||{typ:0,amt:0};
     if(Array.isArray(o.master))S.master=o.master.map((m,i)=>({typ:0,rt:0,p1:0.3,p2:0.3,p3:0.5,mix:0.3,...m}));
@@ -3613,12 +3612,13 @@ function load(json){
         p.cat=sp.cat||(['kik','snr','hh','perc','bass','keys','chord','lead','pad','plk'][i]||'misc');
         p.tr=sp.tr||0; p.prep=sp.prep||null;
         p.au=Object.assign({gain:0.9,semis:0,rate:1,st:0,en:1,fit:0,src:0},sp.au||{});
-        if(sp.stk&&sp.stk.layers)p.stk={on:sp.stk.on||0,mode:sp.stk.mode||0,sel:sp.stk.sel||0,layers:sp.stk.layers.map(L=>foldMod(L))};
+        if(Array.isArray(sp.kit))p.kit=sp.kit.map(k=>k?modToRoutes(foldMod(k)):null);
         if(o.v<13){                    // env+lfo+amp → mod rack + dist fx
           if(sp.env)p.env=sp.env; if(sp.lfo)p.lfo=sp.lfo; if(sp.amp)p.amp=sp.amp;
           p._folded=false; foldMod(p);
         }else p._folded=true;          // v13 already carries a mod rack
         if(o.v<15)modToRoutes(p);      // v14 routes[], v15 min/max→center
+        if(o.v<16&&p.cat==='kit'){p.kit=null;p.prep=null;}   // v16: kits are 12 full pad chains now
         p.modLoop=Looper.from(sp.modLoop||{unit:'b',count:8}); p.modLoop.auto=false;
         if(o.v<13)p.modLoop.events=[]; // module indices changed — drop stale automation
         if(o.v===4){  // module order changed in v5: ply 6->9, vox 8->7, mix 9->8
@@ -3919,7 +3919,7 @@ function renderSnd(L,pos){
     L.push('   '+sp('d','tab = record from input (mic, or mstr = resample the master mix) · modes in settings'));
   }
   else if(M.prs){
-    const p=pre, defs=prsFieldDefs(), onLayer=!!edLayer(p);
+    const p=pre, defs=prsFieldDefs(), onLayer=!!edKit(p);
     S.curParam=Math.min(S.curParam,defs.length-1);
     let lr='   ', vr='   ';
     defs.forEach((fd,i)=>{
@@ -3931,7 +3931,7 @@ function renderSnd(L,pos){
     L.push(lr); L.push(vr);
     stackStrip(L,p);
     L.push('');
-    if(onLayer)L.push('   '+sp('d','←→ field · ↑↓ set · sound = drop a library preset in · ⌫ removes this layer'));
+    if(onLayer)L.push('   '+sp('d','←→ field · ↑↓ set · this pad is a full chain — every module edits it · ⌫ resets the pad'));
     else L.push('   '+sp('d','←→ field · ↑↓ act · stack = off/stack/split · layer = add & edit · enter → library'));
   }
   else if(M.flat){
@@ -3972,29 +3972,15 @@ function renderSnd(L,pos){
 
 /* param display: when a note is focused, show its EFFECTIVE value in place,
    with a • marking params that carry a per-note override */
-function stackStrip(L,p){            // visual row of layers when stacking is on
-  if(!p.stk||!p.stk.on)return;
-  const sel=p.stk.sel, mode=p.stk.mode?'split':'stack';
-  let row='   '+sp('d',pad(mode,7));
-  const cell=(i,lbl,mut)=>i===sel?sp('i',' '+lbl+' '):(mut?sp('d',' '+lbl+' '):sp('a',' '+lbl+' '));
-  row+=cell(0,'L1 '+p.name,0);      // L1 IS the channel sound (no separate "base")
-  p.stk.layers.forEach((Ly,i)=>{
-    const z=p.stk.mode?_zn(Ly.lo)+'–'+_zn(Ly.hi):Math.round(Ly.lvl*100)+'%';
-    row+=cell(i+1,'L'+(i+2)+' '+Ly.name+(Ly.mute?'×':'')+' '+z,Ly.mute);
-  });
-  L.push(row);
-}
-/* which sound a layer edit is landing on, shown in the sound view */
-function layerBanner(L,pre){
-  if(!pre.stk||!pre.stk.on)return;
-  const sel=pre.stk.sel, M=MODULES[S.curMod];
-  const name=sel===0?pre.name:(pre.stk.layers[sel-1]||{}).name;
-  const num='L'+(sel+1);
+function stackStrip(){}          // (stacking removed — kits are per-pad chains)
+function layerBanner(L,pre){     // which kit pad you're editing
+  if(!isKit(pre))return;
+  const M=MODULES[S.curMod];
+  if(S.prepFocus==null){L.push('  '+sp('r','◆ KIT')+sp('d','  play a pad (a note) to pick which instrument you edit'));return;}
+  const K=kitSlot(pre,S.prepFocus), pc=pcOf(S.prepFocus);
   if(M.prs)return;
-  if(LAYERMODS.has(M.id))
-    L.push('  '+sp('r','◆ editing '+num)+sp('a',' '+name)+sp('d',' — this layer only (⇧digit or PRST layer field to switch)'));
-  else
-    L.push('  '+sp('d','◆ '+M.name+' is channel-shared — applies to all layers'));
+  L.push('  '+sp('r','◆ pad '+NN[pc])+sp('a',' '+K.name+' ('+(K.cat||'kik')+')')+
+    sp('d',' — this pad is its own full chain; every module edits THIS pad'));
 }
 function prepDisp(pre,mi,si,spec){
   const holder=modHolder(pre,MODULES[mi].id);
@@ -4006,16 +3992,15 @@ function prepDisp(pre,mi,si,spec){
   const key=MODULES[mi].id+':'+(MODULES[mi].flat?'-':si)+':'+spec.key;
   return {v:getV(prepEffective(pre,f),mi,si,spec),dot:!!(node.k&&node.k[key]!==undefined)};
 }
-function prepLine(L,pre){
-  const kit=pre.cat==='kit';
+function prepLine(L,pre){        // per-note prep overrides (non-kit channels)
+  if(isKit(pre))return;          // kits show their pad banner instead
   const anyPrep=pre.prep&&pre.prep.notes&&Object.keys(pre.prep.notes).length;
-  if(!kit&&!anyPrep)return;
+  if(!anyPrep)return;
   const f=S.prepFocus;
   const has=f!=null&&pre.prep&&pre.prep.notes&&pre.prep.notes[f];
-  L.push('  '+sp('r','◆ '+(kit?'KIT':'PREP'))+
+  L.push('  '+sp('r','◆ PREP')+
     sp('d','  note: ')+(f!=null?sp('a',NN[f%12]+(Math.floor(f/12)-1)+(has?' ●':'')):sp('d','play a note'))+
-    sp('d','  ·  shift+↑↓ tweaks this note only (• marks it) · ⌫ removes'+
-      (kit?' · PRST shows its sound':'')));
+    sp('d','  ·  cmd+↑↓ tweaks this note only (• marks it) · ⌫ removes'));
   L.push('');
 }
 function renderSlots(L){

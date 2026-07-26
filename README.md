@@ -72,8 +72,8 @@ delay/chorus/flanger/phaser/trem/drive/crush/**dist** (the nine former
 AMP distortion curves)/verb/comp/gate/roll/tape/grs8/send/limit/duck/hp/
 lp/bld. PLAY: chord (with strum ±, or `mstr` role = its held chord
 live-retunes all other channels), arp (slot order matters: arp→chord
-chords every step), groove, prep/kit, plus rev / random-playhead /
-velocity / chance / euclid / nudge.
+chords every step), groove, prep, plus rev / random-playhead /
+velocity / chance / euclid / nudge / humanize (±ms jitter) / flam (grace hits).
 
 **Audio channels.** Set a channel's type to `audio` and it becomes a
 looping audio track: drag a file onto it, or record straight in from the
@@ -85,20 +85,18 @@ live in memory only — they don't survive a reload yet.)
 
 **Presets.** Module 1 (PRST) is the first thing you see in a sound: browse
 the library within the channel's type (17 types — drums are split into
-kik/snr/hh/cymb/perc/tom/wood/zap, plus `kit` where every note maps to its
-own drum sound), change type, save, randomize with a `wild%` dial.
+kik/snr/hh/cymb/perc/tom/wood/zap, plus `kit` — see below), change type,
+save, randomize with a `wild%` dial.
 `enter` opens the library explorer (170 factory presets + your saves) —
 browsing auditions safely: `enter` keeps, `esc` restores your sound.
 
-**Stacking (up to 7 layers).** The PRST `stack` field switches a channel
-between `off` (one sound, zero overhead), `stack` (all layers play
-together — layered patches: saw + sub + bell), and `split` (each layer
-owns a key zone — MPC pads, drum kits, keyboard splits). Add/select
-layers with the `layer` field or `shift+digit` (`shift+1` = L1). With a
-layer selected, PRST becomes its inspector (drop a library preset in, set
-root/zone/level/pan/mute) and OSC/FILT/MOD/VOICE edit *that layer*;
-FX, PLAY and MIX stay shared at the channel. `⌫` on PRST removes the
-selected layer.
+**Kits.** Set a channel's type to `kit` and each of the 12 notes becomes a
+**complete independent instrument** — its own oscillators, filters, mod
+rack, fx, everything. Octaves just transpose, so C2/C3/C4 all play pad C
+at different pitches. Play a pad and it becomes the one you see and edit:
+PRST shows that pad's type/sound/level/pan, and every module (OSC, FILT,
+MOD, VOICE, FX) edits *that pad*. `rnd` on PRST rerolls the whole kit;
+`⌫` resets the focused pad.
 
 **The `/` button makes music.** One key, three intensities, everywhere:
 `/` = musical variations of what's there · `shift+/` = a genuinely
