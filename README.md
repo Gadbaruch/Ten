@@ -59,7 +59,8 @@ momentary/latch REC modes are in settings. An empty pattern's first hit
 **Sound = racks.** Every module is 10 slots: operators (add/fm/ring with
 free dest routing, phase + rtrg/free trig, incl. an `smp` sampler wave —
 drop an audio file on an op), filters incl. EQ bands, a **MOD** rack, an
-**FX** chain, and **PLAY**. The MOD rack unifies modulation — each slot
+**FX** chain, and **PLAY**. Filters have a **track** amount so the cutoff
+follows the note — without it a patch turns muddy low and thin up high. The MOD rack unifies modulation — each slot
 picks a *source* (env / lfo / velocity / key-track / random-S&H) and fans
 it out to one or more *routes*, each with its own *target* (amp / pitch /
 filter / pan / op level; slot# targets one, 0 = all), *amount* and
@@ -74,10 +75,9 @@ lp/bld. PLAY: chord (with strum ±, or `mstr` role = its held chord
 live-retunes all other channels), arp (slot order matters: arp→chord
 chords every step), groove, prep, plus rev / random-playhead /
 velocity / chance / euclid / nudge / humanize (±ms jitter) / flam (grace
-hits). Every PLAY slot carries a **scope** (channel-wide, or just this pad
-on a kit) and a **stage**: `post` = a playback effect, `pre` = the recorder
-captures its output, so recording a held chord or an arp writes the notes
-you actually hear.
+hits). On a kit each pad has its own PLAY rack. Every slot carries a
+**stage**: `post` = a playback effect, `pre` = the recorder captures its
+output, so recording a held chord or an arp writes the notes you hear.
 
 **Audio channels.** Set a channel's type to `audio` and it becomes a
 looping audio track: drag a file onto it, or record straight in from the

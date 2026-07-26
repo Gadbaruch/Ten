@@ -155,7 +155,7 @@ const SWM=['sync','rstrt','wait'];
 
 const mkOsc =i=>({wav:i?0:2,mode:0,dst:0,rat:1,amt:i?0:1,fine:0,ph:0,phm:0});
 const mkAmp =()=>({typ:0,drv:0.3,mix:1,par:0});
-const mkFlt =i=>(i===0?{typ:1,frq:9000,q:1,gn:0,par:0}:{typ:0,frq:2000,q:1,gn:0,par:0});
+const mkFlt =i=>(i===0?{typ:1,frq:9000,q:1,gn:0,par:0,trk:0}:{typ:0,frq:2000,q:1,gn:0,par:0,trk:0});
 const mkEnv =i=>(i===0?{dst:1,idx:1,amt:100,a:0.005,d:0.15,s:0.7,r:0.2,crv:0}
                       :{dst:0,idx:1,amt:100,a:0.003,d:0.2,s:0,r:0.2,crv:0});
 const mkLfo =()=>({dst:0,idx:1,wav:0,rate:5,amt:30});
@@ -287,6 +287,7 @@ const FLT_P=()=>[
   SP('freq','frq','freq'),
   SP('reso','q','lin',{min:0.1,max:24,step:0.5}),
   SP('gain','gn','lin',{min:-18,max:18,step:1,fmt:v=>v+'dB'}),
+  SP('track','trk','lin',{min:0,max:100,step:5,fmt:v=>v+'%'}),   // cutoff follows the note
   SP('route','par','enum',{opts:DROUTE})];
 const ENV_P=()=>[
   SP('dest','dst','enum',{opts:EDST}),
@@ -384,8 +385,7 @@ const FX_P=sl=>{
   };
   return base.concat(tail[t]||[]);
 };
-const PLY_SCOPE=[SP('scope','p5','enum',{opts:['chan','pad']}),
-                 SP('stage','p6','enum',{opts:['post','pre']})];   // pre = the recorder captures the output
+const PLY_SCOPE=[SP('stage','p6','enum',{opts:['post','pre']})];   // pre = the recorder captures the output
 const PLY_P=sl=>{
   const base=[SP('type','typ','enum',{opts:PTYPES})];
   const T=(...a)=>base.concat(a,PLY_SCOPE);
@@ -669,9 +669,10 @@ function scheduleRange(from,to){
       const plyFor=midi=>{
         const pc=kitCh?pcOf(midi):-1;
         if(plyCache[pc])return plyCache[pc];
-        let list=chP.ply.filter(sl=>sl.typ&&!sl.off&&(!kitCh||Math.round(sl.p5||0)===0));
-        if(kitCh){const K=kitSlot(chP,midi);
-          if(K)list=list.concat(K.ply.filter(sl=>sl.typ&&!sl.off));}
+        let list;
+        if(kitCh){const K=kitSlot(chP,midi);            // kits: the pad's rack, nothing else
+          list=K?K.ply.filter(sl=>sl.typ&&!sl.off):[];}
+        else list=chP.ply.filter(sl=>sl.typ&&!sl.off);
         const g=t=>list.find(sl=>sl.typ===t);
         return plyCache[pc]={rev:!!g(5),rnd:g(6),vel:g(7),chc:g(8),euc:g(9),nud:g(10),hmz:g(11),flam:g(12)};
       };
@@ -847,11 +848,12 @@ class Voice{
       const f=p.flt[i]; if(!f.typ||f.off)continue;
       const bq=ac.createBiquadFilter();
       bq.type=FTYPE_W[f.typ];
-      bq.frequency.setValueAtTime(clamp(f.frq*(rootW===4?noteRatio:1),20,16000),at);
+      const trk=(rootW===4?100:(f.trk||0))/100, fFrq=clamp(f.frq*Math.pow(noteRatio,trk),20,18000);
+      bq.frequency.setValueAtTime(fFrq,at);
       bq.Q.value=f.q; bq.gain.value=f.gn;
       if(DROUTE[Math.round(f.par||0)]==='par')fPar.push(bq);
       else{if(fTail)fTail.connect(bq); else fHead=bq; fTail=bq;}
-      this.fNodes[i]=bq; fBase[i]=clamp(f.frq*(rootW===4?noteRatio:1),20,16000);
+      this.fNodes[i]=bq; fBase[i]=fFrq;
     }
     const vca=ac.createGain(); this.vca=vca;
     this.amp=clamp(vel,0,1)*0.85*(p._lvl!=null?p._lvl:1);   // layer level folds into voice gain
@@ -2044,7 +2046,7 @@ function genPreset(cat,rnd,wild=0.5){
     fx:[R(0.01,0.6),R(0.3,1),R(0.2,0.8),R(0.3,1.5)]}[cat]
     ||[0.002,R(0.1,0.4),R(0,0.7),R(0.1,0.5)];
   Object.assign(p.env[0],{a:env[0],d:env[1],s:env[2],r:env[3]});
-  p.flt[0]={typ:pick([1,1,1,2,3]),frq:Math.round(300*Math.pow(2,R(0,5.3))),q:+R(0.5,2+6*wild).toFixed(1),gn:0};
+  p.flt[0]={typ:pick([1,1,1,2,3]),frq:Math.round(300*Math.pow(2,R(0,5.3))),q:+R(0.5,2+6*wild).toFixed(1),gn:0,trk:RI(8,14)*5};   // 40-70% keytrack: same character across the keyboard
   if(P(0.5))p.env[1]={dst:3,idx:1,amt:RI(6,18)*5,a:0.003,d:R(0.08,0.4),s:R(0,0.4),r:0.2};
   if(P(0.3))p.lfo[0]={dst:wild>0.6?pick([1,2,3]):2,idx:1,wav:RI(0,3),
     rate:+R(0.2,2+8*wild).toFixed(1),amt:Math.round(R(4,8+10*wild))*5};
