@@ -827,7 +827,14 @@ class Voice{
     this.pi=pi; this.midi=midi; this.p=p;
     this.released=false; this.killed=false; this.nodes=[]; this.startAt=at;
     const ops=p.osc, rootW=ops[0].wav, isS=rootW===9, isN=rootW===4||isS;
-    const baseTarget=(isN?Math.pow(2,(midi-60)/12)
+    /* NOISE has no pitch: resampling it (playbackRate) just makes it grainy low /
+       thin+aliased high. Keep the buffer at rate 1 and track the note on the
+       FILTERS instead — that's how hardware drum machines transpose noise.
+       Samplers (smp) DO repitch, since that's what a sampler is. */
+    const noiseRoot=rootW===4;
+    const noteRatio=Math.pow(2,(midi-60)/12);
+    const baseTarget=(noiseRoot?1
+      :isN?noteRatio
       :440*Math.pow(2,(midi-69)/12))*ops[0].rat*Math.pow(2,(ops[0].fine||0)/1200);
 
     /* filter chain (per voice): ser slots in series, par slots branch from the
@@ -840,11 +847,11 @@ class Voice{
       const f=p.flt[i]; if(!f.typ||f.off)continue;
       const bq=ac.createBiquadFilter();
       bq.type=FTYPE_W[f.typ];
-      bq.frequency.setValueAtTime(clamp(f.frq,20,16000),at);
+      bq.frequency.setValueAtTime(clamp(f.frq*(rootW===4?noteRatio:1),20,16000),at);
       bq.Q.value=f.q; bq.gain.value=f.gn;
       if(DROUTE[Math.round(f.par||0)]==='par')fPar.push(bq);
       else{if(fTail)fTail.connect(bq); else fHead=bq; fTail=bq;}
-      this.fNodes[i]=bq; fBase[i]=clamp(f.frq,20,16000);
+      this.fNodes[i]=bq; fBase[i]=clamp(f.frq*(rootW===4?noteRatio:1),20,16000);
     }
     const vca=ac.createGain(); this.vca=vca;
     this.amp=clamp(vel,0,1)*0.85*(p._lvl!=null?p._lvl:1);   // layer level folds into voice gain
@@ -1126,7 +1133,7 @@ class Voice{
       for(const bq of this.fPar){merge.connect(bq); bq.connect(fsum);}
       fsum.connect(vca);
     }else merge.connect(vca);
-    vca.connect(E.buses[pi].vIn);
+    vca.connect(E.voiceOut(pi,midi));   // kits: this pad's own fx/level bus
     this.src=firstSrc;
     firstSrc.onended=()=>{const a=E.act[pi],i=a.indexOf(this); if(i>=0)a.splice(i,1);
       try{vca.disconnect();}catch(_){}};
@@ -1575,23 +1582,44 @@ class Engine{
   /* bus-level per-note overrides (amp/fx/mix live on the channel, not the voice):
      on each hit, reshape the channel rack to the note's values — mono-minded and
      gloriously wrong for chords (last note wins), by design */
-  /* kit pads own their whole chain — swap the channel's bus modules (fx/mix) to
-     the pad's before the rack is rebuilt, so each pad gets its own fx + level */
-  applyKitBus(pi,midi){
-    const p=S.presets[pi]; if(!isKit(p))return;
-    const K=kitSlot(p,midi); if(!K)return;
-    const sig='kit'+pcOf(midi);
-    this.prepSig=this.prepSig||{};
-    if(this.prepSig[pi]===sig)return;
-    const bFx=p.fx, bMix=p.mix;
-    p.fx=K.fx; p.mix=K.mix;                    // build the rack from THIS pad
-    this._inPrep=true; this.rebuildRack(pi); this._inPrep=false;
-    this.prepSig[pi]=sig;
-    p.fx=bFx; p.mix=bMix;                      // channel data stays untouched
+  /* kit pads own their whole chain: each pad gets its OWN fx chain + level/pan,
+     summing into the channel bus. Built lazily, rebuilt only when that pad changes,
+     so overlapping pads never stomp each other's effects. */
+  voiceOut(pi,midi){
+    const p=S.presets[pi];
+    if(!isKit(p))return this.buses[pi].vIn;
+    const pc=pcOf(midi), K=kitSlot(p,midi);
+    this.kitBuses=this.kitBuses||{};
+    const store=this.kitBuses[pi]=this.kitBuses[pi]||{};
+    const sig=JSON.stringify([K.fx,K.mix]);
+    let kb=store[pc];
+    if(kb&&kb.sig===sig)return kb.in;
+    if(kb){for(const n of kb.rack){try{n.stop&&n.stop();}catch(_){} try{n.disconnect();}catch(_){}}
+      try{kb.in.disconnect();}catch(_){}}
+    const ac=AC, rack=[], keep=n=>{rack.push(n);return n;};
+    const inN=ac.createGain(); let cur=inN;
+    const owner='k'+pi+'_'+pc;
+    this.followers=this.followers.filter(f=>f.owner!==owner);
+    this.grossList=this.grossList.filter(f=>f.owner!==owner);
+    this.duckList=this.duckList.filter(f=>f.owner!==owner);
+    for(const fx of K.fx){
+      if(!fx.typ||fx.off)continue;
+      if(XTYPES[fx.typ]==='send'){
+        const sg=keep(ac.createGain()); sg.gain.value=fx.p2;
+        cur.connect(sg); sg.connect(this.sendIns[clamp(Math.round(fx.p1),1,10)-1]);
+        continue;
+      }
+      cur=this.fxUnit(fx,cur,keep,owner,false);
+    }
+    const g=keep(ac.createGain()); g.gain.value=(K.mix&&K.mix.lvl!=null)?K.mix.lvl:0.8;
+    const pn=keep(ac.createStereoPanner()); pn.pan.value=(K.mix&&K.mix.pan)||0;
+    cur.connect(g); g.connect(pn); pn.connect(this.buses[pi].vIn);   // channel fx still apply on top
+    store[pc]={in:inN,rack,sig};
+    return inN;
   }
   applyBusPreps(pi,midi){
     const p=S.presets[pi];
-    if(isKit(p))return this.applyKitBus(pi,midi);
+    if(isKit(p))return;                  // kit pads use their own buses (voiceOut)
     if(!p.prep||!p.prep.notes)return;
     const keys=new Set();
     for(const m2 in p.prep.notes)for(const key in (p.prep.notes[m2].k||{})){
