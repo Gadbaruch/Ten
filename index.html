@@ -2602,6 +2602,12 @@ function libToPreset(en){          // a library entry → a complete preset obje
   modToRoutes(kp); kp.cat=en.cat; delete kp.kit;
   return kp;
 }
+function prsAction(d){
+  const f0=(prsFieldDefs()[S.curParam]||{}).k;
+  _prsAction(d);
+  const ni=prsFieldDefs().findIndex(x=>x.k===f0);   // keep the cursor on the same field if the row changes
+  if(ni>=0)S.curParam=ni;
+}
 function _prsAction(d){
   const pi=S.editSnd, p=S.presets[pi];
   const defs=prsFieldDefs(), f=(defs[S.curParam]||defs[0]).k;
