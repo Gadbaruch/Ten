@@ -56,11 +56,12 @@ a sensible power-of-two length, wrapped from your entry point. Classic
 momentary/latch REC modes are in settings. An empty pattern's first hit
 **sets the One** (transport retriggers on it).
 
-**Sound = racks.** Every module is 10 slots: operators (add/fm/ring with
-free dest routing, phase + rtrg/free trig, incl. an `smp` sampler wave —
+**Sound = racks.** Every module is 10 slots: operators (add/fm/ring/**sync**
+with free dest routing, phase + rtrg/free trig, incl. an `smp` sampler wave —
 drop an audio file on an op), filters incl. EQ bands, a **MOD** rack, an
 **FX** chain, and **PLAY**. The MOD rack unifies modulation — each slot
-picks a *source* (env / lfo / velocity / key-track / random-S&H) and fans
+picks a *source* (env / lfo / velocity / key-track / random-S&H /
+**pressure**) and fans
 it out to one or more *routes*, each with its own *target* (amp / pitch /
 filter / pan / op level; slot# targets one, 0 = all), *amount* and
 *range*. So a single LFO can sweep the filter, wobble pan and bend pitch
@@ -68,15 +69,40 @@ at once, each at its own depth. Add routes with the `route` field or the
 **learn** gesture: `cmd+C` on a MOD slot arms it, then `cmd+V` on any
 filter/osc/mix param maps a route to that target. The amp envelope is
 just a MOD slot (env → amp). The FX chain runs
-delay/chorus/flanger/phaser/trem/drive/crush/**dist** (the nine former
-AMP distortion curves)/verb/comp/gate/roll/tape/grs8/send/limit/duck/hp/
-lp/bld. PLAY: chord (with strum ±, or `mstr` role = its held chord
+delay/chorus/flanger/phaser/trem/**dist** (all nine drive curves, the
+former AMP distortions — standalone `drv` and `crush` folded into it)/
+verb (50ms rooms to 4.5s halls)/comp/gate/roll/tape/grs8/send/limit/duck/
+hp/lp/bld. PLAY: chord (with strum ±, or `mstr` role = its held chord
 live-retunes all other channels), arp (slot order matters: arp→chord
 chords every step), groove, prep, plus rev / random-playhead /
 velocity / chance / euclid / nudge / humanize (±ms jitter) / flam (grace
-hits). On a kit each pad has its own PLAY rack. Every slot carries a
+hits) / rpit (random pitch: ±cents and ±semitones per note, optionally
+snapped to the key — on a kit it repitches the pad you hit rather than
+jumping to another one). On a kit each pad has its own PLAY rack. Every slot carries a
 **stage**: `post` = a playback effect, `pre` = the recorder captures its
 output, so recording a held chord or an arp writes the notes you hear.
+
+**Operators are live.** Wave, ratio, fine and level land on notes that are
+already sounding — hold a chord and sweep a ratio, no retrigger. (Mode,
+dest, phase and trig rewire the graph, so those still take effect on the
+next note.) `sync` is hard sync: the operator locks to whatever `dest`
+points at and its **ratio becomes the sync sweep**, not its pitch — the
+classic tearing lead. Non-integer ratios are where the character lives.
+
+**Velocity and pressure.** The laptop keyboard has no sensors, so it plays
+at a fixed velocity you step with `c` / `v` while playing — the same way
+`z` / `x` move the octave. Recorded notes keep whatever velocity they were
+played at. `midi in` in SETTINGS has three states: `off`, `solo`
+and `+kbd`. Use **solo** with a hall-effect keyboard — it types *and* sends
+MIDI, so without it every note fires twice, at two different velocities.
+`+kbd` keeps both alive for a normal MIDI controller. Notes that fall inside
+the current key range are played through the real key path, so retro
+capture, live quantize and the ONE all still work. Aftertouch, channel pressure and CC11/CC2/CC1 all feed the
+`press` MOD source, which — unlike `vel`, sampled once at note-on — keeps
+moving while the note sounds. Route it at the filter for a swell, at pitch,
+or at amp (a gain *after* the envelope, so a note can still release). Under
+MPE, where each note owns its own channel, channel pressure is therefore
+genuinely per-note: press one key deeper and only that voice opens up.
 
 **Audio channels.** Set a channel's type to `audio` and it becomes a
 looping audio track: drag a file onto it, or record straight in from the
@@ -157,7 +183,7 @@ top to bottom; each section is banner-commented in this order:
    decides meaning. All state lives in `S` (session) / `CFG` (defaults) /
    `T` (transport).
 8. **Persistence** — `serialize()`/`load()` with versioned migrations
-   (currently v14). Undo = snapshot stack of `serialize()`.
+   (currently v17). Undo = snapshot stack of `serialize()`.
 9. **Render** — full-screen `<pre>`, rebuilt at ~30fps from state. No DOM
    beyond one element.
 

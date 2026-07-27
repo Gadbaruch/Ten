@@ -84,7 +84,7 @@ const cycleState=h=>{h.state=h.state==='on'?'rec':h.state==='rec'?'edit':'on';};
 
 /* ---------------- slot racks: enums + defaults ----------------------- */
 const WAVES=['sin','tri','saw','sqr','nse','org','bel','vox','mtl','smp'];
-const OPMODE=['add','fm','ring'];
+const OPMODE=['add','fm','ring','sync'];
 const DEST=['prev','op1','op2','op3','op4','op5','op6','op7','op8','op9','op10'];
 const DTYPES=['off','soft','hard','fold','tube','fuzz','crush','sat','asym','rect'];
 const DROUTE=['ser','par'];
@@ -93,14 +93,25 @@ const FTYPE_W=[null,'lowpass','highpass','bandpass','notch','peaking','lowshelf'
 const EDST=['off','amp','pitch','filt','op'];
 const LDST=['off','pitch','filt','amp','pan','op'];
 /* unified MOD rack: one source per slot, one target enum */
-const MSRC=['off','env','lfo','vel','key','rnd'];
+const MSRC=['off','env','lfo','vel','key','rnd','press'];   // press = live per-note pressure
 const MDST=['off','amp','pitch','filt','pan','op'];   // + learned tgt address overrides this
 const MD2ENV={1:1,2:2,3:3,5:4};                        // MDST → the engine's env-dst numbering
 const MD2LFO={2:1,3:2,1:3,4:4,5:5};                    // MDST → the engine's lfo-dst numbering
 const LFOW=['sin','tri','sqr','saw'], LFOW_W=['sine','triangle','square','sawtooth'];
+/* note names live up here because startup (libInit → kitPads → basePreset(NN[i]))
+   needs them long before the render section runs */
+const PCH='CcDdEFfGgAaB';
+const NN=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
 const XTYPES=['off','dly','cho','fla','pha','trm','drv','crush','verb','comp','gate','roll','tape','grs8','send','limit','duck','amix','hp','lp','bld','dist'];
+/* drv and crush are the same two curves `dist` already offers — kept in the
+   table so old indices still resolve, hidden from the picker (v17 folds them). */
+const XHIDE=new Set([XTYPES.indexOf('drv'),XTYPES.indexOf('crush')]);
+const XDIST=XTYPES.indexOf('dist');
+/* reverb size: squared so the short end has real resolution — 50ms rooms to 4.5s halls */
+const vrbSec=v=>0.05+4.45*Math.pow(clamp(v,0,1),2);
+const vrbInv=s=>clamp(Math.sqrt(Math.max(0,s-0.05)/4.45),0,1);
 const GPATS=[[1,1,1,1,0,0,0,0],[0,0,1,1,0,0,1,1],[1,0,1,0,1,0,1,0],[1,.7,.45,.3,.2,.12,.07,0],[1,0,0,1,0,0,1,0]];
-const PTYPES=['off','chord','arp','grv','prep','rev','rndp','vel','chc','euc','nudge','hmnz','flam'];
+const PTYPES=['off','chord','arp','grv','prep','rev','rndp','vel','chc','euc','nudge','hmnz','flam','rpit'];
 /* groove templates: f(16th-index) -> -1..1, scaled by amt% * half a 16th */
 const GROOVES=[
  {n:'sw16',f:i=>i%2===1?1:0},
@@ -133,16 +144,16 @@ const DJ0=()=>[
  {typ:20,p1:0.65,p2:0.5,p3:1,mix:1},       // s  buildup (hp + synced dly + verb)
  {typ:19,p1:0.35,p2:0.2,p3:0.5,mix:1},     // d  lopass
  {typ:1, p1:0.27,p2:0.6,p3:3,mix:0.28},    // f  delay throw (synced ping-pong)
- {typ:8, p1:0.85,p2:0.55,p3:0.9,mix:0.4},  // g  verb wash
+ {typ:8, p1:0.91,p2:0.55,p3:0.9,mix:0.4},  // g  verb wash
  {typ:11,p1:1,p2:0.85,p3:0.5,mix:0.55},    // h  roll 1/8
  {typ:11,p1:2,p2:0.85,p3:0.5,mix:0.55},    // j  roll 1/16
- {typ:7, p1:0.55,p2:0,p3:0.5,mix:0.7},     // k  crush
+ {typ:XDIST,p1:0.55,p2:0,p3:5,mix:0.7},    // k  crush (dist curve)
  {typ:12,p1:0.8,p2:0.5,p3:0.5,mix:0.6},    // l  tape
  {typ:13,p1:0,p2:1,p3:0.5,mix:1},          // ;  gate
 ];
 const djName=i=>S.dj&&S.dj[i]&&S.dj[i].typ?XTYPES[S.dj[i].typ]:'off';
 const mkMaster=()=>Array.from({length:10},(_,i)=>
-  i===0?{typ:8,rt:1,p1:0.45,p2:0.5,p3:0.7,mix:0.9}:   // send slot 1: reverb
+  i===0?{typ:8,rt:1,p1:0.68,p2:0.5,p3:0.7,mix:0.9}:   // send slot 1: reverb
   i===1?{typ:1,rt:1,p1:0.27,p2:0.35,p3:0.5,mix:0.8}:  // send slot 2: delay
   i===9?{typ:15,rt:0,p1:0.95,p2:0.3,p3:0.5,mix:0}:    // slot 0: transparent safety limiter (~-1.5dB)
   {typ:0,rt:0,p1:0.3,p2:0.3,p3:0.5,mix:0.3});
@@ -195,8 +206,36 @@ function foldMod(p){
   p._folded=true;
   return p;
 }
+/* PLAY 'rpit': a fresh pitch offset per note. Returns the SOUNDING midi —
+   callers keep the original note for kit-pad selection, so a kit repitches the
+   pad you hit — even across octaves — instead of jumping to another pad. */
+function rpitApply(midi,sl){
+  if(Math.random()>=clamp(sl.p3??100,0,100)/100)return midi;
+  const dir=Math.round(sl.p5||0);
+  const r=()=>dir===1?Math.random():dir===2?-Math.random():Math.random()*2-1;
+  let m=midi, semis=Math.round(sl.p2||0);
+  if(semis){
+    m=Math.round(midi+r()*semis);
+    if(Math.round(sl.p4||0)===1)m=snapToPCs(m,pcsNow());   // stay in key
+  }
+  return m+r()*(sl.p1||0)/100;                             // cents ride on top
+}
 const mkFx  =()=>({typ:0,p1:0.3,p2:0.3,p3:0.5,mix:0.3});
-const mkPly =()=>({typ:0,p1:2,p2:0,p3:1,p4:60,p5:0,p6:0});   // p5 scope(chan/pad) · p6 stage(post/pre)
+const mkPly =()=>({typ:0,p1:2,p2:0,p3:1,p4:60,p5:0,p6:0});   // p5 spare · p6 stage(post/pre)
+/* v17 fx migration, applied once per stored rack: standalone drv/crush become
+   the equivalent `dist` curve, and verb size moves off the old linear 0.3..4.3s
+   dial onto vrbSec() — the same room, a new number. */
+function fx17(list){
+  if(!Array.isArray(list))return list;
+  for(const fx of list){
+    if(!fx)continue;
+    const t=XTYPES[fx.typ];
+    if(t==='drv'||t==='crush'){fx.p3=t==='drv'?0:5; fx.typ=XDIST;}   // dist p3: 0=soft 5=crush
+    else if(t==='verb')fx.p1=vrbInv(0.3+(fx.p1??0)*4);
+  }
+  return list;
+}
+const fx17p=p=>{if(!p)return p; fx17(p.fx); if(Array.isArray(p.kit))p.kit.forEach(k=>k&&fx17(k.fx)); return p;};
 const rack=(mk)=>Array.from({length:10},(_,i)=>mk(i));
 
 const DRUMCATS=['kik','snr','hh','cymb','perc','tom','wood','zap'];
@@ -235,6 +274,8 @@ const SETTINGS=[
  {n:'scale',  v:()=>CFG.scaleOn?'on':'off',    a:()=>CFG.scaleOn=CFG.scaleOn?0:1},
  {n:'key',    v:()=>KEYN[CFG.key],             a:d=>CFG.key=fmod(CFG.key+d,12)},
  {n:'mode',   v:()=>SCALES[CFG.scale][0],      a:d=>CFG.scale=fmod(CFG.scale+d,SCALES.length)},
+ {n:'vel',    v:()=>String(Math.round(clamp(CFG.kvel??0.9,0.02,1)*127)), a:d=>EXP.bump(d*0.05)},
+ {n:'midi in',v:()=>EXP.midiOn?['off','solo','+kbd'][CFG.midiIn|0]:'off', a:d=>EXP.cycleMidi(d)},
 ];
 function basePreset(name){return{
   name, cat:'misc', tr:0, prep:null,
@@ -321,11 +362,13 @@ const MOD_P=sl=>{                    // unified: source picks which extra fields
     SP('rate','rate','time',{min:0.05,max:40,fmt:fHz}),
     SP('phase','ph','lin',{min:0,max:355,step:5,fmt:v=>v+'°'})]);
   if(s===5)return base.concat([SP('rate','rate','time',{min:0.05,max:40,fmt:fHz})]);  // rnd = S&H rate
+  if(s===6)return base.concat([SP('glide','pg','time',{min:0.005,max:0.5,fmt:fT,
+    get:m=>m.pg??0.03, set:(m,v)=>m.pg=v})]);   // pressure smoothing
   return base;                       // vel / key: target + amount + range
 };
 function tgtLabel(t){return (t.mod||'?')+((t.s??-1)>=0?(t.s+1):'')+'·'+(t.key||'?');}
 const FX_P=sl=>{
-  const t=XTYPES[sl.typ], base=[SP('type','typ','enum',{opts:XTYPES})];
+  const t=XTYPES[sl.typ], base=[SP('type','typ','enum',{opts:XTYPES,skip:XHIDE})];
   const tail={
     dly:[SP('time','p1','lin',{min:0,max:1,step:0.05,fmt:v=>Math.round(20+v*1300)+'ms'}),
          SP('fdbk','p2','lin',{min:0,max:0.9,step:0.05}),
@@ -346,7 +389,7 @@ const FX_P=sl=>{
          SP('tone','p2','lin',{min:0,max:1,step:0.05}),SP('mix','mix','lin',{min:0,max:1,step:0.05})],
     crush:[SP('crush','p1','lin',{min:0,max:1,step:0.05}),
          SP('-','p2','lin',{min:0,max:1,step:0.05}),SP('mix','mix','lin',{min:0,max:1,step:0.05})],
-    verb:[SP('size','p1','lin',{min:0,max:1,step:0.05,fmt:v=>(0.3+v*4).toFixed(1)+'s'}),
+    verb:[SP('size','p1','lin',{min:0,max:1,step:0.05,fmt:v=>fT(vrbSec(v))}),
          SP('color','p2','lin',{min:0,max:1,step:0.05}),
          SP('width','p3','lin',{min:0,max:1,step:0.05}),
          SP('mix','mix','lin',{min:0,max:1,step:0.05})],
@@ -414,6 +457,12 @@ const PLY_P=sl=>{
     SP('gap','p1','lin',{min:5,max:120,step:1,fmt:v=>v+'ms'}),
     SP('hits','p2','lin',{min:1,max:3,step:1,fmt:v=>'+'+Math.round(v)}),
     SP('level','p3','lin',{min:0,max:1,step:0.05,fmt:v=>Math.round(v*100)+'%'}));
+  if(sl.typ===13)return T(                       // random pitch, re-rolled per note
+    SP('cents','p1','lin',{min:0,max:200,step:5,fmt:v=>'\u00b1'+v+'c'}),
+    SP('semis','p2','lin',{min:0,max:24,step:1,fmt:v=>'\u00b1'+v}),
+    SP('chance','p3','lin',{min:0,max:100,step:5,fmt:v=>v+'%'}),
+    SP('dir','p5','enum',{opts:['\u00b1','up','dn']}),
+    SP('snap','p4','enum',{opts:['free','scale']}));
   return sl.typ?T():base;    // off = just the type field
 };
 
@@ -446,7 +495,11 @@ const setV=(pre,mi,si,spec,v)=>{const o=MODULES[mi].flat?pre[MODULES[mi].id]:slo
   if(spec.set)spec.set(o,v); else o[spec.key]=v;};
 
 function adjust(spec,v,dir,m=1){
-  if(spec.type==='enum')return fmod(Math.round(v)+dir,spec.opts.length);
+  if(spec.type==='enum'){
+    const n2=spec.opts.length; let nv=fmod(Math.round(v)+dir,n2);
+    if(spec.skip)for(let i=0;i<n2&&spec.skip.has(nv);i++)nv=fmod(nv+(dir||1),n2);   // step over hidden entries
+    return nv;
+  }
   if(spec.type==='freq')return clamp(v*Math.pow(1.12,dir*m),20,16000);
   if(spec.type==='time'){
     const lo=spec.min!==undefined?spec.min:0.001, hi=spec.max!==undefined?spec.max:8;
@@ -482,7 +535,7 @@ const PRESETS0=()=>[
    Object.assign(p.env[0],{a:0.001,d:0.16,s:0,r:0.07});
    Object.assign(p.flt[0],{typ:3,frq:1900,q:1.5});
    p.env[2]={dst:2,idx:1,amt:60,a:0.001,d:0.05,s:0,r:0.05};
-   p.fx[0]={typ:8,p1:0.18,p2:0,mix:1};}),
+   p.fx[0]={typ:8,p1:0.47,p2:0,mix:1};}),
  mkP('HAT','hh',p=>{p.osc[0].wav=4;
    p.osc[1]={wav:8,mode:0,dst:0,rat:6,amt:0.3,fine:0,ph:0,phm:1};
    Object.assign(p.env[0],{a:0.001,d:0.04,s:0,r:0.025});
@@ -491,7 +544,7 @@ const PRESETS0=()=>[
    Object.assign(p.env[0],{a:0.004,d:0.11,s:0,r:0.12});
    Object.assign(p.flt[0],{typ:3,frq:1150,q:6});
    p.amp[0]={typ:2,drv:0.25,mix:0.35,par:0};
-   p.fx[0]={typ:8,p1:0.3,p2:0,mix:1};}),
+   p.fx[0]={typ:8,p1:0.57,p2:0,mix:1};}),
  mkP('BAS','bass',p=>{Object.assign(p.osc[0],{wav:3,rat:0.25});
    p.osc[1]={wav:0,mode:0,dst:0,rat:0.5,amt:0.55,fine:0,ph:0,phm:0};
    Object.assign(p.env[0],{a:0.003,d:0.2,s:0.6,r:0.08});
@@ -509,7 +562,7 @@ const PRESETS0=()=>[
    p.flt[0].frq=2800;
    Object.assign(p.vox,{uni:2,sprd:8,wide:0.5});
    p.fx[0]={typ:2,p1:0.25,p2:0.3,mix:0.25};
-   p.fx[1]={typ:8,p1:0.3,p2:0,mix:1};
+   p.fx[1]={typ:8,p1:0.57,p2:0,mix:1};
    p.ply[0]={typ:1,p1:2,p2:0.012,p3:0};}),
  mkP('LED','lead',p=>{p.osc[0].wav=3;
    p.osc[1]={wav:2,mode:0,dst:0,rat:1,amt:0.4,fine:-7,ph:0,phm:1};
@@ -524,7 +577,7 @@ const PRESETS0=()=>[
    p.lfo[0]={dst:2,idx:1,wav:0,rate:0.35,amt:35};
    Object.assign(p.vox,{uni:5,sprd:18,wide:0.85,slop:0.012});
    p.fx[0]={typ:2,p1:0.2,p2:0.4,mix:0.3};
-   p.fx[1]={typ:8,p1:0.5,p2:0,mix:1}; p.mix.lvl=0.55;}),
+   p.fx[1]={typ:8,p1:0.71,p2:0,mix:1}; p.mix.lvl=0.55;}),
  mkP('PLK','plk',p=>{p.osc[0].wav=1;
    p.osc[1]={wav:0,mode:1,dst:1,rat:3,amt:0.25,fine:0,ph:0,phm:0};
    Object.assign(p.env[0],{a:0.001,d:0.13,s:0,r:0.14});
@@ -821,10 +874,69 @@ function prepEffective(p,midi){
   return eff;
 }
 
+/* which operator op `i` hard-syncs to, as a frequency ratio against op 0.
+   Same resolution rule as fm/ring: `dest` if it points at a live op, otherwise
+   the nearest lower one, otherwise op 0. */
+function syncMasterRat(ops,i){
+  const d=Math.round((ops[i]||{}).dst||0);
+  let j=d>0?d-1:-1;
+  const live=k=>ops[k]&&!ops[k].off&&(k===0||ops[k].amt>0.001);
+  if(j<0||j===i||!live(j)){j=0; for(let k=i-1;k>=1;k--)if(live(k)){j=k;break;}}
+  return j===0?1:ops[j].rat*Math.pow(2,(ops[j].fine||0)/1200);
+}
+/* the sync amount of op `i`: its own ratio measured against its master's */
+const syncRatOf=(ops,i)=>(ops[i].rat*Math.pow(2,(ops[i].fine||0)/1200))/syncMasterRat(ops,i);
 class Voice{
-  constructor(E,at,pi,midi,vel,preOverride){
+  /* live per-note pressure, 0..1 — what the 'press' MOD source follows */
+  setPressure(x){
+    if(this.killed||!this.pressN||!this.pressN.length)return;
+    this.press=clamp(x,0,1);
+    const t=AC.currentTime;
+    for(const n of this.pressN)
+      try{n.p.setTargetAtTime((n.base||0)+this.press*n.sc,t,this.pressGlide);}catch(_){}
+  }
+  /* live OSC edits: retune / relevel / reshape the running oscillators instead of
+     waiting for the next note. mode/dest/trig/phase are structural — those still
+     land on the next note, since they change the graph itself. */
+  oscRefresh(E,key){
+    if(this.killed)return;
+    const ops=this.p.osc, t=AC.currentTime, GL=0.02;
+    const bt=this.rootFreq*ops[0].rat*Math.pow(2,(ops[0].fine||0)/1200);
+    const sprd=this.p.vox.sprd||0;
+    for(let i=0;i<10;i++){
+      const op=ops[i]; if(!op)continue;
+      if(key==='amt'||key==='off')for(const a of (this.opAmt[i]||[]))
+        a.g.gain.setTargetAtTime((op.off?0:op.amt)*a.sc,t,GL);
+      const list=this.opPitch[i]||[];
+      for(let u=0;u<list.length;u++){
+        const e=list[u], target=bt*Math.pow(2,sprd*(this.uniOff[u]||0)/1200);
+        let f;
+        if(e.kind==='smp')f=this.noteRatio*op.rat*Math.pow(2,(op.fine||0)/1200);
+        else if(e.kind==='sync')f=target*syncMasterRat(ops,i);
+        else f=i===0?target:target*op.rat*Math.pow(2,(op.fine||0)/1200);
+        if(!(f>0))continue;
+        e.base=f;
+        if(key==='rat'||key==='fine'||key==='dst'){
+          e.pm.cancelScheduledValues(t);
+          e.pm.setTargetAtTime(f,t,GL);
+        }
+        /* a sync op's ratio is its TIMBRE, not its pitch — reshape the wave */
+        if(e.kind==='sync'&&(key==='rat'||key==='fine'||key==='wav'||key==='dst')){
+          const node=(this.opNodes[i]||[])[u];
+          if(node&&node.setPeriodicWave)node.setPeriodicWave(E.syncWave(op.wav,syncRatOf(ops,i)));
+        }
+      }
+      if(key==='wav')for(const node of (this.opNodes[i]||[])){
+        const sy=i>0&&op.mode===3&&op.wav!==4&&op.wav!==9;
+        if(!node||!node.setPeriodicWave||sy)continue;   // sync handled above; buffers can't swap wave
+        if(op.wav===4||op.wav===9)continue;
+        E.setWave(node,op.wav,op.phm===1?0:op.ph);
+      }
+    }
+  }
+  constructor(E,at,pi,midi,vel,preOverride,padMidi){
     const p=preOverride||prepEffective(S.presets[pi],midi), ac=AC;
-    this.pi=pi; this.midi=midi; this.p=p;
+    this.pi=pi; this.midi=midi; this.pad=padMidi==null?midi:padMidi; this.p=p;
     this.released=false; this.killed=false; this.nodes=[]; this.startAt=at;
     const ops=p.osc, rootW=ops[0].wav, isS=rootW===9, isN=rootW===4||isS;
     /* NOISE has no pitch: resampling it (playbackRate) just makes it grainy low /
@@ -833,9 +945,11 @@ class Voice{
        Samplers (smp) DO repitch, since that's what a sampler is. */
     const noiseRoot=rootW===4;
     const noteRatio=Math.pow(2,(midi-60)/12);
-    const baseTarget=(noiseRoot?1
-      :isN?noteRatio
-      :440*Math.pow(2,(midi-69)/12))*ops[0].rat*Math.pow(2,(ops[0].fine||0)/1200);
+    /* rootFreq is the pitch BEFORE op 0's ratio/fine, so a live edit to those
+       can rebuild every operator's frequency from scratch (see oscRefresh) */
+    this.noteRatio=noteRatio;
+    this.rootFreq=noiseRoot?1:isN?noteRatio:440*Math.pow(2,(midi-69)/12);
+    const baseTarget=this.rootFreq*ops[0].rat*Math.pow(2,(ops[0].fine||0)/1200);
 
     /* filter chain (per voice): ser slots in series, par slots branch from the
        chain input and sum at the end (lp ser + hp par = instant band-split) */
@@ -932,8 +1046,12 @@ class Voice{
     };
     this.opGains={};  // slot -> [gain nodes across uni] for op env/lfo
     this.opPitch={}; this.opDet={};   // slot -> pitch params / mod-targets (per uni)
+    /* live-edit bookkeeping: the source node and the amt→gain scale per op/uni,
+       plus each unison voice's detune offset, so oscRefresh can retune in place */
+    this.opNodes={}; this.opAmt={}; this.uniOff=[];
     for(let u=0;u<uniN;u++){
       const off=uniN===1?0:(u/(uniN-1))*2-1;
+      this.uniOff.push(off);
       const target=baseTarget*Math.pow(2,(p.vox.sprd||0)*off/1200);
       let src,pitchParam;
       if(isN){src=ac.createBufferSource();src.buffer=isS?(E.opSamples.get(pi+':0')||E.noiseBuf):E.noiseBuf;src.loop=true;pitchParam=src.playbackRate;}
@@ -947,10 +1065,19 @@ class Voice{
       const g0=ac.createGain(); g0.gain.value=ops[0].off?0:ops[0].amt;
       src.connect(g0);
       (this.opGains[0]=this.opGains[0]||[]).push(g0);
+      (this.opNodes[0]=this.opNodes[0]||[]).push(src);
+      (this.opAmt[0]=this.opAmt[0]||[]).push({g:g0,sc:1});
       const built=[{i:0,s:src,osc:!isN,f:target,op:ops[0]}];
       for(let i=1;i<10;i++){
         const op=ops[i]; if(!op||op.amt<=0.001||op.off)continue;
-        const wv=op.wav, fi=target*op.rat*Math.pow(2,(op.fine||0)/1200);
+        const wv=op.wav;
+        /* HARD SYNC: the op runs at its MASTER's frequency and its ratio becomes
+           the sync amount — the slave's phase is reset every master cycle, which
+           is exactly a waveform periodic at the master pitch. We bake that shape
+           into a PeriodicWave, so it stays band-limited and costs no extra nodes. */
+        const sync=op.mode===3&&wv!==4&&wv!==9;
+        const mf=sync?target*syncMasterRat(ops,i):0;
+        const fi=sync?mf:target*op.rat*Math.pow(2,(op.fine||0)/1200);
         let s2;
         if(wv===4){s2=ac.createBufferSource();s2.buffer=E.noiseBuf;s2.loop=true;}
         else if(wv===9){                              // sampler op: pitch via playbackRate
@@ -958,13 +1085,15 @@ class Voice{
           s2.buffer=E.opSamples.get(pi+':'+i)||E.noiseBuf; s2.loop=true;
           const ratio=Math.pow(2,(midi-60)/12)*op.rat*Math.pow(2,(op.fine||0)/1200);
           s2.playbackRate.value=ratio;
-          (this.opPitch[i]=this.opPitch[i]||[]).push({pm:s2.playbackRate,base:ratio});
+          (this.opPitch[i]=this.opPitch[i]||[]).push({pm:s2.playbackRate,base:ratio,kind:'smp'});
           (this.opDet[i]=this.opDet[i]||[]).push({pm:s2.playbackRate,sc:0.5});
         }
+        else if(sync){s2=ac.createOscillator();s2.setPeriodicWave(E.syncWave(wv,syncRatOf(ops,i)));setF(s2.frequency,mf);}
         else{s2=ac.createOscillator();E.setWave(s2,wv,op.phm===1?Math.random()*360:op.ph);setF(s2.frequency,fi);}
         built.push({i,s:s2,osc:wv!==4&&wv!==9,f:fi,op});
+        (this.opNodes[i]=this.opNodes[i]||[]).push(s2);
         if(wv!==4&&wv!==9){
-          (this.opPitch[i]=this.opPitch[i]||[]).push({pm:s2.frequency,base:fi});
+          (this.opPitch[i]=this.opPitch[i]||[]).push({pm:s2.frequency,base:fi,kind:sync?'sync':'osc'});
           (this.opDet[i]=this.opDet[i]||[]).push({pm:s2.detune,sc:200});
         }
         if(wv===4)s2.start(at,Math.random()*s2.buffer.duration);  // decorrelated noise per uni voice
@@ -977,6 +1106,7 @@ class Voice{
         const og=ac.createGain(); og.gain.value=b.op.amt*0.9;
         b.s.connect(og); outN[b.i]=og;
         (this.opGains[b.i]=this.opGains[b.i]||[]).push(og);
+        (this.opAmt[b.i]=this.opAmt[b.i]||[]).push({g:og,sc:0.9});
       }
       const tgtOf=b=>{
         const d=b.op.dst||0;
@@ -991,6 +1121,7 @@ class Voice{
           const fg=ac.createGain(); fg.gain.value=b.op.amt*tb.f*6;
           b.s.connect(fg); fg.connect(tb.s.frequency);
           (this.opGains[b.i]=this.opGains[b.i]||[]).push(fg);
+          (this.opAmt[b.i]=this.opAmt[b.i]||[]).push({g:fg,sc:tb.f*6});
         }else if(b.op.mode===2){
           const rj=outN[j]!==undefined?j:0;
           const rg=ac.createGain(); rg.gain.value=0;
@@ -998,10 +1129,12 @@ class Voice{
           outN[rj].connect(rg); b.s.connect(sg); sg.connect(rg.gain);
           outN[rj]=rg;
           (this.opGains[b.i]=this.opGains[b.i]||[]).push(sg);
-        }else{
+          (this.opAmt[b.i]=this.opAmt[b.i]||[]).push({g:sg,sc:1});
+        }else{                                    // 'add' and 'sync' both just sum
           const og=ac.createGain(); og.gain.value=b.op.amt*0.9;
           b.s.connect(og); outN[b.i]=og;
           (this.opGains[b.i]=this.opGains[b.i]||[]).push(og);
+          (this.opAmt[b.i]=this.opAmt[b.i]||[]).push({g:og,sc:0.9});
         }
       }
       let node=sum;
@@ -1088,6 +1221,34 @@ class Voice{
         // amp (dst 1) handled by ampBias scaling the envelope peak — never DC on the gain
       }
     }
+    /* PRESSURE: same shape as vel/key/rnd, but the constant keeps MOVING while the
+       note is held (setPressure). amp goes through a gain AFTER the vca — never a
+       DC offset on the vca itself, or the envelope could not close the note. */
+    this.pressN=[]; this.press=0; this.pressGlide=0.03;
+    for(const m of md){
+      if(m.off||m.src!==6||!m.routes)continue;
+      this.pressGlide=Math.max(0.005,m.pg??0.03);
+      for(const rt of m.routes){
+        if(!rt.dst)continue;
+        const A=(rt.amt||0)/100;
+        if(rt.dst===3){                          // filter cutoff (cents)
+          const bq=this.fNodes[clamp(Math.round(rt.idx),1,10)-1];
+          if(!bq)continue;
+          const cs=ac.createConstantSource(); cs.offset.value=0;
+          cs.connect(bq.detune); cs.start(at); this.nodes.push(cs);
+          this.pressN.push({p:cs.offset,sc:clamp(A*4800,-9600,9600),base:0});
+        }else if(rt.dst===2){                    // pitch
+          const cs=ac.createConstantSource(); cs.offset.value=0;
+          for(const tg of Object.values(this.opDet).flat()){if(tg.sc<1)continue;
+            const g2=ac.createGain(); g2.gain.value=tg.sc*6; cs.connect(g2); g2.connect(tg.pm);}
+          cs.start(at); this.nodes.push(cs);
+          this.pressN.push({p:cs.offset,sc:A,base:0});
+        }else if(rt.dst===1){                    // amp: post-vca gain, 1 → 1+amt
+          if(!this.pGain){this.pGain=ac.createGain(); this.pGain.gain.value=1;}
+          this.pressN.push({p:this.pGain.gain,sc:A,base:1});
+        }
+      }
+    }
     /* center: a per-route DC bias on the target (independent of the source) */
     for(const m of md){
       if(m.off||!m.src||!m.routes)continue;
@@ -1134,7 +1295,8 @@ class Voice{
       for(const bq of this.fPar){merge.connect(bq); bq.connect(fsum);}
       fsum.connect(vca);
     }else merge.connect(vca);
-    vca.connect(E.voiceOut(pi,midi));   // kits: this pad's own fx/level bus
+    if(this.pGain){vca.connect(this.pGain); this.pGain.connect(E.voiceOut(pi,this.pad));}
+    else vca.connect(E.voiceOut(pi,this.pad));   // kits: this pad's own fx/level bus
     this.src=firstSrc;
     firstSrc.onended=()=>{const a=E.act[pi],i=a.indexOf(this); if(i>=0)a.splice(i,1);
       try{vca.disconnect();}catch(_){}};
@@ -1219,10 +1381,10 @@ class Engine{
     this.setDj([]);            // build the dj pass-through — without it the mix dead-ends
   }
   getIR(sec){
-    const key=Math.round(sec*4);
+    const key=Math.round(sec*50);            // 20ms buckets — short rooms need the resolution
     let ir=this.irCache.get(key);
     if(!ir){
-      const ac=AC, l2=Math.floor(Math.max(0.2,sec)*ac.sampleRate);
+      const ac=AC, l2=Math.floor(Math.max(0.03,sec)*ac.sampleRate);
       ir=ac.createBuffer(2,l2,ac.sampleRate);
       for(let c=0;c<2;c++){const d=ir.getChannelData(c);
         for(let i=0;i<l2;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/l2,2.5);}
@@ -1313,7 +1475,7 @@ class Engine{
       sh.curve=distCurve(clamp(Math.round(fx.p3||0),0,8)+1,fx.p1); sh.oversample='2x';  // p3 0..8 → DTYPES 1..9
       cur.connect(sh); sh.connect(wet);
     }else if(t==='verb'){
-      const cv=keep(ac.createConvolver()); cv.buffer=this.getIR(0.3+fx.p1*4);
+      const cv=keep(ac.createConvolver()); cv.buffer=this.getIR(vrbSec(fx.p1));
       const tone=keep(ac.createBiquadFilter()); tone.type='lowpass';
       tone.frequency.value=800*Math.pow(20,fx.p2??0.5);          // color: dark..bright
       cur.connect(cv); cv.connect(tone);
@@ -1507,6 +1669,47 @@ class Engine{
     }
     return h;
   }
+  /* the waveform a hard-synced oscillator traces over one MASTER cycle:
+     slave phase = frac(masterPhase × R). Baked to a PeriodicWave so the browser
+     band-limits it per note; cached, since the DFT is not free. */
+  syncWave(w,R){
+    R=clamp(R||1,1,32);
+    const key='S'+w+':'+Math.round(R*50);
+    let pw=this.waveCache.get(key);
+    if(pw)return pw;
+    const N=1024, H=256, buf=new Float32Array(N);
+    const shape=ph=>w===1?4*Math.abs(ph-0.5)-1 : w===2?2*ph-1 : w===3?(ph<0.5?1:-1)
+                       : Math.sin(2*Math.PI*ph);
+    for(let n=0;n<N;n++)buf[n]=shape(fmod(n/N*R,1));
+    /* twiddle tables: the DFT runs on a note-scheduling path, so no trig inside it */
+    if(!this._tw){
+      const c=new Float32Array(N), sn=new Float32Array(N);
+      for(let j=0;j<N;j++){c[j]=Math.cos(2*Math.PI*j/N); sn[j]=Math.sin(2*Math.PI*j/N);}
+      this._tw={c,sn};
+    }
+    const {c:cosT,sn:sinT}=this._tw;
+    const re=new Float32Array(H+1), im=new Float32Array(H+1);
+    for(let k=1;k<=H;k++){
+      let a=0,b=0,j=0;
+      for(let n=0;n<N;n++){const x=buf[n]; a+=x*cosT[j]; b+=x*sinT[j]; j+=k; if(j>=N)j-=N;}  // k<N: one wrap
+      re[k]=2*a/N; im[k]=-2*b/N;      // WebAudio: Σ real·cos − imag·sin
+    }
+    pw=AC.createPeriodicWave(re,im);
+    this.waveCache.set(key,pw);
+    return pw;
+  }
+  /* an OSC param moved while notes are sounding — push it to every live voice.
+     Also warms the sync table here, at edit time, so the first note of a sync
+     patch doesn't pay for the DFT on the scheduling path. */
+  oscLive(pi,key){
+    const ops=(modHolder(S.presets[pi],'osc')||S.presets[pi]).osc||[];
+    for(let i=1;i<10;i++){
+      const op=ops[i];
+      if(op&&op.mode===3&&!op.off&&op.amt>0.001&&op.wav!==4&&op.wav!==9)
+        try{this.syncWave(op.wav,syncRatOf(ops,i));}catch(_){}
+    }
+    for(const v of this.act[pi])try{v.oscRefresh(this,key);}catch(_){}
+  }
   setWave(osc,w,phDeg){
     if(w>=9){osc.type='sine';return;}   // 'smp' handled as a buffer source elsewhere
     const ph=fmod(phDeg||0,360);
@@ -1649,21 +1852,24 @@ class Engine{
     this.prepSig[pi]=sig;
     for(const t2 of touched)setV(p,t2.mi,t2.si,t2.spec,t2.base);   // stored preset stays clean
   }
-  noteOn(at,pi,midi,vel){
+  noteOn(at,pi,midi,vel,padMidi){
     const p=S.presets[pi];
-    this.applyBusPreps(pi,midi);
+    /* padMidi = the note that picks the instrument; midi = the note that sounds.
+       They differ only when a PLAY effect (rpit) detunes without changing pads. */
+    const pm=padMidi==null?midi:padMidi;
+    this.applyBusPreps(pi,pm);
     if(this.act[pi].length>=16)this.act[pi][0].kill(at,false,true);   // channel poly cap (whole note)
     /* kit channels: the pitch class picks a whole independent preset chain;
        octaves transpose it (C2/C3/C4 = the same instrument, different pitch) */
-    const K=isKit(p)?kitSlot(p,midi):null;
-    const pre=K?K:prepEffective(p,midi);
-    const lid=K?pcOf(midi):'ch';
+    const K=isKit(p)?kitSlot(p,pm):null;
+    const pre=K?K:prepEffective(p,pm);
+    const lid=K?pcOf(pm):'ch';
     const vx=pre.vox||{};
     if(vx.mode===1){                                     // mono steals only its own kit slot
       const killAt=Math.max(AC.currentTime+0.001,at-0.004);
       for(const v of [...this.act[pi]])if(v._lid===lid)v.kill(killAt,true);
     }
-    const v=new Voice(this,at,pi,midi,vel,pre); v._lid=lid;
+    const v=new Voice(this,at,pi,midi,vel,pre,pm); v._lid=lid;
     this.act[pi].push(v);
     return v;
   }
@@ -1694,21 +1900,27 @@ class Engine{
           this.trigger(at-gap*i,pi,midi-(chan.tr||0)*12,Math.max(0.05,vel*lv),0.08);
       }
     }
-    let midis=[midi], strum=0, chordPre=false;
+    let midis=[midi], pads=[midi], strum=0, chordPre=false;
     const arpIdx=p.ply.findIndex(sl=>sl.typ===2&&!sl.off&&T.playing);
     for(let i2=0;i2<p.ply.length;i2++){  // chord slots BEFORE the arp expand pre-pool
       const sl=p.ply[i2];
       if(sl.typ===1&&!sl.off&&(arpIdx<0||i2<arpIdx)){
         const ch=CHORDS[clamp(Math.round(sl.p1),0,CHORDS.length-1)][1];
-        midis=midis.flatMap(m=>ch.map(o=>m+o)); strum=sl.p2||0;
+        midis=midis.flatMap(m=>ch.map(o=>m+o));
+        pads=pads.flatMap(m=>ch.map(o=>m+o)); strum=sl.p2||0;   // a chord on a kit still spans pads
         if(Math.round(sl.p6||0)===1)chordPre=true;   // stage=pre: record the chord, not the root
       }
     }
-    if(chordPre&&durSec==null&&T.playing)         // live play: write every chord note into the lane
-      for(const m of midis)recPlayNote(pi,posNow(),m,vel,0.25);
+    /* random pitch. With an arp running the offset belongs on each arp STEP,
+       so arpTick does it there instead of once for the whole held note. */
+    const rpS=arpIdx<0?p.ply.find(sl=>sl.typ===13&&!sl.off):null;
+    if(rpS)midis=midis.map(m=>rpitApply(m,rpS));
+    const rpPre=!!(rpS&&Math.round(rpS.p6||0)===1);
+    if((chordPre||rpPre)&&durSec==null&&T.playing)   // live play: write every sounding note into the lane
+      for(const m of midis)recPlayNote(pi,posNow(),Math.round(m),vel,0.25);
     let pcHandle=null;
     if(isMaster){                       // this channel's held notes define the chord
-      const pcs=[...new Set(midis.map(m=>((m%12)+12)%12))];
+      const pcs=[...new Set(midis.map(m=>pcOf(m)))];
       pcs.forEach(addPC);
       if(durSec!=null)setTimeout(()=>pcs.forEach(subPC),Math.max(20,durSec*1000));
       else pcHandle=()=>pcs.forEach(subPC);
@@ -1716,20 +1928,20 @@ class Engine{
     const arp=arpIdx>=0?p.ply[arpIdx]:null;
     if(arp){
       const until=durSec!=null?beatsAt(at)+durSec/spb():Infinity;
-      const entries=midis.map(m=>({midi:m,vel,until}));
+      const entries=midis.map((m,i)=>({midi:m,pad:pads[i],vel,until}));
       this.arpPool[pi].push(...entries);
       if(durSec!=null)return null;
-      return {release:t=>{if(pcHandle){pcHandle();pcHandle=null;}
+      return {voices:[],arp:entries,release:t=>{if(pcHandle){pcHandle();pcHandle=null;}
         const b2=T.playing?beatsAt(t):1e9;for(const en of entries)en.until=Math.min(en.until,b2);}};
     }
-    midis.sort((a,b)=>a-b);
-    const nM=midis.length;   // negative strum rolls high -> low
-    const voices=midis.map((m,i)=>{
-      const v=this.noteOn(at+(strum>=0?i*strum:(nM-1-i)*(-strum)),pi,m,vel);
+    const notes=midis.map((m,i)=>({m,pad:pads[i]})).sort((a,b)=>a.m-b.m);
+    const nM=notes.length;   // negative strum rolls high -> low
+    const voices=notes.map((n2,i)=>{
+      const v=this.noteOn(at+(strum>=0?i*strum:(nM-1-i)*(-strum)),pi,n2.m,vel,n2.pad);
       v.live=durSec==null; return v;
     });
     if(durSec!=null){for(const v of voices)v.release(at+durSec);return null;}
-    return {release:t=>{if(pcHandle){pcHandle();pcHandle=null;}voices.forEach(v=>v.release(t));}};
+    return {voices,release:t=>{if(pcHandle){pcHandle();pcHandle=null;}voices.forEach(v=>v.release(t));}};
   }
   arpTick(from,to){
     for(let pi=0;pi<10;pi++){
@@ -1738,7 +1950,7 @@ class Engine{
       if(pool.length>64)pool.splice(0,pool.length-64);
       if(!pool.length)continue;
       /* kits: the arp lives on the PAD of the notes in the pool, not the channel */
-      const rack=isKit(p)?((kitSlot(p,pool[0].midi)||{}).ply||[]):p.ply;
+      const rack=isKit(p)?((kitSlot(p,pool[0].pad??pool[0].midi)||{}).ply||[]):p.ply;
       const ai=rack.findIndex(sl=>sl.typ===2&&!sl.off), arp=ai>=0?rack[ai]:null;
       const postChords=ai>=0?rack.filter((sl,i2)=>sl.typ===1&&!sl.off&&i2>ai):[];
       if(!arp)continue;
@@ -1749,7 +1961,7 @@ class Engine{
         const act2=pool.filter(n2=>n2.until>b).sort((x,y)=>x.midi-y.midi);
         if(!act2.length)continue;
         const seq=[];
-        for(let o=0;o<octs;o++)for(const n2 of act2)seq.push({midi:n2.midi+o*12,vel:n2.vel});
+        for(let o=0;o<octs;o++)for(const n2 of act2)seq.push({midi:n2.midi+o*12,vel:n2.vel,pad:(n2.pad??n2.midi)+o*12});
         const mode=ARPMODE[clamp(Math.round(arp.p2),0,3)];
         let pick;
         if(mode==='rand')pick=seq[Math.floor(Math.random()*seq.length)];
@@ -1765,8 +1977,9 @@ class Engine{
           const ch=CHORDS[clamp(Math.round(cs.p1),0,CHORDS.length-1)][1];
           hits=hits.flatMap(m=>ch.map(o=>m+o));
         }
+        const rpA=rack.find(sl=>sl.typ===13&&!sl.off);
         for(const m of hits){
-          const v=this.noteOn(timeAt(bg),pi,m,pick.vel);
+          const v=this.noteOn(timeAt(bg),pi,rpA?rpitApply(m,rpA):m,pick.vel,pick.pad??m);
           v.release(timeAt(bg+div*0.85));
           if(Math.round(arp.p6||0)===1)             // stage=pre: the recorder captures the arp output
             recPlayNote(pi,bg,m,pick.vel,div*0.85);
@@ -1860,6 +2073,7 @@ function writeParam(pi,mi,si,px,v){
   const slot=M.flat?null:holder[M.id][si];
   const spec=paramsFor(mi,slot)[px]; if(!spec)return;
   setV(holder,mi,si,spec,v);      // layer voice-modules read fresh on the next note — no rebuild
+  if(M.id==='osc')engine.oscLive(pi,spec.key);   // …except OSC, which retunes what's sounding
   dirtySave=true;
 }
 /* value change entry point: address = (module, slot(-1=flat), param) */
@@ -1880,11 +2094,13 @@ function applyParam(pi,mi,si,px,v){
     else if(v===10){sl2.p1=0;}
     else if(v===11){sl2.p1=12;}                     // humanize ±12ms
     else if(v===12){sl2.p1=25;sl2.p2=1;sl2.p3=0.6;} // flam: 25ms, 1 grace hit, 60% level
+    else if(v===13){sl2.p1=25;sl2.p2=0;sl2.p3=100;sl2.p4=0;sl2.p5=0;} // rpit: ±25 cents, always
   }
   if(M.id==='fx'&&spec.key==='typ'&&XTYPES[v]==='dist'){const s2=S.presets[pi].fx[si];s2.p1=0.35;s2.p3=0;s2.mix=0.6;}
   if(M.id==='fx')engine.rebuildRack(pi);
   else if(M.id==='mix'||M.id==='mod')engine.refresh(pi);   // mod→pan lives at bus level
   else if(M.id==='flt'&&spec.key==='frq')engine.cutLive(pi,si);
+  else if(M.id==='osc')engine.oscLive(pi,spec.key);        // held notes follow the edit
   dirtySave=true;
 }
 /* ---------------- preset library ------------------------------------ */
@@ -1892,9 +2108,15 @@ const SESSKEY='ten-sess-v1';   // ten whole-session slots (settings layer digits
 function sessAll(){try{const x=JSON.parse(localStorage.getItem(SESSKEY));return (x&&x.slots)||[];}catch(_){return[];}}
 function sessStore(slots){try{localStorage.setItem(SESSKEY,JSON.stringify({v:1,slots}));}catch(_){flash('session save failed — storage full?');}}
 const LIBKEY='ten-lib-v1';
+let libMigrated=false;
 function libAll(){try{const x=JSON.parse(localStorage.getItem(LIBKEY));
-  return Array.isArray(x)?x:(x&&x.items)||[];}catch(_){return[];}}
-function libStore(a){try{localStorage.setItem(LIBKEY,JSON.stringify({v:2,items:a}));}catch(_){} if(typeof prepCache!=='undefined')prepCache.clear();}
+  const items=Array.isArray(x)?x:(x&&x.items)||[];
+  if(!libMigrated&&(!x||Array.isArray(x)||(x.v||0)<3)){   // v3: drv/crush → dist · verb size curve
+    libMigrated=true; items.forEach(en=>en&&fx17p(en.data)); libStore(items);
+  }
+  return items;}catch(_){return[];}}
+function libStore(a){libMigrated=true;
+  try{localStorage.setItem(LIBKEY,JSON.stringify({v:3,items:a}));}catch(_){} if(typeof prepCache!=='undefined')prepCache.clear();}
 function presetData(p){const {modLoop,...rest}=p;return JSON.parse(JSON.stringify(rest));}
 function mulberry32(a){return function(){let t=a+=0x6D2B79F5;t=Math.imul(t^t>>>15,t|1);
   t^=t+Math.imul(t^t>>>7,t|61);return((t^t>>>14)>>>0)/4294967296;}}
@@ -2008,7 +2230,7 @@ function genPreset(cat,rnd,wild=0.5){
       Object.assign(p.env[0],{a:0.001,d:R(0.1,0.25),s:0,r:0.07});
       p.flt[0]={typ:3,frq:RI(1200,2600),q:+R(0.8,2).toFixed(1),gn:0};
       p.env[2]={dst:2,idx:1,amt:RI(30,80),a:0.001,d:0.05,s:0,r:0.05};
-      if(P(0.5))p.fx[0]={typ:8,p1:+R(0.1,0.3).toFixed(2),p2:0,mix:1};
+      if(P(0.5))p.fx[0]={typ:8,p1:+R(0.38,0.57).toFixed(2),p2:0,mix:1};
       p.mix.lvl=+R(0.5,0.68).toFixed(2);},
     hh:()=>{p.osc[0].wav=4;
       if(P(0.5))p.osc[1]={wav:8,mode:0,dst:0,rat:RI(4,8),amt:0.3,fine:0,ph:0,phm:1};
@@ -2041,7 +2263,10 @@ function genPreset(cat,rnd,wild=0.5){
   if(DRGEN[cat]){
     DRGEN[cat]();
     if(P(0.25)&&!p.amp[0].typ)p.amp[0]={typ:RI(1,9),drv:+R(0.1,0.2+0.4*wild).toFixed(2),mix:+R(0.2,0.5).toFixed(2),par:0};
-    if(wild>0.45&&P(0.3))p.fx[0]=p.fx[0].typ?p.fx[0]:{typ:pick([7,8,12]),p1:+R(0.1,0.4).toFixed(2),p2:+R(0.1,0.4).toFixed(2),mix:+R(0.1,0.3).toFixed(2)};
+    if(wild>0.45&&P(0.3)&&!p.fx[0].typ){const xt=pick([XDIST,8,12]);
+      p.fx[0]={typ:xt,p1:+R(0.1,0.4).toFixed(2),p2:+R(0.1,0.4).toFixed(2),
+        p3:xt===XDIST?5:0.5,                          // dist → the crush curve
+        mix:+R(0.1,0.3).toFixed(2)};}
     if(wild>0.6&&P(0.25))p.lfo[1]={dst:1,idx:1,wav:RI(0,3),rate:+R(4,30).toFixed(1),amt:RI(10,40)};
     p.vox.mode=1;
     foldMod(p);
@@ -2074,8 +2299,8 @@ function genPreset(cat,rnd,wild=0.5){
   if(wild>0.55&&P(0.35))p.lfo[1]={dst:pick([1,3]),idx:1,wav:RI(0,4),rate:+R(0.1,7).toFixed(1),amt:RI(3,10)*5};
   if(P(0.35))p.amp[0]={typ:RI(1,9),drv:+R(0.1,0.2+0.55*wild).toFixed(2),mix:+R(0.2,0.3+0.5*wild).toFixed(2),par:0};
   if(P(0.5))p.fx[0]=rnd()<0.5
-    ?{typ:pick(wild>0.6?[1,2,3,4,5,7,12]:[1,2,4]),p1:+R(0.15,0.5).toFixed(2),p2:+R(0.2,0.5).toFixed(2),mix:+R(0.1,0.2+0.35*wild).toFixed(2)}
-    :{typ:8,p1:+R(0.1,0.2+0.4*wild).toFixed(2),p2:0,mix:1};
+    ?{typ:pick(wild>0.6?[1,2,3,4,5,XDIST,12]:[1,2,4]),p1:+R(0.15,0.5).toFixed(2),p2:+R(0.2,0.5).toFixed(2),mix:+R(0.1,0.2+0.35*wild).toFixed(2)}
+    :{typ:8,p1:+R(0.38,0.49+0.28*wild).toFixed(2),p2:0,mix:1};
   if(wild>0.5&&P(0.3))p.fx[1]={typ:pick([1,2,5,12]),p1:+R(0.1,0.5).toFixed(2),p2:+R(0.1,0.5).toFixed(2),mix:+R(0.1,0.35).toFixed(2)};
   if(cat==='chord'&&P(0.6))p.ply[0]={typ:1,p1:RI(0,4),p2:+R(0,0.02).toFixed(3),p3:0};
   if((cat==='plk'||cat==='lead')&&wild>0.6&&P(0.2))p.ply[0]={typ:2,p1:2,p2:0,p3:1};
@@ -2561,7 +2786,9 @@ function randSlotHere(mutate,wild){
   const si=M.flat?-1:S.curSlot;
   const spec0=paramsFor(mi,M.flat?null:holder[M.id][si])[0];
   if(!mutate&&!M.flat&&spec0&&(spec0.key==='typ'||spec0.key==='src'))   // roll the type/source first
-    writeParam(S.editSnd,mi,si,0,1+Math.floor(Math.random()*(spec0.opts.length-1)));
+  {let rv=1+Math.floor(Math.random()*(spec0.opts.length-1));
+   if(spec0.skip)for(let i=0;i<spec0.opts.length&&spec0.skip.has(rv);i++)rv=1+rv%(spec0.opts.length-1);
+   writeParam(S.editSnd,mi,si,0,rv);}
   const specs=paramsFor(mi,M.flat?null:holder[M.id][si]);
   specs.forEach((spec,px)=>{
     if(spec.key==='typ'||spec.key==='src'||spec.key==='_rt')return;   // never randomize the route selector
@@ -2570,6 +2797,7 @@ function randSlotHere(mutate,wild){
     if(spec.type==='enum'){
       if(mutate)return;                            // mutate keeps types/modes
       v=Math.floor(Math.random()*spec.opts.length);
+      if(spec.skip)for(let i=0;i<spec.opts.length&&spec.skip.has(v);i++)v=(v+1)%spec.opts.length;
     }else{
       /* 'time'/'freq' specs have no min/max — random them in their own domains */
       const lo=spec.min??(spec.type==='time'?0.001:spec.type==='freq'?40:0);
@@ -2834,6 +3062,99 @@ function resetParam(){
 /* ---------------- edit / erase / capture helpers --------------------- */
 const NOTEKEYS={KeyA:0,KeyW:1,KeyS:2,KeyE:3,KeyD:4,KeyF:5,KeyT:6,KeyG:7,KeyY:8,
                 KeyH:9,KeyU:10,KeyJ:11,KeyK:12,KeyO:13,KeyL:14,KeyP:15,Semicolon:16,Quote:17};
+const KEYFOR={}; for(const k in NOTEKEYS)KEYFOR[NOTEKEYS[k]]=k;
+
+/* ---------------- expressive input ------------------------------------
+   Velocity and per-note pressure, from wherever they come from. The laptop
+   keyboard has no sensors, so it plays at a fixed velocity you step with
+   c / v (Ableton's convention — z/x already move the octave).
+
+   A MIDI note that lands inside the current key range is played by SYNTHESISING
+   its keydown, so it inherits the whole recording path — retro capture, live
+   quantize, the ONE. Out-of-range notes fall back to a direct trigger.
+   Pressure (poly aftertouch, channel pressure, or CC11/CC2/CC1) drives the
+   `press` MOD source on that note's own voices — under MPE, where each note
+   owns a channel, channel pressure is therefore genuinely per-note.        */
+const EXP={
+  pend:null, synth:false,          // velocity for, and a marker on, the keydown we synthesise
+  midiOn:false, midiName:'', access:null,
+  held:{},                         // 'ch:note' -> {code} | {h,pi}
+  kvel(){return clamp(CFG.kvel??0.9,0.02,1);},
+  take(){const v=this.pend; this.pend=null; return v==null?this.kvel():clamp(v,0.02,1);},
+  bump(d){CFG.kvel=clamp(this.kvel()+d,0.02,1); saveCfg();
+    flash('velocity '+Math.round(this.kvel()*127)); dirty=true;},
+
+  /* off → solo (midi plays, the board's own keystrokes are ignored) → +kbd (both).
+     'solo' is the one you want with a hall-effect keyboard: it types AND sends
+     midi, so without it every note fires twice, at two different velocities. */
+  async cycleMidi(d){
+    const nx=fmod((CFG.midiIn|0)+(d<0?-1:1),3);
+    CFG.midiIn=nx; saveCfg();
+    if(!nx){this.midiOn=false; this.allOff(); flash('midi in off'); dirty=true; return;}
+    if(!await this.connect())CFG.midiIn=0;
+    else flash('midi in '+['','solo','+kbd'][nx]+': '+(this.midiName||'no inputs')
+      +' — route pressure with a MOD slot: src=press');
+    dirty=true;
+  },
+  async connect(quiet){
+    if(!navigator.requestMIDIAccess){if(!quiet)flash('no Web MIDI here — use Chrome or Edge');return false;}
+    try{
+      if(!this.access)this.access=await navigator.requestMIDIAccess({sysex:false});
+      this.midiOn=true; this.bind();
+      this.access.onstatechange=()=>{if(this.midiOn)this.bind();};
+      return true;
+    }catch(err){if(!quiet)flash('midi blocked — '+(err&&err.message||err)); return false;}
+  },
+  bind(){
+    const ins=[...this.access.inputs.values()];
+    this.midiName=ins.map(i=>i.name).join(', ');
+    for(const i of ins)i.onmidimessage=e=>{if(this.midiOn)try{this.msg(e.data);}catch(_){}};
+    dirty=true;
+  },
+  msg(d){
+    const st=d[0]&0xf0, ch=d[0]&0x0f;
+    if(st===0x90&&d[2]>0)this.noteOn(ch,d[1],d[2]/127);
+    else if(st===0x80||(st===0x90&&!d[2]))this.noteOff(ch,d[1]);
+    else if(st===0xA0)this.pressNote(ch,d[1],d[2]/127);      // poly aftertouch
+    else if(st===0xD0)this.pressChan(ch,d[1]/127);           // channel pressure (= per-note under MPE)
+    else if(st===0xB0&&(d[1]===11||d[1]===2||d[1]===1))this.pressChan(ch,d[2]/127);
+  },
+  noteOn(ch,note,vel){
+    const pi=S.layer===1?S.curPreset:S.editSnd;
+    const code=KEYFOR[note-(60+S.octs[pi]*12)];
+    if(code&&!liveV[code]&&S.layer>0){        // in range: take the real key path
+      this.pend=vel; this.synth=true;
+      try{document.dispatchEvent(new KeyboardEvent('keydown',{code,key:code,bubbles:true}));}
+      finally{this.synth=false; this.pend=null;}
+      this.held[ch+':'+note]={code};
+      return;
+    }
+    const h=engine.trigger(AC.currentTime+0.005,pi,note,vel);
+    if(T.playing)recPlayNote(pi,posNow(),note,vel,0.25);
+    this.held[ch+':'+note]={h,pi};
+  },
+  noteOff(ch,note){
+    const k=ch+':'+note, v=this.held[k]; if(!v)return; delete this.held[k];
+    if(v.code){this.synth=true;
+      try{document.dispatchEvent(new KeyboardEvent('keyup',{code:v.code,key:v.code,bubbles:true}));}
+      finally{this.synth=false;}}
+    else if(v.h&&v.h.release)v.h.release(AC.currentTime+0.005);
+  },
+  voicesOf(ch,note){
+    const v=this.held[ch+':'+note]; if(!v)return null;
+    const h=v.code?liveV[v.code]:v.h;
+    return h&&h.voices||null;
+  },
+  pressNote(ch,note,x){
+    const vs=this.voicesOf(ch,note); if(!vs)return;
+    for(const v of vs)v.setPressure(x);
+  },
+  pressChan(ch,x){
+    for(const k in this.held)if(+k.slice(0,k.indexOf(':'))===ch)
+      this.pressNote(ch,+k.slice(k.indexOf(':')+1),x);
+  },
+  allOff(){for(const k in this.held){const [a,b]=k.split(':'); this.noteOff(+a,+b);}},
+};
 const liveV={}, pend={}, rPend={}, nlive={};
 const retroBuf=Array.from({length:10},()=>[]);
 let eraseHold=null, muteHold=null, stepCur=0, taps=[];
@@ -2889,7 +3210,7 @@ function retroCapture(){
     for(const n of seg){
       const t=fmod(n.t-editAnchor(),L);
       lane.clear(ev=>ev.midi===n.midi&&Math.abs(ev.t-t)<1e-6);   // same note same spot: newest wins
-      lane.events.push({t,midi:n.midi,vel:0.9,dur:n.dur||0.25,born:performance.now()});
+      lane.events.push({t,midi:n.midi,vel:n.vel??0.9,dur:n.dur||0.25,born:performance.now()});
     }
     flash('◉ retro: +'+seg.length+' notes merged into the loop');
     dirty=true; dirtySave=true; return;
@@ -2901,7 +3222,7 @@ function retroCapture(){
   const L=p2*4;
   lane.unit='B'; lane.count=p2; lane.auto=false; delete lane._cap;
   const patEmpty=S.patterns[S.editPat].lanes.every(l=>l===lane||!l.events.length);
-  lane.events=seg.map(n=>({t:fmod(n.t-t0,L),midi:n.midi,vel:0.9,dur:n.dur||0.25,born:performance.now()}));
+  lane.events=seg.map(n=>({t:fmod(n.t-t0,L),midi:n.midi,vel:n.vel??0.9,dur:n.dur||0.25,born:performance.now()}));
   if(patEmpty){                                       // first note becomes the ONE — loop plays from beat 0
     T.startTime=AC.currentTime+0.06; T.startBeat=0; T.schedBeat=0; T.playing=true;
     acts=[{pat:S.editPat,start:-1e9,anchor:0}];
@@ -3412,6 +3733,7 @@ document.addEventListener('keydown',e=>{
         pushUndo('bypass');
         sl.off=sl.off?0:1;
         engine.rebuildRack(S.editSnd); engine.refresh(S.editSnd);
+        if(M.id==='osc')engine.oscLive(S.editSnd,'off');   // mute the operator now, not next note
         flash(M.name+' slot '+((si+1)%10)+(sl.off?' BYPASSED':' back on'));
         dirtySave=true;
       }else{S.curSlot=si;S.slotParam=0;}
@@ -3510,11 +3832,20 @@ document.addEventListener('keydown',e=>{
 
   if(c==='KeyZ'&&!e.repeat){const oc=octCh();S.octs[oc]=clamp(S.octs[oc]-1,-3,3);dirty=true;return;}
   if(c==='KeyX'&&!e.repeat){const oc=octCh();S.octs[oc]=clamp(S.octs[oc]+1,-3,3);dirty=true;return;}
+  /* c / v = velocity down / up for the laptop keyboard, the way z / x move the
+     octave. A real velocity source (midi, and later the hall-effect board)
+     overrides this per note; this is what you play with until then. */
+  if((c==='KeyC'||c==='KeyV')&&S.layer>0&&!e.repeat){
+    e.preventDefault(); EXP.bump((c==='KeyV'?1:-1)*(e.shiftKey?0.2:0.05)); return;}
 
   if(c in NOTEKEYS&&!e.repeat&&S.layer>0){
     e.preventDefault();
+    /* midi solo: the board's own keystrokes are noise — only the events EXP
+       synthesises for a midi note get through, so a note can't fire twice */
+    if(EXP.midiOn&&(CFG.midiIn|0)===1&&!EXP.synth)return;
     const pi=S.layer===1?S.curPreset:S.editSnd;
     const midi=60+S.octs[pi]*12+NOTEKEYS[c];
+    const hitVel=EXP.take();          // MIDI velocity if this key came from EXP, else the c/v value
     if(isAudioCh(pi)){flash('audio channel — tab records mic, drop a file to load a clip');return;}
     const pat=S.patterns[S.editPat];
     if(S.layer===1&&pat.state==='edit'){
@@ -3524,7 +3855,7 @@ document.addEventListener('keydown',e=>{
       const i=lane.events.findIndex(ev=>ev.midi===midi&&ev.t>=t0-1e-9&&ev.t<t0+cell-1e-9);
       if(i>=0)lane.events.splice(i,1);
       else{
-        lane.events.push({t:t0,midi,vel:0.9,dur:cell,born:performance.now()});
+        lane.events.push({t:t0,midi,vel:hitVel,dur:cell,born:performance.now()});
         lane.auto=false;
         engine.trigger(AC.currentTime+0.005,pi,midi,0.9,cell*spb());
       }
@@ -3547,7 +3878,7 @@ document.addEventListener('keydown',e=>{
         else if(lane.auto){lane.unit='B';lane.count=DEFLENS[CFG.defLen];lane.auto=false;
           flash('● the ONE is set — '+lane.count+' bar loop');}
         else flash('● the ONE is set');
-        pend[c]={t0:0,sweep:0,ts:0,bornAt:performance.now(),lane:pi,qt:0,midi};
+        pend[c]={t0:0,sweep:0,ts:0,bornAt:performance.now(),lane:pi,qt:0,midi,vel:hitVel};
       }else{
         /* live quantize applies whenever it's on — stopped or playing, rec or not */
         const t0=gridNow();
@@ -3559,10 +3890,10 @@ document.addEventListener('keydown',e=>{
            strength — playback applies the same groove to the stored note */
         const heard=tr+grooveOff(pi,tr);
         at=Math.max(at,gridTime(heard));
-        if(S.layer>=1)rPend[c]={pi,ts:tr,midi};   // retro memory hears everything
+        if(S.layer>=1)rPend[c]={pi,ts:tr,midi,vel:hitVel};   // retro memory hears everything
         /* an active arp generates the notes — record ITS output (recPlayNote), not the held note */
         const plyOf=isKit(S.presets[pi])?(kitSlot(S.presets[pi],midi)||{ply:[]}).ply:S.presets[pi].ply;
-        const arpOn=T.playing&&plyOf.some(sl=>(sl.typ===2||sl.typ===1)&&!sl.off&&Math.round(sl.p6||0)===1);
+        const arpOn=T.playing&&plyOf.some(sl=>(sl.typ===2||sl.typ===1||sl.typ===13)&&!sl.off&&Math.round(sl.p6||0)===1);
         if(recording&&arpOn&&lane.auto&&!lane._cap&&!lane.events.length){   // arp: still start the listen window
           if(CFG.listen)startCapture(lane,tr);
           else{lane.unit='B';lane.count=DEFLENS[CFG.defLen];lane.auto=false;}
@@ -3574,11 +3905,11 @@ document.addEventListener('keydown',e=>{
           }
           const qt=lane._cap?Math.max(0,tr-lane._cap.t0):fmod(tr-editAnchor(),lane.len);
           // qt stored straight (groove is a playback layer); ts = where it actually sounds
-          pend[c]={t0,sweep:t0,ts:heard,bornAt:performance.now(),lane:pi,qt,midi};
+          pend[c]={t0,sweep:t0,ts:heard,bornAt:performance.now(),lane:pi,qt,midi,vel:hitVel};
         }
       }
     }
-    liveV[c]=engine.trigger(at,pi,midi,0.9);
+    liveV[c]=engine.trigger(at,pi,midi,hitVel);
     if(S.layer>=2)S.prepFocus=engine.lastMidi[pi];   // last played note = per-note focus (any channel)
     dirty=true; return;
   }
@@ -3615,7 +3946,7 @@ document.addEventListener('keyup',e=>{
   if(c==='Backspace'){eraseHold=null;muteHold=null;clearTimeout(delHoldTimer);}
   if(rPend[c]){
     const r=rPend[c];
-    retroBuf[r.pi].push({t:r.ts,midi:r.midi,dur:Math.max(0.05,gridNow()-r.ts)});
+    retroBuf[r.pi].push({t:r.ts,midi:r.midi,vel:r.vel,dur:Math.max(0.05,gridNow()-r.ts)});
     if(retroBuf[r.pi].length>96)retroBuf[r.pi].shift();
     delete rPend[c];
   }
@@ -3632,7 +3963,7 @@ document.addEventListener('keyup',e=>{
     const relG=T.playing?gridNow():p.ts+0.25;
     const dur=Math.max(0.05,relG-p.ts);
     lane.clear(ev=>ev.midi===p.midi&&Math.abs(ev.t-p.qt)<1e-6);
-    lane.events.push({t:p.qt,midi:p.midi,vel:0.9,dur,born:performance.now()});
+    lane.events.push({t:p.qt,midi:p.midi,vel:p.vel??0.9,dur,born:performance.now()});
     if(lane._cap)lane._cap.lastEnd=Math.max(lane._cap.lastEnd,p.qt+dur);
     relAt=Math.max(relAt,gridTime(p.ts+dur));   // hold the monitored note to that same length
     delete pend[c]; dirty=true; dirtySave=true;
@@ -3648,7 +3979,7 @@ window.addEventListener('blur',()=>{
 
 /* ---------------- persistence + migration ---------------------------- */
 const LS='ten-v1';
-function serialize(){return JSON.stringify({v:16,bpm:T.bpm,metro:S.metro,hum:S.hum,grv:S.grv,octs:S.octs,master:S.master,dj:S.dj,arrOn:S.arrOn!==false,
+function serialize(){return JSON.stringify({v:17,bpm:T.bpm,metro:S.metro,hum:S.hum,grv:S.grv,octs:S.octs,master:S.master,dj:S.dj,arrOn:S.arrOn!==false,
   arr:S.arr,
   patterns:S.patterns.map(p=>({state:p.state==='edit'?'on':p.state,sw:p.sw||0,lanes:p.lanes})),
   presets:S.presets.map(p=>({...p,modLoop:p.modLoop.toJSON()}))});}
@@ -3669,17 +4000,18 @@ function convertV3Preset(sp,i){ // v3-and-earlier preset data -> v4 racks
     p.lfo[j]={dst:[0,1,2,3][lf.dst]||0,idx:1,wav:lf.wav,rate:lf.rate,amt:Math.round(lf.amt*100)};
   });
   if(sp.dly&&sp.dly.send>0.01)p.fx[0]={typ:1,p1:0.27,p2:0.35,mix:sp.dly.send};
-  if(sp.rev&&sp.rev.send>0.01)p.fx[1]={typ:8,p1:sp.rev.send,p2:0,mix:1};
+  if(sp.rev&&sp.rev.send>0.01)p.fx[1]={typ:8,p1:vrbInv(0.3+sp.rev.send*4),p2:0,mix:1};
   if(sp.vox)Object.assign(p.vox,sp.vox);
   if(sp.mix)Object.assign(p.mix,sp.mix);
   return p;
 }
 function load(json){
   try{
-    const o=JSON.parse(json); if(!o||o.v<1||o.v>16)return false;
+    const o=JSON.parse(json); if(!o||o.v<1||o.v>17)return false;
     T.bpm=o.bpm||120; S.metro=!!o.metro; S.hum=o.hum??0;
     S.grv=o.grv||{typ:0,amt:0};
     if(Array.isArray(o.master))S.master=o.master.map((m,i)=>({typ:0,rt:0,p1:0.3,p2:0.3,p3:0.5,mix:0.3,...m}));
+    if(o.v<17)fx17(S.master);            // drv/crush → dist · verb size curve
     if(o.v<9&&S.master[9]&&!S.master[9].typ)S.master[9]={typ:15,rt:0,p1:0.85,p2:0.3,p3:0.5,mix:0};
     S.octs=Array.isArray(o.octs)?o.octs.slice(0,10):Array.from({length:10},()=>0);
     S.arr=Looper.from(o.arr); S.arr.auto=false; S.arrOn=o.arrOn!==false;
@@ -3718,6 +4050,7 @@ function load(json){
         }else p._folded=true;          // v13 already carries a mod rack
         if(o.v<15)modToRoutes(p);      // v14 routes[], v15 min/max→center
         if(o.v<16&&p.cat==='kit'){p.kit=null;p.prep=null;}   // v16: kits are 12 full pad chains now
+        if(o.v<17)fx17p(p);                                 // v17: drv/crush → dist · verb size curve
         p.modLoop=Looper.from(sp.modLoop||{unit:'b',count:8}); p.modLoop.auto=false;
         if(o.v<13)p.modLoop.events=[]; // module indices changed — drop stale automation
         if(o.v===4){  // module order changed in v5: ply 6->9, vox 8->7, mix 9->8
@@ -3748,6 +4081,7 @@ function load(json){
       if(p.cat==='drum')p.cat=drumCatOf(p);          // drum split into subtypes
     });
     S.dj=DJ0().map((d2,i)=>Object.assign(d2,(o.dj&&o.dj[i])||{}));
+    if(o.v<17)fx17(S.dj);
     if(o.v<11){                                       // dj pads became indexed editable slots
       const KM={a:0,s:1,d:2,h:3,j:4,k:5,l:6,';':7,"'":8,w:9};
       S.arr.events.forEach(ev=>{if(typeof ev.dj==='string')ev.dj=KM[ev.dj]??0;});
@@ -3787,6 +4121,7 @@ document.addEventListener('drop',e=>{
 });
 if(!load(localStorage.getItem(LS)))demoContent();
 libInit();
+if(CFG.midiIn|0)EXP.connect(true);   // reconnect silently if midi in was left on
 
 /* ---------------- render --------------------------------------------- */
 const screen=document.getElementById('screen');
@@ -3794,8 +4129,6 @@ const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;');
 const sp=(cls,s)=>`<span class="${cls}">${esc(s)}</span>`;
 const pad=(s,n)=>s.length>=n?s.slice(0,n):s+' '.repeat(n-s.length);
 const W=92;
-const PCH='CcDdEFfGgAaB';
-const NN=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
 
 function stateBadge(st){
   return st==='rec'?sp('ri',' REC '):st==='edit'?sp('i',' EDIT '):sp('ai',' PLAY ');
@@ -3828,9 +4161,11 @@ function render(){
   const dsp=dspOn?dspLoad:cpuLoad;             // audio-thread DSP % (falls back to main-thread if no worklet)
   const cpuS=String(Math.min(99,Math.round(dsp))).padStart(2,' ')+'%';
   const nvS=String(Math.min(99,nv)).padStart(2,' ')+'v';
-  L.push(sp('a','TEN')+sp('d',' ▐ keyboard groovebox')+' '.repeat(16)+tState+
+  L.push(sp('a','TEN')+sp('d',' ▐ keyboard groovebox')+' '.repeat(3)+tState+
     sp('d',' │ ')+sp('a',String(T.bpm).padStart(3,' ')+'bpm')+sp('d','(,/.)')+
     sp('d',' │ metro ')+(S.metro?sp('a','on '):sp('d','off'))+sp('d','(m)')+
+    sp('d',' │ vel ')+sp(EXP.midiOn?'a':'d',String(Math.round(clamp(CFG.kvel??0.9,0.02,1)*127)).padStart(3,' '))+
+    sp('d',EXP.midiOn?'(midi)':'(c/v)')+
     sp('d',' │ '+(dspOn?'dsp ':'cpu ')+' ')+sp(dsp>70?'r':dsp>45?'a':'d',cpuS)+sp('d','·'+nvS));
   L.push(sp('d','─'.repeat(W)));
   {const path=[                                 // the whole ladder, always visible — you are the lit rung
@@ -4173,11 +4508,11 @@ function renderSlots(L){
   if(mEdit)L.push('  '+sp('i',' EDIT ')+' '+sp('a',(curCell(ml)+1)+'/'+stepCells(ml))+
     sp('d','  ←→ cursor · ↑↓ set point for focused param · ⌫ clear cell'));
   L.push('');
-  const hints={osc:'dest routes fm/ring at any op · phase + trig: rtrg = locked start, free = analog-style random',
+  const hints={osc:'dest routes fm/ring/sync at any op · sync: ratio = the sweep, pitch follows the master · edits are live on held notes',
     flt:'peq/lsh/hsh use gain — stack EQ bands alongside filters',
-    mod:'src = env/lfo/vel/key/rnd · dest = amp/pitch/filt/pan/op (slot# targets one) · cmd+C then cmd+V learns any param',
-    fx:'serial chain top to bottom · verb = send to shared reverb · dist = the old amp distortions',
-    ply:'chord (±strum: + low→high, − high→low) · arp needs transport · grv = this part’s groove'};
+    mod:'src = env/lfo/vel/key/rnd/press (live per-note pressure) · dest = amp/pitch/filt/pan/op · cmd+C then cmd+V learns any param',
+    fx:'serial chain top to bottom · dist holds every drive/crush curve (drv + crush retired into it)',
+    ply:'chord (±strum: + low→high, − high→low) · arp needs transport · grv = this part’s groove · rpit = per-note random pitch'};
   L.push('   '+sp('d','←→ flows params → next slot · shift+←→ jumps slot · digits pick slot · ↑↓ value'));
   L.push('   '+sp('d',hints[M.id]||''));
 }
@@ -4262,6 +4597,9 @@ function renderSettings(L){
   L.push('   '+sp('d','listen  off = new lanes skip listening and start at defLen bars'));
   L.push('   '+sp('d','smix    smart mixer: listens per channel + master, trims harsh/loud channels live'));
   L.push('   '+sp('d','/       here = generate a whole song (4 sections + arrangement + dj drops)'));
+  L.push('   '+sp('d','vel     laptop-keyboard velocity — c / v step it while you play (z / x = octave)'));
+  L.push('   '+sp('d','midi in velocity + per-note pressure from any midi controller · aftertouch,'));
+  L.push('   '+sp('d','        channel pressure and CC11/2/1 all drive the MOD src \'press\' · MPE ready'));
   L.push('   '+sp('d','scale   on = non-drum notes snap to key+mode — or, if a PLAY chord slot has'));
   L.push('   '+sp('d','        role=mstr, that channel’s held chord live-retunes every other channel'));
 }
@@ -4278,7 +4616,7 @@ function renderHelp(L){
     ['dj pads + arr REC/EDIT','held pads record as timed fx windows (≈) · in edit they toggle at the cursor'],
     ['a s d f g h j k l ; (arrange)','DJ pads — hold = momentary fx · shift = latch · edit them inside MASTER 0'],
     ['0-9','arrange: part · pattern: channel · sound: module · rack: slot (same digit = bypass)'],
-    ['a w s e d f t g y h u j k o l p ; \'','play notes · z/x keyboard register'],
+    ['a w s e d f t g y h u j k o l p ; \'','play notes · z/x keyboard register · c/v velocity'],
     ['← →','move focus / edit cursor'],
     ['↑ ↓','adjust focused value · option=×0.1 · transpose in the pattern layer'],
     ['shift+↑↓ (sound)','tweak the LAST-PLAYED NOTE only — • marks prepped params · ⌫ removes'],
@@ -4305,7 +4643,8 @@ function renderHelp(L){
     [', .','bpm −1/+1 (shift = ±10) · m metronome'],
     ['cmd/ctrl+Z / +shift+Z','undo / redo — takes, clears, tweaks, preset loads, randomize'],
     [', . (in pattern)','channel volume −/+ (shift = bpm as usual)'],
-    ['esc (from arrange)','SETTINGS: looper momentary/latch · overdub · listen · scale/key/mode'],
+    ['esc (from arrange)','SETTINGS: looper · overdub · listen · scale/key/mode · vel · midi in'],
+    ['midi in = solo','midi plays the notes and the keyboard\u2019s own keystrokes are ignored'],
     ['0 0 (in arrange)','first 0 selects pattern 0 · 0 again opens MASTER (fx rack + dj pad editor)'],
     ['PLAY slot: prep/kit','per-note tweaks (prepared synth) or per-note sounds (kit) — normal by default'],
     ['ctrl/cmd+E','export session json · drop a json file anywhere to load'],
