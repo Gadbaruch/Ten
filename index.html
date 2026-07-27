@@ -89,6 +89,20 @@ const DEST=['prev','op1','op2','op3','op4','op5','op6','op7','op8','op9','op10']
 const DTYPES=['off','soft','hard','fold','tube','fuzz','crush','sat','asym','rect'];
 const DROUTE=['ser','par'];
 const FTYPES=['off','lp','hp','bp','ntc','peq','lsh','hsh'];
+/* one filter effect, every type — same idea as `dist` holding every drive
+   curve. XFT adds the two a biquad cannot do: a formant bank and a vowel
+   morph through it. */
+const XFT=['lp','hp','bp','ntc','peq','lsh','hsh','fmnt','vowel'];
+const XFT_W={lp:'lowpass',hp:'highpass',bp:'bandpass',ntc:'notch',
+             peq:'peaking',lsh:'lowshelf',hsh:'highshelf'};
+const VOWELS=['a','e','i','o','u'];
+/* F1..F3 for each vowel — the peaks that make a throat sound like a mouth */
+const VFORM=[[730,1090,2440],[530,1840,2480],[270,2290,3010],
+             [570,840,2410],[300,870,2240]];
+const vowelAt=x=>{                      // morph a -> e -> i -> o -> u
+  const t=clamp(x,0,1)*(VOWELS.length-1), i=Math.min(VOWELS.length-2,Math.floor(t)), f=t-i;
+  return [0,1,2].map(k=>VFORM[i][k]+(VFORM[i+1][k]-VFORM[i][k])*f);
+};
 const FTYPE_W=[null,'lowpass','highpass','bandpass','notch','peaking','lowshelf','highshelf'];
 const EDST=['off','amp','pitch','filt','op'];
 const LDST=['off','pitch','filt','amp','pan','op'];
@@ -102,7 +116,7 @@ const LFOW=['sin','tri','sqr','saw'], LFOW_W=['sine','triangle','square','sawtoo
    needs them long before the render section runs */
 const PCH='CcDdEFfGgAaB';
 const NN=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
-const XTYPES=['off','dly','cho','fla','pha','trm','drv','crush','verb','comp','gate','roll','tape','grs8','send','limit','duck','amix','hp','lp','bld','dist'];
+const XTYPES=['off','dly','cho','fla','pha','trm','drv','crush','verb','comp','gate','roll','tape','grs8','send','limit','duck','amix','hp','lp','bld','dist','grain','filt'];
 /* drv and crush are the same two curves `dist` already offers — kept in the
    table so old indices still resolve, hidden from the picker (v17 folds them). */
 const XHIDE=new Set([XTYPES.indexOf('drv'),XTYPES.indexOf('crush')]);
@@ -220,7 +234,7 @@ function rpitApply(midi,sl){
   }
   return m+r()*(sl.p1||0)/100;                             // cents ride on top
 }
-const mkFx  =()=>({typ:0,p1:0.3,p2:0.3,p3:0.5,mix:0.3});
+const mkFx  =()=>({typ:0,p1:0.3,p2:0.3,p3:0.5,p4:0.3,p5:0,mix:0.3});
 const mkPly =()=>({typ:0,p1:2,p2:0,p3:1,p4:60,p5:0,p6:0});   // p5 spare · p6 stage(post/pre)
 /* v17 fx migration, applied once per stored rack: standalone drv/crush become
    the equivalent `dist` curve, and verb size moves off the old linear 0.3..4.3s
@@ -434,8 +448,38 @@ const FX_P=sl=>{
     bld:[SP('hp','p1','lin',{min:0,max:1,step:0.02,fmt:v=>Math.round(40*Math.pow(200,v))+'Hz'}),
          SP('wet','p2','lin',{min:0,max:1,step:0.05}),
          SP('time','p3','enum',{opts:['1/16','1/8','1/8.','1/4']})],
-    dist:[SP('type','p3','enum',{opts:DTYPES.slice(1)}),   // the old AMP distortions, now an fx
+    dist:[SP('curve','p3','enum',{opts:DTYPES.slice(1)}),  // the old AMP distortions, now an fx
          SP('drive','p1','lin',{min:0,max:1,step:0.05}),
+         /* crush quantises AMPLITUDE only; the grit of a bitcrusher is sample
+            RATE reduction, which had no control at all. Doubles as the tone
+            lowpass the retired `drv` used to have and dist lost. */
+         SP(DTYPES[clamp(Math.round(sl.p3||0),0,8)+1]==='crush'?'rate':'tone','p2','lin',
+            {min:0,max:1,step:0.05,
+             fmt:v=>DTYPES[clamp(Math.round(sl.p3||0),0,8)+1]==='crush'
+               ?'/'+(1+Math.round(Math.pow(v,2)*40)):Math.round(800+(1-v)*0+v*11000)+'Hz'}),
+         SP('mix','mix','lin',{min:0,max:1,step:0.05})],
+    filt:(()=>{
+      const ty=XFT[clamp(Math.round(sl.p3||0),0,XFT.length-1)];
+      const a=[SP('kind','p3','enum',{opts:XFT})];   // 'type' is taken by the fx selector
+      if(ty==='vowel')a.push(SP('vowel','p1','lin',{min:0,max:1,step:0.02,
+        fmt:v=>{const t=clamp(v,0,1)*4,i=Math.min(3,Math.floor(t));
+          return VOWELS[i].toUpperCase()+'-'+VOWELS[i+1].toUpperCase()+' '+Math.round((t-i)*100)+'%';}}));
+      else a.push(SP('freq','p1','lin',{min:0,max:1,step:0.02,
+        fmt:v=>Math.round(40*Math.pow(200,v))+'Hz'}));
+      a.push(SP(ty==='fmnt'||ty==='vowel'?'sharp':'reso','p2','lin',{min:0,max:1,step:0.05}));
+      if(ty==='peq'||ty==='lsh'||ty==='hsh')
+        a.push(SP('gain','p4','lin',{min:0,max:1,step:0.05,
+          fmt:v=>((v-0.5)*36>0?'+':'')+Math.round((v-0.5)*36)+'dB'}));
+      a.push(SP('mix','mix','lin',{min:0,max:1,step:0.05}));
+      return a;})(),
+    grain:[SP('size','p1','lin',{min:0,max:1,step:0.02,
+              fmt:v=>Math.round((0.004+v*v*0.6)*1000)+'ms'}),
+         SP('dens','p2','lin',{min:0,max:1,step:0.02,
+              fmt:v=>(1+v*55).toFixed(0)+'/s'}),
+         SP('pitch','p3','lin',{min:0,max:1,step:1/48,
+              fmt:v=>{const st=Math.round((v-0.5)*48);return (st>0?'+':'')+st+'st';}}),
+         SP('spray','p4','lin',{min:0,max:1,step:0.05}),
+         SP('fdbk','p5','lin',{min:0,max:0.92,step:0.04}),
          SP('mix','mix','lin',{min:0,max:1,step:0.05})],
   };
   return base.concat(tail[t]||[]);
@@ -643,6 +687,104 @@ let dspLoad=0, dspOn=false;
     const n=new AudioWorkletNode(AC,'ten-load',{numberOfOutputs:1,outputChannelCount:[1]});
     n.port.onmessage=e=>{dspLoad=dspLoad*0.6+e.data*0.4; dspOn=true;};
     const z=AC.createGain(); z.gain.value=0; n.connect(z); z.connect(AC.destination);  // pulled every quantum, silent
+  }).catch(()=>{});
+})();
+/* Two fx that cannot be built from native nodes: a real granular cloud (needs
+   per-sample grain scheduling over a circular buffer) and a sample-rate
+   decimator (sample-and-hold — the half of a bitcrusher that actually grits).
+   Registered once; racks built before the module lands rebuild themselves. */
+let fxwReady=false;
+(function fxWorklets(){
+  if(!AC.audioWorklet)return;
+  const code=`
+  class G extends AudioWorkletProcessor{
+    static get parameterDescriptors(){return[
+      {name:'size', defaultValue:0.12,minValue:0.004,maxValue:1.2,automationRate:'k-rate'},
+      {name:'dens', defaultValue:12,  minValue:0.5,  maxValue:80, automationRate:'k-rate'},
+      {name:'rate', defaultValue:1,   minValue:0.15, maxValue:6,  automationRate:'k-rate'},
+      {name:'spray',defaultValue:0.3, minValue:0,    maxValue:1,  automationRate:'k-rate'},
+      {name:'fb',   defaultValue:0,   minValue:0,    maxValue:0.92,automationRate:'k-rate'}];}
+    constructor(){super();
+      this.N=Math.floor(sampleRate*4);
+      this.bL=new Float32Array(this.N); this.bR=new Float32Array(this.N);
+      this.w=0; this.g=[]; this.next=0; this.fl=0; this.fr=0; this.nrm=1;}
+    process(ins,outs,par){
+      const inp=ins[0], out=outs[0]; if(!out||!out[0])return true;
+      const oL=out[0], oR=out[1]||null;
+      const iL=(inp&&inp[0])?inp[0]:null, iR=(inp&&inp[1])?inp[1]:iL;
+      const n=oL.length, N=this.N;
+      const size=par.size[0], dens=par.dens[0], rt=par.rate[0], sp=par.spray[0], fb=par.fb[0];
+      const glen=Math.max(48,Math.floor(size*sampleRate));
+      const per=Math.max(8,Math.floor(sampleRate/(dens>0.5?dens:0.5)));
+      for(let i=0;i<n;i++){
+        /* feedback re-records the cloud, which is what turns a grain sprinkle
+           into an evolving wash rather than a delay line */
+        this.bL[this.w]=(iL?iL[i]:0)+this.fl*fb;
+        this.bR[this.w]=(iR?iR[i]:0)+this.fr*fb;
+        if(--this.next<=0){
+          this.next=per;
+          if(this.g.length<64){
+            const r=Math.random()*2-1;
+            const det=Math.pow(2,(r*sp*7)/12);          // spray also detunes
+            const u=Math.random();
+            const back=Math.floor((0.012+u*u*sp*1.6)*sampleRate);
+            this.g.push({p:0,len:glen,pos:(this.w-back+N)%N,
+              rt:rt*det, pan:(Math.random()*2-1)*Math.min(1,sp*1.5),
+              rev:(sp>0.55&&Math.random()<0.22)?-1:1});
+          }
+        }
+        let sl=0,sr=0;
+        for(let k=this.g.length-1;k>=0;k--){
+          const gr=this.g[k], ph=gr.p/gr.len;
+          if(ph>=1){this.g.splice(k,1);continue;}
+          const win=0.5-0.5*Math.cos(6.28318530718*ph);   // hann: no edge clicks
+          let rp=gr.pos+gr.p*gr.rt*gr.rev;
+          rp=rp%N; if(rp<0)rp+=N;
+          const i0=rp|0, fr2=rp-i0, i1=(i0+1)%N;
+          const a=this.bL[i0]+(this.bL[i1]-this.bL[i0])*fr2;
+          const b=this.bR[i0]+(this.bR[i1]-this.bR[i0])*fr2;
+          const pl=gr.pan>0?1-gr.pan*0.9:1, pr=gr.pan<0?1+gr.pan*0.9:1;
+          sl+=a*win*pl; sr+=b*win*pr;
+          gr.p++;
+        }
+        /* SLEWED, never per-sample: grain count changes constantly and reading
+           it straight off would step the gain — the exact click bug from the
+           polyphony scaling. */
+        const tgt=1/Math.sqrt(1+this.g.length*0.55);
+        this.nrm+=(tgt-this.nrm)*0.0016;
+        sl*=this.nrm; sr*=this.nrm;
+        this.fl=sl; this.fr=sr;                  // pre-makeup: loop gain is just fb
+        sl*=1.9; sr*=1.9;
+        if(sl>0.98||sl<-0.98)sl=sl>0?0.98:-0.98;
+        if(sr>0.98||sr<-0.98)sr=sr>0?0.98:-0.98;
+        oL[i]=sl; if(oR)oR[i]=sr;
+        this.w=this.w+1; if(this.w>=N)this.w=0;
+      }
+      return true;}}
+  class D extends AudioWorkletProcessor{
+    static get parameterDescriptors(){return[
+      {name:'red',defaultValue:1,minValue:1,maxValue:80,automationRate:'k-rate'}];}
+    constructor(){super();this.a=0;this.b=0;this.c=0;}
+    process(ins,outs,par){
+      const inp=ins[0], out=outs[0]; if(!out||!out[0])return true;
+      if(!inp||!inp[0]){out[0].fill(0); if(out[1])out[1].fill(0); return true;}
+      const r=par.red[0]|0, n=out[0].length;
+      const i0=inp[0], i1=inp[1]||inp[0];
+      for(let i=0;i<n;i++){
+        if(this.c<=0){this.c=r<1?1:r; this.a=i0[i]; this.b=i1[i];}
+        this.c--;
+        out[0][i]=this.a; if(out[1])out[1][i]=this.b;
+      }
+      return true;}}
+  registerProcessor('ten-grain',G);
+  registerProcessor('ten-deci',D);`;
+  const url=URL.createObjectURL(new Blob([code],{type:'application/javascript'}));
+  AC.audioWorklet.addModule(url).then(()=>{
+    fxwReady=true;
+    if(typeof engine!=='undefined'&&engine&&engine.buses){
+      for(let i=0;i<10;i++)engine.rebuildRack(i);
+      if(engine.rebuildMaster)engine.rebuildMaster();
+    }
   }).catch(()=>{});
 })();
 const T={bpm:120,playing:false,startTime:0,startBeat:0,schedBeat:0};
@@ -1490,9 +1632,63 @@ class Engine{
         tone.frequency.value=800+fx.p2*10000; sh.connect(tone); tone.connect(wet);}
       else sh.connect(wet);
     }else if(t==='dist'){                    // all AMP distortion curves, as an fx (dry/wet mix)
+      const di=clamp(Math.round(fx.p3||0),0,8)+1;
       const sh=keep(ac.createWaveShaper());
-      sh.curve=distCurve(clamp(Math.round(fx.p3||0),0,8)+1,fx.p1); sh.oversample='2x';  // p3 0..8 → DTYPES 1..9
-      cur.connect(sh); sh.connect(wet);
+      sh.curve=distCurve(di,fx.p1); sh.oversample='2x';           // p3 0..8 → DTYPES 1..9
+      cur.connect(sh);
+      const p2=clamp(fx.p2??0.3,0,1);
+      if(DTYPES[di]==='crush'&&fxwReady&&p2>0.01){
+        /* sample-rate reduction: the aliasing half of a bitcrusher */
+        const dc=keep(new AudioWorkletNode(ac,'ten-deci',
+          {numberOfInputs:1,numberOfOutputs:1,outputChannelCount:[2]}));
+        dc.parameters.get('red').value=1+Math.round(p2*p2*40);
+        sh.connect(dc); dc.connect(wet);
+      }else if(DTYPES[di]!=='crush'){
+        const tone=keep(ac.createBiquadFilter()); tone.type='lowpass';
+        tone.frequency.value=800+p2*11000;      // the tone control drv used to have
+        sh.connect(tone); tone.connect(wet);
+      }else sh.connect(wet);
+    }else if(t==='filt'){
+      const ty=XFT[clamp(Math.round(fx.p3||0),0,XFT.length-1)];
+      const frq=40*Math.pow(200,clamp(fx.p1??0.5,0,1)), rz=clamp(fx.p2??0.3,0,1);
+      if(ty==='fmnt'||ty==='vowel'){
+        /* a formant is a BANK of resonant peaks, not one filter — three
+           parallel bandpasses at F1..F3, which is why this could never be a
+           FILT-module type (that one is a single biquad node) */
+        const fs=ty==='vowel'?vowelAt(fx.p1??0.5)
+                             :vowelAt(0.5).map((f,i)=>f*(0.35+ (fx.p1??0.5)*1.9));
+        const sum=keep(ac.createGain()); sum.gain.value=1;
+        const amp=[1,0.55,0.28];
+        fs.forEach((f,i)=>{
+          const bp=keep(ac.createBiquadFilter()); bp.type='bandpass';
+          bp.frequency.value=clamp(f,60,12000);
+          bp.Q.value=clamp((f/95)*(0.5+rz*1.8),1,26);      // sharp = narrower throat
+          const g=keep(ac.createGain()); g.gain.value=amp[i]*2.2;
+          cur.connect(bp); bp.connect(g); g.connect(sum);
+        });
+        sum.connect(wet);
+      }else{
+        const f2=keep(ac.createBiquadFilter());
+        f2.type=XFT_W[ty]||'lowpass';
+        f2.frequency.value=frq;
+        f2.Q.value=ty==='peq'||ty==='bp'||ty==='ntc'?0.7+rz*12:0.5+rz*8;
+        if(ty==='peq'||ty==='lsh'||ty==='hsh')f2.gain.value=((fx.p4??0.5)-0.5)*36;
+        cur.connect(f2); f2.connect(wet);
+      }
+    }else if(t==='grain'){
+      if(!fxwReady)cur.connect(wet);           // module still compiling: pass audio through
+      else{
+        const gn=keep(new AudioWorkletNode(ac,'ten-grain',
+          {numberOfInputs:1,numberOfOutputs:1,outputChannelCount:[2]}));
+        const P=k=>gn.parameters.get(k);
+        const p1=clamp(fx.p1??0.3,0,1);
+        P('size').value=0.004+p1*p1*0.6;                       // 4ms .. 600ms
+        P('dens').value=1+clamp(fx.p2??0.3,0,1)*55;
+        P('rate').value=Math.pow(2,Math.round(((fx.p3??0.5)-0.5)*48)/12);
+        P('spray').value=clamp(fx.p4??0.3,0,1);
+        P('fb').value=clamp(fx.p5??0,0,0.92);
+        cur.connect(gn); gn.connect(wet);
+      }
     }else if(t==='verb'){
       const cv=keep(ac.createConvolver()); cv.buffer=this.getIR(vrbSec(fx.p1));
       const tone=keep(ac.createBiquadFilter()); tone.type='lowpass';
