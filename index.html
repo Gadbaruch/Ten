@@ -911,9 +911,9 @@ class Voice{
   /* live OSC edits: retune / relevel / reshape the running oscillators instead of
      waiting for the next note. mode/dest/trig/phase are structural — those still
      land on the next note, since they change the graph itself. */
-  oscRefresh(E,key,gl){
+  oscRefresh(E,key,gl,at){
     if(this.killed)return;
-    const ops=this.p.osc, t=AC.currentTime, GL=gl>0?gl:0.02;
+    const ops=this.p.osc, t=Math.max(AC.currentTime,at||0), GL=gl>0?gl:0.02;
     const bt=this.rootFreq*ops[0].rat*Math.pow(2,(ops[0].fine||0)/1200);
     const sprd=this.p.vox.sprd||0;
     for(let i=0;i<10;i++){
@@ -1899,6 +1899,7 @@ class Engine{
           this.port.onmessage=e=>{const d=e.data;
             if(d.t==='p'){this.p[d.i]=d.v;return;}
             if(d.t==='cfg'){this.cfg=d.cfg||{flt:[],mod:[]};return;}
+            if(d.t==='retune'&&d.at){this.ev.push(d);return;}   // scheduled: fire in time
             if(d.t==='retune'){                       // legato: glide, do not restrike
               const g=Math.max(0.004,d.gl||0.02);
               for(let k=0;k<this.v.length;k++){
@@ -2043,9 +2044,22 @@ class Engine{
             }
             if(this.v.length>64)this.v.splice(0,this.v.length-64);}
           else if(d.t==='off'){
+            /* Ignore a repeat off for a voice already released. A steal can
+               legitimately send a second, earlier off, and re-running noteOff
+               would reset relT — restarting the release and making the note
+               ring PAST where it was supposed to stop. First off wins. */
             for(let k=0;k<this.v.length;k++)
-              if(this.v[k].id===d.id){this.v[k].relT=this.v[k]._t;
+              if(this.v[k].id===d.id&&!this.v[k]._off){this.v[k]._off=1;
+                this.v[k].relT=this.v[k]._t;
                 try{noteOff(this.v[k]);}catch(err){this.v[k].done=true;}}}
+          else if(d.t==='retune'){
+            const g=Math.max(0.004,d.gl||0.02);
+            for(let k=0;k<this.v.length;k++){
+              const vo=this.v[k];
+              if(vo.done||vo._fd!==undefined)continue;
+              vo._gt=d.f; vo._gf=vo.f||d.f; vo._gk=Math.exp(-1/(g*sampleRate));
+            }
+            this.lastF=d.f;}
         }
         process(ins,outs){
           const o=outs[0][0]; if(!o)return true;
@@ -2216,13 +2230,15 @@ class Engine{
      amp env, filter env, the model's excitation state — carries through, which
      is what makes legato legato. Pitch is scaled off the note the voice was
      built at, so sample/noise roots that were never frequencies survive. */
-  retune(pi,midi){
+  retune(pi,midi,at){
     const p=S.presets[pi];
     const gl=Math.max(0.004,(p.vox&&p.vox.glide)||0.02);
     if(p.cat==='proc'){
       const e=this.cn&&this.cn[pi];
       if(!e||!e.node)return false;
-      this.codeSend(pi,{t:'retune',f:440*Math.pow(2,(midi-69)/12),gl});
+      /* `at` matters: the sequencer schedules ~150ms ahead, so a retune applied
+         on arrival lands early and the pitch moves before the note does. */
+      this.codeSend(pi,{t:'retune',f:440*Math.pow(2,(midi-69)/12),gl,at:at||0});
       return true;
     }
     let did=false;
@@ -2237,11 +2253,72 @@ class Engine{
          used to pass a bare `E`, which does not exist in this scope, so every
          legato retune threw ReferenceError into a silent catch and the pitch
          never moved. Errors here are reported, never swallowed. */
-      try{v.oscRefresh(this,'rat',gl);}
+      try{v.oscRefresh(this,'rat',gl,at);}
       catch(err){ if(!this._rtErr){this._rtErr=1; flash('retune: '+(err&&err.message||err));} }
       did=true;
     }
     return did;
+  }
+  /* The SEQUENCER counterpart of monoTrigger. A recorded phrase has to play
+     back the way it was played: if a short note sits inside a long one, ending
+     the short note returns you to the long one. Live, the note stack does that.
+     Scheduled notes never went near it — noteOn just stole the earlier voice
+     and nothing brought it back, so an overlapping phrase played back as
+     something you never played.
+     Every time is known up front here (the scheduler runs ~150ms ahead), so the
+     fall-back is scheduled rather than waiting for a key release. */
+  monoSeq(at,pi,midi,pad,vel,durSec,mv){
+    const S2=this.seq=this.seq||{};
+    const st=S2[pi]=S2[pi]||[];
+    const end=at+durSec;
+    for(let i=st.length-1;i>=0;i--)              // drop notes finished before this starts
+      if(st[i].end<=at+1e-4||st[i].end<AC.currentTime-1)st.splice(i,1);
+    if(st.length>24)st.splice(0,st.length-24);
+    const sounding=st.some(e=>e.start<=at+1e-4&&e.end>at+1e-4);
+    // the newest note that OUTLIVES this one is what we fall back to
+    const under=st.filter(e=>e.start<=at+1e-4&&e.end>end+1e-4)
+                  .sort((a,b)=>b.start-a.start)[0];
+    st.push({midi,vel,start:at,end});
+    if(mv===2){
+      /* Legato cannot pre-release: release() commits the gain ramp AND stops
+         the nodes, and neither can be taken back. So the voice is held and its
+         release armed by a timer that later notes can push further out — the
+         phrase releases once, at its real end. */
+      const P=(this.seqPend=this.seqPend||{})[pi];
+      const alive=P&&P.v&&!P.v.killed&&P.end>at+1e-4;
+      if(!(alive&&this.retune(pi,midi,at))){
+        const v=this.noteOn(at,pi,midi,vel,pad); v.live=false;
+        this.seqPend[pi]={v,end,timer:null};
+      }
+      if(under){this.retune(pi,under.midi,end); this.seqPend[pi].end=under.end;}
+      else this.seqPend[pi].end=end;
+      this._armRel(pi);
+      return null;
+    }
+    const v=this.noteOn(at,pi,midi,vel,pad);
+    v.live=false; v.release(end);
+    if(under){                                   // mono: restrike what is still held
+      const v2=this.noteOn(end,pi,under.midi,under.vel,under.midi);
+      v2.live=false; v2.release(under.end);
+    }
+    return null;
+  }
+  /* Arm the pending legato release. Fired slightly early so release(end) still
+     lands sample-accurately; a later note re-arms it instead of letting it go. */
+  _armRel(pi){
+    const P=this.seqPend&&this.seqPend[pi]; if(!P)return;
+    if(P.timer)clearTimeout(P.timer);
+    const end=P.end;
+    P.timer=setTimeout(()=>{
+      if((this.seqPend[pi]||{})!==P||P.end!==end)return;   // extended meanwhile
+      try{P.v.release(P.end);}catch(_){}
+      this.seqPend[pi]=null;
+    },Math.max(0,(end-0.06-AC.currentTime)*1000));
+  }
+  seqClear(pi){
+    if(this.seq)this.seq[pi]=[];
+    const P=this.seqPend&&this.seqPend[pi];
+    if(P){if(P.timer)clearTimeout(P.timer); try{P.v.release(AC.currentTime);}catch(_){} this.seqPend[pi]=null;}
   }
   /* Mono/legato live handle. `wasTop` matters: releasing a key that is NOT the
      one currently sounding must change nothing — only dropping the top of the
@@ -2269,6 +2346,17 @@ class Engine{
   }
   noteOn(at,pi,midi,vel,padMidi){
     const p=S.presets[pi];
+    /* MONO STEAL, before anything else. This used to live below the procedural
+       early-return, so proc channels never stole at all and mono stacked up
+       polyphonically — the old note just kept ringing under the new one. */
+    const pm0=padMidi==null?midi:padMidi;
+    const K0=isKit(p)?kitSlot(p,pm0):null;
+    const pre0=K0||prepEffective(p,pm0);
+    const lid0=K0?pcOf(pm0):'ch';
+    if(((pre0.vox&&pre0.vox.mode)|0)>=1){        // mono steals only its own kit slot
+      const killAt=Math.max(AC.currentTime+0.001,at-0.004);
+      for(const v of [...this.act[pi]])if((v._lid||'ch')===lid0)v.kill(killAt,true);
+    }
     if(p.cat==='proc'){
       /* the worklet owns the voice; hand back a shim so the sequencer, the
          pressure path and the poly cap all behave exactly as they do for a Voice */
@@ -2280,8 +2368,15 @@ class Engine{
         pressN:[],nodes:[],p,
         release(t){if(this.released)return;this.released=true;
           send({t:'off',id,at:Math.max(at,t||AC.currentTime)});},
-        kill(t){this.killed=true;this.release(t);},
+        /* A kill must be able to SHORTEN an already-scheduled release: the
+           sequencer releases a note when it schedules it, so a later mono
+           steal arrived after `released` was set and did nothing — the stolen
+           note rang on underneath the new one. Voice.kill() has always worked
+           after release; this shim has to match it. */
+        kill(t){this.killed=true; this.released=true;
+          send({t:'off',id,at:Math.max(at,t||AC.currentTime)});},
         setPressure(x){this.press=clamp(x,0,1); send({t:'p',i:0,v:((p.cp&&p.cp[0])??1)*(0.3+0.7*this.press)});}};
+      sh._lid=lid0;
       this.act[pi].push(sh);
       if(this.act[pi].length>16)this.act[pi].shift();
       const drop=()=>{const a=this.act[pi],i=a.indexOf(sh);if(i>=0)a.splice(i,1);};
@@ -2301,11 +2396,6 @@ class Engine{
     const K=isKit(p)?kitSlot(p,pm):null;
     const pre=K?K:prepEffective(p,pm);
     const lid=K?pcOf(pm):'ch';
-    const vx=pre.vox||{};
-    if(vx.mode>=1){                                      // mono steals only its own kit slot
-      const killAt=Math.max(AC.currentTime+0.001,at-0.004);
-      for(const v of [...this.act[pi]])if(v._lid===lid)v.kill(killAt,true);
-    }
     const v=new Voice(this,at,pi,midi,vel,pre,pm); v._lid=lid;
     this.act[pi].push(v);
     return v;
@@ -2374,11 +2464,13 @@ class Engine{
     /* mono & legato get note priority: a stack of what is still held, so
        releasing the newest note drops back to the one under it. Only single
        live notes — a chord effect on a mono channel is already contradictory. */
-    if(durSec==null&&midis.length===1){
+    if(midis.length===1){
       const K0=isKit(p)?kitSlot(p,pads[0]):null;
       const pr0=K0||prepEffective(p,pads[0]);
       const mv=(pr0.vox&&pr0.vox.mode)|0;
-      if(mv>=1)return this.monoTrigger(at,pi,midis[0],pads[0],vel,mv,pcHandle);
+      if(mv>=1)return durSec==null
+        ? this.monoTrigger(at,pi,midis[0],pads[0],vel,mv,pcHandle)
+        : this.monoSeq(at,pi,midis[0],pads[0],vel,durSec,mv);
     }
     const notes=midis.map((m,i)=>({m,pad:pads[i]})).sort((a,b)=>a.m-b.m);
     const nM=notes.length;   // negative strum rolls high -> low
@@ -5941,7 +6033,7 @@ document.addEventListener('keyup',e=>{
 window.addEventListener('blur',()=>{
   eraseHold=null;
   for(const c in liveV){liveV[c]&&liveV[c].release&&liveV[c].release(AC.currentTime);delete liveV[c];}
-  for(let i=0;i<10;i++)engine.monoClear(i);
+  for(let i=0;i<10;i++){engine.monoClear(i); engine.seqClear(i);}
   for(const c in pend)delete pend[c];
 });
 
