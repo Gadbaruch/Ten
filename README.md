@@ -127,6 +127,30 @@ existence. That last one is the breath/swell gesture. Under
 MPE, where each note owns its own channel, channel pressure is therefore
 genuinely per-note: press one key deeper and only that voice opens up.
 
+**Procedural instruments.** Set a channel's type to `proc` and its sound
+becomes real DSP running in an audio worklet — for the instruments the rack
+cannot express. **18 models**, grouped by how they actually make sound:
+
+- *modal* (struck bars, tines, pans) — kalimba, xylophone, marimba,
+  vibraphone, steeldrum, woodblock
+- *struck* — piano, rhodes · *tonewheel* — hammond
+- *string* — string (Karplus-Strong), bowed (a saw section, not a waveguide)
+- *blown* — clarinet, flute, saxophone, harmonica, accordion, trumpet
+- *skin* — skindrum (a real membrane: modes at the Bessel zeros)
+
+Each model exposes 8 named params, live-tweakable with the arrow keys while
+it plays, and ships **10 presets** (180 in all) — mostly the real instrument
+in a real room, with one or two deliberately strange per set. A preset carries
+the model's params *plus* a filter, amp envelope, voice settings and an fx
+chain, so it's a whole voice rather than a timbre tweak. PRST picks `model`
+then `preset`.
+
+The rest of the rack applies on top: FX, MIX and PLAY come free (the worklet
+feeds the channel bus above them), and FILT, MOD and VOICE — unison, stereo
+spread, mono steal, glide — are applied per voice. Every model is level-matched
+to a plain saw on the normal engine, and RELEASE in the MOD rack governs all of
+them. Note this half is web-only: arbitrary DSP doesn't port to hvcc.
+
 **Audio channels.** Set a channel's type to `audio` and it becomes a
 looping audio track: drag a file onto it, or record straight in from the
 mic (`tab`, same looper) with overwrite / overdub / **smart-duck** modes —

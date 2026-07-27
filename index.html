@@ -239,7 +239,7 @@ const fx17p=p=>{if(!p)return p; fx17(p.fx); if(Array.isArray(p.kit))p.kit.forEac
 const rack=(mk)=>Array.from({length:10},(_,i)=>mk(i));
 
 const DRUMCATS=['kik','snr','hh','cymb','perc','tom','wood','zap'];
-const CATS=[...DRUMCATS,'kit','bass','keys','chord','lead','pad','plk','fx','audio','misc'];
+const CATS=[...DRUMCATS,'kit','bass','keys','chord','lead','pad','plk','fx','audio','proc','misc'];
 const isDrumCat=c=>DRUMCATS.includes(c)||c==='drum'||c==='kit';
 
 /* ---------------- cross-session settings ----------------------------- */
@@ -293,6 +293,10 @@ function basePreset(name){return{
   lfo:rack(mkLfo), mod:rack(mkMod), fx:rack(mkFx), ply:rack(mkPly),
   vox:{mode:0,glide:0,uni:1,sprd:12,wide:0.6,slop:0.008},
   mix:{lvl:0.8,pan:0},
+  code:null,       // procedural channels: custom DSP source (null = use pmodel)
+  pmodel:null,     // ...or a name from PROCLIB
+  psel:0,          // which of that model's presets
+  cp:[1,1,1,0.5,0,0,0.5,0.3],
   kit:null,        // kit channels: 12 full preset chains, one per pitch class (built on demand)
   modLoop:new Looper('b',8,'on'),
 };}
@@ -1866,8 +1870,257 @@ class Engine{
     this.prepSig[pi]=sig;
     for(const t2 of touched)setV(p,t2.mi,t2.si,t2.spec,t2.base);   // stored preset stays clean
   }
+  /* Compile a channel's DSP into an AudioWorklet. One node per channel, which
+     handles its own polyphony — a node per voice would cost milliseconds per
+     note just to construct. Notes that arrive before the module finishes
+     compiling are queued rather than dropped. */
+  codeNode(pi){
+    const p=S.presets[pi];
+    this.cn=this.cn||{};
+    const src=p.code||procSrc(p);
+    let e=this.cn[pi];
+    if(e&&e.src===src)return e;
+    if(e&&e.node){try{e.node.disconnect();}catch(_){}}
+    e=this.cn[pi]={src,node:null,ready:false,q:[],id:1};
+    const cls='tencode'+pi+'_'+(this._cseq=(this._cseq||0)+1);
+    const wrap=`
+      const srI=1/sampleRate;
+      let PARAMS=[];
+      ${src}
+      class P extends AudioWorkletProcessor{
+        constructor(){super();this.v=[];this.ev=[];this.p=new Float32Array(8);
+          this.dc=0; this.g=1; this.dcR=0; this.lastF=0; this.mg=1;
+          this.cfg={flt:[],mod:[],vox:{mode:0,uni:1,sprd:12,wide:0.6,slop:0.008,glide:0}};
+          /* Events carry the audio-context TIME they are due and are applied
+             sample-accurately here. Delivering them with setTimeout instead
+             loses note-offs: the sequencer schedules ~150ms ahead, so a note
+             shorter than the lookahead gets its OFF before its ON, and hangs. */
+          this.port.onmessage=e=>{const d=e.data;
+            if(d.t==='p'){this.p[d.i]=d.v;return;}
+            if(d.t==='cfg'){this.cfg=d.cfg||{flt:[],mod:[]};return;}
+            if(d.t==='gain'){this.mg=d.v||1;return;}
+            if(d.t==='alloff'){this.v.length=0;this.ev.length=0;return;}
+            this.ev.push(d);};
+          this.port.postMessage({t:'params',names:PARAMS});}
+        /* TEN's own FILT and MOD racks, run per voice on top of whatever the
+           model produced. The model is the oscillator; these are the same
+           filter and modulation you get on any other channel. */
+        _relRate(){
+          const M=(this.cfg&&this.cfg.mod)||[];
+          let r=0.12;
+          for(let i=0;i<M.length;i++)
+            if(M[i]&&M[i].src===1&&M[i].dst===1){r=Math.max(0.004,M[i].r||0.12);break;}
+          return Math.min(0.5, 3.2/(r*sampleRate));
+        }
+        _env(v,m){
+          const a=Math.max(0.0005,m.a), d=Math.max(0.001,m.d), s=m.s, r=Math.max(0.005,m.r);
+          if(v.relT>=0){const rt=v._t-v.relT; return v._rl*Math.exp(-rt/(r*0.36));}
+          if(v._t<a){v._rl=v._t/a; return v._rl;}
+          v._rl = s + (1-s)*Math.exp(-(v._t-a)/(d*0.36));
+          return v._rl;
+        }
+        _rack(v,x){
+          const C=this.cfg; if(!C)return x;
+          let amp=1, cut=[0,0,0];
+          const M=C.mod;
+          for(let i=0;i<M.length;i++){
+            const m=M[i]; if(!m||!m.src)continue;
+            let val=0;
+            if(m.src===1)val=this._env(v,m);
+            else if(m.src===2)val=Math.sin(6.2832*(m.rate||5)*v._t+(m.ph||0)*0.0175);
+            else if(m.src===3)val=v.vel;
+            else if(m.src===4)val=(v.key-60)/24;
+            else continue;
+            const A=(m.amt||0)/100;
+            if(m.dst===1)amp *= (m.src===1? val : (1+A*val));
+            else if(m.dst===3){const k=(m.idx|0)||1; if(k<=3)cut[k-1]+=A*val*4;}
+          }
+          const F=C.flt;
+          for(let i=0;i<F.length&&i<3;i++){
+            const f=F[i]; if(!f||!f.typ)continue;
+            let fc=f.frq*Math.pow(2,cut[i]);
+            /* TPT (zero-delay-feedback) SVF. The Chamberlin form had to be
+               clamped to sr/6 for stability, which turned the harmless 9kHz
+               DEFAULT lowpass into a real 7kHz one on every model — that is
+               why they all went dull. This form is stable to Nyquist, so a
+               high cutoff is genuinely transparent. */
+            if(fc<20)fc=20; else if(fc>sampleRate*0.49)fc=sampleRate*0.49;
+            const st=v._fs[i];
+            const g=Math.tan(Math.PI*fc/sampleRate), k=1/Math.max(0.5,f.q||1);
+            const a1=1/(1+g*(g+k)), a2=g*a1, a3=g*a2;
+            const v3=x-st.c2, v1=a1*st.c1+a2*v3, v2=st.c2+a2*st.c1+a3*v3;
+            st.c1=2*v1-st.c1; st.c2=2*v2-st.c2;
+            x = f.typ===1?v2 : f.typ===2?(x-k*v1-v2) : f.typ===3?v1 : x;
+          }
+          return x*amp;
+        }
+        fire(d){
+          if(d.t==='on'){
+            const V=this.cfg.vox||{}, uni=Math.max(1,Math.min(7,Math.round(V.uni||1)));
+            /* MONO: a new note steals the sounding one rather than stacking */
+            if(V.mode===1){for(let k=0;k<this.v.length;k++)
+              if(this.v[k]._fd===undefined&&!this.v[k].done)this.v[k]._fd=1;}
+            const from=(V.glide>0.001&&this.lastF)?this.lastF:0;
+            for(let u=0;u<uni;u++){
+              const off=uni===1?0:(u/(uni-1))*2-1;
+              const det=Math.pow(2,off*(V.sprd||0)/1200);
+              const f=d.f*det;
+              const vo={id:d.id};
+              try{noteOn(vo,f,d.vel,this.p);}catch(err){vo.done=true;}
+              vo._t=0; vo.relT=-1; vo._rl=0; vo.vel=d.vel; vo.key=d.key||60;
+              /* Release used to do nothing because every model applied its OWN
+                 hardcoded release, which always finished first. The rate now
+                 comes from the amp envelope's R and the models use it. */
+              vo._rr=this._relRate();
+              vo._fs=[{c1:0,c2:0},{c1:0,c2:0},{c1:0,c2:0}];
+              vo._pan=off*(V.wide||0);                       // stereo spread
+              vo._amp=1/Math.sqrt(uni);
+              vo._skip=Math.round((V.slop||0)*Math.abs(off)*sampleRate);  // unison slop
+              /* GLIDE: slide v.f from the last note. Models that read v.f each
+                 sample follow it; waveguide models fix their delay length at
+                 noteOn, so those step instead of gliding. */
+              if(from){vo._gf=from*det; vo._gt=f; vo._gk=Math.exp(-1/(Math.max(0.002,V.glide)*sampleRate));}
+              this.v.push(vo);
+            }
+            this.lastF=d.f;
+            /* Voice stealing must FADE, never splice. These models ring for
+               seconds, so a busy passage overflows the array and splicing
+               guillotines notes mid-decay — which is exactly the 'notes cut
+               off randomly' symptom. Steal the oldest not-already-fading voice
+               and let it fall over ~40ms instead. */
+            if(this.v.length>36){
+              for(let k=0;k<this.v.length;k++)
+                if(!this.v[k]._fd){this.v[k]._fd=1;break;}
+            }
+            if(this.v.length>64)this.v.splice(0,this.v.length-64);}
+          else if(d.t==='off'){for(let k=0;k<this.v.length;k++)
+            if(this.v[k].id===d.id){this.v[k].relT=this.v[k]._t;
+              try{noteOff(this.v[k]);}catch(err){this.v[k].done=true;}}}
+        }
+        process(ins,outs){
+          const o=outs[0][0]; if(!o)return true;
+          const oR=outs[0][1]||null;
+          const V=this.v, N=o.length, t0=currentTime, sr=sampleRate;
+          for(let i=0;i<N;i++){
+            if(this.ev.length){
+              const tn=t0+i/sr;
+              for(let k=0;k<this.ev.length;k++){
+                const d=this.ev[k];
+                if((d.at||0)<=tn){this.fire(d);this.ev.splice(k,1);k--;}
+              }
+            }
+            let sm=0, smR=0;
+            for(let k=0;k<V.length;k++){const vo=V[k];
+              if(vo.done)continue;
+              if(vo._skip>0){vo._skip--; continue;}      // unison slop: stagger the starts
+              if(vo._gf!==undefined){                    // glide toward the target
+                vo._gf=vo._gt+(vo._gf-vo._gt)*vo._gk;
+                vo.f=vo._gf;
+                if(Math.abs(vo._gf-vo._gt)<0.05){vo.f=vo._gt; vo._gf=undefined;}
+              }
+              let x=0; try{x=render(vo,this.p);}catch(err){vo.done=true;}
+              try{x=this._rack(vo,x);}catch(err){}
+              vo._t+=1/sampleRate;
+              if(vo._fd!==undefined){                   // stolen: fade, do not cut
+                x*=vo._fd; vo._fd-=0.000023;
+                if(vo._fd<=0)vo.done=true;
+              }
+              if(!(x===x)||x<-64||x>64)continue;
+              x*=(vo._amp!==undefined?vo._amp:1);
+              const pn=vo._pan||0;
+              sm  += x*(pn>0?1-pn*0.85:1);
+              smR += x*(pn<0?1+pn*0.85:1);}
+            /* Level: the models already run near full scale, so this is a trim,
+               not a boost. Pushing it higher just parks the limiter on and
+               flattens every transient — which reads as quiet AND lifeless. */
+            sm*=1.7*this.mg; smR*=1.7*this.mg;
+            this.dc+=(sm-this.dc)*0.0004; sm-=this.dc;  // DC block: user DSP drifts
+            this.dcR+=(smR-this.dcR)*0.0004; smR-=this.dcR;
+            /* soft limiter, so a preset that overshoots gets caught rather than
+               crackling — user code should never be able to clip the bus */
+            /* a SAFETY NET, not a compressor: it should sit at unity and only
+               catch a preset that overshoots. Parked on the threshold means it
+               is flattening every transient. */
+            const aL=sm<0?-sm:sm, aR=smR<0?-smR:smR, a=aL>aR?aL:aR;
+            if(a*this.g>0.92){const want=0.92/a; if(want<this.g)this.g=want;}
+            this.g+=(1-this.g)*0.0009;
+            sm*=this.g; smR*=this.g;
+            if(sm>0.99)sm=0.99; else if(sm<-0.99)sm=-0.99;
+            if(smR>0.99)smR=0.99; else if(smR<-0.99)smR=-0.99;
+            o[i]=sm; if(oR)oR[i]=smR;
+          }
+          for(let k=V.length-1;k>=0;k--)if(V[k].done)V.splice(k,1);
+          if(this.ev.length>64)this.ev.splice(0,this.ev.length-64);
+          return true;
+        }
+      }
+      registerProcessor('${cls}',P);`;
+    const url=URL.createObjectURL(new Blob([wrap],{type:'application/javascript'}));
+    AC.audioWorklet.addModule(url).then(()=>{
+      if(this.cn[pi]!==e)return;
+      const n=new AudioWorkletNode(AC,cls,{numberOfInputs:0,numberOfOutputs:1,outputChannelCount:[2]});
+      n.port.onmessage=ev=>{if(ev.data&&ev.data.t==='params')e.names=ev.data.names||[];};
+      n.connect(this.buses[pi].vIn);
+      e.node=n; e.ready=true;
+      for(let i=0;i<8;i++)n.port.postMessage({t:'p',i,v:(p.cp&&p.cp[i])??0});
+      n.port.postMessage({t:'gain',v:((PROCLIB[p.pmodel]||{}).gain)||1});
+      this.codeCfg(pi);
+      for(const m of e.q)n.port.postMessage(m);
+      e.q.length=0;
+    }).catch(err=>{e.err=String(err&&err.message||err); flash('code error: '+e.err); dirty=true;});
+    return e;
+  }
+  codeCfg(pi){
+    const p=S.presets[pi];
+    const flt=(p.flt||[]).slice(0,3).map(f=>f&&!f.off?{typ:f.typ|0,frq:f.frq,q:f.q}:{typ:0});
+    const mod=[];
+    for(const m of (p.mod||[])){
+      if(!m||m.off||!m.src||!m.routes)continue;
+      for(const rt of m.routes){
+        if(!rt.dst)continue;
+        mod.push({src:m.src,dst:rt.dst,idx:rt.idx,amt:rt.amt,
+                  a:m.a,d:m.d,s:m.s,r:m.r,rate:m.rate,ph:m.ph});
+      }
+    }
+    const vx=p.vox||{};
+    const vox={mode:vx.mode|0,uni:vx.uni||1,sprd:vx.sprd||0,
+               wide:vx.wide||0,slop:vx.slop||0,glide:vx.glide||0};
+    this.codeSend(pi,{t:'cfg',cfg:{flt,mod,vox}});
+  }
+  codeSend(pi,msg){
+    const e=this.codeNode(pi);
+    if(e.ready&&e.node)e.node.port.postMessage(msg); else e.q.push(msg);
+  }
+  codeParams(pi){
+    const e=this.cn&&this.cn[pi];
+    const p=S.presets[pi];
+    for(let i=0;i<8;i++)this.codeSend(pi,{t:'p',i,v:(p.cp&&p.cp[i])??0});
+    return (e&&e.names)||[];
+  }
   noteOn(at,pi,midi,vel,padMidi){
     const p=S.presets[pi];
+    if(p.cat==='proc'){
+      /* the worklet owns the voice; hand back a shim so the sequencer, the
+         pressure path and the poly cap all behave exactly as they do for a Voice */
+      const e=this.codeNode(pi), id=e.id++;
+      const f=440*Math.pow(2,(midi-69)/12);
+      const send=m=>this.codeSend(pi,m);
+      send({t:'on',id,f,vel,at,key:midi});            // the worklet schedules it
+      const sh={midi,pad:padMidi==null?midi:padMidi,released:false,killed:false,press:0,
+        pressN:[],nodes:[],p,
+        release(t){if(this.released)return;this.released=true;
+          send({t:'off',id,at:Math.max(at,t||AC.currentTime)});},
+        kill(t){this.killed=true;this.release(t);},
+        setPressure(x){this.press=clamp(x,0,1); send({t:'p',i:0,v:((p.cp&&p.cp[0])??1)*(0.3+0.7*this.press)});}};
+      this.act[pi].push(sh);
+      if(this.act[pi].length>16)this.act[pi].shift();
+      const drop=()=>{const a=this.act[pi],i=a.indexOf(sh);if(i>=0)a.splice(i,1);};
+      sh._drop=setTimeout(drop,12000);          // backstop for a note never released
+      const rel0=sh.release.bind(sh);
+      sh.release=t=>{rel0(t); clearTimeout(sh._drop);
+        sh._drop=setTimeout(drop,3500);};       // …normally it clears soon after release
+      return sh;
+    }
     /* padMidi = the note that picks the instrument; midi = the note that sounds.
        They differ only when a PLAY effect (rpit) detunes without changing pads. */
     const pm=padMidi==null?midi:padMidi;
@@ -2113,6 +2366,7 @@ function applyParam(pi,mi,si,px,v){
   if(M.id==='fx'&&spec.key==='typ'&&XTYPES[v]==='dist'){const s2=S.presets[pi].fx[si];s2.p1=0.35;s2.p3=0;s2.mix=0.6;}
   if(M.id==='fx')engine.rebuildRack(pi);
   else if(M.id==='mix'||M.id==='mod')engine.refresh(pi);   // mod→pan lives at bus level
+  if(isCodeCh(pi)&&(M.id==='flt'||M.id==='mod'||M.id==='vox'))engine.codeCfg(pi);
   else if(M.id==='flt'&&spec.key==='frq')engine.cutLive(pi,si);
   else if(M.id==='osc')engine.oscLive(pi,spec.key);        // held notes follow the edit
   dirtySave=true;
@@ -2171,6 +2425,8 @@ function applyPresetData(pi,name,cat,data){
 }
 function setPresetData(pi,name,cat,data){   // same, no undo — for composite generators
   const p=basePreset(name); p.cat=cat;
+  if(data&&data.code)p.code=data.code;
+  if(data&&Array.isArray(data.cp))p.cp=data.cp.slice(0,8);
   for(const M of MODULES){
     if(!M.id||M.prs)continue;
     if(M.flat){if(data[M.id])Object.assign(p[M.id],data[M.id]);}
@@ -2892,6 +3148,16 @@ function prsFieldDefs(){
     {k:'level',v:()=>Math.round((K.mix?K.mix.lvl:0.8)*100)+'%'},
     {k:'pan',  v:()=>{const pn=K.mix?K.mix.pan:0;return pn===0?'C':(pn>0?'R':'L')+Math.round(Math.abs(pn)*100);}},
     {k:'wild', v:()=>(CFG.wild??50)+'%'}];
+  if(p.cat==='proc'){
+    const L=procPresets(p.pmodel||PROCNAMES[0]);
+    return [
+    chType,
+    {k:'model', v:()=>p.pmodel||PROCNAMES[0]},
+    {k:'preset',v:()=>L.length?((L[clamp(p.psel|0,0,L.length-1)]||{}).n||'—')
+                              +' '+((p.psel|0)+1)+'/'+L.length : '—'},
+    {k:'rnd',   v:()=>'↕ roll'},
+    {k:'wild',  v:()=>(CFG.wild??50)+'%'}];
+  }
   return [
     chType,
     {k:'prst', v:()=>p.name},
@@ -2909,7 +3175,21 @@ const AUDF=[
  SP('fit','fit','enum',{opts:['off','on']}),
  SP('input','src','enum',{opts:['mic','mstr']}),
 ];
+const CODEF=()=>Array.from({length:8},(_,i)=>{
+  const nm=(engine.cn&&engine.cn[S.editSnd]&&engine.cn[S.editSnd].names)||[];
+  return SP(nm[i]||('p'+(i+1)),'cp'+i,'lin',{min:0,max:2,step:0.05});
+});
+function codeAction(d,m){
+  const pre=S.presets[S.editSnd], i=clamp(S.curParam,0,7);
+  const spec=CODEF()[i];
+  pre.cp=pre.cp||[1,1,1,0.5,0,0,0.5,0.3];
+  pre.cp[i]=adjust(spec,pre.cp[i]??0,d,m);
+  engine.codeSend(S.editSnd,{t:'p',i,v:pre.cp[i]});
+  flash('code '+spec.lbl+' = '+fmtVal(spec,pre.cp[i]));
+  dirty=true; dirtySave=true;
+}
 function audAction(d,m){
+  if(isCodeCh(S.editSnd)){codeAction(d,m);return;}
   const pre=S.presets[S.editSnd], spec=AUDF[clamp(S.curParam,0,AUDF.length-1)];
   pre.au[spec.key]=adjust(spec,pre.au[spec.key]??0,d,m);
   flash('audio '+spec.lbl+' = '+fmtVal(spec,pre.au[spec.key]));
@@ -2978,9 +3258,32 @@ function _prsAction(d){
     else if(f==='wild'){CFG.wild=clamp((CFG.wild??50)+d*5,0,100);saveCfg();}
     engine.rebuildRack(pi); dirty=true; dirtySave=true; return;
   }
+  if(f==='model'){
+    const i=PROCNAMES.indexOf(p.pmodel||PROCNAMES[0]);
+    p.pmodel=PROCNAMES[fmod((i<0?0:i)+d,PROCNAMES.length)];
+    p.name=p.pmodel.slice(0,5).toUpperCase();
+    p.psel=0;
+    const L0=procPresets(p.pmodel);
+    if(L0.length)applyProcPreset(pi,L0[0]); else {p.cp=[1,1,1,0.5,0.4,0,0.5,0.2];procDefaults(p);}
+    engine.codeNode(pi); engine.rebuildRack(pi); engine.codeCfg(pi);
+    flash('⚙ '+p.pmodel+'  ('+(PROCLIB[p.pmodel]||{}).fam+')');
+    dirty=true; dirtySave=true; return;
+  }
+  if(f==='preset'){
+    const L=procPresets(p.pmodel||PROCNAMES[0]);
+    if(!L.length){flash('no presets for '+(p.pmodel||'?'));dirty=true;return;}
+    pushUndo('proc preset');
+    p.psel=fmod((p.psel|0)+d,L.length);
+    applyProcPreset(pi,L[p.psel]);
+    flash('⚙ '+(p.pmodel)+' · '+L[p.psel].n);
+    dirty=true; dirtySave=true; return;
+  }
   if(f==='prst')scrollPreset(pi,d);
   else if(f==='type'){
     const cat=CATS[fmod(CATS.indexOf(p.cat||'misc')+d,CATS.length)];
+    if(cat==='proc'&&p.cat!=='proc'){p.pmodel=p.pmodel||PROCNAMES[0]; p.psel=p.psel|0;
+      procDefaults(p);
+      const L1=procPresets(p.pmodel); if(L1.length)setTimeout(()=>applyProcPreset(pi,L1[0]),0);}
     const pool=libAll().filter(en=>en.cat===cat);
     if(pool.length)applyPresetData(pi,pool[0].name,pool[0].cat,pool[0].data);
     else p.cat=cat;
@@ -3383,6 +3686,1000 @@ const retroBuf=Array.from({length:10},()=>[]);
 let eraseHold=null, muteHold=null, stepCur=0, taps=[];
 const liveMute=Array.from({length:10},()=>0);   // >0 = a live key overrides recorded notes on this lane
 const isAudioCh=pi=>S.presets[pi].cat==='audio';
+/* ---------------- code instruments -------------------------------------
+   A channel whose sound is DSP you write, compiled into an AudioWorklet.
+   This exists for the sounds the rack provably cannot express — anything
+   RECURSIVE (a string is a delay line fed back through a filter; the
+   recursion IS the instrument) and physical models whose partials are
+   coupled rather than independently enveloped.
+
+   Your code defines three things and nothing else:
+     PARAMS      up to 8 names, shown in the OSC module and live-tweakable
+     noteOn(v,f,vel,p)   set up voice state on `v`
+     noteOff(v)          begin its release
+     render(v,p)         return ONE sample; called per voice per sample
+
+   Available: sampleRate, srI (1/sampleRate), and Math. Polyphony, voice
+   allocation and cleanup are handled for you — set v.done=true to be culled.
+
+   Caveat worth knowing: this is web-only. Arbitrary JS does not port to
+   hvcc/Pd, so a model that earns its keep should eventually be rewritten as
+   a named, portable one. */
+const CODE_DEFAULT = `
+PARAMS = ['dyn','bloom','formant','breath','vib','mute','decay','drive']
+
+function noteOn(v, f, vel, p) {
+  v.f = f; v.vel = vel; v.ph = 0; v.t = 0;
+  v.env = 0; v.rel = false;
+  v.lp1 = 0; v.lp2 = 0;          // 2-pole lowpass state (the bore)
+  v.fbp = 0; v.flp = 0;          // state-variable filter, brass formant
+  v.dc = 0;
+}
+function noteOff(v) { v.rel = true }
+
+function render(v, p) {
+  var dyn = p[0] * v.vel;
+  // --- amplitude envelope: fast tongue, real sustain so a held key sustains
+  var tgt = v.rel ? 0 : (v.t < 0.012 ? 1 : 0.86);
+  var rate = v.rel ? v._rr : (v.t < 0.012 ? 0.010 : 0.0009);
+  v.env += (tgt - v.env) * rate * 48000 * srI;
+  if (v.rel && v.env < 0.0004) { v.done = true; return 0 }
+
+  // --- lips settle upward into the note, plus vibrato once it is established
+  var scoop = Math.pow(2, -20 * Math.exp(-v.t / 0.016) / 1200);
+  var vibA = p[4] * 0.006 * Math.min(1, Math.max(0, (v.t - 0.18) / 0.25));
+  var f = v.f * scoop * (1 + vibA * Math.sin(6.2832 * 5.4 * v.t));
+
+  // --- the lip buzz: a saw. polyBLEP removes the aliasing a naive saw has
+  var inc = f * srI;
+  v.ph += inc; if (v.ph >= 1) v.ph -= 1;
+  var saw = 2 * v.ph - 1;
+  var t2 = v.ph;
+  if (t2 < inc) { t2 /= inc; saw -= t2 + t2 - t2 * t2 - 1 }
+  else if (t2 > 1 - inc) { t2 = (t2 - 1) / inc; saw -= t2 * t2 + t2 + t2 + 1 }
+
+  // --- breath: chiff on the attack, whisper gated by the note
+  var nz = Math.random() * 2 - 1;
+  saw += nz * p[3] * (Math.exp(-v.t / 0.010) * 0.5 + v.env * 0.03);
+
+  // --- THE BORE. One cutoff, driven by how hard you blow. This single line
+  //     is what makes it read as brass instead of as an organ.
+  var fc = 260 + 9200 * Math.pow(v.env, 1.3) * Math.pow(dyn, 1.7) * p[1];
+  fc *= (1 - 0.55 * p[5]);
+  if (fc > sampleRate * 0.45) fc = sampleRate * 0.45;
+  var g = 1 - Math.exp(-6.2832 * fc * srI);
+  v.lp1 += (saw - v.lp1) * g;
+  v.lp2 += (v.lp1 - v.lp2) * g;
+  var y = v.lp2;
+
+  // --- brass formant ~1150 Hz. Take the BANDPASS output of the SVF: adding a
+  //     resonant LOWPASS here instead piles up everything below the formant
+  //     and drags the whole instrument dark.
+  var wf = 6.2832 * 1150 * srI, q = 0.4;
+  var hp = y - v.flp - q * v.fbp;
+  v.fbp += wf * hp;
+  v.flp += wf * v.fbp;
+  y += v.fbp * p[2] * (1.2 + 1.6 * dyn);
+
+  // --- mild asymmetric grit, then DC block
+  y = Math.tanh(y * (1 + p[7] * 2.2) + 0.08 * dyn) - 0.08 * dyn;
+  v.dc += (y - v.dc) * 0.0006;
+  y -= v.dc;
+
+  v.t += srI;
+  return y * v.env * dyn * 0.30;
+}
+`;
+const isCodeCh = pi => S.presets[pi].cat === 'proc';
+/* ---------------- the procedural model library --------------------------
+   Each entry is a complete instrument. They are grouped by HOW they make
+   sound, because that is what decides whether the rack could have done it:
+
+   MODAL      a struck bar/tine/pan: a few inharmonic partials, each with its
+              own decay. The rack can approximate these with per-op envelopes.
+   WAVEGUIDE  a delay line fed back through a filter. The recursion IS the
+              instrument, and no arrangement of oscillators can express it —
+              this is the family that justifies the whole feature.
+   BLOWN      a nonlinear excitation driving a resonator.                   */
+const PROCLIB = {};
+const _mk=(name,fam,src,gain)=>{PROCLIB[name]={fam,src,gain:gain||1};};
+
+/* --- shared preamble: helpers every model can use ---------------------- */
+const _PRE = `
+function _adsr(v,a,d,s,r){
+  if(v.rel){v.env+=(0-v.env)*r; if(v.env<0.0004)v.done=true; return v.env}
+  v.env += ((v.t<a?1:s) - v.env) * (v.t<a? d*4 : d);
+  return v.env;
+}
+function _svf(v,x,f,q){                 // returns [lp,bp]
+  v._h = x - v._l - q*v._b; v._b += f*v._h; v._l += f*v._b;
+  return v._b;
+}
+function _noise(){return Math.random()*2-1}
+function _blep(t,dt){                    // band-limits a naive saw's step
+  if(t<dt){t/=dt; return t+t-t*t-1}
+  if(t>1-dt){t=(t-1)/dt; return t*t+t+t+1}
+  return 0;
+}
+`;
+
+/* ============ MODAL: struck bars, tines, pans ========================== */
+const _modal = (label, ratios, decays, levels, atk, noiseAmt, extra) => `
+PARAMS = ['strike','decay','tone','noise','detune','spread','trem','drive']
+var RAT=[${ratios}], DEC=[${decays}], LVL=[${levels}];
+function noteOn(v,f,vel,p){
+  v.f=f; v.vel=vel; v.t=0; v.rel=false; v.env=1;
+  v.ph=[]; v.am=[];
+  for(var i=0;i<RAT.length;i++){ v.ph[i]=Math.random()*6.2832; v.am[i]=LVL[i]; }
+  v.nz=${noiseAmt};
+  v._l=0;v._b=0;v._h=0;
+}
+function noteOff(v){ v.rel=true }
+function render(v,p){
+  var y=0, t=v.t, dec=0.25+p[1]*1.75;
+  for(var i=0;i<RAT.length;i++){
+    var fi=v.f*RAT[i]*(1+ (i? p[4]*0.004*(i%2?1:-1) :0));
+    if(fi>sampleRate*0.47) continue;
+    var d=DEC[i]*dec;
+    var a=v.am[i]*Math.exp(-t/d);
+    v.ph[i]+=6.2832*fi*srI;
+    y += a*Math.sin(v.ph[i]);
+  }
+  // mallet contact: a few ms of bright noise
+  if(t<0.006) y += _noise()*v.nz*p[3]*Math.exp(-t/0.0015);
+  ${extra}
+  // release: a played note that is let go damps rather than rings on
+  if(v.rel){ v.env*=(1-v._rr); if(v.env<0.0006) v.done=true; }
+  if(t>${atk} && Math.abs(y)<1e-5 && t>0.25) v.done=true;
+  y=Math.tanh(y*(1+p[7]*3));
+  v.t+=srI;
+  return y*v.vel*v.env*0.5*(0.4+0.6*p[0]);
+}`;
+
+_mk('kalimba','modal',`
+PARAMS = ['strike','decay','tone','noise','detune','spread','trem','drive']
+/* Plucky = what happens in the first 30ms. A thumb piano tine is bent and
+   released, so it starts SHARP (bent up a few cents, settling fast) and the
+   fundamental has a fast initial slump before its long ring. A single
+   exponential per partial cannot do that and reads as a soft bell. */
+var RAT=[1,6.27,17.1,33.4];
+var LVL=[1,0.40,0.15,0.055];
+var DEC=[1.05,0.16,0.055,0.022];
+function noteOn(v,f,vel,p){
+  v.f=f; v.vel=vel; v.t=0; v.rel=false; v.env=1;
+  v.ph=[0,0,0,0]; v.hp=0; v.dc=0; v.nz=0;
+  v.hard=0.35+0.65*vel;
+}
+function noteOff(v){ v.rel=true }
+function render(v,p){
+  var t=v.t, dec=0.3+p[1]*1.7;
+  // the tine is released from a bend: sharp, settling within ~15ms
+  var bend = 1 + 0.020*v.hard*Math.exp(-t/0.010);
+  var y=0;
+  for(var i=0;i<RAT.length;i++){
+    var fi=v.f*RAT[i]*bend*(1+(i?p[4]*0.002:0));
+    if(fi>sampleRate*0.46)continue;
+    var lv=LVL[i]*Math.pow(0.6+0.7*p[2],i)*(i?v.hard:1);
+    v.ph[i]+=6.2832*fi*srI;
+    var e=Math.exp(-t/(DEC[i]*dec));
+    if(i===0) e=e*0.72+0.45*Math.exp(-t/0.055);     // fast slump + long ring
+    y+=lv*e*Math.sin(v.ph[i]);
+  }
+  // the thumbnail leaving the tine: brief, bright, essential to 'pluck'
+  if(t<0.012){
+    var nz=_noise();
+    v.hp=nz-v.nz; v.nz=nz;                          // 1-pole highpass = crisp
+    y += v.hp*p[3]*0.55*v.hard*Math.exp(-t/0.0022);
+  }
+  if(p[6]>0) y*=1+p[6]*0.2*Math.sin(6.2832*5.5*t);
+  y=Math.tanh(y*(1+p[7]*2.6));
+  v.dc+=(y-v.dc)*0.0006; y-=v.dc;
+  if(v.rel){ v.env*=(1-v._rr); if(v.env<0.0006)v.done=true; }
+  if(t>0.3&&Math.abs(y)<1e-5)v.done=true;
+  v.t+=srI;
+  return y*v.vel*v.env*0.5*(0.4+0.6*p[0]);
+}`);
+_mk('xylophone','modal',_modal('xylo',
+  '1,3.01,6.03,10.6','0.42,0.085,0.038,0.018','1,0.34,0.14,0.05',0.3,0.55,''));
+_mk('marimba','modal',_modal('marimba',
+  '1,3.99,10.5,19.7','1.55,0.12,0.05,0.022','1,0.28,0.12,0.05',0.6,0.35,''));
+_mk('vibraphone','modal',_modal('vibes',
+  '1,4.0,10.4,17.9','3.2,0.95,0.30,0.10','1,0.30,0.11,0.04',0.9,0.18,
+  'y *= 1 + p[6]*0.42*Math.sin(6.2832*5.2*t);'));   // rotating discs = tremolo
+_mk('steeldrum','modal',`
+PARAMS = ['strike','decay','tone','noise','detune','spread','trem','drive']
+/* A pan is STRUCK, so it must speak instantly — my earlier version faded in
+   over 90ms, which is what made it sound soft and synthetic. Round comes from
+   leaning on the low partials (1,2,4) and rolling off the high ones, not from
+   removing the attack. */
+var RAT=[1,2,3,4,5,6,8];
+var LVL=[1,0.86,0.18,0.72,0.16,0.24,0.10];
+var DEC=[0.95,0.80,0.30,0.55,0.22,0.30,0.16];
+function noteOn(v,f,vel,p){
+  v.f=f; v.vel=vel; v.t=0; v.rel=false; v.env=1;
+  v.ph=[]; for(var i=0;i<RAT.length;i++)v.ph[i]=0;
+  v.lp=0; v.dc=0; v.nz=0;
+}
+function noteOff(v){ v.rel=true }
+function render(v,p){
+  var t=v.t, dec=0.35+p[1]*1.6;
+  // the head gives a touch on the way in — a real pan pitches down a few cents
+  var drop = 1 + 0.012*Math.exp(-t/0.012);
+  var y=0;
+  for(var i=0;i<RAT.length;i++){
+    var fi=v.f*RAT[i]*drop*(1+(i?p[4]*0.0022*(i%2?1:-1):0));
+    if(fi>sampleRate*0.46)continue;
+    // higher partials both quieter AND shorter: that is 'round'
+    var lv=LVL[i]*Math.pow(0.55+0.45*p[2],i);
+    v.ph[i]+=6.2832*fi*srI;
+    y+=lv*Math.exp(-t/(DEC[i]*dec))*Math.sin(v.ph[i]);
+  }
+  // rubber-tipped stick: a soft knock, not a bright tick
+  if(t<0.020){
+    v.nz+=(_noise()-v.nz)*0.45;                    // pre-darkened noise
+    y += v.nz*p[3]*0.9*Math.exp(-t/0.0045);
+  }
+  if(p[6]>0) y*=1+p[6]*0.25*Math.sin(6.2832*4.5*t);
+  // the drum shell rounds off the top
+  var g=1-Math.exp(-6.2832*(2600+p[2]*5200)*srI);
+  v.lp+=(y-v.lp)*g; y=v.lp*0.82+y*0.18;
+  y=Math.tanh(y*(1+p[7]*2.2));
+  v.dc+=(y-v.dc)*0.0006; y-=v.dc;
+  if(v.rel){ v.env*=(1-v._rr); if(v.env<0.0006)v.done=true; }
+  if(t>0.3&&Math.abs(y)<1e-5)v.done=true;
+  v.t+=srI;
+  return y*v.vel*v.env*0.5*(0.4+0.6*p[0]);
+}`);                      // the pan blooms in, it does not click
+_mk('woodblock','modal',_modal('wood',
+  '1,2.57,4.94,8.1','0.085,0.045,0.022,0.012','1,0.55,0.25,0.10',0.15,0.75,''));
+
+/* ============ WAVEGUIDE: the family the rack cannot do ================= */
+_mk('string','waveguide',`
+PARAMS = ['pluck','damp','decay','body','pos','stiff','noise','drive']
+function noteOn(v,f,vel,p){
+  v.f=f; v.vel=vel; v.t=0; v.rel=false; v.env=1;
+  var L=Math.max(8,Math.round(sampleRate/f));
+  v.L=L; v.buf=new Float32Array(L); v.i=0; v.y=0; v.dc=0;
+  var k=Math.max(1,Math.round(L*(0.08+p[4]*0.42)));   // pluck position -> comb
+  for(var n=0;n<L;n++) v.buf[n]=(Math.random()*2-1);
+  for(var n=L-1;n>=k;n--) v.buf[n]-=v.buf[n-k]*0.7;
+  var g=0.5;                                          // soften the excitation
+  for(var n=1;n<L;n++) v.buf[n]=v.buf[n]*(1-g)+v.buf[n-1]*g;
+  v._l=0;v._b=0;v._h=0;
+}
+function noteOff(v){ v.rel=true }
+function render(v,p){
+  var s=v.buf[v.i];
+  // the loop filter: every trip round the string loses treble. This recursion
+  // is the instrument — it produces every partial with correct coupling.
+  var d=0.02+p[1]*0.33;                               // damp: 0.02..0.35, not 0.9
+  v.y=(1-d)*s+d*v.y;
+  // loss per SAMPLE: 0.9992 is a 28ms time constant, i.e. the string was dying
+  // in under 200ms. T60 = 6.9/(1-loss)/sr, so 2s needs ~0.99992.
+  var loss=0.999975-(1-p[2])*0.00012;
+  if(v.rel) loss-=0.0004;                             // damping the string
+  v.buf[v.i]=v.y*loss;
+  v.i++; if(v.i>=v.L)v.i=0;
+  var y=s;
+  if(p[3]>0){                                         // body resonance
+    var bp=_svf(v,y,6.2832*220*srI,0.22);
+    y+=bp*p[3]*0.8;
+  }
+  v.dc+=(y-v.dc)*0.0005; y-=v.dc;
+  y=Math.tanh(y*(1+p[7]*3));
+  v.t+=srI;
+  if(v.rel){ v.env*=(1-v._rr); if(v.env<0.0005)v.done=true; }
+  return y*v.vel*v.env*0.55*(0.4+0.6*p[0]);
+}`);
+
+_mk('bowed','waveguide',`
+PARAMS = ['bow','size','decay','body','vib','bright','noise','drive']
+/* Rebuilt as a SECTION, and without a delay loop.
+   Two things were wrong before. The friction loop never sustained, so all you
+   heard was bow noise. And a bowed string's Helmholtz motion produces a
+   SAWTOOTH velocity wave — so a saw through a bow-pressure-controlled filter
+   is both simpler and far more accurate than my friction model was.
+   The 'size' param fans out 1..5 players, each with its own drift and vibrato
+   which is what turns one violin into a section. */
+function noteOn(v,f,vel,p){
+  v.f=f; v.vel=vel; v.t=0; v.rel=false; v.env=0;
+  v.ph=[0,0,0,0,0]; v.dr=[0,0,0,0,0]; v.vp=[];
+  for(var i=0;i<5;i++){ v.ph[i]=Math.random(); v.dr[i]=(Math.random()*2-1);
+    v.vp[i]=Math.random()*6.2832; }
+  v.lp1=0; v.lp2=0; v.b1=0; v.l1=0; v.b2=0; v.l2=0; v.dc=0; v.nz=0;
+}
+function noteOff(v){ v.rel=true }
+function render(v,p){
+  // bowing on and off is gradual — that slow swell is half the character
+  var atk=0.0016+0.004*(1-p[0]);
+  v.env += ((v.rel?0:1)-v.env)*(v.rel?v._rr:atk);
+  if(v.rel&&v.env<0.0005){v.done=true;return 0}
+  var n=1+Math.round(p[1]*4);                        // 1..5 players
+  var vibD=Math.min(1,Math.max(0,(v.t-0.25)/0.5));
+  var y=0;
+  for(var i=0;i<n;i++){
+    // each player is a few cents off and drifts slowly on their own
+    var det=1+v.dr[i]*(0.0012+p[1]*0.0040)
+            +v.dr[i]*0.0006*Math.sin(6.2832*(0.21+i*0.07)*v.t);
+    var vib=1+p[4]*0.005*vibD*Math.sin(6.2832*(4.8+i*0.35)*v.t+v.vp[i]);
+    var inc=v.f*det*vib*srI;
+    v.ph[i]+=inc; if(v.ph[i]>=1)v.ph[i]-=1;
+    y += ((2*v.ph[i]-1)-_blep(v.ph[i],inc));          // Helmholtz = sawtooth
+  }
+  y/=Math.sqrt(n);
+  // bow noise: present, but a fraction of what it was
+  v.nz+=(_noise()-v.nz)*0.25;
+  y += v.nz*p[6]*0.045*v.env;
+  // bow pressure opens the string's brightness, exactly like blowing harder
+  var fc=260+4200*Math.pow(v.env,1.1)*(0.3+p[0]*0.8)*(0.4+p[5]);
+  if(fc>sampleRate*0.45)fc=sampleRate*0.45;
+  var g=1-Math.exp(-6.2832*fc*srI);
+  v.lp1+=(y-v.lp1)*g; v.lp2+=(v.lp1-v.lp2)*g;
+  y=v.lp2;
+  if(p[3]>0){                                        // the wooden body
+    var w1=6.2832*300*srI, w2=6.2832*720*srI;
+    var h1=y-v.l1-0.6*v.b1; v.b1+=w1*h1; v.l1+=w1*v.b1;
+    var h2=y-v.l2-0.7*v.b2; v.b2+=w2*h2; v.l2+=w2*v.b2;
+    y += (v.b1*0.8+v.b2*0.4)*p[3];
+  }
+  y=Math.tanh(y*(0.9+p[7]*1.8));
+  v.dc+=(y-v.dc)*0.0005; y-=v.dc;
+  v.t+=srI;
+  return y*v.vel*v.env*0.30;
+}`);
+
+/* ============ BLOWN: reed and jet ====================================== */
+_mk('clarinet','blown',`
+PARAMS = ['breath','reed','bright','hollow','vib','noise','warm','drive']
+/* Rebuilt WITHOUT a delay loop. My waveguide version would not hold its
+   oscillation — it spoke then collapsed within a second. A cylindrical bore
+   closed at one end resonates at odd harmonics only, and that is the whole
+   identity of the clarinet, so it is generated directly and reliably here. */
+function noteOn(v,f,vel,p){
+  v.f=f; v.vel=vel; v.t=0; v.rel=false; v.env=0; v.ph=0;
+  v.lp1=0; v.lp2=0; v._l=0; v._b=0; v.dc=0;
+}
+function noteOff(v){ v.rel=true }
+function render(v,p){
+  v.env += ((v.rel?0:1)-v.env)*(v.rel?v._rr:0.0030);
+  if(v.rel&&v.env<0.0005){v.done=true;return 0}
+  var dyn=v.vel*(0.4+0.6*p[0]);
+  var vib=1+p[4]*0.004*Math.sin(6.2832*4.9*v.t)*Math.min(1,Math.max(0,(v.t-0.25)/0.4));
+  var inc=v.f*vib*srI;
+  v.ph+=inc; if(v.ph>=1)v.ph-=1;
+  // square = odd harmonics only, which is a closed pipe. polyBLEP both edges.
+  var h=v.ph<0.5?1:-1;
+  h -= _blep(v.ph,inc);
+  var p2=v.ph+0.5; if(p2>=1)p2-=1;
+  h += _blep(p2,inc);
+  // the reed rounds the corners; more reed = more of the upper odd partials
+  var y=h*(0.35+p[1]*0.3) + Math.sin(6.2832*v.ph)*(0.55-p[1]*0.2);
+  y += _noise()*(0.012+p[5]*0.05)*(Math.exp(-v.t/0.04)*1.2+0.3*v.env);
+  var fc=280+3400*Math.pow(v.env,1.1)*Math.pow(dyn,1.2)*(0.35+p[2]);
+  if(fc>sampleRate*0.45)fc=sampleRate*0.45;
+  var g=1-Math.exp(-6.2832*fc*srI);
+  v.lp1+=(y-v.lp1)*g; v.lp2+=(v.lp1-v.lp2)*g;
+  y=v.lp2;
+  // the woody hollow around 1.2k that says 'clarinet' rather than 'square wave'
+  var wf=6.2832*(900+p[3]*700)*srI, q=0.55;
+  var hp=y-v._l-q*v._b; v._b+=wf*hp; v._l+=wf*v._b;
+  y += v._b*(0.30+0.5*p[3]);
+  y = y*(1-p[6]*0.3) + v._l*p[6]*0.5;            // warm: lean on the lowpass
+  y = Math.tanh(y*(0.9+p[7]*1.6));
+  v.dc+=(y-v.dc)*0.0005; y-=v.dc;
+  v.t+=srI;
+  return y*v.vel*v.env*0.42;
+}`);
+
+_mk('flute','blown',`
+PARAMS = ['air','breath','bright','octave','vib','noise','warm','drive']
+/* Also rebuilt without a delay loop, for the same reason. A flute is very
+   nearly a sine with a strong 2nd, a whisper of 3rd, and a great deal of
+   breath — the noise is not a detail, it is most of what you recognise. */
+function noteOn(v,f,vel,p){
+  v.f=f; v.vel=vel; v.t=0; v.rel=false; v.env=0; v.ph=0;
+  v.lp1=0; v.lp2=0; v.nz=0; v.dc=0;
+}
+function noteOff(v){ v.rel=true }
+function render(v,p){
+  v.env += ((v.rel?0:1)-v.env)*(v.rel?v._rr:0.0026);
+  if(v.rel&&v.env<0.0005){v.done=true;return 0}
+  var dyn=v.vel*(0.4+0.6*p[0]);
+  var vib=1+p[4]*0.005*Math.sin(6.2832*5.2*v.t)*Math.min(1,Math.max(0,(v.t-0.28)/0.45));
+  v.ph+=v.f*vib*srI; if(v.ph>=1)v.ph-=1;
+  var a=6.2832*v.ph;
+  var h2=0.16+p[3]*0.42, h3=0.05+p[2]*0.10;
+  var y=Math.sin(a)+h2*Math.sin(2*a)+h3*Math.sin(3*a)+0.03*Math.sin(4*a);
+  // breath: shaped, and louder on the attack — the chiff
+  var nz=_noise();
+  v.nz += (nz-v.nz)*0.35;                        // tilt the noise darker
+  y += v.nz*(0.06+p[1]*0.22)*(Math.exp(-v.t/0.05)*1.6+0.55*v.env);
+  var fc=600+5200*Math.pow(v.env,1.0)*Math.pow(dyn,1.1)*(0.4+p[2]);
+  if(fc>sampleRate*0.45)fc=sampleRate*0.45;
+  var g=1-Math.exp(-6.2832*fc*srI);
+  v.lp1+=(y-v.lp1)*g; v.lp2+=(v.lp1-v.lp2)*g;
+  y=v.lp2*(1-p[6]*0.25)+v.lp1*p[6]*0.25;
+  y=Math.tanh(y*(0.75+p[7]*1.2));
+  v.dc+=(y-v.dc)*0.0005; y-=v.dc;
+  v.t+=srI;
+  return y*v.vel*v.env*0.46;
+}`);
+
+
+/* --- FREE REED: harmonica and accordion. A free reed swings THROUGH its slot,
+   so it is not a beating reed like a clarinet's — the waveform stays close to a
+   rich asymmetric pulse and the character comes from the cavity around it and
+   from several reeds sounding slightly apart. ------------------------------ */
+_mk('harmonica','blown',`
+PARAMS = ['breath','reed','beat','cavity','vib','bend','noise','drive']
+function noteOn(v,f,vel,p){
+  v.f=f; v.vel=vel; v.t=0; v.rel=false; v.env=0;
+  v.p1=Math.random(); v.p2=Math.random();
+  v._l=0; v._b=0; v._h=0; v.dc=0;
+}
+function noteOff(v){ v.rel=true }
+function render(v,p){
+  v.env += ((v.rel?0:1)-v.env)*(v.rel?v._rr:0.0075);
+  if(v.rel&&v.env<0.0005){v.done=true;return 0}
+  var vib = 1 + p[4]*0.005*Math.sin(6.2832*6.2*v.t)*Math.min(1,Math.max(0,(v.t-0.12)/0.3));
+  var bend = Math.pow(2, -p[5]*0.6*Math.exp(-v.t/0.045)/12);   // the draw-bend scoop
+  var f = v.f*vib*bend;
+  // two reeds a few cents apart — the beating IS the harmonica
+  var d1=f*srI, d2=f*(1+p[2]*0.0035)*srI;
+  v.p1+=d1; if(v.p1>=1)v.p1-=1;
+  v.p2+=d2; if(v.p2>=1)v.p2-=1;
+  var y = ((2*v.p1-1)-_blep(v.p1,d1))*0.6 + ((2*v.p2-1)-_blep(v.p2,d2))*0.45;
+  y += _noise()*p[6]*0.05*(Math.exp(-v.t/0.022)+0.25*v.env);
+  // the little cavity: a nasal resonance, which is what says 'harmonica'
+  var wf=6.2832*(850+p[3]*1100)*srI, q=0.30;
+  var hp=y-v._l-q*v._b; v._b+=wf*hp; v._l+=wf*v._b;
+  y = y*0.45 + v._b*(0.9+0.8*p[3]);
+  y = Math.tanh(y*(1.1+p[7]*2.2+p[1]*1.2));
+  v.dc+=(y-v.dc)*0.0005; y-=v.dc;
+  v.t+=srI;
+  return y*v.vel*v.env*0.36;
+}`);
+
+_mk('accordion','blown',`
+PARAMS = ['bellows','musette','ranks','tone','body','vib','noise','drive']
+function noteOn(v,f,vel,p){
+  v.f=f; v.vel=vel; v.t=0; v.rel=false; v.env=0;
+  v.ph=[Math.random(),Math.random(),Math.random(),Math.random()];
+  v._l=0; v._b=0; v._h=0; v.b2=0; v.l2=0; v.dc=0;
+}
+function noteOff(v){ v.rel=true }
+function render(v,p){
+  // bellows: slower in and out than a mouth-blown reed
+  v.env += ((v.rel?0:1)-v.env)*(v.rel?v._rr:0.0042);
+  if(v.rel&&v.env<0.0005){v.done=true;return 0}
+  var vib = 1 + p[5]*0.004*Math.sin(6.2832*4.6*v.t)*Math.min(1,Math.max(0,(v.t-0.2)/0.4));
+  var n = 2 + Math.round(p[2]*2);                     // 2..4 reed ranks
+  var y = 0;
+  for(var k=0;k<n;k++){
+    // MUSETTE: the ranks are deliberately mistuned a few cents apart, and that
+    // slow beating between them is the whole sound of the instrument
+    var det = 1 + (k-(n-1)*0.5)*p[1]*0.006;
+    var oct = k===3 ? 2 : 1;                          // a 4th rank an octave up
+    var inc = v.f*vib*det*oct*srI;
+    v.ph[k]+=inc; if(v.ph[k]>=1)v.ph[k]-=1;
+    y += ((2*v.ph[k]-1)-_blep(v.ph[k],inc))*(k===3?0.35:0.8);
+  }
+  y /= n;
+  y += _noise()*p[6]*0.02*v.env;                      // air through the bellows
+  var wf=6.2832*(420+p[3]*900)*srI, q=0.5;
+  var hp=y-v._l-q*v._b; v._b+=wf*hp; v._l+=wf*v._b;
+  y = v._l*0.75 + y*0.3;                              // reed box is fairly dark
+  if(p[4]>0){                                          // wooden body resonance
+    var wb=6.2832*220*srI;
+    var h2=y-v.l2-0.35*v.b2; v.b2+=wb*h2; v.l2+=wb*v.b2;
+    y += v.b2*p[4]*0.5;
+  }
+  y = Math.tanh(y*(1.2+p[7]*2));
+  v.dc+=(y-v.dc)*0.0005; y-=v.dc;
+  v.t+=srI;
+  return y*v.vel*v.env*0.40;
+}`);
+
+/* --- SAXOPHONE: a CONICAL bore, so unlike the clarinet it gives the full
+   harmonic series, and like brass its brightness tracks how hard you blow. --- */
+_mk('saxophone','blown',`
+PARAMS = ['breath','reed','bright','formant','vib','growl','noise','drive']
+function noteOn(v,f,vel,p){
+  v.f=f; v.vel=vel; v.t=0; v.rel=false; v.env=0; v.ph=0;
+  v.lp1=0; v.lp2=0; v._l=0; v._b=0; v.l2=0; v.b2=0; v.dc=0;
+}
+function noteOff(v){ v.rel=true }
+function render(v,p){
+  v.env += ((v.rel?0:1)-v.env)*(v.rel?v._rr:0.0060);
+  if(v.rel&&v.env<0.0005){v.done=true;return 0}
+  var dyn = v.vel*(0.35+0.65*p[0]);
+  var vib = 1 + p[4]*0.006*Math.sin(6.2832*5.3*v.t)*Math.min(1,Math.max(0,(v.t-0.22)/0.35));
+  var growl = p[5]>0 ? 1+p[5]*0.02*Math.sin(6.2832*28*v.t) : 1;
+  var inc = v.f*vib*growl*srI;
+  v.ph+=inc; if(v.ph>=1)v.ph-=1;
+  var y = (2*v.ph-1)-_blep(v.ph,inc);                 // conical bore: all harmonics
+  y = y - 0.35*y*y*Math.abs(y)*(0.5+p[1]);            // reed asymmetry
+  y += _noise()*(0.03+p[6]*0.12)*(Math.exp(-v.t/0.03)*1.4+0.35*v.env);
+  // blow harder, open the bore — same law as the trumpet
+  var fc = 300 + 6500*Math.pow(v.env,1.2)*Math.pow(dyn,1.5)*(0.4+p[2]);
+  if(fc>sampleRate*0.45)fc=sampleRate*0.45;
+  var g = 1-Math.exp(-6.2832*fc*srI);
+  v.lp1 += (y-v.lp1)*g; v.lp2 += (v.lp1-v.lp2)*g;
+  y = v.lp2;
+  // the two vocal-tract-ish formants that make a sax sound like a sax
+  var w1=6.2832*(620+p[3]*260)*srI, w2=6.2832*(1550+p[3]*500)*srI;
+  var h1=y-v._l-0.5*v._b; v._b+=w1*h1; v._l+=w1*v._b;
+  var h2=y-v.l2-0.6*v.b2; v.b2+=w2*h2; v.l2+=w2*v.b2;
+  y += v._b*0.9 + v.b2*0.45;
+  y = Math.tanh(y*(1.1+p[7]*2.2));
+  v.dc+=(y-v.dc)*0.0005; y-=v.dc;
+  v.t+=srI;
+  return y*v.vel*v.env*0.34;
+}`);
+
+/* --- SKIN DRUM (djembe / conga / frame). A circular membrane's modes are not
+   harmonic — they sit at the Bessel zeros, 1 : 1.59 : 2.14 : 2.30 : 2.65 …
+   and the skin detunes DOWNWARD as the initial tension relaxes. --------- */
+_mk('skindrum','modal',`
+PARAMS = ['strike','tune','skin','slap','body','decay','drop','drive']
+var RAT=[1,1.593,2.135,2.295,2.653,2.917,3.155,3.5];
+var LVL=[1,0.52,0.33,0.28,0.19,0.14,0.09,0.06];
+var DEC=[0.62,0.30,0.20,0.17,0.12,0.09,0.07,0.05];
+function noteOn(v,f,vel,p){
+  v.f=f*(0.5+p[1]); v.vel=vel; v.t=0; v.rel=false; v.env=1;
+  v.ph=[]; for(var i=0;i<RAT.length;i++)v.ph[i]=Math.random()*6.2832;
+  v._l=0; v._b=0; v.dc=0;
+}
+function noteOff(v){ v.rel=true }
+function render(v,p){
+  var t=v.t, dec=0.35+p[5]*1.5;
+  // the head loosens as it rings: a real skin drops in pitch, and this is most
+  // of what separates it from a synthetic tom
+  var drop = 1 + p[6]*0.35*Math.exp(-t/0.045);
+  var y=0;
+  for(var i=0;i<RAT.length;i++){
+    var fi=v.f*RAT[i]*drop;
+    if(fi>sampleRate*0.47)continue;
+    v.ph[i]+=6.2832*fi*srI;
+    y += LVL[i]*Math.exp(-t/(DEC[i]*dec))*Math.sin(v.ph[i]);
+  }
+  // hand contact: the slap sits on top, brief and bright
+  if(t<0.02){
+    var nz=_noise()*Math.exp(-t/0.0035);
+    var wf=6.2832*2600*srI, q=0.45;
+    var hp=nz-v._l-q*v._b; v._b+=wf*hp; v._l+=wf*v._b;
+    y += v._b*p[3]*1.6 + nz*p[2]*0.35;
+  }
+  if(p[4]>0) y += y*p[4]*0.25*Math.exp(-t/0.09);      // shell / air cavity
+  y = Math.tanh(y*(1+p[7]*2.5));
+  v.dc+=(y-v.dc)*0.0006; y-=v.dc;
+  if(v.rel){ v.env*=(1-v._rr); if(v.env<0.0006)v.done=true; }
+  if(t>0.3 && Math.abs(y)<1e-5) v.done=true;
+  v.t+=srI;
+  return y*v.vel*v.env*0.5*(0.4+0.6*p[0]);
+}`);
+
+/* --- PIANO. A struck string is STIFF, so its partials are stretched sharp:
+   f(n) = n*f0*sqrt(1+B*n^2). That inharmonicity is why a piano cannot be an
+   additive stack of exact harmonics, and why octaves are stretched. Two or
+   three strings per note beat slowly against each other. ------------------ */
+_mk('piano','struck',`
+PARAMS = ['strike','decay','stretch','unison','hammer','body','tone','drive']
+/* A piano is not a smooth additive stack. Three things it must have:
+   a KNOCK (the hammer, felt and wood, before any pitch is heard), a DOUBLE
+   decay (fast for ~0.4s while the strings couple, then a long slow tail), and
+   two or three strings per note beating slowly. My first version had a single
+   exponential per partial and a whisper of hammer, which is why it read as a
+   generic mallet rather than a piano. */
+function noteOn(v,f,vel,p){
+  v.f=f; v.vel=vel; v.t=0; v.rel=false; v.env=1;
+  v.ph=new Float32Array(20); v.q1=0; v.q2=0;
+  v.lp=0; v.hp=0; v.nzp=0; v.b1=0; v.l1=0; v.dc=0;
+  v.hard=0.25+0.75*vel;
+}
+function noteOff(v){ v.rel=true }
+function render(v,p){
+  var t=v.t, B=0.00016+p[2]*0.0008;
+  // DOUBLE DECAY: strings couple, dump energy fast, then ring on
+  var d1=0.30+p[1]*0.5, d2=2.4+p[1]*7;
+  var body=0.62*Math.exp(-t/d1)+0.38*Math.exp(-t/d2);
+  var y=0;
+  var nH=20;
+  for(var n=1;n<=nH;n++){
+    var fn=n*v.f*Math.sqrt(1+B*n*n);
+    if(fn>sampleRate*0.46)break;
+    // hit harder and the upper partials come up; they also die sooner
+    var amp=Math.pow(v.hard,0.5+n*0.16)/Math.pow(n,1.35);
+    var hd=1/(1+n*n*0.020);
+    var e=body*Math.pow(hd,0.6)*Math.exp(-t*n*n*0.010);
+    if(amp*e<0.00012)continue;
+    v.ph[n-1]+=6.2832*fn*srI;
+    y+=amp*e*Math.sin(v.ph[n-1]);
+  }
+  if(p[3]>0){                                        // 2nd/3rd string, slow beat
+    v.q1+=6.2832*v.f*(1+p[3]*0.0007)*srI;
+    v.q2+=6.2832*v.f*(1-p[3]*0.0005)*srI;
+    y+=(Math.sin(v.q1)*0.42+Math.sin(v.q2)*0.30)*body;
+  }
+  // THE KNOCK: felt thud plus a wooden tick, both gone in ~20ms
+  if(t<0.03){
+    var nz=_noise();
+    v.nzp+=(nz-v.nzp)*0.30;                          // felt = dark
+    var tick=nz-v.hp; v.hp=nz;                       // wood = bright
+    y += (v.nzp*1.5+tick*0.5)*p[4]*v.hard*Math.exp(-t/0.0055);
+  }
+  if(p[5]>0){                                        // soundboard
+    var w=6.2832*(120+p[5]*120)*srI;
+    var h=y-v.l1-0.55*v.b1; v.b1+=w*h; v.l1+=w*v.b1;
+    y+=v.b1*p[5]*0.45;
+  }
+  var g=1-Math.exp(-6.2832*(1800+p[6]*9000)*srI);
+  v.lp+=(y-v.lp)*g; y=v.lp*0.7+y*0.3;
+  y=Math.tanh(y*(0.9+p[7]*2));
+  v.dc+=(y-v.dc)*0.0005; y-=v.dc;
+  if(v.rel){ v.env*=(1-v._rr); if(v.env<0.0005)v.done=true; }
+  if(t>0.5&&Math.abs(y)<1e-5)v.done=true;
+  v.t+=srI;
+  return y*v.vel*v.env*0.42*(0.4+0.6*p[0]);
+}`, 1);
+
+/* --- HAMMOND. Tonewheels are literally spinning discs read by pickups, so
+   every drawbar is a PURE SINE at a fixed ratio — no harmonics of its own.
+   The sound is entirely in which sines you add. Plus the key click. ------- */
+_mk('hammond','tonewheel',`
+PARAMS = ['drawbars','perc','click','vib','leslie','warm','tone','drive']
+var RAT=[0.5,1.5,1,2,3,4,5,6,8];                     // 16' 5⅓' 8' 4' 2⅔' 2' 1⅗' 1⅓' 1'
+function noteOn(v,f,vel,p){
+  v.f=f; v.vel=vel; v.t=0; v.rel=false; v.env=0;
+  v.ph=[]; for(var i=0;i<RAT.length;i++)v.ph[i]=Math.random()*6.2832;
+  v.lz=0; v.dc=0;
+}
+function noteOff(v){ v.rel=true }
+function render(v,p){
+  // an organ has no decay at all: on or off, nothing in between
+  v.env += ((v.rel?0:1)-v.env)*(v.rel?v._rr:0.06);
+  if(v.rel&&v.env<0.0006){v.done=true;return 0}
+  var d=p[0];
+  // registration sweeps from mellow (fundamental only) to full drawbars
+  var LVL=[0.55*d,0.30*d*d,1,0.72*d,0.45*d*d,0.38*d*d,0.22*d*d,0.18*d*d,0.26*d*d];
+  var vib=1+p[3]*0.003*Math.sin(6.2832*6.7*v.t);
+  var y=0;
+  for(var i=0;i<RAT.length;i++){
+    if(LVL[i]<0.004)continue;
+    var f=v.f*RAT[i]*vib;
+    if(f>sampleRate*0.46)continue;
+    v.ph[i]+=6.2832*f*srI;
+    y+=LVL[i]*Math.sin(v.ph[i]);
+  }
+  y*=0.42;
+  if(v.t<0.02) y+=_noise()*p[2]*0.35*Math.exp(-v.t/0.0022);   // key click
+  if(p[1]>0) y*=1+p[1]*1.6*Math.exp(-v.t/0.13);               // percussion tab
+  if(p[4]>0){                                                  // leslie wobble
+    var lf=6.2832*(0.8+p[4]*6.0)*v.t;
+    y*=1+p[4]*0.16*Math.sin(lf);
+  }
+  if(p[5]>0){ v.lz+=(y-v.lz)*(0.55-p[5]*0.35); y=y*(1-p[5]*0.5)+v.lz*p[5]*0.5; }
+  y=Math.tanh(y*(1+p[7]*2.6));                                // overdriven tube
+  v.dc+=(y-v.dc)*0.0005; y-=v.dc;
+  v.t+=srI;
+  return y*v.vel*v.env*0.42;
+}`, 1);
+
+/* --- RHODES. A hammer hits a stiff TINE next to a tonebar; a magnetic pickup
+   reads it. The signature is a bell-like inharmonic partial that barks on the
+   attack and dies well before the fundamental does. -------------------- */
+_mk('rhodes','struck',`
+PARAMS = ['strike','decay','bell','bark','trem','warm','tone','drive']
+function noteOn(v,f,vel,p){
+  v.f=f; v.vel=vel; v.t=0; v.rel=false; v.env=1;
+  v.p1=0; v.p2=0; v.p3=0; v.p4=0; v.lz=0; v.dc=0;
+  v.hard=0.3+0.7*vel;                                // dig in, and the tine barks
+}
+function noteOff(v){ v.rel=true }
+function render(v,p){
+  var t=v.t, dec=1.5+p[1]*4.5;
+  v.p1+=6.2832*v.f*srI;
+  v.p2+=6.2832*v.f*2*srI;
+  // the bell: inharmonic, well above, and gone within a second
+  var bf=v.f*(5.42+p[2]*3.1);
+  var y=0;
+  if(bf<sampleRate*0.46){ v.p3+=6.2832*bf*srI;
+    y+=Math.sin(v.p3)*0.34*v.hard*p[2]*Math.exp(-t/(0.22+p[1]*0.5)); }
+  var bf2=v.f*(11.7+p[2]*4);
+  if(bf2<sampleRate*0.46){ v.p4+=6.2832*bf2*srI;
+    y+=Math.sin(v.p4)*0.10*v.hard*p[2]*Math.exp(-t/0.10); }
+  y += Math.sin(v.p1)*Math.exp(-t/dec);
+  y += Math.sin(v.p2)*0.22*Math.exp(-t/(dec*0.55));
+  if(t<0.008) y+=_noise()*p[3]*0.30*v.hard*Math.exp(-t/0.0016);   // the bark
+  if(p[4]>0) y*=1+p[4]*0.45*Math.sin(6.2832*(3.2+p[4]*3)*t);      // amp tremolo
+  if(p[5]>0){ v.lz+=(y-v.lz)*(0.6-p[5]*0.4); y=y*(1-p[5]*0.55)+v.lz*p[5]*0.55; }
+  y=Math.tanh(y*(0.9+p[6]*0.8+p[7]*2.2));
+  v.dc+=(y-v.dc)*0.0005; y-=v.dc;
+  if(v.rel){ v.env*=(1-v._rr); if(v.env<0.0005)v.done=true; }
+  if(t>0.4&&Math.abs(y)<1e-5)v.done=true;
+  v.t+=srI;
+  return y*v.vel*v.env*0.5*(0.4+0.6*p[0]);
+}`, 1);
+_mk('trumpet','blown',CODE_DEFAULT);
+/* Output trim, measured per model against a plain saw on the normal synth
+   engine (osc saw @0.85, no filter, vel 0.9) = the reference every instrument
+   is levelled to. Re-measure and update this table if a model changes. */
+const PROCGAIN={kalimba:0.700,xylophone:0.475,marimba:0.412,vibraphone:0.404,
+  steeldrum:0.579,woodblock:0.867,string:0.892,bowed:1.272,clarinet:0.455,
+  flute:0.554,harmonica:0.676,accordion:0.998,saxophone:0.686,skindrum:0.601,
+  piano:0.653,hammond:0.584,rhodes:0.388,trumpet:0.873};
+for(const k in PROCGAIN) if(PROCLIB[k]) PROCLIB[k].gain=PROCGAIN[k];
+
+/* ---------------- procedural presets -----------------------------------
+   Ten per model. Each carries the model's own eight params plus a filter, an
+   amp envelope, voice settings and an fx chain — so a preset is a whole voice,
+   not just a timbre tweak. Mostly built to sound like the real instrument in a
+   real room; the last one or two of each set deliberately are not.
+   PP(name, cp[8], flt|null, env[a,d,s,r], vox|null, fx[])
+     flt : [type, freq, q]              type: 1 lp · 2 hp · 3 bp · 5 peq
+     vox : [mode, uni, sprd, wide, glide]
+     fx  : [[typeName, p1, p2, p3, mix], …]                                  */
+const PP=(n,cp,flt,env,vox,fx)=>({n,cp,flt,env,vox,fx});
+const PROCPRE={};
+function applyProcPreset(pi,pre){
+  const p=S.presets[pi];
+  procDefaults(p);
+  p.cp=pre.cp.slice(0,8);
+  if(pre.flt){const [t,f,q]=pre.flt; Object.assign(p.flt[0],{typ:t,frq:f,q:q});}
+  else p.flt[0].typ=0;
+  const [a,d,su,r]=pre.env||[0.002,6,1,0.12];
+  p.mod[0]={src:1,rsel:0,routes:[{dst:1,idx:1,amt:100,ctr:0,tgt:null}],
+            a,d,s:su,r,crv:0,wav:0,rate:5,ph:0};
+  if(pre.vox){const [m,u,sp,w,g]=pre.vox;
+    Object.assign(p.vox,{mode:m,uni:u,sprd:sp,wide:w,glide:g,slop:0.004});}
+  p.fx.forEach((f,i)=>p.fx[i]=mkFx());
+  (pre.fx||[]).forEach((f,i)=>{
+    if(i>9)return;
+    const ti=XTYPES.indexOf(f[0]);
+    if(ti<0)return;
+    p.fx[i]={typ:ti,p1:f[1],p2:f[2],p3:f[3],mix:f[4]};
+  });
+  p.name=pre.n.slice(0,5).toUpperCase();
+  engine.rebuildRack(pi); engine.refresh(pi); engine.codeCfg(pi);
+}
+const procPresets=m=>PROCPRE[m]||[];
+
+/* ---- MODAL: struck bars, tines, pans -------------------------------- */
+PROCPRE.kalimba=[
+ PP('Traditional',[1,.55,.5,.35,0,.2,.5,.1],  null,[.001,6,1,.5],null,[['verb',.30,.5,.55,.16]]),
+ PP('Deep Thumb', [.9,.85,.35,.3,0,.3,.5,.08],[1,4200,.8],[.001,6,1,.7],null,[['verb',.36,.42,.6,.20]]),
+ PP('Bright Tine',[1,.4,.75,.45,.1,.2,.5,.18],[2,320,.7],[.001,6,1,.35],null,[['verb',.24,.62,.5,.14]]),
+ PP('Soft Pads',  [.7,.7,.3,.2,0,.25,.5,.05], [1,3000,.7],[.004,6,1,.9],null,[['verb',.42,.4,.7,.26]]),
+ PP('Buzzy',      [1,.5,.6,.7,.15,.35,.5,.32],null,[.001,6,1,.4],null,[['dist',.30,0,1,.22],['verb',.26,.5,.5,.14]]),
+ PP('Studio',     [1,.6,.55,.3,0,.2,.5,.12],  [5,2400,1.1],[.001,6,1,.45],null,[['comp',.35,.5,.5,.28],['verb',.26,.55,.55,.15]]),
+ PP('Warm Room',  [.95,.7,.4,.28,0,.25,.5,.1],[1,5200,.8],[.001,6,1,.6],null,[['verb',.46,.35,.65,.24]]),
+ PP('Thumb Bass', [1,.9,.25,.3,0,.4,.5,.1],   [1,1400,1.0],[.001,6,1,.8],null,[['verb',.34,.4,.6,.16]]),
+ PP('Music Box',  [.8,.35,.9,.15,.4,.15,.5,.06],[2,900,.9],[.001,6,1,.3],[0,3,26,.7,0],[['cho',.35,.45,.5,.34],['verb',.5,.6,.8,.3]]),
+ PP('Iron Comb',  [1,.3,1,.8,.9,.5,.5,.55],   [3,2100,4],[.001,6,1,.25],null,[['dist',.55,0,4,.4],['dly',.19,.34,3,.24]])];
+
+PROCPRE.xylophone=[
+ PP('Concert',    [1,.5,.6,.5,0,.2,.5,.12],  null,[.001,6,1,.28],null,[['verb',.28,.55,.55,.16]]),
+ PP('Hard Mallet',[1,.4,.8,.75,0,.15,.5,.2], [2,420,.7],[.001,6,1,.2],null,[['verb',.22,.62,.5,.12]]),
+ PP('Soft Mallet',[.8,.65,.35,.25,0,.25,.5,.06],[1,4200,.8],[.002,6,1,.4],null,[['verb',.34,.42,.6,.2]]),
+ PP('Rosewood',   [.95,.6,.45,.4,0,.3,.5,.1],[1,6000,.8],[.001,6,1,.32],null,[['verb',.3,.45,.6,.18]]),
+ PP('Toy',        [1,.3,.85,.6,.2,.1,.5,.22],[3,1800,2.2],[.001,6,1,.18],null,[['verb',.18,.6,.4,.1]]),
+ PP('Studio Tight',[1,.45,.6,.5,0,.2,.5,.14],[5,3200,1.2],[.001,6,1,.22],null,[['comp',.32,.55,.5,.3],['verb',.2,.6,.5,.1]]),
+ PP('Church Hall',[.95,.55,.55,.45,0,.25,.5,.1],null,[.001,6,1,.5],null,[['verb',.72,.45,.85,.4]]),
+ PP('Deep Bars',  [.9,.75,.4,.35,0,.35,.5,.1],[1,2600,.9],[.001,6,1,.45],null,[['verb',.36,.4,.6,.2]]),
+ PP('Glass',      [1,.35,1,.3,.5,.15,.5,.05],[2,1500,1.6],[.001,6,1,.3],[0,3,18,.7,0],[['cho',.4,.5,.5,.3],['verb',.56,.7,.85,.34]]),
+ PP('Shattered',  [1,.25,1,.9,1,.4,.5,.6],   [3,3400,5],[.001,6,1,.15],null,[['dist',.6,0,6,.45],['roll',2,.8,.5,.4]])];
+
+PROCPRE.marimba=[
+ PP('Concert',    [1,.6,.5,.35,0,.25,.5,.1], null,[.002,6,1,.5],null,[['verb',.36,.5,.6,.2]]),
+ PP('Warm Wood',  [.95,.75,.4,.3,0,.3,.5,.08],[1,5000,.8],[.002,6,1,.6],null,[['verb',.42,.42,.65,.24]]),
+ PP('Bass Marimba',[.9,.9,.3,.3,0,.4,.5,.08],[1,1800,.9],[.002,6,1,.8],null,[['verb',.44,.38,.65,.22]]),
+ PP('Soft Yarn',  [.75,.7,.3,.2,0,.25,.5,.05],[1,3600,.75],[.005,6,1,.7],null,[['verb',.4,.4,.65,.26]]),
+ PP('Bright',     [1,.5,.7,.5,0,.2,.5,.14],  [2,300,.7],[.002,6,1,.4],null,[['verb',.3,.58,.55,.16]]),
+ PP('Chamber',    [.95,.65,.5,.32,0,.28,.5,.1],null,[.002,6,1,.6],null,[['verb',.58,.48,.75,.32]]),
+ PP('Studio Dry', [1,.55,.55,.35,0,.25,.5,.12],[5,900,1.1],[.002,6,1,.35],null,[['comp',.36,.5,.5,.26],['verb',.16,.5,.4,.08]]),
+ PP('Duo Wide',   [1,.6,.5,.35,.25,.25,.5,.1],null,[.002,6,1,.55],[0,2,14,.85,0],[['verb',.42,.45,.75,.26]]),
+ PP('Bowed Bars', [.6,1,.25,.05,0,.3,.5,.04],[1,2200,1.0],[.35,6,1,1.2],[0,3,10,.7,0],[['verb',.7,.4,.85,.42]]),
+ PP('Rusted',     [1,.4,.9,.8,.8,.4,.5,.5],  [3,1500,4.5],[.002,6,1,.3],null,[['dist',.5,0,5,.4],['tape',.7,.5,.5,.4]])];
+
+PROCPRE.vibraphone=[
+ PP('Jazz Vibes', [1,.7,.5,.2,0,.25,.55,.08],null,[.002,6,1,.9],null,[['verb',.44,.48,.7,.26]]),
+ PP('Motor Slow', [1,.75,.5,.18,0,.25,.35,.08],null,[.002,6,1,1.0],null,[['verb',.46,.45,.7,.26]]),
+ PP('Motor Fast', [1,.7,.55,.2,0,.25,.9,.08],null,[.002,6,1,.85],null,[['verb',.42,.5,.7,.24]]),
+ PP('Motor Off',  [1,.8,.45,.15,0,.25,0,.06],null,[.002,6,1,1.1],null,[['verb',.5,.45,.75,.3]]),
+ PP('Soft Mallet',[.7,.85,.35,.12,0,.3,.4,.05],[1,4000,.8],[.006,6,1,1.2],null,[['verb',.52,.4,.75,.32]]),
+ PP('Bright Bars',[1,.6,.75,.3,0,.2,.5,.14], [2,380,.7],[.002,6,1,.7],null,[['verb',.34,.6,.6,.2]]),
+ PP('Chamber',    [.95,.75,.5,.18,0,.28,.45,.08],null,[.002,6,1,1.0],null,[['verb',.68,.45,.85,.38]]),
+ PP('Studio',     [1,.65,.55,.2,0,.25,.5,.1],[5,1600,1.1],[.002,6,1,.7],null,[['comp',.34,.5,.5,.26],['verb',.3,.55,.6,.16]]),
+ PP('Glass Choir',[.9,.9,.45,.06,.4,.3,.3,.04],[2,700,1.2],[.02,6,1,1.6],[0,3,16,.85,0],[['cho',.42,.5,.5,.34],['verb',.8,.6,.9,.46]]),
+ PP('Detune Bell',[1,.7,.7,.25,1,.3,.7,.35], [3,2400,3],[.002,6,1,.8],[0,2,45,.8,0],[['dist',.32,0,3,.24],['dly',.24,.4,3,.26]])];
+
+PROCPRE.steeldrum=[
+ PP('Lead Pan',   [1,.55,.5,.3,0,.25,.5,.12],null,[.002,6,1,.5],null,[['verb',.4,.5,.65,.24]]),
+ PP('Double Second',[.95,.7,.45,.28,0,.3,.5,.1],[1,5200,.8],[.002,6,1,.6],null,[['verb',.44,.45,.68,.26]]),
+ PP('Bass Pan',   [.9,.85,.35,.25,0,.35,.5,.08],[1,2000,.9],[.002,6,1,.75],null,[['verb',.42,.4,.65,.22]]),
+ PP('Calypso',    [1,.5,.6,.4,0,.25,.5,.16], [2,260,.7],[.002,6,1,.45],null,[['verb',.34,.58,.6,.2]]),
+ PP('Soft Sticks',[.75,.75,.35,.15,0,.3,.5,.06],[1,3800,.8],[.004,6,1,.7],null,[['verb',.46,.42,.7,.28]]),
+ PP('Beach Wide', [1,.6,.5,.3,.3,.28,.5,.12],null,[.002,6,1,.6],[0,2,12,.9,0],[['verb',.56,.5,.85,.32]]),
+ PP('Studio',     [1,.55,.55,.3,0,.25,.5,.12],[5,1200,1.1],[.002,6,1,.4],null,[['comp',.34,.5,.5,.26],['verb',.24,.55,.55,.14]]),
+ PP('Warm Yard',  [.95,.72,.42,.26,0,.3,.5,.1],[1,6500,.8],[.002,6,1,.65],null,[['verb',.6,.4,.8,.34]]),
+ PP('Detuned Yard',[1,.6,.55,.35,.9,.28,.5,.2],null,[.002,6,1,.55],[0,3,38,.85,0],[['cho',.4,.55,.5,.3],['verb',.5,.5,.8,.3]]),
+ PP('Oil Barrel', [1,.45,.85,.7,.6,.4,.5,.55],[3,1700,4],[.002,6,1,.35],null,[['dist',.55,0,5,.42],['tape',.65,.5,.5,.34]])];
+
+PROCPRE.woodblock=[
+ PP('Standard',   [1,.5,.6,.5,0,.2,.5,.12],  null,[.001,6,1,.12],null,[['verb',.18,.55,.45,.1]]),
+ PP('High Block', [1,.35,.7,.55,0,.15,.5,.14],[2,700,.8],[.001,6,1,.1],null,[['verb',.16,.6,.4,.09]]),
+ PP('Low Block',  [1,.7,.45,.4,0,.3,.5,.1],  [1,3200,.9],[.001,6,1,.16],null,[['verb',.22,.45,.5,.12]]),
+ PP('Temple',     [.9,.85,.4,.3,0,.35,.5,.08],[1,2400,1.0],[.001,6,1,.3],null,[['verb',.44,.42,.7,.26]]),
+ PP('Claves',     [1,.4,.75,.6,0,.15,.5,.16],[3,2400,2.4],[.001,6,1,.1],null,[['verb',.2,.6,.45,.1]]),
+ PP('Soft Tap',   [.65,.6,.4,.25,0,.25,.5,.05],[1,4000,.8],[.002,6,1,.16],null,[['verb',.26,.45,.55,.14]]),
+ PP('Studio Dry', [1,.5,.6,.5,0,.2,.5,.14],  [5,1800,1.2],[.001,6,1,.08],null,[['comp',.3,.55,.5,.3]]),
+ PP('Room',       [1,.55,.55,.45,0,.25,.5,.12],null,[.001,6,1,.2],null,[['verb',.42,.5,.7,.26]]),
+ PP('Toy Blocks', [1,.3,.9,.7,.3,.1,.5,.2],  [3,3200,3],[.001,6,1,.08],[0,2,30,.8,0],[['cho',.4,.5,.5,.3],['verb',.24,.6,.5,.14]]),
+ PP('Anvil',      [1,.55,1,.85,.9,.5,.5,.6], [3,2800,5],[.001,6,1,.25],null,[['dist',.62,0,6,.48],['dly',.16,.36,3,.22]])];
+
+/* ---- STRUCK STRINGS + TINES ----------------------------------------- */
+PROCPRE.piano=[
+ PP('Upright',    [1,.5,.35,.6,.5,.4,.5,.12],null,[.001,6,1,.28],null,[['verb',.34,.48,.6,.18]]),
+ PP('Grand',      [1,.7,.5,.7,.45,.5,.55,.1],null,[.001,6,1,.35],null,[['verb',.46,.45,.72,.26]]),
+ PP('Felt Piano', [.7,.6,.3,.5,.7,.35,.3,.05],[1,2600,.8],[.004,6,1,.4],null,[['verb',.5,.38,.7,.3]]),
+ PP('Studio Pop', [1,.55,.4,.55,.4,.35,.6,.14],[5,2800,1.1],[.001,6,1,.22],null,[['comp',.4,.55,.5,.34],['verb',.24,.55,.55,.14]]),
+ PP('Ballad',     [.85,.75,.45,.65,.5,.45,.45,.08],[1,7000,.8],[.002,6,1,.45],null,[['verb',.56,.42,.78,.3]]),
+ PP('Honky Tonk', [1,.5,.55,.95,.55,.4,.6,.2],null,[.001,6,1,.25],[0,2,22,.6,0],[['verb',.28,.55,.55,.16]]),
+ PP('Bright Rock',[1,.45,.6,.6,.45,.3,.8,.22],[2,180,.7],[.001,6,1,.2],null,[['comp',.42,.6,.5,.3],['verb',.22,.6,.5,.12]]),
+ PP('Old Saloon', [1,.4,.7,1,.6,.45,.5,.28], [1,4200,1.0],[.001,6,1,.22],[0,2,34,.5,0],[['tape',.6,.45,.5,.36],['verb',.3,.4,.55,.2]]),
+ PP('Prepared',   [1,.35,1,.8,1,.6,.5,.4],   [3,1900,3.5],[.001,6,1,.2],null,[['dist',.4,0,5,.3],['roll',2,.7,.5,.3]]),
+ PP('Glass Frame',[.6,1,.85,.3,.9,.5,.2,.05],[2,900,1.4],[.02,6,1,1.4],[0,3,20,.85,0],[['cho',.45,.5,.5,.34],['verb',.85,.6,.92,.5]])];
+
+PROCPRE.rhodes=[
+ PP('Suitcase',   [1,.6,.55,.55,.25,.35,.5,.12],null,[.002,6,1,.4],null,[['verb',.32,.5,.6,.18]]),
+ PP('Stage',      [1,.55,.7,.7,0,.25,.55,.16],null,[.002,6,1,.35],null,[['verb',.26,.55,.55,.14]]),
+ PP('Mellow',     [.8,.7,.3,.3,.2,.6,.35,.06],[1,2400,.8],[.004,6,1,.5],null,[['verb',.42,.4,.68,.26]]),
+ PP('Bell Top',   [1,.5,1,.75,.2,.2,.6,.14], [2,220,.7],[.002,6,1,.35],null,[['verb',.3,.6,.6,.18]]),
+ PP('Tremolo',    [1,.6,.6,.55,.75,.35,.5,.12],null,[.002,6,1,.4],null,[['verb',.3,.5,.6,.16]]),
+ PP('Dyno',       [1,.5,.85,.8,.15,.2,.7,.26],[5,2200,1.2],[.002,6,1,.3],null,[['comp',.4,.55,.5,.32],['verb',.24,.6,.55,.14]]),
+ PP('Warm Tape',  [.9,.7,.45,.4,.3,.55,.4,.1],[1,3600,.85],[.003,6,1,.45],null,[['tape',.45,.4,.5,.26],['verb',.4,.4,.65,.24]]),
+ PP('Ballad Wide',[.85,.75,.5,.4,.35,.4,.4,.08],null,[.003,6,1,.5],[0,2,10,.85,0],[['cho',.3,.4,.5,.24],['verb',.5,.45,.8,.3]]),
+ PP('Ghost Keys', [.55,1,.7,.15,.5,.7,.25,.04],[1,1800,1.0],[.06,6,1,1.5],[0,3,14,.9,0],[['verb',.9,.55,.95,.5],['dly',.3,.4,3,.2]]),
+ PP('Broken Amp', [1,.45,1,.95,.9,.2,.8,.62],[3,1500,3],[.002,6,1,.25],null,[['dist',.62,0,4,.5],['tape',.75,.55,.5,.4]])];
+
+PROCPRE.hammond=[
+ PP('Jazz 888',   [.7,0,.35,.25,.3,.35,.5,.1], null,[.004,6,1,.1],null,[['verb',.3,.5,.6,.16]]),
+ PP('Gospel Full',[1,0,.5,.3,.5,.25,.5,.2],   null,[.004,6,1,.08],null,[['verb',.36,.55,.65,.2]]),
+ PP('Percussion', [.8,.8,.6,.25,.35,.3,.5,.14],null,[.003,6,1,.08],null,[['verb',.28,.55,.6,.16]]),
+ PP('Rock Organ', [1,.3,.6,.3,.7,.2,.5,.4],   null,[.004,6,1,.08],null,[['dist',.42,0,3,.34],['verb',.26,.55,.55,.14]]),
+ PP('Mellow Flute',[.35,0,.2,.2,.25,.6,.5,.05],[1,2600,.8],[.006,6,1,.12],null,[['verb',.4,.4,.68,.24]]),
+ PP('Leslie Fast',[.85,0,.4,.3,.95,.3,.5,.16],null,[.004,6,1,.09],null,[['verb',.3,.5,.6,.18]]),
+ PP('Blues Drawbars',[.9,.5,.55,.25,.45,.3,.5,.26],null,[.004,6,1,.08],null,[['dist',.3,0,1,.24],['verb',.28,.5,.6,.16]]),
+ PP('Cathedral',  [.8,0,.3,.2,.2,.4,.5,.08], null,[.02,6,1,.4],null,[['verb',.92,.5,.95,.5]]),
+ PP('Chorale Wide',[.6,0,.25,.35,.15,.5,.5,.06],null,[.01,6,1,.3],[0,3,8,.9,0],[['cho',.35,.45,.5,.3],['verb',.7,.5,.88,.4]]),
+ PP('Broken Wheels',[1,.6,.9,.9,1,.15,.5,.6],[3,1600,3],[.003,6,1,.08],[0,2,50,.7,0],[['dist',.7,0,6,.55],['roll',1,.7,.5,.3]])];
+
+/* ---- STRINGS -------------------------------------------------------- */
+PROCPRE.string=[
+ PP('Nylon',      [1,.45,.9,.45,.3,.3,.2,.1], [1,4200,.8],[.002,6,1,.35],null,[['verb',.36,.42,.62,.2]]),
+ PP('Steel',      [1,.3,1,.35,.25,.4,.2,.16], [2,180,.7],[.002,6,1,.3],null,[['verb',.3,.55,.58,.18]]),
+ PP('Bass Guitar',[1,.4,1,.3,.2,.5,.15,.14],  [1,2200,.9],[.002,6,1,.3],null,[['comp',.4,.5,.5,.3],['verb',.16,.4,.4,.08]]),
+ PP('Harp',       [.85,.55,.95,.5,.4,.25,.25,.06],[1,6000,.8],[.003,6,1,.5],null,[['verb',.56,.45,.8,.32]]),
+ PP('Koto',       [1,.35,.85,.7,.15,.35,.3,.2],[3,1200,2.0],[.002,6,1,.3],null,[['verb',.34,.5,.6,.2]]),
+ PP('Muted Palm', [1,.75,.5,.5,.1,.25,.2,.16],[1,2000,1.0],[.002,6,1,.12],null,[['comp',.36,.55,.5,.28],['verb',.14,.5,.4,.08]]),
+ PP('Bright Pluck',[1,.25,1,.3,.35,.3,.25,.2],[2,300,.8],[.002,6,1,.35],null,[['verb',.28,.6,.55,.16]]),
+ PP('Warm Room',  [.95,.55,.9,.45,.3,.35,.2,.08],[1,5000,.8],[.002,6,1,.45],null,[['verb',.62,.4,.82,.34]]),
+ PP('Sitar',      [1,.3,.9,.85,.05,.5,.35,.34],[3,1900,3.2],[.002,6,1,.4],[0,3,26,.7,0],[['dist',.3,0,1,.24],['verb',.4,.5,.7,.26]]),
+ PP('Snapped',    [1,.15,1,.9,.9,.6,.5,.6],   [3,2600,5],[.002,6,1,.2],null,[['dist',.6,0,6,.46],['dly',.2,.36,3,.26]])];
+
+PROCPRE.bowed=[
+ PP('Cello',      [.6,.45,.9,.5,.4,.35,.2,.1], [1,3200,.8],[.06,6,1,.4],null,[['verb',.5,.42,.75,.3]]),
+ PP('Violin',     [.7,.5,.9,.4,.5,.5,.2,.12],  [1,5000,.8],[.05,6,1,.35],null,[['verb',.46,.5,.72,.28]]),
+ PP('Viola',      [.65,.48,.9,.45,.45,.42,.2,.1],[1,4000,.8],[.055,6,1,.38],null,[['verb',.48,.46,.74,.28]]),
+ PP('Double Bass',[.55,.4,.95,.55,.3,.25,.2,.08],[1,1800,.9],[.08,6,1,.45],null,[['verb',.46,.38,.72,.26]]),
+ PP('Sul Tasto',  [.75,.35,.95,.4,.35,.2,.2,.06],[1,3400,.8],[.10,6,1,.5],null,[['verb',.58,.38,.8,.34]]),
+ PP('Sul Pont',   [.95,.8,.8,.35,.35,.75,.4,.3],[2,600,1.0],[.04,6,1,.3],null,[['verb',.4,.6,.68,.24]]),
+ PP('Section',    [.6,.45,.9,.5,.45,.35,.2,.08],null,[.09,6,1,.5],[0,4,16,.9,0],[['cho',.3,.4,.5,.24],['verb',.7,.45,.88,.4]]),
+ PP('Warm Solo',  [.62,.42,.92,.55,.5,.3,.2,.08],[1,3600,.85],[.07,6,1,.42],null,[['verb',.6,.4,.8,.34]]),
+ PP('Creak',      [.35,.9,.6,.2,.2,.9,.7,.3], [3,1400,3],[.03,6,1,.25],null,[['dist',.35,0,2,.28],['verb',.4,.5,.7,.24]]),
+ PP('Glass Bow',  [.95,.3,1,.2,.6,.15,.2,.06],[2,700,1.2],[.18,6,1,1.4],[0,3,12,.9,0],[['cho',.45,.5,.5,.34],['verb',.92,.6,.95,.5]])];
+
+/* ---- BLOWN ---------------------------------------------------------- */
+PROCPRE.clarinet=[
+ PP('Classical',  [.85,.45,.5,.45,.35,.25,.35,.1],null,[.02,6,1,.2],null,[['verb',.5,.42,.75,.28]]),
+ PP('Jazz Club',  [.95,.6,.65,.5,.4,.35,.25,.16],null,[.014,6,1,.16],null,[['verb',.34,.5,.62,.2]]),
+ PP('Bass Clar',  [.8,.5,.4,.55,.3,.3,.5,.12],[1,2200,.9],[.03,6,1,.25],null,[['verb',.44,.38,.7,.24]]),
+ PP('Chalumeau',  [.7,.35,.3,.6,.3,.25,.6,.08],[1,1600,.9],[.03,6,1,.28],null,[['verb',.46,.36,.72,.26]]),
+ PP('Breathy',    [.75,.4,.5,.4,.35,.8,.4,.08],null,[.03,6,1,.24],null,[['verb',.54,.45,.78,.32]]),
+ PP('Bright Solo',[1,.7,.85,.35,.4,.25,.15,.2],[2,240,.7],[.012,6,1,.14],null,[['verb',.3,.58,.6,.18]]),
+ PP('Klezmer',    [1,.75,.7,.4,.8,.3,.2,.22],null,[.012,6,1,.14],null,[['verb',.36,.52,.65,.22]]),
+ PP('Soft Chamber',[.65,.35,.4,.5,.3,.3,.55,.06],null,[.04,6,1,.35],null,[['verb',.72,.4,.88,.4]]),
+ PP('Reed Buzz',  [1,.9,.9,.3,.45,.5,.1,.4], [3,1100,2.6],[.012,6,1,.16],null,[['dist',.4,0,2,.32],['verb',.3,.55,.6,.18]]),
+ PP('Hollow Pipe',[.6,.2,.25,1,.25,.2,.8,.05],[1,1100,1.6],[.06,6,1,.6],[0,3,10,.85,0],[['cho',.35,.45,.5,.26],['verb',.86,.5,.92,.46]])];
+
+PROCPRE.flute=[
+ PP('Concert',    [.85,.4,.5,.35,.4,.3,.3,.08],null,[.03,6,1,.22],null,[['verb',.54,.45,.78,.3]]),
+ PP('Alto Flute', [.75,.45,.35,.45,.35,.3,.5,.06],[1,3200,.85],[.04,6,1,.28],null,[['verb',.56,.4,.8,.32]]),
+ PP('Piccolo',    [.95,.35,.75,.25,.45,.25,.15,.12],[2,700,.7],[.02,6,1,.16],null,[['verb',.4,.55,.68,.22]]),
+ PP('Breathy Solo',[.7,.85,.45,.3,.4,.5,.35,.06],null,[.035,6,1,.26],null,[['verb',.6,.42,.82,.36]]),
+ PP('Shakuhachi', [.65,.95,.4,.2,.6,.4,.45,.1],[1,4200,.9],[.05,6,1,.3],null,[['verb',.66,.4,.85,.38]]),
+ PP('Soft Chamber',[.6,.35,.35,.3,.3,.3,.5,.05],null,[.06,6,1,.35],null,[['verb',.76,.42,.9,.42]]),
+ PP('Airy Pad',   [.5,.7,.3,.25,.35,.35,.6,.04],[1,2400,.9],[.12,6,1,.7],[0,3,10,.9,0],[['cho',.3,.4,.5,.24],['verb',.88,.5,.94,.48]]),
+ PP('Wooden',     [.8,.5,.4,.55,.35,.35,.55,.1],[1,2800,1.0],[.035,6,1,.28],null,[['verb',.5,.38,.75,.28]]),
+ PP('Whistle',    [1,.15,.9,.35,.6,.15,.1,.2],[5,2400,1.1],[.015,6,1,.14],null,[['dly',.18,.38,3,.14],['verb',.3,.6,.6,.14]]),
+ PP('Ghost Air',  [.8,1,.3,.25,.5,.6,.7,.06],[1,3000,1.0],[.14,6,1,1.3],[0,3,14,.92,0],[['verb',.9,.5,.94,.3],['dly',.28,.42,3,.12]])];
+
+PROCPRE.saxophone=[
+ PP('Tenor',      [.9,.5,.6,.5,.4,0,.35,.14],null,[.014,6,1,.2],null,[['verb',.38,.45,.65,.22]]),
+ PP('Alto',       [.9,.5,.7,.45,.45,0,.3,.16],null,[.012,6,1,.18],null,[['verb',.34,.5,.62,.2]]),
+ PP('Baritone',   [.85,.55,.45,.6,.3,0,.5,.12],[1,2400,.9],[.018,6,1,.25],null,[['verb',.4,.4,.68,.22]]),
+ PP('Subtone',    [.6,.35,.35,.5,.35,0,.5,.08],[1,2000,.9],[.03,6,1,.3],null,[['verb',.5,.38,.75,.3]]),
+ PP('Smooth Jazz',[.8,.45,.55,.55,.5,0,.4,.12],[1,4200,.85],[.02,6,1,.24],null,[['verb',.46,.42,.72,.26]]),
+ PP('Jazz Club',  [.95,.6,.7,.45,.4,.15,.3,.2],null,[.012,6,1,.16],null,[['verb',.3,.5,.6,.18]]),
+ PP('Growl',      [1,.8,.75,.4,.4,.75,.2,.34],null,[.01,6,1,.14],null,[['dist',.35,0,2,.28],['verb',.28,.55,.6,.16]]),
+ PP('Breathy Ballad',[.7,.4,.45,.5,.45,0,.45,.08],null,[.03,6,1,.35],null,[['verb',.66,.42,.85,.36]]),
+ PP('Reed Split', [1,.9,.9,.3,.5,.9,.15,.45],[3,1400,3],[.01,6,1,.16],null,[['dist',.55,0,5,.4],['dly',.2,.35,3,.22]]),
+ PP('Distant',    [.5,.35,.4,.5,.4,0,.6,.06],[1,1800,1.1],[.06,6,1,.6],[0,2,8,.9,0],[['verb',.92,.45,.95,.5],['dly',.28,.4,3,.2]])];
+
+PROCPRE.harmonica=[
+ PP('Blues',      [.9,.55,.5,.5,.35,.3,.5,.2], null,[.008,6,1,.16],null,[['verb',.32,.5,.6,.2]]),
+ PP('Folk',       [.85,.4,.35,.45,.3,0,.4,.12],null,[.008,6,1,.18],null,[['verb',.34,.45,.62,.2]]),
+ PP('Chromatic',  [.9,.35,.25,.55,.35,0,.4,.1],[1,4200,.85],[.01,6,1,.2],null,[['verb',.36,.42,.65,.22]]),
+ PP('Cupped Hands',[.85,.5,.45,.7,.3,.2,.6,.16],[1,2600,1.0],[.008,6,1,.16],null,[['verb',.3,.4,.6,.2]]),
+ PP('Bent Notes', [.95,.6,.55,.5,.4,.85,.45,.22],null,[.008,6,1,.16],null,[['verb',.34,.5,.62,.2]]),
+ PP('Train',      [1,.7,.8,.45,.3,.35,.55,.28],null,[.006,6,1,.12],null,[['dist',.28,0,1,.22],['verb',.4,.5,.68,.24]]),
+ PP('Wailing',    [1,.65,.6,.4,.6,.5,.4,.26],null,[.008,6,1,.18],null,[['dly',.26,.38,3,.22],['verb',.38,.5,.68,.24]]),
+ PP('Soft Folk',  [.65,.3,.3,.4,.25,0,.35,.08],[1,3000,.85],[.014,6,1,.24],null,[['verb',.5,.4,.75,.3]]),
+ PP('Radio',      [1,.7,.7,.5,.35,.4,.5,.35],[3,1500,2.2],[.008,6,1,.14],null,[['dist',.5,0,5,.4],['tape',.6,.5,.5,.34]]),
+ PP('Ghost Reed', [.45,.4,.4,.3,.5,.2,.5,.06],[1,1800,1.2],[.06,6,1,.9],[0,3,16,.9,0],[['cho',.4,.5,.5,.3],['verb',.9,.5,.94,.5]])];
+
+PROCPRE.accordion=[
+ PP('Musette',    [.85,.9,.7,.4,.35,.35,.3,.12],null,[.02,6,1,.16],null,[['verb',.36,.45,.65,.22]]),
+ PP('Tango',      [.9,.55,.6,.45,.4,.3,.35,.16],null,[.016,6,1,.14],null,[['verb',.32,.48,.62,.2]]),
+ PP('Folk Box',   [.85,.7,.5,.35,.3,.25,.3,.12],null,[.02,6,1,.16],null,[['verb',.34,.45,.62,.2]]),
+ PP('Bandoneon',  [.8,.4,.45,.55,.45,.3,.4,.1],[1,3400,.9],[.03,6,1,.2],null,[['verb',.42,.4,.7,.26]]),
+ PP('Dry Reeds',  [.9,.25,.55,.35,.25,0,.25,.14],null,[.014,6,1,.1],null,[['comp',.34,.5,.5,.26]]),
+ PP('Wet Musette',[.85,1,.85,.45,.4,.4,.35,.12],null,[.022,6,1,.18],null,[['cho',.32,.42,.5,.24],['verb',.44,.48,.72,.26]]),
+ PP('Cajun',      [1,.75,.75,.4,.35,.3,.3,.2],null,[.014,6,1,.14],null,[['verb',.3,.52,.6,.2]]),
+ PP('Chamber',    [.7,.5,.45,.4,.3,.25,.4,.08],null,[.04,6,1,.3],null,[['verb',.74,.42,.9,.42]]),
+ PP('Fairground', [1,1,.9,.5,.5,.6,.4,.3], null,[.016,6,1,.16],[0,2,30,.8,0],[['dist',.3,0,1,.24],['tape',.55,.5,.5,.3],['verb',.4,.5,.7,.24]]),
+ PP('Broken Bellows',[.6,1,.8,.6,.9,.9,.6,.45],[3,1300,3],[.05,6,1,.4],null,[['dist',.5,0,5,.4],['roll',1,.7,.5,.28]])];
+
+PROCPRE.trumpet=[
+ PP('Straight',   [.95,1,1,.5,0,0,.5,.2],  null,[.01,6,1,.16],null,[['verb',.36,.5,.65,.22]]),
+ PP('Jazz Ballad',[.7,.9,.9,.45,.4,0,.5,.14],null,[.016,6,1,.24],null,[['verb',.5,.45,.75,.3]]),
+ PP('Lead',       [1,1,1,.4,.15,0,.5,.3], [2,200,.7],[.008,6,1,.14],null,[['comp',.4,.6,.5,.3],['verb',.24,.55,.55,.14]]),
+ PP('Flugel',     [.7,.75,.7,.5,.35,0,.5,.1],[1,3600,.85],[.02,6,1,.26],null,[['verb',.52,.4,.76,.3]]),
+ PP('Harmon Mute',[.85,.9,1,.4,.2,.85,.5,.24],null,[.01,6,1,.16],null,[['verb',.34,.55,.62,.2]]),
+ PP('Cup Mute',   [.8,.85,.85,.45,.25,.55,.5,.18],[1,2600,1.0],[.012,6,1,.18],null,[['verb',.38,.45,.68,.24]]),
+ PP('Soft Section',[.6,.8,.8,.4,.3,0,.5,.1],null,[.02,6,1,.3],[0,3,10,.85,0],[['verb',.62,.45,.85,.34]]),
+ PP('Brassy',     [1,1,1,.5,.1,0,.5,.5],  null,[.008,6,1,.14],null,[['dist',.4,0,3,.32],['verb',.26,.55,.58,.16]]),
+ PP('Wah',        [1,1,1,.35,.9,.3,.5,.32],[3,1300,3.4],[.01,6,1,.16],null,[['pha',.4,.5,.5,.4],['verb',.3,.5,.6,.18]]),
+ PP('Far Off',    [.85,.8,.8,.4,.35,0,.5,.1],[1,3200,1.0],[.04,6,1,.7],[0,2,8,.9,0],[['verb',.9,.45,.94,.3],['dly',.28,.4,3,.12]])];
+
+/* ---- SKIN --------------------------------------------------------- */
+PROCPRE.skindrum=[
+ PP('Djembe',     [1,.5,.6,.6,.4,.5,.5,.16], null,[.001,6,1,.12],null,[['verb',.28,.45,.6,.16]]),
+ PP('Djembe Slap',[1,.45,.75,1,.35,.35,.5,.24],[2,180,.7],[.001,6,1,.1],null,[['verb',.24,.55,.55,.14]]),
+ PP('Conga',      [1,.62,.5,.4,.45,.6,.4,.14],null,[.001,6,1,.14],null,[['verb',.3,.45,.6,.16]]),
+ PP('Bongo',      [1,.35,.6,.55,.3,.35,.55,.16],[2,240,.7],[.001,6,1,.1],null,[['verb',.24,.5,.55,.14]]),
+ PP('Frame Drum', [.9,.7,.45,.3,.55,.7,.35,.1],[1,2600,.9],[.001,6,1,.2],null,[['verb',.42,.4,.7,.24]]),
+ PP('Tabla',      [1,.4,.55,.45,.3,.3,.85,.2],[3,900,2.0],[.001,6,1,.12],null,[['verb',.26,.5,.55,.14]]),
+ PP('Deep Bass',  [1,.85,.4,.25,.6,.75,.3,.12],[1,900,1.0],[.001,6,1,.24],null,[['comp',.4,.5,.5,.3],['verb',.3,.38,.6,.16]]),
+ PP('Studio Room',[1,.55,.55,.5,.45,.5,.45,.16],[5,700,1.1],[.001,6,1,.16],null,[['comp',.36,.55,.5,.28],['verb',.44,.45,.72,.26]]),
+ PP('Talking',    [1,.5,.6,.55,.35,.4,1,.2], null,[.001,6,1,.14],null,[['pha',.45,.5,.5,.4],['verb',.3,.5,.6,.18]]),
+ PP('Metal Skin', [1,.4,.85,.9,.7,.6,.6,.55],[3,2200,4],[.001,6,1,.18],null,[['dist',.6,0,6,.46],['dly',.18,.34,3,.24]])];
+const PROCNAMES = Object.keys(PROCLIB);
+/* Sensible starting rack for a procedural channel. The amp envelope sits at
+   sustain 1 with a long decay, so while a key is held it does nothing at all —
+   its only job is to give TEN's RELEASE control over a model that otherwise
+   decides its own. Without it, release genuinely has no effect, which is
+   exactly what it felt like. */
+function procDefaults(p){
+  p.flt.forEach((f,i)=>{p.flt[i]=mkFlt(i); if(i===0)p.flt[i].frq=16000;});
+  p.mod.forEach((m,i)=>p.mod[i]=mkMod(i));
+  p.mod[0]={src:1,rsel:0,routes:[{dst:1,idx:1,amt:100,ctr:0,tgt:null}],
+            a:0.002,d:6,s:1,r:0.12,crv:0,wav:0,rate:5,ph:0};
+  Object.assign(p.vox,{mode:0,uni:1,sprd:12,wide:0.5,slop:0.004,glide:0});
+}
+const procSrc = p => _PRE + ((p.pmodel && PROCLIB[p.pmodel]) ? PROCLIB[p.pmodel].src : CODE_DEFAULT);
+
+
 function audPlace(pi,rec,startBeat,name='mic'){
   const lane=S.patterns[S.editPat].lanes[pi], sr=AC.sampleRate;
   const LATC=8192;                                  // script-processor latency fudge
@@ -3986,6 +5283,7 @@ document.addEventListener('keydown',e=>{
         if(M2.prs)prsFieldDefs().forEach((_,pi2)=>stops.push([mi2,pi2,0]));
         else if(M2.flat)M2.flat.forEach((_,pi2)=>stops.push([mi2,pi2,0]));
         else if(M2.slot){
+          if(M2.id==='osc'&&isCodeCh(S.editSnd)){CODEF().forEach((_,pi2)=>stops.push([mi2,pi2,0]));return;}
           if(M2.id==='osc'&&isAudioCh(S.editSnd)){AUDF.forEach((_,pi2)=>stops.push([mi2,pi2,0]));return;}
           const act2=[];
           pre2[M2.id].forEach((sl2,si2)=>{if(M2.abbr(sl2)!=='···')act2.push(si2);});
@@ -3994,7 +5292,7 @@ document.addEventListener('keydown',e=>{
         }else if(M2.id)stops.push([mi2,0,0]);
       });
       let idx=stops.findIndex(st=>st[0]===S.curMod&&
-        (MODULES[S.curMod].slot&&!(MODULES[S.curMod].id==='osc'&&isAudioCh(S.editSnd))?st[2]===S.curSlot:st[1]===S.curParam));
+        (MODULES[S.curMod].slot&&!(MODULES[S.curMod].id==='osc'&&(isAudioCh(S.editSnd)||isCodeCh(S.editSnd)))?st[2]===S.curSlot:st[1]===S.curParam));
       if(idx<0)idx=stops.findIndex(st=>st[0]===S.curMod);
       if(idx<0)idx=0;
       if(e.shiftKey){const cm=S.curMod;let j=idx,g=0;
@@ -4027,6 +5325,8 @@ document.addEventListener('keydown',e=>{
       dirty=true; dirtySave=true; return;}
     if(S.layer===1&&S.patterns[S.editPat].state==='edit'){
       S.curPreset=fmod(S.curPreset-d,10);dirty=true;return;}
+    if(S.layer===2&&MODULES[S.curMod].id==='osc'&&isCodeCh(S.editSnd)){
+      pushUndo('code'); codeAction(d,kmult(e)); return;}
     if(S.layer===2&&MODULES[S.curMod].id==='osc'&&isAudioCh(S.editSnd)){
       pushUndo('audio'); audAction(d,kmult(e)); return;}
     if(S.layer>=2&&MODULES[S.curMod].prs){
@@ -4266,6 +5566,8 @@ function load(json){
         p.name=sp.name;
         p.cat=sp.cat||(['kik','snr','hh','perc','bass','keys','chord','lead','pad','plk'][i]||'misc');
         p.tr=sp.tr||0; p.prep=sp.prep||null;
+        p.code=sp.code||null; p.pmodel=sp.pmodel||null; p.psel=sp.psel|0;
+        p.cp=Array.isArray(sp.cp)?sp.cp.slice(0,8):[1,1,1,0.5,0,0,0.5,0.3];
         p.au=Object.assign({gain:0.9,semis:0,rate:1,st:0,en:1,fit:0,src:0},sp.au||{});
         if(Array.isArray(sp.kit))p.kit=sp.kit.map(k=>k?modToRoutes(foldMod(k)):null);
         if(o.v<13){                    // env+lfo+amp → mod rack + dist fx
@@ -4558,7 +5860,33 @@ function renderSnd(L,pos){
   prepLine(L,pre);
   layerBanner(L,pre);
   const M=MODULES[S.curMod];
-  if(M.id==='osc'&&isAudioCh(S.editSnd)){
+  if(M.id==='osc'&&isCodeCh(S.editSnd)){
+    const e=engine.cn&&engine.cn[S.editSnd];
+    const names=(e&&e.names)||[];
+    const _pl=procPresets(pre.pmodel||'trumpet');
+    const _pn=_pl.length?(_pl[clamp(pre.psel|0,0,_pl.length-1)]||{}).n:'';
+    L.push('  '+sp('a','⚙ PROCEDURAL  ')+sp('i',' '+(pre.pmodel||'trumpet')+' ')
+      +(_pn?sp('a','  '+_pn):'')
+      +sp('d','  '+((PROCLIB[pre.pmodel||'trumpet']||{}).fam||'')+'   ')+(e&&e.err
+      ? sp('r','error: '+e.err)
+      : sp('d','worklet ')+sp(e&&e.ready?'a':'r',e&&e.ready?'live':'compiling…')
+        +sp('d','  '+((pre.code||CODE_DEFAULT).split('\n').length)+' lines · '+
+             (engine.act[S.editSnd]||[]).length+' voices')));
+    L.push('');
+    let lr='   ', vr='   ';
+    CODEF().forEach((pspec,i)=>{
+      const foc=i===S.curParam;
+      const v=fmtVal(pspec,(pre.cp&&pre.cp[i])??0);
+      lr+=(foc?sp('a','▸'+pad(names[i]||pspec.lbl,8)):sp('d',' '+pad(names[i]||pspec.lbl,8)))+' ';
+      vr+=(foc?sp('i',' '+pad(v,8)):' '+pad(v,8))+' ';
+    });
+    L.push(lr); L.push(vr);
+    L.push('');
+    L.push('   '+sp('d','real DSP in an audio-thread worklet · PRST ▸model picks the instrument'));
+    L.push('   '+sp('d','modal = struck bars/tines · waveguide = recursion the rack cannot express'));
+    L.push('   '+sp('d','←→ pick a param · ↑↓ change it while it plays · cmd+E exports the session with the code'));
+  }
+  else if(M.id==='osc'&&isAudioCh(S.editSnd)){
     const buf=engine.audBuf[S.editSnd];
     L.push('  '+sp('a','≈ AUDIO CHANNEL  ')+(buf
       ?sp('d','clip: ')+sp('a',(engine.audName[S.editSnd]||'clip')+' · '+buf.duration.toFixed(2)+'s')
