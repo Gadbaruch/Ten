@@ -99,8 +99,11 @@ MIDI, so without it every note fires twice, at two different velocities.
 the current key range are played through the real key path, so retro
 capture, live quantize and the ONE all still work. Aftertouch, channel pressure and CC11/CC2/CC1 all feed the
 `press` MOD source, which — unlike `vel`, sampled once at note-on — keeps
-moving while the note sounds. Route it at the filter for a swell, at pitch,
-or at amp (a gain *after* the envelope, so a note can still release). Under
+moving while the note sounds. Route it at the filter, at pitch, or at amp — a gain
+*after* the envelope, so a note can still release. On an amp route `center`
+sets where an unpressed note sits: `0` leaves it at full and pressure adds
+on top, `-100%` starts it at **silence**, so the note has to be pressed into
+existence. That last one is the breath/swell gesture. Under
 MPE, where each note owns its own channel, channel pressure is therefore
 genuinely per-note: press one key deeper and only that voice opens up.
 
