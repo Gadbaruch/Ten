@@ -161,7 +161,7 @@ const CHORDS=[['oct',[0,12]],['5th',[0,7]],['maj',[0,4,7]],['min',[0,3,7]],['ma7
 const ARPDIV=['1/4','1/4.','1/4T','1/8','1/8.','1/8T','1/16','1/16.','1/16T','1/32'],
       ARPDIVB=[1,1.5,2/3,0.5,0.75,1/3,0.25,0.375,1/6,0.125];
 const ARPMODE=['up','down','updn','rand'];
-const MODE=['poly','mono'];
+const MODE=['poly','mono','legato'];   // legato = mono, but pitch moves without retriggering
 const SWM=['sync','rstrt','wait'];
 
 const mkOsc =i=>({wav:i?0:2,mode:0,dst:0,rat:1,amt:i?0:1,fine:0,ph:0,phm:0});
@@ -911,9 +911,9 @@ class Voice{
   /* live OSC edits: retune / relevel / reshape the running oscillators instead of
      waiting for the next note. mode/dest/trig/phase are structural — those still
      land on the next note, since they change the graph itself. */
-  oscRefresh(E,key){
+  oscRefresh(E,key,gl){
     if(this.killed)return;
-    const ops=this.p.osc, t=AC.currentTime, GL=0.02;
+    const ops=this.p.osc, t=AC.currentTime, GL=gl>0?gl:0.02;
     const bt=this.rootFreq*ops[0].rat*Math.pow(2,(ops[0].fine||0)/1200);
     const sprd=this.p.vox.sprd||0;
     for(let i=0;i<10;i++){
@@ -949,7 +949,8 @@ class Voice{
   }
   constructor(E,at,pi,midi,vel,preOverride,padMidi){
     const p=preOverride||prepEffective(S.presets[pi],midi), ac=AC;
-    this.pi=pi; this.midi=midi; this.pad=padMidi==null?midi:padMidi; this.p=p;
+    this.pi=pi; this.midi=midi; this.baseMidi=midi;
+    this.pad=padMidi==null?midi:padMidi; this.p=p;
     this.released=false; this.killed=false; this.nodes=[]; this.startAt=at;
     const ops=p.osc, rootW=ops[0].wav, isS=rootW===9, isN=rootW===4||isS;
     /* NOISE has no pitch: resampling it (playbackRate) just makes it grainy low /
@@ -1050,7 +1051,7 @@ class Voice{
     const merge=ac.createGain(); merge.gain.value=1/Math.sqrt(uniN);
     const rootMods=[]; let firstSrc=null;
     /* portamento ratio shared by EVERY operator (not just op 0) */
-    const glideOn=p.vox.mode===1&&p.vox.glide>0.001&&E.lastPitch[pi]&&!pitchEnv;
+    const glideOn=p.vox.mode>=1&&p.vox.glide>0.001&&E.lastPitch[pi]&&!pitchEnv;
     const glR=glideOn?E.lastPitch[pi]/baseTarget:1;
     const setF=(param,val)=>{                       // glide-or-set any frequency param
       if(glideOn){param.setValueAtTime(Math.max(val*glR,0.01),at);
@@ -1889,7 +1890,7 @@ class Engine{
       ${src}
       class P extends AudioWorkletProcessor{
         constructor(){super();this.v=[];this.ev=[];this.p=new Float32Array(8);
-          this.dc=0; this.g=1; this.dcR=0; this.lastF=0; this.mg=1;
+          this.dc=0; this.g=1; this.dcR=0; this.lastF=0; this.mg=1; this.perc=0;
           this.cfg={flt:[],mod:[],vox:{mode:0,uni:1,sprd:12,wide:0.6,slop:0.008,glide:0}};
           /* Events carry the audio-context TIME they are due and are applied
              sample-accurately here. Delivering them with setTimeout instead
@@ -1898,13 +1899,31 @@ class Engine{
           this.port.onmessage=e=>{const d=e.data;
             if(d.t==='p'){this.p[d.i]=d.v;return;}
             if(d.t==='cfg'){this.cfg=d.cfg||{flt:[],mod:[]};return;}
+            if(d.t==='retune'){                       // legato: glide, do not restrike
+              const g=Math.max(0.004,d.gl||0.02);
+              for(let k=0;k<this.v.length;k++){
+                const vo=this.v[k];
+                if(vo.done||vo._fd!==undefined)continue;
+                vo._gt=d.f; vo._gf=vo.f||d.f;
+                vo._gk=Math.exp(-1/(g*sampleRate));
+              }
+              this.lastF=d.f; return;
+            }
             if(d.t==='gain'){this.mg=d.v||1;return;}
+            if(d.t==='perc'){this.perc=d.v?1:0;return;}
             if(d.t==='alloff'){this.v.length=0;this.ev.length=0;return;}
             this.ev.push(d);};
+          this.hasSetF=(typeof setF==='function');
           this.port.postMessage({t:'params',names:PARAMS});}
         /* TEN's own FILT and MOD racks, run per voice on top of whatever the
            model produced. The model is the oscillator; these are the same
            filter and modulation you get on any other channel. */
+        _relSec(){
+          const M=(this.cfg&&this.cfg.mod)||[];
+          for(let i=0;i<M.length;i++)
+            if(M[i]&&M[i].src===1&&M[i].dst===1)return Math.max(0.004,M[i].r||0.12);
+          return 0.12;
+        }
         _relRate(){
           const M=(this.cfg&&this.cfg.mod)||[];
           let r=0.12;
@@ -1952,15 +1971,30 @@ class Engine{
             st.c1=2*v1-st.c1; st.c2=2*v2-st.c2;
             x = f.typ===1?v2 : f.typ===2?(x-k*v1-v2) : f.typ===3?v1 : x;
           }
+          if(v.relT>=0&&v._dfc!==undefined){
+            /* The hand landing. TWO poles, not one: at 6dB/octave the damping
+               was audible on bars but barely touched anything with a dense
+               spectrum. 12dB/octave makes it decisive across every model. */
+            v._dfc=v._dfl+(v._dfc-v._dfl)*v._dk;
+            const dg=1-Math.exp(-6.2832*v._dfc/sampleRate);
+            v._dz+=(x-v._dz)*dg;
+            v._dz2+=(v._dz-v._dz2)*dg;
+            x=v._dz2;
+          }
           return x*amp;
         }
         fire(d){
           if(d.t==='on'){
             const V=this.cfg.vox||{}, uni=Math.max(1,Math.min(7,Math.round(V.uni||1)));
             /* MONO: a new note steals the sounding one rather than stacking */
+            /* mono: the previous note must get out of the way NOW. Reusing
+               the slow steal fade (~1s) made mono sound like it did nothing. */
             if(V.mode===1){for(let k=0;k<this.v.length;k++)
-              if(this.v[k]._fd===undefined&&!this.v[k].done)this.v[k]._fd=1;}
-            const from=(V.glide>0.001&&this.lastF)?this.lastF:0;
+              if(this.v[k]._fd===undefined&&!this.v[k].done){
+                this.v[k]._fd=1; this.v[k]._fdr=0.00028;}}
+            /* glide needs the LAST note played, which for percussion models is
+               meaningless, and must survive the previous voice being stolen. */
+            const from=(V.glide>0.001&&this.lastF&&!this.perc)?this.lastF:0;
             for(let u=0;u<uni;u++){
               const off=uni===1?0:(u/(uni-1))*2-1;
               const det=Math.pow(2,off*(V.sprd||0)/1200);
@@ -1972,6 +2006,21 @@ class Engine{
                  hardcoded release, which always finished first. The rate now
                  comes from the amp envelope's R and the models use it. */
               vo._rr=this._relRate();
+              /* Damping. Letting go of a struck or plucked note is not just a
+                 fade — it is a hand landing on the thing, and a hand kills the
+                 high modes far faster than the low ones. So on note-off a
+                 lowpass sweeps down over roughly a third of the release, and
+                 the note goes dull before it goes quiet. */
+              vo._dfc=18000; vo._dz=0; vo._dz2=0;              /* the hand lands FAST — much faster than the note fades. Tying this to a
+                 third of the release meant a long release never went dark before
+                 it went quiet. */
+              /* How hard the hand lands depends on how long a release you asked
+                 for. A short release = a real mute, so damp down to 170Hz fast.
+                 A LONG release means you want it to ring — damping that into a
+                 170Hz thud reads as the note being cut off, which it was. */
+              const rs=this._relSec();
+              vo._dfl=170+Math.min(1,Math.max(0,(rs-0.15)/0.9))*1900;
+              vo._dk=Math.exp(-1/(Math.min(0.42,Math.max(0.005,rs*0.30))*sampleRate));
               vo._fs=[{c1:0,c2:0},{c1:0,c2:0},{c1:0,c2:0}];
               vo._pan=off*(V.wide||0);                       // stereo spread
               vo._amp=1/Math.sqrt(uni);
@@ -1993,14 +2042,23 @@ class Engine{
                 if(!this.v[k]._fd){this.v[k]._fd=1;break;}
             }
             if(this.v.length>64)this.v.splice(0,this.v.length-64);}
-          else if(d.t==='off'){for(let k=0;k<this.v.length;k++)
-            if(this.v[k].id===d.id){this.v[k].relT=this.v[k]._t;
-              try{noteOff(this.v[k]);}catch(err){this.v[k].done=true;}}}
+          else if(d.t==='off'){
+            for(let k=0;k<this.v.length;k++)
+              if(this.v[k].id===d.id){this.v[k].relT=this.v[k]._t;
+                try{noteOff(this.v[k]);}catch(err){this.v[k].done=true;}}}
         }
         process(ins,outs){
           const o=outs[0][0]; if(!o)return true;
           const oR=outs[0][1]||null;
           const V=this.v, N=o.length, t0=currentTime, sr=sampleRate;
+          /* Headroom target, once per block. Count only voices that are still
+             AUDIBLE — a voice that has decayed to nothing is taking no headroom,
+             so letting it inflate the count made held notes duck for no reason. */
+          let nA=0;
+          for(let k=0;k<V.length;k++){const vo=V[k];
+            if(!vo.done&&(vo._amp===undefined||vo._amp>0.02))nA++;}
+          const vnT=nA>1?1/Math.sqrt(nA):1;
+          if(this.vn===undefined)this.vn=vnT;
           for(let i=0;i<N;i++){
             if(this.ev.length){
               const tn=t0+i/sr;
@@ -2015,14 +2073,20 @@ class Engine{
               if(vo._skip>0){vo._skip--; continue;}      // unison slop: stagger the starts
               if(vo._gf!==undefined){                    // glide toward the target
                 vo._gf=vo._gt+(vo._gf-vo._gt)*vo._gk;
-                vo.f=vo._gf;
+                if(this.hasSetF)try{setF(vo,vo._gf,this.p);}catch(_){}
+                vo.f=vo._gf;                             // models that cache a delay length
                 if(Math.abs(vo._gf-vo._gt)<0.05){vo.f=vo._gt; vo._gf=undefined;}
               }
               let x=0; try{x=render(vo,this.p);}catch(err){vo.done=true;}
-              try{x=this._rack(vo,x);}catch(err){}
+              /* Never swallow this silently. A throw in here loses the filter,
+                 the mod rack AND the damping with no symptom other than 'it
+                 does nothing', which is exactly how the damping bug hid. */
+              try{x=this._rack(vo,x);}
+              catch(err){ if(!this._rerr){this._rerr=1;
+                this.port.postMessage({t:'err',m:'rack: '+(err&&err.message||err)});} }
               vo._t+=1/sampleRate;
               if(vo._fd!==undefined){                   // stolen: fade, do not cut
-                x*=vo._fd; vo._fd-=0.000023;
+                x*=vo._fd; vo._fd-=(vo._fdr||0.000023);
                 if(vo._fd<=0)vo.done=true;
               }
               if(!(x===x)||x<-64||x>64)continue;
@@ -2033,7 +2097,17 @@ class Engine{
             /* Level: the models already run near full scale, so this is a trim,
                not a boost. Pushing it higher just parks the limiter on and
                flattens every transient — which reads as quiet AND lifeless. */
-            sm*=1.7*this.mg; smR*=1.7*this.mg;
+            /* Voices summed linearly straight into the limiter, so two notes
+               together drove it hard and it distorted — a per-sample limiter
+               IS distortion once you lean on it. Scale by 1/sqrt(n) so a chord
+               has the same headroom as a single note. */
+            /* ...but it MUST be slewed. Read straight off V.length it steps the
+               instant a decaying voice is spliced out, so a note you were still
+               holding jumped 1/sqrt(2)->1 in one sample — a 41% discontinuity,
+               heard as a click mid-hold every time another note ended. ~30ms. */
+            this.vn+=(vnT-this.vn)*0.0007;
+            const gg=1.5*this.mg*this.vn;
+            sm*=gg; smR*=gg;
             this.dc+=(sm-this.dc)*0.0004; sm-=this.dc;  // DC block: user DSP drifts
             this.dcR+=(smR-this.dcR)*0.0004; smR-=this.dcR;
             /* soft limiter, so a preset that overshoots gets caught rather than
@@ -2042,14 +2116,23 @@ class Engine{
                catch a preset that overshoots. Parked on the threshold means it
                is flattening every transient. */
             const aL=sm<0?-sm:sm, aR=smR<0?-smR:smR, a=aL>aR?aL:aR;
-            if(a*this.g>0.92){const want=0.92/a; if(want<this.g)this.g=want;}
+            if(a*this.g>0.86){const want=0.86/a; if(want<this.g)this.g=want;}
             this.g+=(1-this.g)*0.0009;
             sm*=this.g; smR*=this.g;
-            if(sm>0.99)sm=0.99; else if(sm<-0.99)sm=-0.99;
-            if(smR>0.99)smR=0.99; else if(smR<-0.99)smR=-0.99;
+            /* soft knee instead of a hard ceiling: clipping at 0.99 was audible
+               as crackle on peaks the limiter had not caught yet */
+            if(sm>0.72||sm<-0.72)sm=sm>0?0.72+0.28*Math.tanh((sm-0.72)/0.28)
+                                        :-0.72+0.28*Math.tanh((sm+0.72)/0.28);
+            if(smR>0.72||smR<-0.72)smR=smR>0?0.72+0.28*Math.tanh((smR-0.72)/0.28)
+                                           :-0.72+0.28*Math.tanh((smR+0.72)/0.28);
             o[i]=sm; if(oR)oR[i]=smR;
           }
           for(let k=V.length-1;k>=0;k--)if(V[k].done)V.splice(k,1);
+          /* tell the host how many voices are ACTUALLY sounding — it was
+             counting note-ons and guessing when they ended */
+          if((this.rc=(this.rc||0)+1)>=8){this.rc=0;
+            if(V.length!==this.lastN){this.lastN=V.length;
+              this.port.postMessage({t:'nv',n:V.length});}}
           if(this.ev.length>64)this.ev.splice(0,this.ev.length-64);
           return true;
         }
@@ -2059,11 +2142,22 @@ class Engine{
     AC.audioWorklet.addModule(url).then(()=>{
       if(this.cn[pi]!==e)return;
       const n=new AudioWorkletNode(AC,cls,{numberOfInputs:0,numberOfOutputs:1,outputChannelCount:[2]});
-      n.port.onmessage=ev=>{if(ev.data&&ev.data.t==='params')e.names=ev.data.names||[];};
+      n.port.onmessage=ev=>{
+        if(!ev.data)return;
+        if(ev.data.t==='params')e.names=ev.data.names||[];
+        else if(ev.data.t==='nv'){
+          e.nv=ev.data.n|0;
+          const a=this.act[pi];                    // trim shims down to the real count
+          while(a.length>e.nv){const sh=a.shift(); if(sh&&sh._drop)clearTimeout(sh._drop);}
+          dirty=true;
+        }
+        else if(ev.data.t==='err'){e.err=ev.data.m; flash('code error: '+e.err); dirty=true;}
+      };
       n.connect(this.buses[pi].vIn);
       e.node=n; e.ready=true;
       for(let i=0;i<8;i++)n.port.postMessage({t:'p',i,v:(p.cp&&p.cp[i])??0});
-      n.port.postMessage({t:'gain',v:((PROCLIB[p.pmodel]||{}).gain)||1});
+      n.port.postMessage({t:'gain',v:((PROCLIB[resolveModel(p.pmodel)]||{}).gain)||1});
+      n.port.postMessage({t:'perc',v:PROCPERC.has(p.pmodel)?1:0});
       this.codeCfg(pi);
       for(const m of e.q)n.port.postMessage(m);
       e.q.length=0;
@@ -2096,6 +2190,77 @@ class Engine{
     const p=S.presets[pi];
     for(let i=0;i<8;i++)this.codeSend(pi,{t:'p',i,v:(p.cp&&p.cp[i])??0});
     return (e&&e.names)||[];
+  }
+  /* MONO NOTE PRIORITY. Holding A, then B, then releasing B should drop you
+     back onto A — a mono synth remembers what is still held rather than just
+     killing whatever came before. The stack is per channel and only tracks
+     LIVE notes (the sequencer manages its own). In `legato` the pitch of the
+     sounding voice moves instead of retriggering, so envelopes carry through. */
+  monoPush(pi,midi,vel){
+    this.mono=this.mono||{};
+    const st=this.mono[pi]=this.mono[pi]||[];
+    const i=st.findIndex(n=>n.midi===midi);
+    if(i>=0)st.splice(i,1);
+    st.push({midi,vel});
+    if(st.length>12)st.shift();
+    return st;
+  }
+  monoPop(pi,midi){
+    const st=(this.mono&&this.mono[pi])||[];
+    const i=st.findIndex(n=>n.midi===midi);
+    if(i>=0)st.splice(i,1);
+    return st.length?st[st.length-1]:null;
+  }
+  monoClear(pi){ if(this.mono)this.mono[pi]=[]; }
+  /* move a sounding voice to a new pitch WITHOUT retriggering. Everything —
+     amp env, filter env, the model's excitation state — carries through, which
+     is what makes legato legato. Pitch is scaled off the note the voice was
+     built at, so sample/noise roots that were never frequencies survive. */
+  retune(pi,midi){
+    const p=S.presets[pi];
+    const gl=Math.max(0.004,(p.vox&&p.vox.glide)||0.02);
+    if(p.cat==='proc'){
+      const e=this.cn&&this.cn[pi];
+      if(!e||!e.node)return false;
+      this.codeSend(pi,{t:'retune',f:440*Math.pow(2,(midi-69)/12),gl});
+      return true;
+    }
+    let did=false;
+    for(const v of this.act[pi]){
+      if(!v||v.released||v.killed||!v.opPitch)continue;
+      if(v._rf0===undefined){v._rf0=v.rootFreq; v._nr0=v.noteRatio;}
+      const rat=Math.pow(2,(midi-(v.baseMidi==null?v.midi:v.baseMidi))/12);
+      v.rootFreq=v._rf0*rat;
+      if(v._nr0!==undefined)v.noteRatio=v._nr0*rat;
+      v.midi=midi;
+      try{v.oscRefresh(E,'rat',gl);}catch(_){}
+      did=true;
+    }
+    return did;
+  }
+  /* Mono/legato live handle. `wasTop` matters: releasing a key that is NOT the
+     one currently sounding must change nothing — only dropping the top of the
+     stack falls back to whatever is still held underneath. */
+  monoTrigger(at,pi,midi,pad,vel,mv,pcHandle){
+    const st=this.monoPush(pi,midi,vel);
+    const already=st.length>1;
+    let voices=[];
+    if(!(mv===2&&already&&this.retune(pi,midi)))
+      voices=[this.noteOn(at,pi,midi,vel,pad)].map(v=>{v.live=true;return v;});
+    return {voices,release:t=>{
+      if(pcHandle){pcHandle();pcHandle=null;}
+      const cur=(this.mono&&this.mono[pi])||[];
+      const wasTop=cur.length&&cur[cur.length-1].midi===midi;
+      const prev=this.monoPop(pi,midi);
+      if(!wasTop)return;                       // an under-note let go: keep playing
+      if(prev){
+        if(mv===2&&this.retune(pi,prev.midi))return;
+        const v=this.noteOn(Math.max(t,AC.currentTime),pi,prev.midi,prev.vel,prev.midi);
+        v.live=true; return;
+      }
+      for(const v of [...this.act[pi]])
+        if(v&&v.release&&!v.released)v.release(t);
+    }};
   }
   noteOn(at,pi,midi,vel,padMidi){
     const p=S.presets[pi];
@@ -2132,7 +2297,7 @@ class Engine{
     const pre=K?K:prepEffective(p,pm);
     const lid=K?pcOf(pm):'ch';
     const vx=pre.vox||{};
-    if(vx.mode===1){                                     // mono steals only its own kit slot
+    if(vx.mode>=1){                                      // mono steals only its own kit slot
       const killAt=Math.max(AC.currentTime+0.001,at-0.004);
       for(const v of [...this.act[pi]])if(v._lid===lid)v.kill(killAt,true);
     }
@@ -2200,6 +2365,15 @@ class Engine{
       if(durSec!=null)return null;
       return {voices:[],arp:entries,release:t=>{if(pcHandle){pcHandle();pcHandle=null;}
         const b2=T.playing?beatsAt(t):1e9;for(const en of entries)en.until=Math.min(en.until,b2);}};
+    }
+    /* mono & legato get note priority: a stack of what is still held, so
+       releasing the newest note drops back to the one under it. Only single
+       live notes — a chord effect on a mono channel is already contradictory. */
+    if(durSec==null&&midis.length===1){
+      const K0=isKit(p)?kitSlot(p,pads[0]):null;
+      const pr0=K0||prepEffective(p,pads[0]);
+      const mv=(pr0.vox&&pr0.vox.mode)|0;
+      if(mv>=1)return this.monoTrigger(at,pi,midis[0],pads[0],vel,mv,pcHandle);
     }
     const notes=midis.map((m,i)=>({m,pad:pads[i]})).sort((a,b)=>a.m-b.m);
     const nM=notes.length;   // negative strum rolls high -> low
@@ -3135,11 +3309,46 @@ function randomizeChannel(pi,wildOverride){
 }
 const _zn=v=>NN[((Math.round(v)%12)+12)%12]+(Math.floor(Math.round(v)/12)-1);
 /* PRST fields: a kit channel edits the focused pitch-class slot, else the channel */
+/* ENGINE — how a channel makes sound, as opposed to what KIND of sound it is.
+   Those two were tangled together in one 'type' field: picking 'kit' or 'proc'
+   changed the whole engine, while picking 'bass' or 'lead' only changed which
+   corner of the preset library you were browsing. Splitting them makes the
+   choice legible and leaves room for the two still to come. */
+const ENGINES=[
+  {k:'kit',   n:'Kit'},
+  {k:'synth', n:'Synth'},
+  {k:'proc',  n:'Procedural'},
+  {k:'audio', n:'Audio'},
+  {k:'smp',   n:'Sampler', soon:1},
+  {k:'grain', n:'Grain',   soon:1},
+];
+/* the categories a Synth channel can be — the engine names are not among them */
+const SYNTHCATS=CATS.filter(c=>c!=='kit'&&c!=='audio'&&c!=='proc');
+const engineOf=p=>p.cat==='kit'?'kit':p.cat==='audio'?'audio':p.cat==='proc'?'proc':'synth';
+const engineName=p=>(ENGINES.find(e=>e.k===engineOf(p))||{}).n||'Synth';
+function setEngine(pi,key){
+  const p=S.presets[pi], was=engineOf(p);
+  if(key===was)return false;
+  if(was==='synth')p._scat=p.cat;          // remember the category to come back to
+  if(key==='kit'){p.cat='kit'; p.kit=null;}
+  else if(key==='audio')p.cat='audio';
+  else if(key==='proc'){
+    p.cat='proc'; p.pmodel=p.pmodel||PROCNAMES[0]; p.psel=p.psel|0;
+    procDefaults(p);
+    const L=procPresets(p.pmodel); if(L.length)applyProcPreset(pi,L[p.psel|0]);
+  }
+  else {                                    // back to the normal rack
+    p.cat=p._scat&&SYNTHCATS.includes(p._scat)?p._scat:'keys';
+    p.kit=null;
+  }
+  engine.rebuildRack(pi); engine.refresh(pi);
+  return true;
+}
 function prsFieldDefs(){
   const p=S.presets[S.editSnd], K=edKit(p);
-  const chType={k:'type',v:()=>p.cat||'misc'};   // ALWAYS first — this is how you leave kit mode
-  if(K)return [    // kit: channel type, then which pad, then that pad's own chain
-    chType,
+  const chEng={k:'engine',v:()=>engineName(p)};  // ALWAYS first — this is how you leave any engine
+  if(K)return [    // kit: engine, then which pad, then that pad's own chain
+    chEng,
     {k:'pad',  v:()=>NN[pcOf(S.prepFocus)]+(Math.floor(S.prepFocus/12)-1)},
     {k:'sound',v:()=>K.cat||'kik'},
     {k:'prst', v:()=>K.name},
@@ -3151,21 +3360,30 @@ function prsFieldDefs(){
   if(p.cat==='proc'){
     const L=procPresets(p.pmodel||PROCNAMES[0]);
     return [
-    chType,
+    chEng,
     {k:'model', v:()=>p.pmodel||PROCNAMES[0]},
     {k:'preset',v:()=>L.length?((L[clamp(p.psel|0,0,L.length-1)]||{}).n||'—')
                               +' '+((p.psel|0)+1)+'/'+L.length : '—'},
     {k:'rnd',   v:()=>'↕ roll'},
     {k:'wild',  v:()=>(CFG.wild??50)+'%'}];
   }
-  return [
-    chType,
+  if(p.cat==='audio')return [
+    chEng,
+    {k:'ainfo',v:()=>engine.audBuf[S.editSnd]?'clip loaded':'drop a file'}];
+  if(p.cat==='kit')return [        // kit, but no pad played yet: no pad fields to show
+    chEng,
+    {k:'kinfo',v:()=>'play a note to pick a pad'},
+    {k:'rnd',  v:()=>'↕ roll'},
+    {k:'wild', v:()=>(CFG.wild??50)+'%'}];
+  return [                                        // Synth: engine, then category
+    chEng,
+    {k:'type', v:()=>p.cat||'misc'},
     {k:'prst', v:()=>p.name},
     {k:'save', v:()=>'↕ keep'},
     {k:'rnd',  v:()=>'↕ roll'},
     {k:'wild', v:()=>(CFG.wild??50)+'%'}];
 }
-const PRSFIELDS=['type','prst','save','rnd','wild'];   // legacy stops reference (nav uses prsFieldDefs)
+const PRSFIELDS=['engine','type','prst','save','rnd','wild'];   // legacy stops reference (nav uses prsFieldDefs)
 const AUDF=[
  SP('gain','gain','lin',{min:0,max:1,step:0.05}),
  SP('pitch','semis','lin',{min:-24,max:24,step:1,fmt:v=>v+'st'}),
@@ -3258,6 +3476,25 @@ function _prsAction(d){
     else if(f==='wild'){CFG.wild=clamp((CFG.wild??50)+d*5,0,100);saveCfg();}
     engine.rebuildRack(pi); dirty=true; dirtySave=true; return;
   }
+  if(f==='engine'){
+    /* Sampler and Grain are listed so the shape of the thing is visible, but
+       cycling steps OVER them — landing on an engine that does nothing is a
+       worse experience than not seeing it yet. */
+    const cur=Math.max(0,ENGINES.findIndex(e=>e.k===engineOf(p)));
+    let i=cur, guard=0;
+    do{ i=fmod(i+(d<0?-1:1),ENGINES.length); guard++; }
+    while(ENGINES[i].soon&&guard<ENGINES.length);
+    const e2=ENGINES[i];
+    if(e2.soon){flash(e2.n+' — coming next');dirty=true;return;}
+    pushUndo('engine');
+    if(setEngine(pi,e2.k)){
+      S.curParam=0;
+      flash('engine: '+e2.n+(e2.k==='synth'?' · '+(p.cat||'misc'):
+            e2.k==='proc'?' · '+(p.pmodel||''):''));
+    }
+    dirty=true; dirtySave=true; return;
+  }
+  if(f==='ainfo'||f==='kinfo'){dirty=true;return;}
   if(f==='model'){
     const i=PROCNAMES.indexOf(p.pmodel||PROCNAMES[0]);
     p.pmodel=PROCNAMES[fmod((i<0?0:i)+d,PROCNAMES.length)];
@@ -3280,14 +3517,13 @@ function _prsAction(d){
   }
   if(f==='prst')scrollPreset(pi,d);
   else if(f==='type'){
-    const cat=CATS[fmod(CATS.indexOf(p.cat||'misc')+d,CATS.length)];
-    if(cat==='proc'&&p.cat!=='proc'){p.pmodel=p.pmodel||PROCNAMES[0]; p.psel=p.psel|0;
-      procDefaults(p);
-      const L1=procPresets(p.pmodel); if(L1.length)setTimeout(()=>applyProcPreset(pi,L1[0]),0);}
+    const i0=Math.max(0,SYNTHCATS.indexOf(p.cat||'misc'));
+    const cat=SYNTHCATS[fmod(i0+d,SYNTHCATS.length)];
     const pool=libAll().filter(en=>en.cat===cat);
     if(pool.length)applyPresetData(pi,pool[0].name,pool[0].cat,pool[0].data);
     else p.cat=cat;
-    flash('channel type: '+cat+(pool.length?' → '+pool[0].name:''));
+    p._scat=cat;
+    flash('sound type: '+cat+(pool.length?' → '+pool[0].name:''));
     dirtySave=true;}
   else if(f==='save')saveToLib(pi);
   else if(f==='wild'){
@@ -3812,16 +4048,21 @@ function noteOn(v,f,vel,p){
   v.ph=[]; v.am=[];
   for(var i=0;i<RAT.length;i++){ v.ph[i]=Math.random()*6.2832; v.am[i]=LVL[i]; }
   v.nz=${noiseAmt};
+  // higher bars ring shorter — true of every struck idiophone
+  v.fs=Math.pow(261.6/Math.max(60,f),0.5);
   v._l=0;v._b=0;v._h=0;
 }
 function noteOff(v){ v.rel=true }
 function render(v,p){
-  var y=0, t=v.t, dec=0.25+p[1]*1.75;
+  var y=0, t=v.t, dec=(0.22+p[1]*1.30)*v.fs;
   for(var i=0;i<RAT.length;i++){
     var fi=v.f*RAT[i]*(1+ (i? p[4]*0.004*(i%2?1:-1) :0));
     if(fi>sampleRate*0.47) continue;
     var d=DEC[i]*dec;
-    var a=v.am[i]*Math.exp(-t/d);
+    /* squared exponential: a struck bar drops away fast and then whispers.
+       A plain exponential rings on far too loud for far too long. */
+    var ex=Math.exp(-t/d);
+    var a=v.am[i]*ex*ex;
     v.ph[i]+=6.2832*fi*srI;
     y += a*Math.sin(v.ph[i]);
   }
@@ -3836,8 +4077,10 @@ function render(v,p){
   return y*v.vel*v.env*0.5*(0.4+0.6*p[0]);
 }`;
 
-_mk('kalimba','modal',`
+_mk('bell','modal',`
 PARAMS = ['strike','decay','tone','noise','detune','spread','trem','drive']
+/* This was called 'kalimba' but it is a struck metal BAR, not a plucked
+   tongue — it always sounded like a xylophone because that is what it is. */
 /* Plucky = what happens in the first 30ms. A thumb piano tine is bent and
    released, so it starts SHARP (bent up a few cents, settling fast) and the
    fundamental has a fast initial slump before its long ring. A single
@@ -3879,6 +4122,76 @@ function render(v,p){
   v.t+=srI;
   return y*v.vel*v.env*0.5*(0.4+0.6*p[0]);
 }`);
+_mk('kalimba','plucked',`
+PARAMS = ['flick','decay','tone','nail','buzz','spread','trem','drive']
+/* Thumb piano. Three transient layers, in the order they actually happen:
+     0ms  the THU  — thumb flesh dragging off the steel: low, dull, ~4ms
+     ~2ms the nail SCRAPE — bright, the crack of release
+     ~6ms the metallic partial blooms in, slightly after the fundamental
+   Having the bright partial arrive with everything else is what made it read
+   as a bell; letting it bloom a few ms late is what makes it a plucked tongue.
+   Higher tines also ring shorter, as on any struck metal. */
+function noteOn(v,f,vel,p){
+  v.f=f; v.vel=vel; v.t=0; v.rel=false;
+  v.hard=0.3+0.7*vel;
+  var fs=Math.pow(261.6/Math.max(60,f),0.5);
+  var dec=(0.42+p[1]*1.7)*fs;
+  v.p1=0; v.p2=0; v.p3=0;
+  v.i1=6.2832*f*srI; v.i2=6.2832*f*6.27*srI; v.i3=6.2832*f*17.1*srI;
+  v.eA=0.55; v.kA=Math.exp(-1/((dec*0.10)*sampleRate));   // fast slump
+  v.eB=0.62; v.kB=Math.exp(-1/(dec*sampleRate));          // long ring
+  v.e2=1; v.k2=Math.exp(-1/(((0.050+p[1]*0.05)*fs)*sampleRate));
+  v.e3=1; v.k3=Math.exp(-1/((0.018*fs)*sampleRate));
+  v.b2=0; v.r2=1-Math.exp(-1/(0.0055*sampleRate));        // the metallic bloom
+  v.hpz=0; v.thu=0; v.lp=0; v.dc=0; v.bz=0; v.bzt=0;
+  v.tE=1; v.tk=Math.exp(-1/(0.0040*sampleRate));          // the 'thu'
+  v.nE=1; v.nk=Math.exp(-1/(0.0016*sampleRate));          // the nail
+  v.nD=Math.round(0.0018*sampleRate);                     // nail arrives after the thu
+  v.g=1-Math.exp(-6.2832*(2400+p[2]*6000)*srI);
+  v.drv=1+p[7]*2.4; v.out=0.5*(0.4+0.6*p[0]);
+  v.bend=1;
+}
+/* retune without restriking: the tine keeps ringing, only its pitch moves */
+function setF(v,f){
+  v.f=f; v.i1=6.2832*f*srI; v.i2=6.2832*f*6.27*srI; v.i3=6.2832*f*17.1*srI;
+}
+function noteOff(v){ v.rel=true }
+function render(v,p){
+  var t=v.t;
+  var bend=1+0.028*v.hard*Math.exp(-t/0.008);
+  v.p1+=v.i1*bend; v.p2+=v.i2*bend; v.p3+=v.i3;
+  v.eA*=v.kA; v.eB*=v.kB; v.e2*=v.k2; v.e3*=v.k3;
+  v.b2+=(1-v.b2)*v.r2;                                    // bloom, not instant
+  var y = Math.sin(v.p1)*(v.eA+v.eB)
+        + Math.sin(v.p2)*0.30*v.hard*(0.45+p[2]*0.7)*v.e2*v.b2
+        + Math.sin(v.p3)*0.10*v.hard*p[2]*v.e3*v.b2;
+  // THE THU: thumb flesh dragging off the tine before the nail lets go
+  if(v.tE>0.0015){
+    var nz=_noise();
+    v.thu+=(nz-v.thu)*0.055;                              // heavily darkened
+    y += v.thu*p[3]*1.5*v.hard*v.tE;
+    v.tE*=v.tk;
+  }
+  // THE NAIL: the bright crack, a hair later
+  if(v.nD>0){ v.nD--; }
+  else if(v.nE>0.0015){
+    var n2=_noise(); var tick=n2-v.hpz; v.hpz=n2;
+    y += tick*p[3]*0.95*v.hard*v.nE;
+    v.nE*=v.nk;
+  }
+  if(p[4]>0 && t<0.16){                                   // shells buzzing
+    v.bzt+=srI;
+    if(v.bzt>0.0022){ v.bzt=0; v.bz=_noise()*(0.5+0.5*Math.random()); }
+    y += v.bz*p[4]*0.22*v.hard*Math.exp(-t/0.055);
+  }
+  if(p[6]>0) y*=1+p[6]*0.18*Math.sin(6.2832*5.5*t);
+  v.lp+=(y-v.lp)*v.g; y=v.lp*0.72+y*0.28;
+  y=Math.tanh(y*v.drv);
+  v.dc+=(y-v.dc)*0.0006; y-=v.dc;
+  if(t>0.3&&v.eA+v.eB<0.00006)v.done=true;
+  v.t+=srI;
+  return y*v.vel*v.out;
+}`);
 _mk('xylophone','modal',_modal('xylo',
   '1,3.01,6.03,10.6','0.42,0.085,0.038,0.018','1,0.34,0.14,0.05',0.3,0.55,''));
 _mk('marimba','modal',_modal('marimba',
@@ -3887,48 +4200,89 @@ _mk('vibraphone','modal',_modal('vibes',
   '1,4.0,10.4,17.9','3.2,0.95,0.30,0.10','1,0.30,0.11,0.04',0.9,0.18,
   'y *= 1 + p[6]*0.42*Math.sin(6.2832*5.2*t);'));   // rotating discs = tremolo
 _mk('steeldrum','modal',`
-PARAMS = ['strike','decay','tone','noise','detune','spread','trem','drive']
-/* A pan is STRUCK, so it must speak instantly — my earlier version faded in
-   over 90ms, which is what made it sound soft and synthetic. Round comes from
-   leaning on the low partials (1,2,4) and rolling off the high ones, not from
-   removing the attack. */
-var RAT=[1,2,3,4,5,6,8];
-var LVL=[1,0.86,0.18,0.72,0.16,0.24,0.10];
-var DEC=[0.95,0.80,0.30,0.55,0.22,0.30,0.16];
+PARAMS = ['strike','decay','tone','noise','detune','skirt','trem','drive']
+/* Steel pan, rebuilt on how the instrument actually generates its tone.
+   Two things I had wrong, both from the acoustics literature:
+
+   1. Only THREE modes are tuned — the fundamental (0,0), the octave (0,1) at
+      2x, and the twelfth (1,0) at 3x. Everything above that is NOT an
+      independent mode: it is generated by NONLINEAR DISTORTION, because the
+      dome moves further up than down. So the upper spectrum has to come out
+      of a waveshaper fed by those three, not from a stack of sines. Summing
+      partials additively is why earlier versions sounded like a struck string.
+
+   2. The partials ARRIVE LATE. The fundamental peaks within milliseconds, the
+      octave peaks around 15ms, and everything above at 20-30ms. That staggered
+      bloom is the sound of a pan being struck.
+      [stockholmsteelband.se/pan/tuning/theory20_tone_generation.php ·
+       Rossing, Vibrational mode shapes in Caribbean steelpans]                */
 function noteOn(v,f,vel,p){
-  v.f=f; v.vel=vel; v.t=0; v.rel=false; v.env=1;
-  v.ph=[]; for(var i=0;i<RAT.length;i++)v.ph[i]=0;
-  v.lp=0; v.dc=0; v.nz=0;
+  v.f=f; v.vel=vel; v.t=0; v.rel=false;
+  v.hard=0.3+0.7*vel;
+  // higher notes die faster: radiation damping and internal friction both rise
+  // with frequency, which is why a treble pan note is much shorter than a bass one
+  var fs=Math.pow(261.6/Math.max(60,f),0.55);
+  var dec=(0.11+p[1]*0.62)*fs;      // a pan is short and quite muted
+  v.p0=0; v.p1=0; v.p2=0;
+  v.i0=6.2832*f*srI;
+  v.i1=6.2832*f*2*(1+p[4]*0.0006)*srI;        // octave: 2:1 must be near-exact
+  v.i2=6.2832*f*3*(1+p[4]*0.0012)*srI;        // twelfth
+  /* the upper modes go FAST — the twelfth is gone almost immediately, which
+     is what rounds the note off instead of letting it ring like a string */
+  v.e0=1; v.k0=Math.exp(-1/((dec*1.00)*sampleRate));
+  v.e1=1; v.k1=Math.exp(-1/((dec*0.42)*sampleRate));
+  v.e2=1; v.k2=Math.exp(-1/((dec*0.16)*sampleRate));
+  // the modes BLOOM in, each later than the last
+  v.r1=1-Math.exp(-1/(0.015*sampleRate));
+  v.r2=1-Math.exp(-1/(0.026*sampleRate));
+  v.a1=0; v.a2=0;
+  v.lp=0; v.nz=0; v.dc=0; v.hpz=0;
+  v.hE=1; v.hk=Math.exp(-1/(0.0050*sampleRate));
+  v.sk=0; v.skb=0; v.skw=6.2832*Math.max(70,f*0.52)*srI;   // the skirt resonance
+  v.drv=1.6+p[7]*2.6; v.out=0.5*(0.4+0.6*p[0]);
+  v.tone=0.45+0.55*p[2];
+}
+function setF(v,f,p){
+  v.f=f; v.i0=6.2832*f*srI;
+  v.i1=6.2832*f*2*(1+p[4]*0.0006)*srI;
+  v.i2=6.2832*f*3*(1+p[4]*0.0012)*srI;
 }
 function noteOff(v){ v.rel=true }
 function render(v,p){
-  var t=v.t, dec=0.35+p[1]*1.6;
-  // the head gives a touch on the way in — a real pan pitches down a few cents
-  var drop = 1 + 0.012*Math.exp(-t/0.012);
-  var y=0;
-  for(var i=0;i<RAT.length;i++){
-    var fi=v.f*RAT[i]*drop*(1+(i?p[4]*0.0022*(i%2?1:-1):0));
-    if(fi>sampleRate*0.46)continue;
-    // higher partials both quieter AND shorter: that is 'round'
-    var lv=LVL[i]*Math.pow(0.55+0.45*p[2],i);
-    v.ph[i]+=6.2832*fi*srI;
-    y+=lv*Math.exp(-t/(DEC[i]*dec))*Math.sin(v.ph[i]);
+  v.p0+=v.i0; v.p1+=v.i1; v.p2+=v.i2;
+  v.a1+=(1-v.a1)*v.r1; v.a2+=(1-v.a2)*v.r2;      // the staggered bloom
+  v.e0*=v.k0; v.e1*=v.k1; v.e2*=v.k2;
+  /* squared envelopes: drop away hard, then whisper. A plain exponential
+     rings on far too loud for something struck on thin steel. */
+  var d0=v.e0*v.e0;
+  var d1=v.a1*v.e1*v.e1;
+  var d2=v.a2*v.e2*v.e2*v.hard;
+  var y = Math.sin(v.p0)*0.62*d0
+        + Math.sin(v.p1)*0.95*d1
+        + Math.sin(v.p2)*0.42*d2*v.tone;
+  /* ASYMMETRIC nonlinearity: this is where every partial above the twelfth
+     comes from, and why the even ones come out stronger than the odd. */
+  y = y + 0.55*y*y*v.tone;
+  y = Math.tanh(y*v.drv)/1.4;
+  if(v.hE>0.0008){                               // rubber tip on thin steel
+    var nz=_noise();
+    v.nz+=(nz-v.nz)*0.32;
+    y += v.nz*p[3]*0.85*v.hard*v.hE;
+    var tick=nz-v.hpz; v.hpz=nz;
+    y += tick*p[3]*0.14*v.hard*v.hE*v.hE;
+    v.hE*=v.hk;
   }
-  // rubber-tipped stick: a soft knock, not a bright tick
-  if(t<0.020){
-    v.nz+=(_noise()-v.nz)*0.45;                    // pre-darkened noise
-    y += v.nz*p[3]*0.9*Math.exp(-t/0.0045);
+  if(p[5]>0){                                    // skirt: the drum body couples
+    var h=y-v.sk-0.45*v.skb; v.skb+=v.skw*h; v.sk+=v.skw*v.skb;
+    y += v.skb*p[5]*0.5;
   }
-  if(p[6]>0) y*=1+p[6]*0.25*Math.sin(6.2832*4.5*t);
-  // the drum shell rounds off the top
-  var g=1-Math.exp(-6.2832*(2600+p[2]*5200)*srI);
-  v.lp+=(y-v.lp)*g; y=v.lp*0.82+y*0.18;
-  y=Math.tanh(y*(1+p[7]*2.2));
+  if(p[6]>0) y*=1+p[6]*0.22*Math.sin(6.2832*4.5*v.t);
+  var g=1-Math.exp(-6.2832*(1500+p[2]*3200)*srI);
+  v.lp+=(y-v.lp)*g; y=v.lp*0.93+y*0.07;   // muted, rounded
   v.dc+=(y-v.dc)*0.0006; y-=v.dc;
-  if(v.rel){ v.env*=(1-v._rr); if(v.env<0.0006)v.done=true; }
-  if(t>0.3&&Math.abs(y)<1e-5)v.done=true;
+  if(v.t>0.12&&v.e0<0.0002)v.done=true;
   v.t+=srI;
-  return y*v.vel*v.env*0.5*(0.4+0.6*p[0]);
+  return y*v.vel*v.out;
 }`);                      // the pan blooms in, it does not click
 _mk('woodblock','modal',_modal('wood',
   '1,2.57,4.94,8.1','0.085,0.045,0.022,0.012','1,0.55,0.25,0.10',0.15,0.75,''));
@@ -3939,13 +4293,25 @@ PARAMS = ['pluck','damp','decay','body','pos','stiff','noise','drive']
 function noteOn(v,f,vel,p){
   v.f=f; v.vel=vel; v.t=0; v.rel=false; v.env=1;
   var L=Math.max(8,Math.round(sampleRate/f));
-  v.L=L; v.buf=new Float32Array(L); v.i=0; v.y=0; v.dc=0;
+  /* the delay line is allocated for the LOWEST note it might glide down to,
+     not just this one — a waveguide retunes by changing its length, and it
+     cannot lengthen past its buffer */
+  v.L=L; v.buf=new Float32Array(Math.max(L,Math.round(sampleRate/27.5)));
+  v.i=0; v.y=0; v.dc=0;
   var k=Math.max(1,Math.round(L*(0.08+p[4]*0.42)));   // pluck position -> comb
   for(var n=0;n<L;n++) v.buf[n]=(Math.random()*2-1);
   for(var n=L-1;n>=k;n--) v.buf[n]-=v.buf[n-k]*0.7;
   var g=0.5;                                          // soften the excitation
   for(var n=1;n<L;n++) v.buf[n]=v.buf[n]*(1-g)+v.buf[n-1]*g;
   v._l=0;v._b=0;v._h=0;
+}
+/* retune = change the string's LENGTH. The energy already circulating in the
+   delay line stays there, so the note keeps ringing at the new pitch instead
+   of being replucked — which is what separates legato from a retrigger. */
+function setF(v,f){
+  var L=Math.max(8,Math.round(sampleRate/f));
+  if(L>v.buf.length)L=v.buf.length;
+  v.f=f; v.L=L; if(v.i>=L)v.i=0;
 }
 function noteOff(v){ v.rel=true }
 function render(v,p){
@@ -4263,64 +4629,98 @@ function render(v,p){
    f(n) = n*f0*sqrt(1+B*n^2). That inharmonicity is why a piano cannot be an
    additive stack of exact harmonics, and why octaves are stretched. Two or
    three strings per note beat slowly against each other. ------------------ */
-_mk('piano','struck',`
+_mk('e-piano','struck',`
 PARAMS = ['strike','decay','stretch','unison','hammer','body','tone','drive']
-/* A piano is not a smooth additive stack. Three things it must have:
-   a KNOCK (the hammer, felt and wood, before any pitch is heard), a DOUBLE
-   decay (fast for ~0.4s while the strings couple, then a long slow tail), and
-   two or three strings per note beating slowly. My first version had a single
-   exponential per partial and a whisper of hammer, which is why it read as a
-   generic mallet rather than a piano. */
+/* Piano. Everything a partial needs — its frequency, its level, and its two
+   decay rates — is FIXED for the whole note, so it is all computed once in
+   noteOn. The render loop is then one sine and a few multiplies per partial.
+   Doing that maths per sample instead cost 8.4% of a core PER VOICE and fell
+   over past five notes; envelopes advance by repeated multiplication, never
+   by calling exp() in the inner loop. */
 function noteOn(v,f,vel,p){
   v.f=f; v.vel=vel; v.t=0; v.rel=false; v.env=1;
-  v.ph=new Float32Array(20); v.q1=0; v.q2=0;
-  v.lp=0; v.hp=0; v.nzp=0; v.b1=0; v.l1=0; v.dc=0;
-  v.hard=0.25+0.75*vel;
+  v.hard=Math.pow(0.15+0.85*vel,1.4);        // felt compresses nonlinearly
+  var B=0.00014+p[2]*0.0007;
+  /* Higher strings ring far shorter — bass notes sustain for tens of seconds,
+     the top octave for about one. Radiation damping and internal friction both
+     climb with frequency. */
+  // a piano's gradient is steep: bottom strings ring for tens of seconds, the
+  // top octave for about one, so this exponent is higher than the bars'
+  var fs=Math.pow(261.6/Math.max(50,f),0.95);
+  var d1=(0.28+p[1]*0.45)*fs, d2=(2.6+p[1]*8)*fs;
+  v.n=0; v.ph=[]; v.inc=[]; v.amp=[]; v.e1=[]; v.e2=[]; v.k1=[]; v.k2=[];
+  for(var n=1;n<=22;n++){
+    var fn=n*f*Math.sqrt(1+B*n*n);
+    if(fn>sampleRate*0.46)break;
+    var i=v.n++;
+    v.ph[i]=0;
+    v.inc[i]=6.2832*fn*srI;
+    /* a saw is 1/n. A piano falls away far faster than that — 1/n^1.25 was
+       essentially a sawtooth, which is exactly what it sounded like. Even at
+       full velocity the upper partials stay well down. */
+    v.amp[i]=Math.pow(v.hard,0.8+n*0.20)/Math.pow(n,2.0);
+    v.e1[i]=0.58; v.e2[i]=0.42;
+    // per-SAMPLE decay factors: e *= k each sample replaces exp(-t/tau)
+    v.k1[i]=Math.exp(-1/((d1/(1+n*0.16))*sampleRate));
+    v.k2[i]=Math.exp(-1/((d2/(1+n*n*0.02))*sampleRate));
+  }
+  v.q1=0; v.q2=0; v.qi1=6.2832*f*(1+p[3]*0.00055)*srI; v.qi2=6.2832*f*(1-p[3]*0.00040)*srI;
+  v.u1=0.55; v.u2=0.45;
+  v.uk1=Math.exp(-1/(d1*sampleRate)); v.uk2=Math.exp(-1/(d2*sampleRate));
+  v.lp=0; v.lp2=0; v.hpz=0; v.nz=0; v.b1=0; v.l1=0; v.dc=0; v.thump=0;
+  v.hfc=1-Math.exp(-6.2832*(280+2600*v.hard)*srI);   // hammer lowpass, velocity-set
+  v.hk=Math.exp(-1/((0.0022+0.004*(1-v.hard))*sampleRate));
+  v.hE=1; v.tE=1; v.tk=Math.exp(-1/(0.014*sampleRate));
+  v.g2=1-Math.exp(-6.2832*(900+p[6]*4200*(0.35+0.65*v.hard))*srI);
+  v.bw=6.2832*(110+p[5]*130)*srI;
+  v.drv=0.55+p[7]*0.9; v.out=0.62*(0.4+0.6*p[0]);   // gentle: the buzz was here
+}
+function setF(v,f){
+  var r=f/v.f; if(!(r>0)||r===1)return;
+  v.f=f; for(var i=0;i<v.n;i++)v.inc[i]*=r;   // inharmonicity ratios ride along
 }
 function noteOff(v){ v.rel=true }
 function render(v,p){
-  var t=v.t, B=0.00016+p[2]*0.0008;
-  // DOUBLE DECAY: strings couple, dump energy fast, then ring on
-  var d1=0.30+p[1]*0.5, d2=2.4+p[1]*7;
-  var body=0.62*Math.exp(-t/d1)+0.38*Math.exp(-t/d2);
-  var y=0;
-  var nH=20;
-  for(var n=1;n<=nH;n++){
-    var fn=n*v.f*Math.sqrt(1+B*n*n);
-    if(fn>sampleRate*0.46)break;
-    // hit harder and the upper partials come up; they also die sooner
-    var amp=Math.pow(v.hard,0.5+n*0.16)/Math.pow(n,1.35);
-    var hd=1/(1+n*n*0.020);
-    var e=body*Math.pow(hd,0.6)*Math.exp(-t*n*n*0.010);
-    if(amp*e<0.00012)continue;
-    v.ph[n-1]+=6.2832*fn*srI;
-    y+=amp*e*Math.sin(v.ph[n-1]);
+  var y=0, i, e;
+  /* Shrink the loop rather than testing corpses. Weight by AMPLITUDE: a high
+     partial is inaudible long before its envelope is small, because its level
+     is already 1/n^1.25 down. Testing the envelope alone kept all 22 alive. */
+  while(v.n>1 && v.amp[v.n-1]*(v.e1[v.n-1]+v.e2[v.n-1])<0.00004) v.n--;
+  for(i=0;i<v.n;i++){
+    e=v.e1[i]+v.e2[i];
+    v.e1[i]*=v.k1[i]; v.e2[i]*=v.k2[i];
+    if(e<0.00008)continue;
+    v.ph[i]+=v.inc[i];
+    y+=v.amp[i]*e*Math.sin(v.ph[i]);
   }
-  if(p[3]>0){                                        // 2nd/3rd string, slow beat
-    v.q1+=6.2832*v.f*(1+p[3]*0.0007)*srI;
-    v.q2+=6.2832*v.f*(1-p[3]*0.0005)*srI;
-    y+=(Math.sin(v.q1)*0.42+Math.sin(v.q2)*0.30)*body;
+  if(p[3]>0){                                 // 2nd + 3rd string, slow beating
+    var bd=v.u1+v.u2; v.u1*=v.uk1; v.u2*=v.uk2;
+    v.q1+=v.qi1; v.q2+=v.qi2;
+    y+=(Math.sin(v.q1)*0.40+Math.sin(v.q2)*0.28)*bd;
   }
-  // THE KNOCK: felt thud plus a wooden tick, both gone in ~20ms
-  if(t<0.03){
+  /* THE HAMMER: a felt thump whose brightness is set by velocity, plus a
+     little wooden tick. This is the percussive character. */
+  if(v.hE>0.0005){
     var nz=_noise();
-    v.nzp+=(nz-v.nzp)*0.30;                          // felt = dark
-    var tick=nz-v.hp; v.hp=nz;                       // wood = bright
-    y += (v.nzp*1.5+tick*0.5)*p[4]*v.hard*Math.exp(-t/0.0055);
+    v.nz+=(nz-v.nz)*v.hfc;
+    var tick=nz-v.hpz; v.hpz=nz;
+    y += (v.nz*2.6 + tick*0.35*v.hard)*p[4]*v.hard*v.hE;
+    v.thump+=(nz-v.thump)*0.02;
+    y += v.thump*p[4]*1.1*v.tE;
+    v.hE*=v.hk; v.tE*=v.tk;
   }
-  if(p[5]>0){                                        // soundboard
-    var w=6.2832*(120+p[5]*120)*srI;
-    var h=y-v.l1-0.55*v.b1; v.b1+=w*h; v.l1+=w*v.b1;
-    y+=v.b1*p[5]*0.45;
+  if(p[5]>0){                                  // soundboard
+    var h=y-v.l1-0.5*v.b1; v.b1+=v.bw*h; v.l1+=v.bw*v.b1;
+    y+=v.b1*p[5]*0.5;
   }
-  var g=1-Math.exp(-6.2832*(1800+p[6]*9000)*srI);
-  v.lp+=(y-v.lp)*g; y=v.lp*0.7+y*0.3;
-  y=Math.tanh(y*(0.9+p[7]*2));
+  v.lp+=(y-v.lp)*v.g2; v.lp2+=(v.lp-v.lp2)*v.g2;
+  y=v.lp2*0.92+y*0.08;                        // lean hard on the filtered path
+  y=Math.tanh(y*v.drv);
   v.dc+=(y-v.dc)*0.0005; y-=v.dc;
   if(v.rel){ v.env*=(1-v._rr); if(v.env<0.0005)v.done=true; }
-  if(t>0.5&&Math.abs(y)<1e-5)v.done=true;
+  if(v.t>0.5&&v.e1[0]+v.e2[0]<0.00008)v.done=true;
   v.t+=srI;
-  return y*v.vel*v.env*0.42*(0.4+0.6*p[0]);
+  return y*v.vel*v.env*v.out;
 }`, 1);
 
 /* --- HAMMOND. Tonewheels are literally spinning discs read by pickups, so
@@ -4368,32 +4768,49 @@ function render(v,p){
 /* --- RHODES. A hammer hits a stiff TINE next to a tonebar; a magnetic pickup
    reads it. The signature is a bell-like inharmonic partial that barks on the
    attack and dies well before the fundamental does. -------------------- */
-_mk('rhodes','struck',`
-PARAMS = ['strike','decay','bell','bark','trem','warm','tone','drive']
+_mk('tine','struck',`
+PARAMS = ['strike','decay','tine','bark','trem','warm','tone','drive']
+/* Electric piano: a hammer strikes a stiff steel TINE which sits beside a
+   TONEBAR, and the pair behaves as an ASYMMETRIC TUNING FORK read by a
+   magnetic pickup. Two sounds in one: the tine gives the bell-like attack,
+   the tonebar the round sustain.
+   FM is the right tool for the bell half — this is exactly how the DX7 made
+   its famous electric pianos: a modulator at ratio 1 whose INDEX decays fast,
+   so the note is bright at the strike and settles to a near-pure tone.
+   [sweetwater.com/insync/tine-piano · en.wikipedia.org/wiki/Rhodes_piano] */
 function noteOn(v,f,vel,p){
   v.f=f; v.vel=vel; v.t=0; v.rel=false; v.env=1;
-  v.p1=0; v.p2=0; v.p3=0; v.p4=0; v.lz=0; v.dc=0;
-  v.hard=0.3+0.7*vel;                                // dig in, and the tine barks
+  v.pc=0; v.pm=0; v.pb=0; v.pt=0; v.lz=0; v.dc=0; v.hpz=0;
+  v.hard=0.25+0.75*vel;
 }
 function noteOff(v){ v.rel=true }
 function render(v,p){
-  var t=v.t, dec=1.5+p[1]*4.5;
-  v.p1+=6.2832*v.f*srI;
-  v.p2+=6.2832*v.f*2*srI;
-  // the bell: inharmonic, well above, and gone within a second
-  var bf=v.f*(5.42+p[2]*3.1);
-  var y=0;
-  if(bf<sampleRate*0.46){ v.p3+=6.2832*bf*srI;
-    y+=Math.sin(v.p3)*0.34*v.hard*p[2]*Math.exp(-t/(0.22+p[1]*0.5)); }
-  var bf2=v.f*(11.7+p[2]*4);
-  if(bf2<sampleRate*0.46){ v.p4+=6.2832*bf2*srI;
-    y+=Math.sin(v.p4)*0.10*v.hard*p[2]*Math.exp(-t/0.10); }
-  y += Math.sin(v.p1)*Math.exp(-t/dec);
-  y += Math.sin(v.p2)*0.22*Math.exp(-t/(dec*0.55));
-  if(t<0.008) y+=_noise()*p[3]*0.30*v.hard*Math.exp(-t/0.0016);   // the bark
-  if(p[4]>0) y*=1+p[4]*0.45*Math.sin(6.2832*(3.2+p[4]*3)*t);      // amp tremolo
-  if(p[5]>0){ v.lz+=(y-v.lz)*(0.6-p[5]*0.4); y=y*(1-p[5]*0.55)+v.lz*p[5]*0.55; }
-  y=Math.tanh(y*(0.9+p[6]*0.8+p[7]*2.2));
+  var t=v.t, dec=0.18+p[1]*5.2;   // reaches genuinely short now
+  var body=Math.exp(-t/dec);
+  // --- FM pair: index falls fast, which IS the electric-piano attack
+  var idx=(1.4+3.6*p[2])*v.hard*Math.exp(-t/(0.045+p[1]*0.05))
+          + 0.22*Math.exp(-t/(dec*0.6));
+  v.pm+=6.2832*v.f*srI;
+  var mod=Math.sin(v.pm)*idx;
+  v.pc+=6.2832*v.f*srI;
+  var y=Math.sin(v.pc+mod)*body;
+  // --- the tine itself: a high inharmonic ping that dies well before the tone
+  var bf=v.f*(6.1+p[2]*4.2);
+  if(bf<sampleRate*0.46){
+    v.pb+=6.2832*bf*srI;
+    y+=Math.sin(v.pb)*0.30*v.hard*p[2]*Math.exp(-t/(0.11+p[1]*0.16));
+  }
+  // --- tonebar: the round sustained partner, an octave down under the tine
+  v.pt+=6.2832*v.f*0.5*srI;
+  y+=Math.sin(v.pt)*0.16*Math.exp(-t/(dec*1.25));
+  // --- the hammer tip on steel: a short bright bark
+  if(t<0.010){
+    var nz=_noise(); var tick=nz-v.hpz; v.hpz=nz;
+    y+=tick*p[3]*0.34*v.hard*Math.exp(-t/0.0017);
+  }
+  if(p[4]>0) y*=1+p[4]*0.45*Math.sin(6.2832*(3.4+p[4]*3)*t);
+  if(p[5]>0){ v.lz+=(y-v.lz)*(0.62-p[5]*0.42); y=y*(1-p[5]*0.55)+v.lz*p[5]*0.55; }
+  y=Math.tanh(y*(0.9+p[6]*0.7+p[7]*2.2));
   v.dc+=(y-v.dc)*0.0005; y-=v.dc;
   if(v.rel){ v.env*=(1-v._rr); if(v.env<0.0005)v.done=true; }
   if(t>0.4&&Math.abs(y)<1e-5)v.done=true;
@@ -4404,10 +4821,10 @@ _mk('trumpet','blown',CODE_DEFAULT);
 /* Output trim, measured per model against a plain saw on the normal synth
    engine (osc saw @0.85, no filter, vel 0.9) = the reference every instrument
    is levelled to. Re-measure and update this table if a model changes. */
-const PROCGAIN={kalimba:0.700,xylophone:0.475,marimba:0.412,vibraphone:0.404,
-  steeldrum:0.579,woodblock:0.867,string:0.892,bowed:1.272,clarinet:0.455,
+const PROCGAIN={bell:0.855,kalimba:0.801,xylophone:0.475,marimba:0.412,vibraphone:0.404,
+  steeldrum:0.966,woodblock:0.867,string:0.892,bowed:1.272,clarinet:0.455,
   flute:0.554,harmonica:0.676,accordion:0.998,saxophone:0.686,skindrum:0.601,
-  piano:0.653,hammond:0.584,rhodes:0.388,trumpet:0.873};
+  'e-piano':0.658,hammond:0.584,tine:0.692,trumpet:0.873};
 for(const k in PROCGAIN) if(PROCLIB[k]) PROCLIB[k].gain=PROCGAIN[k];
 
 /* ---------------- procedural presets -----------------------------------
@@ -4445,127 +4862,139 @@ function applyProcPreset(pi,pre){
 const procPresets=m=>PROCPRE[m]||[];
 
 /* ---- MODAL: struck bars, tines, pans -------------------------------- */
-PROCPRE.kalimba=[
- PP('Traditional',[1,.55,.5,.35,0,.2,.5,.1],  null,[.001,6,1,.5],null,[['verb',.30,.5,.55,.16]]),
- PP('Deep Thumb', [.9,.85,.35,.3,0,.3,.5,.08],[1,4200,.8],[.001,6,1,.7],null,[['verb',.36,.42,.6,.20]]),
- PP('Bright Tine',[1,.4,.75,.45,.1,.2,.5,.18],[2,320,.7],[.001,6,1,.35],null,[['verb',.24,.62,.5,.14]]),
+PROCPRE.bell=[
+ PP('Struck Bell',[1,.55,.5,.35,0,.2,.5,.1],  null,[.001,6,1,.9],null,[['verb',.30,.5,.55,.16]]),
+ PP('Deep Thumb', [.9,.85,.35,.3,0,.3,.5,.08],[1,4200,.8],[.001,6,1,.9],null,[['verb',.36,.42,.6,.20]]),
+ PP('Bright Tine',[1,.4,.75,.45,.1,.2,.5,.18],[2,320,.7],[.001,6,1,.9],null,[['verb',.24,.62,.5,.14]]),
  PP('Soft Pads',  [.7,.7,.3,.2,0,.25,.5,.05], [1,3000,.7],[.004,6,1,.9],null,[['verb',.42,.4,.7,.26]]),
- PP('Buzzy',      [1,.5,.6,.7,.15,.35,.5,.32],null,[.001,6,1,.4],null,[['dist',.30,0,1,.22],['verb',.26,.5,.5,.14]]),
- PP('Studio',     [1,.6,.55,.3,0,.2,.5,.12],  [5,2400,1.1],[.001,6,1,.45],null,[['comp',.35,.5,.5,.28],['verb',.26,.55,.55,.15]]),
- PP('Warm Room',  [.95,.7,.4,.28,0,.25,.5,.1],[1,5200,.8],[.001,6,1,.6],null,[['verb',.46,.35,.65,.24]]),
- PP('Thumb Bass', [1,.9,.25,.3,0,.4,.5,.1],   [1,1400,1.0],[.001,6,1,.8],null,[['verb',.34,.4,.6,.16]]),
- PP('Music Box',  [.8,.35,.9,.15,.4,.15,.5,.06],[2,900,.9],[.001,6,1,.3],[0,3,26,.7,0],[['cho',.35,.45,.5,.34],['verb',.5,.6,.8,.3]]),
- PP('Iron Comb',  [1,.3,1,.8,.9,.5,.5,.55],   [3,2100,4],[.001,6,1,.25],null,[['dist',.55,0,4,.4],['dly',.19,.34,3,.24]])];
+ PP('Buzzy',      [1,.5,.6,.7,.15,.35,.5,.32],null,[.001,6,1,.9],null,[['dist',.30,0,1,.22],['verb',.26,.5,.5,.14]]),
+ PP('Studio',     [1,.6,.55,.3,0,.2,.5,.12],  [5,2400,1.1],[.001,6,1,.9],null,[['comp',.35,.5,.5,.28],['verb',.26,.55,.55,.15]]),
+ PP('Warm Room',  [.95,.7,.4,.28,0,.25,.5,.1],[1,5200,.8],[.001,6,1,.9],null,[['verb',.46,.35,.65,.24]]),
+ PP('Thumb Bass', [1,.9,.25,.3,0,.4,.5,.1],   [1,1400,1.0],[.001,6,1,.9],null,[['verb',.34,.4,.6,.16]]),
+ PP('Music Box',  [.8,.35,.9,.15,.4,.15,.5,.06],[2,900,.9],[.001,6,1,.9],[0,3,26,.7,0],[['verb',.5,.6,.8,.3]]),
+ PP('Iron Comb',  [1,.3,1,.8,.9,.5,.5,.55],   [3,2100,4],[.001,6,1,.9],null,[['dist',.55,0,4,.4],['dly',.19,.34,3,.24]])];
+
+PROCPRE.kalimba=[
+ PP('Thumb Piano', [1,.5,.5,.85,.45,.2,0,.14],  null,[.001,6,1,.8],null,[['verb',.28,.5,.55,.16]]),
+ PP('Deep Tongue', [.95,.8,.35,.8,.4,.3,0,.12], [1,3400,.8],[.001,6,1,.8],null,[['verb',.34,.42,.62,.2]]),
+ PP('Bright Nail', [1,.4,.75,1,.35,.2,0,.2],    [2,260,.7],[.001,6,1,.8],null,[['verb',.24,.6,.5,.14]]),
+ PP('Soft Thumb',  [.7,.6,.35,.5,.3,.25,0,.08], [1,2600,.8],[.003,6,1,.8],null,[['verb',.38,.4,.65,.24]]),
+ PP('Buzzy Shells',[1,.55,.6,.9,1,.3,0,.2],     null,[.001,6,1,.8],null,[['verb',.3,.5,.6,.18]]),
+ PP('Studio',      [1,.5,.55,.8,.35,.2,0,.14],  [5,1800,1.1],[.001,6,1,.8],null,[['comp',.34,.55,.5,.28],['verb',.22,.55,.5,.12]]),
+ PP('Warm Board',  [.95,.7,.4,.7,.5,.28,0,.1],  [1,4200,.8],[.001,6,1,.8],null,[['verb',.44,.38,.68,.26]]),
+ PP('Bass Tine',   [1,.9,.3,.75,.4,.35,0,.12],  [1,1500,.9],[.001,6,1,.8],null,[['verb',.34,.4,.6,.18]]),
+ PP('Rattle Box',  [1,.45,.7,1,1,.35,0,.34],    [3,1700,2.2],[.001,6,1,.8],null,[['dist',.35,0,1,.26],['verb',.3,.5,.6,.18]]),
+ PP('Broken Tine', [1,.3,1,1,1,.6,0,.6],        [3,2600,4.5],[.001,6,1,.8],null,[['dist',.6,0,6,.46],['dly',.18,.34,3,.22]])];
 
 PROCPRE.xylophone=[
- PP('Concert',    [1,.5,.6,.5,0,.2,.5,.12],  null,[.001,6,1,.28],null,[['verb',.28,.55,.55,.16]]),
- PP('Hard Mallet',[1,.4,.8,.75,0,.15,.5,.2], [2,420,.7],[.001,6,1,.2],null,[['verb',.22,.62,.5,.12]]),
- PP('Soft Mallet',[.8,.65,.35,.25,0,.25,.5,.06],[1,4200,.8],[.002,6,1,.4],null,[['verb',.34,.42,.6,.2]]),
- PP('Rosewood',   [.95,.6,.45,.4,0,.3,.5,.1],[1,6000,.8],[.001,6,1,.32],null,[['verb',.3,.45,.6,.18]]),
- PP('Toy',        [1,.3,.85,.6,.2,.1,.5,.22],[3,1800,2.2],[.001,6,1,.18],null,[['verb',.18,.6,.4,.1]]),
- PP('Studio Tight',[1,.45,.6,.5,0,.2,.5,.14],[5,3200,1.2],[.001,6,1,.22],null,[['comp',.32,.55,.5,.3],['verb',.2,.6,.5,.1]]),
- PP('Church Hall',[.95,.55,.55,.45,0,.25,.5,.1],null,[.001,6,1,.5],null,[['verb',.72,.45,.85,.4]]),
+ PP('Concert',    [1,.5,.6,.5,0,.2,.5,.12],  null,[.001,6,1,.45],null,[['verb',.28,.55,.55,.16]]),
+ PP('Hard Mallet',[1,.4,.8,.75,0,.15,.5,.2], [2,420,.7],[.001,6,1,.45],null,[['verb',.22,.62,.5,.12]]),
+ PP('Soft Mallet',[.8,.65,.35,.25,0,.25,.5,.06],[1,4200,.8],[.002,6,1,.45],null,[['verb',.34,.42,.6,.2]]),
+ PP('Rosewood',   [.95,.6,.45,.4,0,.3,.5,.1],[1,6000,.8],[.001,6,1,.45],null,[['verb',.3,.45,.6,.18]]),
+ PP('Toy',        [1,.3,.85,.6,.2,.1,.5,.22],[3,1800,2.2],[.001,6,1,.45],null,[['verb',.18,.6,.4,.1]]),
+ PP('Studio Tight',[1,.45,.6,.5,0,.2,.5,.14],[5,3200,1.2],[.001,6,1,.45],null,[['comp',.32,.55,.5,.3],['verb',.2,.6,.5,.1]]),
+ PP('Church Hall',[.95,.55,.55,.45,0,.25,.5,.1],null,[.001,6,1,.45],null,[['verb',.72,.45,.85,.4]]),
  PP('Deep Bars',  [.9,.75,.4,.35,0,.35,.5,.1],[1,2600,.9],[.001,6,1,.45],null,[['verb',.36,.4,.6,.2]]),
- PP('Glass',      [1,.35,1,.3,.5,.15,.5,.05],[2,1500,1.6],[.001,6,1,.3],[0,3,18,.7,0],[['cho',.4,.5,.5,.3],['verb',.56,.7,.85,.34]]),
- PP('Shattered',  [1,.25,1,.9,1,.4,.5,.6],   [3,3400,5],[.001,6,1,.15],null,[['dist',.6,0,6,.45],['roll',2,.8,.5,.4]])];
+ PP('Glass',      [1,.35,1,.3,.5,.15,.5,.05],[2,1500,1.6],[.001,6,1,.45],[0,3,18,.7,0],[['verb',.56,.7,.85,.34]]),
+ PP('Shattered',  [1,.25,1,.9,1,.4,.5,.6],   [3,3400,5],[.001,6,1,.45],null,[['dist',.6,0,6,.45],['roll',2,.8,.5,.4]])];
 
 PROCPRE.marimba=[
- PP('Concert',    [1,.6,.5,.35,0,.25,.5,.1], null,[.002,6,1,.5],null,[['verb',.36,.5,.6,.2]]),
- PP('Warm Wood',  [.95,.75,.4,.3,0,.3,.5,.08],[1,5000,.8],[.002,6,1,.6],null,[['verb',.42,.42,.65,.24]]),
- PP('Bass Marimba',[.9,.9,.3,.3,0,.4,.5,.08],[1,1800,.9],[.002,6,1,.8],null,[['verb',.44,.38,.65,.22]]),
- PP('Soft Yarn',  [.75,.7,.3,.2,0,.25,.5,.05],[1,3600,.75],[.005,6,1,.7],null,[['verb',.4,.4,.65,.26]]),
- PP('Bright',     [1,.5,.7,.5,0,.2,.5,.14],  [2,300,.7],[.002,6,1,.4],null,[['verb',.3,.58,.55,.16]]),
- PP('Chamber',    [.95,.65,.5,.32,0,.28,.5,.1],null,[.002,6,1,.6],null,[['verb',.58,.48,.75,.32]]),
- PP('Studio Dry', [1,.55,.55,.35,0,.25,.5,.12],[5,900,1.1],[.002,6,1,.35],null,[['comp',.36,.5,.5,.26],['verb',.16,.5,.4,.08]]),
- PP('Duo Wide',   [1,.6,.5,.35,.25,.25,.5,.1],null,[.002,6,1,.55],[0,2,14,.85,0],[['verb',.42,.45,.75,.26]]),
- PP('Bowed Bars', [.6,1,.25,.05,0,.3,.5,.04],[1,2200,1.0],[.35,6,1,1.2],[0,3,10,.7,0],[['verb',.7,.4,.85,.42]]),
- PP('Rusted',     [1,.4,.9,.8,.8,.4,.5,.5],  [3,1500,4.5],[.002,6,1,.3],null,[['dist',.5,0,5,.4],['tape',.7,.5,.5,.4]])];
+ PP('Concert',    [1,.6,.5,.35,0,.25,.5,.1], null,[.002,6,1,.9],null,[['verb',.36,.5,.6,.2]]),
+ PP('Warm Wood',  [.95,.75,.4,.3,0,.3,.5,.08],[1,5000,.8],[.002,6,1,.9],null,[['verb',.42,.42,.65,.24]]),
+ PP('Bass Marimba',[.9,.9,.3,.3,0,.4,.5,.08],[1,1800,.9],[.002,6,1,.9],null,[['verb',.44,.38,.65,.22]]),
+ PP('Soft Yarn',  [.75,.7,.3,.2,0,.25,.5,.05],[1,3600,.75],[.005,6,1,.9],null,[['verb',.4,.4,.65,.26]]),
+ PP('Bright',     [1,.5,.7,.5,0,.2,.5,.14],  [2,300,.7],[.002,6,1,.9],null,[['verb',.3,.58,.55,.16]]),
+ PP('Chamber',    [.95,.65,.5,.32,0,.28,.5,.1],null,[.002,6,1,.9],null,[['verb',.58,.48,.75,.32]]),
+ PP('Studio Dry', [1,.55,.55,.35,0,.25,.5,.12],[5,900,1.1],[.002,6,1,.9],null,[['comp',.36,.5,.5,.26],['verb',.16,.5,.4,.08]]),
+ PP('Duo Wide',   [1,.6,.5,.35,.25,.25,.5,.1],null,[.002,6,1,.9],[0,2,14,.85,0],[['verb',.42,.45,.75,.26]]),
+ PP('Bowed Bars', [.6,1,.25,.05,0,.3,.5,.04],[1,2200,1.0],[.35,6,1,.9],[0,3,10,.7,0],[['verb',.7,.4,.85,.42]]),
+ PP('Rusted',     [1,.4,.9,.8,.8,.4,.5,.5],  [3,1500,4.5],[.002,6,1,.9],null,[['dist',.5,0,5,.4],['tape',.7,.5,.5,.4]])];
 
 PROCPRE.vibraphone=[
- PP('Jazz Vibes', [1,.7,.5,.2,0,.25,.55,.08],null,[.002,6,1,.9],null,[['verb',.44,.48,.7,.26]]),
- PP('Motor Slow', [1,.75,.5,.18,0,.25,.35,.08],null,[.002,6,1,1.0],null,[['verb',.46,.45,.7,.26]]),
- PP('Motor Fast', [1,.7,.55,.2,0,.25,.9,.08],null,[.002,6,1,.85],null,[['verb',.42,.5,.7,.24]]),
- PP('Motor Off',  [1,.8,.45,.15,0,.25,0,.06],null,[.002,6,1,1.1],null,[['verb',.5,.45,.75,.3]]),
- PP('Soft Mallet',[.7,.85,.35,.12,0,.3,.4,.05],[1,4000,.8],[.006,6,1,1.2],null,[['verb',.52,.4,.75,.32]]),
- PP('Bright Bars',[1,.6,.75,.3,0,.2,.5,.14], [2,380,.7],[.002,6,1,.7],null,[['verb',.34,.6,.6,.2]]),
- PP('Chamber',    [.95,.75,.5,.18,0,.28,.45,.08],null,[.002,6,1,1.0],null,[['verb',.68,.45,.85,.38]]),
- PP('Studio',     [1,.65,.55,.2,0,.25,.5,.1],[5,1600,1.1],[.002,6,1,.7],null,[['comp',.34,.5,.5,.26],['verb',.3,.55,.6,.16]]),
- PP('Glass Choir',[.9,.9,.45,.06,.4,.3,.3,.04],[2,700,1.2],[.02,6,1,1.6],[0,3,16,.85,0],[['cho',.42,.5,.5,.34],['verb',.8,.6,.9,.46]]),
- PP('Detune Bell',[1,.7,.7,.25,1,.3,.7,.35], [3,2400,3],[.002,6,1,.8],[0,2,45,.8,0],[['dist',.32,0,3,.24],['dly',.24,.4,3,.26]])];
+ PP('Jazz Vibes', [1,.7,.5,.2,0,.25,.55,.08],null,[.002,6,1,1.4],null,[['verb',.44,.48,.7,.26]]),
+ PP('Motor Slow', [1,.75,.5,.18,0,.25,.35,.08],null,[.002,6,1,1.4],null,[['verb',.46,.45,.7,.26]]),
+ PP('Motor Fast', [1,.7,.55,.2,0,.25,.9,.08],null,[.002,6,1,1.4],null,[['verb',.42,.5,.7,.24]]),
+ PP('Motor Off',  [1,.8,.45,.15,0,.25,0,.06],null,[.002,6,1,1.4],null,[['verb',.5,.45,.75,.3]]),
+ PP('Soft Mallet',[.7,.85,.35,.12,0,.3,.4,.05],[1,4000,.8],[.006,6,1,1.4],null,[['verb',.52,.4,.75,.32]]),
+ PP('Bright Bars',[1,.6,.75,.3,0,.2,.5,.14], [2,380,.7],[.002,6,1,1.4],null,[['verb',.34,.6,.6,.2]]),
+ PP('Chamber',    [.95,.75,.5,.18,0,.28,.45,.08],null,[.002,6,1,1.4],null,[['verb',.68,.45,.85,.38]]),
+ PP('Studio',     [1,.65,.55,.2,0,.25,.5,.1],[5,1600,1.1],[.002,6,1,1.4],null,[['comp',.34,.5,.5,.26],['verb',.3,.55,.6,.16]]),
+ PP('Glass Choir',[.9,.9,.45,.06,.4,.3,.3,.04],[2,700,1.2],[.02,6,1,1.4],[0,3,16,.85,0],[['verb',.8,.6,.9,.46]]),
+ PP('Detune Bell',[1,.7,.7,.25,1,.3,.7,.35], [3,2400,3],[.002,6,1,1.4],[0,2,45,.8,0],[['dist',.32,0,3,.24],['dly',.24,.4,3,.26]])];
 
 PROCPRE.steeldrum=[
- PP('Lead Pan',   [1,.55,.5,.3,0,.25,.5,.12],null,[.002,6,1,.5],null,[['verb',.4,.5,.65,.24]]),
- PP('Double Second',[.95,.7,.45,.28,0,.3,.5,.1],[1,5200,.8],[.002,6,1,.6],null,[['verb',.44,.45,.68,.26]]),
- PP('Bass Pan',   [.9,.85,.35,.25,0,.35,.5,.08],[1,2000,.9],[.002,6,1,.75],null,[['verb',.42,.4,.65,.22]]),
- PP('Calypso',    [1,.5,.6,.4,0,.25,.5,.16], [2,260,.7],[.002,6,1,.45],null,[['verb',.34,.58,.6,.2]]),
- PP('Soft Sticks',[.75,.75,.35,.15,0,.3,.5,.06],[1,3800,.8],[.004,6,1,.7],null,[['verb',.46,.42,.7,.28]]),
- PP('Beach Wide', [1,.6,.5,.3,.3,.28,.5,.12],null,[.002,6,1,.6],[0,2,12,.9,0],[['verb',.56,.5,.85,.32]]),
- PP('Studio',     [1,.55,.55,.3,0,.25,.5,.12],[5,1200,1.1],[.002,6,1,.4],null,[['comp',.34,.5,.5,.26],['verb',.24,.55,.55,.14]]),
- PP('Warm Yard',  [.95,.72,.42,.26,0,.3,.5,.1],[1,6500,.8],[.002,6,1,.65],null,[['verb',.6,.4,.8,.34]]),
- PP('Detuned Yard',[1,.6,.55,.35,.9,.28,.5,.2],null,[.002,6,1,.55],[0,3,38,.85,0],[['cho',.4,.55,.5,.3],['verb',.5,.5,.8,.3]]),
- PP('Oil Barrel', [1,.45,.85,.7,.6,.4,.5,.55],[3,1700,4],[.002,6,1,.35],null,[['dist',.55,0,5,.42],['tape',.65,.5,.5,.34]])];
+ PP('Lead Pan',   [1,.55,.5,.3,0,.25,.5,.12],null,[.002,6,1,.55],null,[['verb',.4,.5,.65,.24]]),
+ PP('Double Second',[.95,.7,.45,.28,0,.3,.5,.1],[1,5200,.8],[.002,6,1,.55],null,[['verb',.44,.45,.68,.26]]),
+ PP('Bass Pan',   [.9,.85,.35,.25,0,.35,.5,.08],[1,2000,.9],[.002,6,1,.55],null,[['verb',.42,.4,.65,.22]]),
+ PP('Calypso',    [1,.5,.6,.4,0,.25,.5,.16], [2,260,.7],[.002,6,1,.55],null,[['verb',.34,.58,.6,.2]]),
+ PP('Soft Sticks',[.75,.75,.35,.15,0,.3,.5,.06],[1,3800,.8],[.004,6,1,.55],null,[['verb',.46,.42,.7,.28]]),
+ PP('Beach Wide', [1,.6,.5,.3,.3,.28,.5,.12],null,[.002,6,1,.55],[0,2,12,.9,0],[['verb',.56,.5,.85,.32]]),
+ PP('Studio',     [1,.55,.55,.3,0,.25,.5,.12],[5,1200,1.1],[.002,6,1,.55],null,[['comp',.34,.5,.5,.26],['verb',.24,.55,.55,.14]]),
+ PP('Warm Yard',  [.95,.72,.42,.26,0,.3,.5,.1],[1,6500,.8],[.002,6,1,.55],null,[['verb',.6,.4,.8,.34]]),
+ PP('Detuned Yard',[1,.6,.55,.35,.9,.28,.5,.2],null,[.002,6,1,.55],[0,3,38,.85,0],[['verb',.5,.5,.8,.3]]),
+ PP('Oil Barrel', [1,.45,.85,.7,.6,.4,.5,.55],[3,1700,4],[.002,6,1,.55],null,[['dist',.55,0,5,.42],['tape',.65,.5,.5,.34]])];
 
 PROCPRE.woodblock=[
- PP('Standard',   [1,.5,.6,.5,0,.2,.5,.12],  null,[.001,6,1,.12],null,[['verb',.18,.55,.45,.1]]),
- PP('High Block', [1,.35,.7,.55,0,.15,.5,.14],[2,700,.8],[.001,6,1,.1],null,[['verb',.16,.6,.4,.09]]),
- PP('Low Block',  [1,.7,.45,.4,0,.3,.5,.1],  [1,3200,.9],[.001,6,1,.16],null,[['verb',.22,.45,.5,.12]]),
+ PP('Standard',   [1,.5,.6,.5,0,.2,.5,.12],  null,[.001,6,1,.3],null,[['verb',.18,.55,.45,.1]]),
+ PP('High Block', [1,.35,.7,.55,0,.15,.5,.14],[2,700,.8],[.001,6,1,.3],null,[['verb',.16,.6,.4,.09]]),
+ PP('Low Block',  [1,.7,.45,.4,0,.3,.5,.1],  [1,3200,.9],[.001,6,1,.3],null,[['verb',.22,.45,.5,.12]]),
  PP('Temple',     [.9,.85,.4,.3,0,.35,.5,.08],[1,2400,1.0],[.001,6,1,.3],null,[['verb',.44,.42,.7,.26]]),
- PP('Claves',     [1,.4,.75,.6,0,.15,.5,.16],[3,2400,2.4],[.001,6,1,.1],null,[['verb',.2,.6,.45,.1]]),
- PP('Soft Tap',   [.65,.6,.4,.25,0,.25,.5,.05],[1,4000,.8],[.002,6,1,.16],null,[['verb',.26,.45,.55,.14]]),
- PP('Studio Dry', [1,.5,.6,.5,0,.2,.5,.14],  [5,1800,1.2],[.001,6,1,.08],null,[['comp',.3,.55,.5,.3]]),
- PP('Room',       [1,.55,.55,.45,0,.25,.5,.12],null,[.001,6,1,.2],null,[['verb',.42,.5,.7,.26]]),
- PP('Toy Blocks', [1,.3,.9,.7,.3,.1,.5,.2],  [3,3200,3],[.001,6,1,.08],[0,2,30,.8,0],[['cho',.4,.5,.5,.3],['verb',.24,.6,.5,.14]]),
- PP('Anvil',      [1,.55,1,.85,.9,.5,.5,.6], [3,2800,5],[.001,6,1,.25],null,[['dist',.62,0,6,.48],['dly',.16,.36,3,.22]])];
+ PP('Claves',     [1,.4,.75,.6,0,.15,.5,.16],[3,2400,2.4],[.001,6,1,.3],null,[['verb',.2,.6,.45,.1]]),
+ PP('Soft Tap',   [.65,.6,.4,.25,0,.25,.5,.05],[1,4000,.8],[.002,6,1,.3],null,[['verb',.26,.45,.55,.14]]),
+ PP('Studio Dry', [1,.5,.6,.5,0,.2,.5,.14],  [5,1800,1.2],[.001,6,1,.3],null,[['comp',.3,.55,.5,.3]]),
+ PP('Room',       [1,.55,.55,.45,0,.25,.5,.12],null,[.001,6,1,.3],null,[['verb',.42,.5,.7,.26]]),
+ PP('Toy Blocks', [1,.3,.9,.7,.3,.1,.5,.2],  [3,3200,3],[.001,6,1,.3],[0,2,30,.8,0],[['verb',.24,.6,.5,.14]]),
+ PP('Anvil',      [1,.55,1,.85,.9,.5,.5,.6], [3,2800,5],[.001,6,1,.3],null,[['dist',.62,0,6,.48],['dly',.16,.36,3,.22]])];
 
 /* ---- STRUCK STRINGS + TINES ----------------------------------------- */
-PROCPRE.piano=[
- PP('Upright',    [1,.5,.35,.6,.5,.4,.5,.12],null,[.001,6,1,.28],null,[['verb',.34,.48,.6,.18]]),
- PP('Grand',      [1,.7,.5,.7,.45,.5,.55,.1],null,[.001,6,1,.35],null,[['verb',.46,.45,.72,.26]]),
- PP('Felt Piano', [.7,.6,.3,.5,.7,.35,.3,.05],[1,2600,.8],[.004,6,1,.4],null,[['verb',.5,.38,.7,.3]]),
- PP('Studio Pop', [1,.55,.4,.55,.4,.35,.6,.14],[5,2800,1.1],[.001,6,1,.22],null,[['comp',.4,.55,.5,.34],['verb',.24,.55,.55,.14]]),
- PP('Ballad',     [.85,.75,.45,.65,.5,.45,.45,.08],[1,7000,.8],[.002,6,1,.45],null,[['verb',.56,.42,.78,.3]]),
- PP('Honky Tonk', [1,.5,.55,.95,.55,.4,.6,.2],null,[.001,6,1,.25],[0,2,22,.6,0],[['verb',.28,.55,.55,.16]]),
- PP('Bright Rock',[1,.45,.6,.6,.45,.3,.8,.22],[2,180,.7],[.001,6,1,.2],null,[['comp',.42,.6,.5,.3],['verb',.22,.6,.5,.12]]),
- PP('Old Saloon', [1,.4,.7,1,.6,.45,.5,.28], [1,4200,1.0],[.001,6,1,.22],[0,2,34,.5,0],[['tape',.6,.45,.5,.36],['verb',.3,.4,.55,.2]]),
- PP('Prepared',   [1,.35,1,.8,1,.6,.5,.4],   [3,1900,3.5],[.001,6,1,.2],null,[['dist',.4,0,5,.3],['roll',2,.7,.5,.3]]),
- PP('Glass Frame',[.6,1,.85,.3,.9,.5,.2,.05],[2,900,1.4],[.02,6,1,1.4],[0,3,20,.85,0],[['cho',.45,.5,.5,.34],['verb',.85,.6,.92,.5]])];
+PROCPRE['e-piano']=[
+ PP('Upright',    [1,.45,.30,.55,.50,.45,.45,0], null,[.001,6,1,.9],null,[['verb',.30,.48,.58,.16]]),
+ PP('Concert Grand',[1,.80,.55,.70,.45,.55,.72,0],null,[.001,6,1,.9],null,[['verb',.46,.45,.72,.24]]),
+ PP('Felt',       [.75,.60,.22,.45,.75,.35,.20,0],[1,2200,.8],[.004,6,1,.9],null,[['verb',.50,.36,.72,.28]]),
+ PP('Mellow Jazz',[.9,.70,.35,.60,.40,.50,.35,0],[1,3600,.8],[.002,6,1,.9],null,[['verb',.42,.40,.68,.22]]),
+ PP('Bright Studio',[1,.50,.45,.50,.55,.30,.90,0],[5,2600,1.0],[.001,6,1,.9],null,[['comp',.36,.55,.5,.30],['verb',.22,.55,.52,.12]]),
+ PP('Ballad',     [.85,.85,.40,.65,.35,.60,.50,0],[1,5200,.8],[.002,6,1,.9],null,[['verb',.56,.42,.78,.28]]),
+ PP('Honky Tonk', [1,.45,.60,1.0,.55,.40,.60,0], null,[.001,6,1,.9],null,[['verb',.26,.52,.55,.14]]),
+ PP('Parlour',    [.95,.55,.70,.75,.50,.65,.30,0],[1,2800,.9],[.001,6,1,.9],null,[['verb',.38,.38,.66,.22]]),
+ PP('Tack Piano', [1,.35,.85,.85,.95,.25,.95,0], [2,220,.7],[.001,6,1,.9],null,[['verb',.24,.58,.52,.13]]),
+ PP('Prepared',   [1,.30,1.0,.90,.85,.70,.15,0], [3,1500,2.6],[.001,6,1,.9],null,[['verb',.34,.44,.62,.20]])];
 
-PROCPRE.rhodes=[
- PP('Suitcase',   [1,.6,.55,.55,.25,.35,.5,.12],null,[.002,6,1,.4],null,[['verb',.32,.5,.6,.18]]),
- PP('Stage',      [1,.55,.7,.7,0,.25,.55,.16],null,[.002,6,1,.35],null,[['verb',.26,.55,.55,.14]]),
- PP('Mellow',     [.8,.7,.3,.3,.2,.6,.35,.06],[1,2400,.8],[.004,6,1,.5],null,[['verb',.42,.4,.68,.26]]),
- PP('Bell Top',   [1,.5,1,.75,.2,.2,.6,.14], [2,220,.7],[.002,6,1,.35],null,[['verb',.3,.6,.6,.18]]),
- PP('Tremolo',    [1,.6,.6,.55,.75,.35,.5,.12],null,[.002,6,1,.4],null,[['verb',.3,.5,.6,.16]]),
- PP('Dyno',       [1,.5,.85,.8,.15,.2,.7,.26],[5,2200,1.2],[.002,6,1,.3],null,[['comp',.4,.55,.5,.32],['verb',.24,.6,.55,.14]]),
- PP('Warm Tape',  [.9,.7,.45,.4,.3,.55,.4,.1],[1,3600,.85],[.003,6,1,.45],null,[['tape',.45,.4,.5,.26],['verb',.4,.4,.65,.24]]),
- PP('Ballad Wide',[.85,.75,.5,.4,.35,.4,.4,.08],null,[.003,6,1,.5],[0,2,10,.85,0],[['cho',.3,.4,.5,.24],['verb',.5,.45,.8,.3]]),
- PP('Ghost Keys', [.55,1,.7,.15,.5,.7,.25,.04],[1,1800,1.0],[.06,6,1,1.5],[0,3,14,.9,0],[['verb',.9,.55,.95,.5],['dly',.3,.4,3,.2]]),
- PP('Broken Amp', [1,.45,1,.95,.9,.2,.8,.62],[3,1500,3],[.002,6,1,.25],null,[['dist',.62,0,4,.5],['tape',.75,.55,.5,.4]])];
+PROCPRE.tine=[
+ PP('Suitcase',   [1,.55,.50,.55,.30,.35,.5,0],  null,[.002,6,1,.8],null,[['verb',.30,.50,.58,.16]]),
+ PP('Stage',      [1,.45,.72,.72,0,.20,.55,0],   null,[.002,6,1,.8],null,[['verb',.24,.55,.54,.13]]),
+ PP('Mellow',     [.8,.70,.28,.30,.20,.65,.35,0],[1,2400,.8],[.004,6,1,.8],null,[['verb',.40,.40,.66,.24]]),
+ PP('Bell Top',   [1,.40,1.0,.80,.15,.20,.62,0], [2,200,.7],[.002,6,1,.8],null,[['verb',.28,.60,.58,.16]]),
+ PP('Short Tine', [1,.12,.85,.75,0,.25,.55,0],   null,[.002,6,1,.8],null,[['verb',.20,.55,.50,.12]]),
+ PP('Wurly-ish',  [1,.30,.60,.85,.55,.30,.45,0], [1,3200,.9],[.002,6,1,.8],null,[['verb',.26,.48,.55,.14]]),
+ PP('Ballad Wide',[.85,.75,.45,.40,.40,.45,.40,0],null,[.003,6,1,.8],[0,2,9,.85,0],[['cho',.28,.40,.5,.22],['verb',.48,.45,.76,.28]]),
+ PP('Tremolo',    [1,.60,.55,.50,.85,.35,.5,0],  null,[.002,6,1,.8],null,[['verb',.30,.50,.60,.16]]),
+ PP('Warm Crunch',[1,.50,.62,.65,.25,.55,.45,.30],null,[.002,6,1,.8],null,[['dist',.26,0,3,.35],['verb',.28,.45,.58,.16]]),
+ PP('Ghost',      [.55,.90,.70,.15,.45,.75,.25,0],[1,1800,1.0],[.05,6,1,.8],[0,3,12,.9,0],[['cho',.35,.45,.5,.26],['verb',.82,.52,.92,.42]])];
 
 PROCPRE.hammond=[
- PP('Jazz 888',   [.7,0,.35,.25,.3,.35,.5,.1], null,[.004,6,1,.1],null,[['verb',.3,.5,.6,.16]]),
- PP('Gospel Full',[1,0,.5,.3,.5,.25,.5,.2],   null,[.004,6,1,.08],null,[['verb',.36,.55,.65,.2]]),
- PP('Percussion', [.8,.8,.6,.25,.35,.3,.5,.14],null,[.003,6,1,.08],null,[['verb',.28,.55,.6,.16]]),
- PP('Rock Organ', [1,.3,.6,.3,.7,.2,.5,.4],   null,[.004,6,1,.08],null,[['dist',.42,0,3,.34],['verb',.26,.55,.55,.14]]),
- PP('Mellow Flute',[.35,0,.2,.2,.25,.6,.5,.05],[1,2600,.8],[.006,6,1,.12],null,[['verb',.4,.4,.68,.24]]),
- PP('Leslie Fast',[.85,0,.4,.3,.95,.3,.5,.16],null,[.004,6,1,.09],null,[['verb',.3,.5,.6,.18]]),
- PP('Blues Drawbars',[.9,.5,.55,.25,.45,.3,.5,.26],null,[.004,6,1,.08],null,[['dist',.3,0,1,.24],['verb',.28,.5,.6,.16]]),
- PP('Cathedral',  [.8,0,.3,.2,.2,.4,.5,.08], null,[.02,6,1,.4],null,[['verb',.92,.5,.95,.5]]),
- PP('Chorale Wide',[.6,0,.25,.35,.15,.5,.5,.06],null,[.01,6,1,.3],[0,3,8,.9,0],[['cho',.35,.45,.5,.3],['verb',.7,.5,.88,.4]]),
- PP('Broken Wheels',[1,.6,.9,.9,1,.15,.5,.6],[3,1600,3],[.003,6,1,.08],[0,2,50,.7,0],[['dist',.7,0,6,.55],['roll',1,.7,.5,.3]])];
+ PP('Jazz 888',   [.55,0,.30,.20,.30,.45,.5,0],  null,[.004,6,1,.09],null,[['verb',.28,.50,.58,.14]]),
+ PP('Full Drawbars',[1,0,.45,.25,.45,.20,.5,0],  null,[.004,6,1,.08],null,[['verb',.32,.55,.62,.17]]),
+ PP('Percussion 3rd',[.75,.85,.55,.22,.35,.30,.5,0],null,[.003,6,1,.08],null,[['verb',.26,.55,.58,.15]]),
+ PP('Mellow Flutes',[.28,0,.18,.18,.25,.65,.5,0],[1,2400,.8],[.006,6,1,.12],null,[['verb',.38,.40,.66,.22]]),
+ PP('Leslie Slow',[.7,0,.35,.30,.35,.40,.5,0],   null,[.004,6,1,.09],null,[['verb',.30,.48,.60,.16]]),
+ PP('Leslie Fast',[.8,0,.40,.28,.95,.30,.5,0],   null,[.004,6,1,.09],null,[['verb',.28,.50,.58,.15]]),
+ PP('Gospel',     [.95,.55,.50,.25,.55,.25,.5,0],null,[.004,6,1,.08],null,[['verb',.36,.52,.66,.19]]),
+ PP('Bass Register',[.6,0,.25,.20,.20,.60,.5,0], [1,1600,.9],[.005,6,1,.10],null,[['verb',.26,.38,.56,.14]]),
+ PP('Warm Crunch',[.85,.35,.45,.25,.45,.45,.5,.26],null,[.004,6,1,.08],null,[['dist',.24,0,3,.34],['verb',.28,.48,.60,.16]]),
+ PP('Cathedral',  [.7,0,.25,.18,.15,.40,.5,0],   null,[.02,6,1,.35],null,[['verb',.90,.50,.94,.46]])];
 
 /* ---- STRINGS -------------------------------------------------------- */
 PROCPRE.string=[
- PP('Nylon',      [1,.45,.9,.45,.3,.3,.2,.1], [1,4200,.8],[.002,6,1,.35],null,[['verb',.36,.42,.62,.2]]),
- PP('Steel',      [1,.3,1,.35,.25,.4,.2,.16], [2,180,.7],[.002,6,1,.3],null,[['verb',.3,.55,.58,.18]]),
- PP('Bass Guitar',[1,.4,1,.3,.2,.5,.15,.14],  [1,2200,.9],[.002,6,1,.3],null,[['comp',.4,.5,.5,.3],['verb',.16,.4,.4,.08]]),
- PP('Harp',       [.85,.55,.95,.5,.4,.25,.25,.06],[1,6000,.8],[.003,6,1,.5],null,[['verb',.56,.45,.8,.32]]),
- PP('Koto',       [1,.35,.85,.7,.15,.35,.3,.2],[3,1200,2.0],[.002,6,1,.3],null,[['verb',.34,.5,.6,.2]]),
- PP('Muted Palm', [1,.75,.5,.5,.1,.25,.2,.16],[1,2000,1.0],[.002,6,1,.12],null,[['comp',.36,.55,.5,.28],['verb',.14,.5,.4,.08]]),
- PP('Bright Pluck',[1,.25,1,.3,.35,.3,.25,.2],[2,300,.8],[.002,6,1,.35],null,[['verb',.28,.6,.55,.16]]),
- PP('Warm Room',  [.95,.55,.9,.45,.3,.35,.2,.08],[1,5000,.8],[.002,6,1,.45],null,[['verb',.62,.4,.82,.34]]),
- PP('Sitar',      [1,.3,.9,.85,.05,.5,.35,.34],[3,1900,3.2],[.002,6,1,.4],[0,3,26,.7,0],[['dist',.3,0,1,.24],['verb',.4,.5,.7,.26]]),
- PP('Snapped',    [1,.15,1,.9,.9,.6,.5,.6],   [3,2600,5],[.002,6,1,.2],null,[['dist',.6,0,6,.46],['dly',.2,.36,3,.26]])];
+ PP('Nylon',      [1,.45,.9,.45,.3,.3,.2,.1], [1,4200,.8],[.002,6,1,1.1],null,[['verb',.36,.42,.62,.2]]),
+ PP('Steel',      [1,.3,1,.35,.25,.4,.2,.16], [2,180,.7],[.002,6,1,1.1],null,[['verb',.3,.55,.58,.18]]),
+ PP('Bass Guitar',[1,.4,1,.3,.2,.5,.15,.14],  [1,2200,.9],[.002,6,1,1.1],null,[['comp',.4,.5,.5,.3],['verb',.16,.4,.4,.08]]),
+ PP('Harp',       [.85,.55,.95,.5,.4,.25,.25,.06],[1,6000,.8],[.003,6,1,1.1],null,[['verb',.56,.45,.8,.32]]),
+ PP('Koto',       [1,.35,.85,.7,.15,.35,.3,.2],[3,1200,2.0],[.002,6,1,1.1],null,[['verb',.34,.5,.6,.2]]),
+ PP('Muted Palm', [1,.75,.5,.5,.1,.25,.2,.16],[1,2000,1.0],[.002,6,1,1.1],null,[['comp',.36,.55,.5,.28],['verb',.14,.5,.4,.08]]),
+ PP('Bright Pluck',[1,.25,1,.3,.35,.3,.25,.2],[2,300,.8],[.002,6,1,1.1],null,[['verb',.28,.6,.55,.16]]),
+ PP('Warm Room',  [.95,.55,.9,.45,.3,.35,.2,.08],[1,5000,.8],[.002,6,1,1.1],null,[['verb',.62,.4,.82,.34]]),
+ PP('Sitar',      [1,.3,.9,.85,.05,.5,.35,.34],[3,1900,3.2],[.002,6,1,1.1],[0,3,26,.7,0],[['dist',.3,0,1,.24],['verb',.4,.5,.7,.26]]),
+ PP('Snapped',    [1,.15,1,.9,.9,.6,.5,.6],   [3,2600,5],[.002,6,1,1.1],null,[['dist',.6,0,6,.46],['dly',.2,.36,3,.26]])];
 
 PROCPRE.bowed=[
  PP('Cello',      [.6,.45,.9,.5,.4,.35,.2,.1], [1,3200,.8],[.06,6,1,.4],null,[['verb',.5,.42,.75,.3]]),
@@ -4590,7 +5019,7 @@ PROCPRE.clarinet=[
  PP('Klezmer',    [1,.75,.7,.4,.8,.3,.2,.22],null,[.012,6,1,.14],null,[['verb',.36,.52,.65,.22]]),
  PP('Soft Chamber',[.65,.35,.4,.5,.3,.3,.55,.06],null,[.04,6,1,.35],null,[['verb',.72,.4,.88,.4]]),
  PP('Reed Buzz',  [1,.9,.9,.3,.45,.5,.1,.4], [3,1100,2.6],[.012,6,1,.16],null,[['dist',.4,0,2,.32],['verb',.3,.55,.6,.18]]),
- PP('Hollow Pipe',[.6,.2,.25,1,.25,.2,.8,.05],[1,1100,1.6],[.06,6,1,.6],[0,3,10,.85,0],[['cho',.35,.45,.5,.26],['verb',.86,.5,.92,.46]])];
+ PP('Hollow Pipe',[.6,.2,.25,1,.25,.2,.8,.05],[1,1100,1.6],[.06,6,1,.6],[0,3,10,.85,0],[['verb',.86,.5,.92,.46]])];
 
 PROCPRE.flute=[
  PP('Concert',    [.85,.4,.5,.35,.4,.3,.3,.08],null,[.03,6,1,.22],null,[['verb',.54,.45,.78,.3]]),
@@ -4599,7 +5028,7 @@ PROCPRE.flute=[
  PP('Breathy Solo',[.7,.85,.45,.3,.4,.5,.35,.06],null,[.035,6,1,.26],null,[['verb',.6,.42,.82,.36]]),
  PP('Shakuhachi', [.65,.95,.4,.2,.6,.4,.45,.1],[1,4200,.9],[.05,6,1,.3],null,[['verb',.66,.4,.85,.38]]),
  PP('Soft Chamber',[.6,.35,.35,.3,.3,.3,.5,.05],null,[.06,6,1,.35],null,[['verb',.76,.42,.9,.42]]),
- PP('Airy Pad',   [.5,.7,.3,.25,.35,.35,.6,.04],[1,2400,.9],[.12,6,1,.7],[0,3,10,.9,0],[['cho',.3,.4,.5,.24],['verb',.88,.5,.94,.48]]),
+ PP('Airy Pad',   [.5,.7,.3,.25,.35,.35,.6,.04],[1,2400,.9],[.12,6,1,.7],[0,3,10,.9,0],[['verb',.88,.5,.94,.48]]),
  PP('Wooden',     [.8,.5,.4,.55,.35,.35,.55,.1],[1,2800,1.0],[.035,6,1,.28],null,[['verb',.5,.38,.75,.28]]),
  PP('Whistle',    [1,.15,.9,.35,.6,.15,.1,.2],[5,2400,1.1],[.015,6,1,.14],null,[['dly',.18,.38,3,.14],['verb',.3,.6,.6,.14]]),
  PP('Ghost Air',  [.8,1,.3,.25,.5,.6,.7,.06],[1,3000,1.0],[.14,6,1,1.3],[0,3,14,.92,0],[['verb',.9,.5,.94,.3],['dly',.28,.42,3,.12]])];
@@ -4654,16 +5083,23 @@ PROCPRE.trumpet=[
 
 /* ---- SKIN --------------------------------------------------------- */
 PROCPRE.skindrum=[
- PP('Djembe',     [1,.5,.6,.6,.4,.5,.5,.16], null,[.001,6,1,.12],null,[['verb',.28,.45,.6,.16]]),
- PP('Djembe Slap',[1,.45,.75,1,.35,.35,.5,.24],[2,180,.7],[.001,6,1,.1],null,[['verb',.24,.55,.55,.14]]),
- PP('Conga',      [1,.62,.5,.4,.45,.6,.4,.14],null,[.001,6,1,.14],null,[['verb',.3,.45,.6,.16]]),
- PP('Bongo',      [1,.35,.6,.55,.3,.35,.55,.16],[2,240,.7],[.001,6,1,.1],null,[['verb',.24,.5,.55,.14]]),
- PP('Frame Drum', [.9,.7,.45,.3,.55,.7,.35,.1],[1,2600,.9],[.001,6,1,.2],null,[['verb',.42,.4,.7,.24]]),
- PP('Tabla',      [1,.4,.55,.45,.3,.3,.85,.2],[3,900,2.0],[.001,6,1,.12],null,[['verb',.26,.5,.55,.14]]),
- PP('Deep Bass',  [1,.85,.4,.25,.6,.75,.3,.12],[1,900,1.0],[.001,6,1,.24],null,[['comp',.4,.5,.5,.3],['verb',.3,.38,.6,.16]]),
- PP('Studio Room',[1,.55,.55,.5,.45,.5,.45,.16],[5,700,1.1],[.001,6,1,.16],null,[['comp',.36,.55,.5,.28],['verb',.44,.45,.72,.26]]),
- PP('Talking',    [1,.5,.6,.55,.35,.4,1,.2], null,[.001,6,1,.14],null,[['pha',.45,.5,.5,.4],['verb',.3,.5,.6,.18]]),
- PP('Metal Skin', [1,.4,.85,.9,.7,.6,.6,.55],[3,2200,4],[.001,6,1,.18],null,[['dist',.6,0,6,.46],['dly',.18,.34,3,.24]])];
+ PP('Djembe',     [1,.5,.6,.6,.4,.5,.5,.16], null,[.001,6,1,.22],null,[['verb',.28,.45,.6,.16]]),
+ PP('Djembe Slap',[1,.45,.75,1,.35,.35,.5,.24],[2,180,.7],[.001,6,1,.22],null,[['verb',.24,.55,.55,.14]]),
+ PP('Conga',      [1,.62,.5,.4,.45,.6,.4,.14],null,[.001,6,1,.22],null,[['verb',.3,.45,.6,.16]]),
+ PP('Bongo',      [1,.35,.6,.55,.3,.35,.55,.16],[2,240,.7],[.001,6,1,.22],null,[['verb',.24,.5,.55,.14]]),
+ PP('Frame Drum', [.9,.7,.45,.3,.55,.7,.35,.1],[1,2600,.9],[.001,6,1,.22],null,[['verb',.42,.4,.7,.24]]),
+ PP('Tabla',      [1,.4,.55,.45,.3,.3,.85,.2],[3,900,2.0],[.001,6,1,.22],null,[['verb',.26,.5,.55,.14]]),
+ PP('Deep Bass',  [1,.85,.4,.25,.6,.75,.3,.12],[1,900,1.0],[.001,6,1,.22],null,[['comp',.4,.5,.5,.3],['verb',.3,.38,.6,.16]]),
+ PP('Studio Room',[1,.55,.55,.5,.45,.5,.45,.16],[5,700,1.1],[.001,6,1,.22],null,[['comp',.36,.55,.5,.28],['verb',.44,.45,.72,.26]]),
+ PP('Talking',    [1,.5,.6,.55,.35,.4,1,.2], null,[.001,6,1,.22],null,[['pha',.45,.5,.5,.4],['verb',.3,.5,.6,.18]]),
+ PP('Metal Skin', [1,.4,.85,.9,.7,.6,.6,.55],[3,2200,4],[.001,6,1,.22],null,[['dist',.6,0,6,.46],['dly',.18,.34,3,.24]])];
+/* Struck instruments ring for as long as they ring. Holding or releasing the
+   key must not change that — a marimba does not sustain and does not stop when
+   you lift your finger. Their length is the model's own `decay` param. */
+/* Every model now responds to note-off — being able to stop a note is half of
+   playing one. How long a struck instrument rings is set by its preset's
+   release, not by ignoring the key. */
+const PROCPERC=new Set();
 const PROCNAMES = Object.keys(PROCLIB);
 /* Sensible starting rack for a procedural channel. The amp envelope sits at
    sustain 1 with a long decay, so while a key is held it does nothing at all —
@@ -4677,7 +5113,9 @@ function procDefaults(p){
             a:0.002,d:6,s:1,r:0.12,crv:0,wav:0,rate:5,ph:0};
   Object.assign(p.vox,{mode:0,uni:1,sprd:12,wide:0.5,slop:0.004,glide:0});
 }
-const procSrc = p => _PRE + ((p.pmodel && PROCLIB[p.pmodel]) ? PROCLIB[p.pmodel].src : CODE_DEFAULT);
+const PMODEL_ALIAS={piano:'e-piano'};
+const resolveModel=n=>(n&&PMODEL_ALIAS[n])||n;
+const procSrc = p => _PRE + ((p.pmodel && PROCLIB[resolveModel(p.pmodel)]) ? PROCLIB[resolveModel(p.pmodel)].src : CODE_DEFAULT);
 
 
 function audPlace(pi,rec,startBeat,name='mic'){
@@ -5498,6 +5936,7 @@ document.addEventListener('keyup',e=>{
 window.addEventListener('blur',()=>{
   eraseHold=null;
   for(const c in liveV){liveV[c]&&liveV[c].release&&liveV[c].release(AC.currentTime);delete liveV[c];}
+  for(let i=0;i<10;i++)engine.monoClear(i);
   for(const c in pend)delete pend[c];
 });
 
@@ -5566,7 +6005,7 @@ function load(json){
         p.name=sp.name;
         p.cat=sp.cat||(['kik','snr','hh','perc','bass','keys','chord','lead','pad','plk'][i]||'misc');
         p.tr=sp.tr||0; p.prep=sp.prep||null;
-        p.code=sp.code||null; p.pmodel=sp.pmodel||null; p.psel=sp.psel|0;
+        p.code=sp.code||null; p.pmodel=resolveModel(sp.pmodel)||null; p.psel=sp.psel|0;
         p.cp=Array.isArray(sp.cp)?sp.cp.slice(0,8):[1,1,1,0.5,0,0,0.5,0.3];
         p.au=Object.assign({gain:0.9,semis:0,rate:1,st:0,en:1,fit:0,src:0},sp.au||{});
         if(Array.isArray(sp.kit))p.kit=sp.kit.map(k=>k?modToRoutes(foldMod(k)):null);
@@ -6188,7 +6627,8 @@ function renderHelp(L){
     ['↑ ↓ (pattern)','transpose the channel ±1 octave — recorded notes included'],
     ['shift+↑↓ (pattern)','swap the channel’s sound: prev/next library preset of its type'],
     ['module 1 PRST','browse/type/save/randomize · stack/layer fields · enter = library'],
-    ['module 4 MOD','one source (env/lfo/vel/key/rnd) → routes: each target has own amt+range'],
+    ['PRST ▸engine','Kit · Synth · Procedural · Audio  (Sampler and Grain next)'],
+    ['module 4 MOD','one source (env/lfo/vel/key/rnd/press) → routes: each target has own amt+range'],
     ['cmd+C on a MOD slot','arm it · then cmd+V on a filter/osc/mix param maps a route there'],
     ['q','live quantize ON/OFF (global) — what you hear is exactly what records'],
     ['shift+Q (in pattern)','snap the selected lane to the grid now (for takes recorded with q off)'],
