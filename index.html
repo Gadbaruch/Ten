@@ -5699,7 +5699,11 @@ function doRedo(){
 }
 
 /* ---------------- keyboard ------------------------------------------ */
-document.addEventListener('keydown',e=>{
+/* Named so the MOUSE can replay it. Every value edit in every context —
+   proc, audio, kit, master, arrange — already funnels through this one
+   dispatcher, so driving it with a synthetic arrow event is the only way
+   to get mouse and keyboard that cannot drift apart. */
+const onKeyDown=e=>{
   if(e.metaKey||e.ctrlKey){
     if(e.code==='KeyE'){e.preventDefault();exportJSON();}
     if(e.code==='KeyZ'){e.preventDefault();if(!e.repeat)(e.shiftKey?doRedo:doUndo)();}
@@ -6207,7 +6211,10 @@ document.addEventListener('keydown',e=>{
     if(S.layer>=2)S.prepFocus=engine.lastMidi[pi];   // last played note = per-note focus (any channel)
     dirty=true; return;
   }
-});
+};
+document.addEventListener('keydown',onKeyDown);
+
+
 
 let djHeld={},djLatch={},djAuto={},djRecStart={};
 function djPress(k,shift){        // shared pad logic: tap on a latched pad unlatches it
@@ -6422,8 +6429,78 @@ if(CFG.midiIn|0)EXP.connect(true);   // reconnect silently if midi in was left o
 
 /* ---------------- render --------------------------------------------- */
 const screen=document.getElementById('screen');
+/* ---------------- mouse ------------------------------------------------
+   The keyboard is still the instrument; this is a second way in, not a
+   replacement. Every value change replays the real arrow-key handler with a
+   synthetic event, so the mouse can never drift away from what the keys do.
+
+   Three gestures: click a field to focus it, drag up/down to change it,
+   wheel over it to nudge. Modifiers match the keyboard — shift x10, alt x0.1.
+
+   Listener sits on `screen`, which survives the innerHTML rebuild; the cell
+   under the cursor does NOT, so drag state lives out here and pointer capture
+   goes on the container. preventDefault everywhere keeps focus on body so the
+   note keys keep playing mid-drag. */
+const MOUSE={on:false,acc:0,y:0,kind:null,moved:false};
+function mouseFocus(kind,i){
+  if(kind==='cp'||kind==='set'){ if(S.layer===-3)S.setSel=i; else S.curParam=i; }
+  else if(kind==='slot')S.slotParam=i;
+  else if(kind==='mst')S.mParam=i;
+  else if(kind==='sl'){S.curSlot=i; S.slotParam=0;}
+  dirty=true;
+}
+function mouseBump(dir,shift,alt){
+  onKeyDown({code:dir>0?'ArrowUp':'ArrowDown',key:dir>0?'ArrowUp':'ArrowDown',
+    shiftKey:!!shift,altKey:!!alt,metaKey:false,ctrlKey:false,repeat:false,
+    preventDefault(){}});
+}
+const hitOf=t=>{
+  for(let n=t;n&&n!==screen;n=n.parentElement){
+    const h=n.getAttribute&&n.getAttribute('data-h');
+    if(h){const [k,i]=h.split(':');return {kind:k,i:+i};}
+  }
+  return null;
+};
+screen.addEventListener('pointerdown',e=>{
+  const hit=hitOf(e.target); if(!hit)return;
+  e.preventDefault();                       // focus stays on body: keys keep working
+  mouseFocus(hit.kind,hit.i);
+  MOUSE.on=true; MOUSE.acc=0; MOUSE.y=e.clientY; MOUSE.kind=hit.kind; MOUSE.moved=false;
+  try{screen.setPointerCapture(e.pointerId);}catch(_){}
+});
+screen.addEventListener('pointermove',e=>{
+  if(!MOUSE.on)return;
+  e.preventDefault();
+  /* clientY delta, not movementY: movementY is distorted by pointer capture
+     and OS acceleration, and is absent on synthetic events. */
+  MOUSE.acc+=MOUSE.y-e.clientY;             // up = increase, like the arrow keys
+  MOUSE.y=e.clientY;
+  const STEP=6;                             // px per increment
+  while(Math.abs(MOUSE.acc)>=STEP){
+    const d=MOUSE.acc>0?1:-1;
+    MOUSE.acc-=d*STEP; MOUSE.moved=true;
+    mouseBump(d,e.shiftKey,e.altKey);
+  }
+});
+const mouseUp=e=>{
+  if(!MOUSE.on)return;
+  MOUSE.on=false;
+  try{screen.releasePointerCapture(e.pointerId);}catch(_){}
+};
+screen.addEventListener('pointerup',mouseUp);
+screen.addEventListener('pointercancel',mouseUp);
+screen.addEventListener('wheel',e=>{
+  const hit=hitOf(e.target); if(!hit)return;
+  e.preventDefault();
+  mouseFocus(hit.kind,hit.i);
+  mouseBump(e.deltaY<0?1:-1,e.shiftKey,e.altKey);
+},{passive:false});
+screen.addEventListener('contextmenu',e=>{if(hitOf(e.target))e.preventDefault();});
 const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;');
 const sp=(cls,s)=>`<span class="${cls}">${esc(s)}</span>`;
+/* the same span, tagged with what it edits: kind selects which focus index
+   to move, i is the position inside that context. The mouse layer reads these. */
+const spH=(cls,s,kind,i)=>`<span class="${cls}" data-h="${kind}:${i}">${esc(s)}</span>`;
 const pad=(s,n)=>s.length>=n?s.slice(0,n):s+' '.repeat(n-s.length);
 const W=92;
 
@@ -6648,8 +6725,8 @@ function renderSnd(L,pos){
     CODEF().forEach((pspec,i)=>{
       const foc=i===S.curParam;
       const v=fmtVal(pspec,(pre.cp&&pre.cp[i])??0);
-      lr+=(foc?sp('a','▸'+pad(names[i]||pspec.lbl,8)):sp('d',' '+pad(names[i]||pspec.lbl,8)))+' ';
-      vr+=(foc?sp('i',' '+pad(v,8)):' '+pad(v,8))+' ';
+      lr+=(foc?spH('a','▸'+pad(names[i]||pspec.lbl,8),'cp',i):spH('d',' '+pad(names[i]||pspec.lbl,8),'cp',i))+' ';
+      vr+=(foc?spH('i',' '+pad(v,8),'cp',i):spH('v',' '+pad(v,8),'cp',i))+' ';
     });
     L.push(lr); L.push(vr);
     L.push('');
@@ -6667,8 +6744,8 @@ function renderSnd(L,pos){
     AUDF.forEach((pspec,i)=>{
       const foc=i===S.curParam;
       const v=fmtVal(pspec,pre.au[pspec.key]??0);
-      lr+=(foc?sp('a','▸'+pad(pspec.lbl,8)):sp('d',' '+pad(pspec.lbl,8)))+' ';
-      vr+=(foc?sp('i',' '+pad(v,8)):' '+pad(v,8))+' ';
+      lr+=(foc?spH('a','▸'+pad(pspec.lbl,8),'cp',i):spH('d',' '+pad(pspec.lbl,8),'cp',i))+' ';
+      vr+=(foc?spH('i',' '+pad(v,8),'cp',i):spH('v',' '+pad(v,8),'cp',i))+' ';
     });
     L.push(lr); L.push(vr);
     L.push('');
@@ -6682,8 +6759,8 @@ function renderSnd(L,pos){
     defs.forEach((fd,i)=>{
       if(fd.br){L.push(lr);L.push(vr);L.push('');lr='   ';vr='   ';}   // start a new field row
       const foc=i===S.curParam, v=fd.v();
-      lr+=(foc?sp('a','▸'+pad(fd.k,9)):sp('d',' '+pad(fd.k,9)))+' ';
-      vr+=(foc?sp('i',' '+pad(v,9)):' '+pad(v,9))+' ';
+      lr+=(foc?spH('a','▸'+pad(fd.k,9),'cp',i):spH('d',' '+pad(fd.k,9),'cp',i))+' ';
+      vr+=(foc?spH('i',' '+pad(v,9),'cp',i):spH('v',' '+pad(v,9),'cp',i))+' ';
     });
     L.push(lr); L.push(vr);
     stackStrip(L,p);
@@ -6697,8 +6774,8 @@ function renderSnd(L,pos){
       const foc=i===S.curParam;
       const pd=prepDisp(pre,S.curMod,-1,pspec);
       const v=(pd.dot?'•':'')+fmtVal(pspec,pd.v);
-      lr+=(foc?sp('a','▸'+pad(pspec.lbl,9)):sp('d',' '+pad(pspec.lbl,9)))+' ';
-      vr+=(foc?sp('i',' '+pad(v,9)):(pd.dot?sp('r',' '+pad(v,9)):' '+pad(v,9)))+' ';
+      lr+=(foc?spH('a','▸'+pad(pspec.lbl,9),'cp',i):spH('d',' '+pad(pspec.lbl,9),'cp',i))+' ';
+      vr+=(foc?spH('i',' '+pad(v,9),'cp',i):(pd.dot?spH('r',' '+pad(v,9),'cp',i):spH('v',' '+pad(v,9),'cp',i)))+' ';
     });
     L.push(lr); L.push(vr);
     L.push('');
@@ -6771,7 +6848,7 @@ function renderSlots(L){
   rackA.forEach((sl,i)=>{
     const ab=M.abbr(sl);
     const lbl=` ${(i+1)%10}${sl.off?'×':''}${ab} `;
-    tabs+=(i===S.curSlot?sp('i',lbl):(sl.off?sp('d',lbl):ab!=='···'?sp('a',lbl):sp('d',lbl)));
+    tabs+=(i===S.curSlot?spH('i',lbl,'sl',i):(sl.off?spH('d',lbl,'sl',i):ab!=='···'?spH('a',lbl,'sl',i):spH('d',lbl,'sl',i)));
   });
   L.push(tabs);
   L.push('');
@@ -6784,8 +6861,8 @@ function renderSlots(L){
       const i=ofs+j, foc=i===S.slotParam;
       const pd=prepDisp(pre,S.curMod,S.curSlot,pspec);
       const v=(pd.dot?'•':'')+fmtVal(pspec,pd.v);
-      lr+=(foc?sp('a','▸'+pad(pspec.lbl,9)):sp('d',' '+pad(pspec.lbl,9)))+' ';
-      vr+=(foc?sp('i',' '+pad(v,9)):(pd.dot?sp('r',' '+pad(v,9)):' '+pad(v,9)))+' ';
+      lr+=(foc?spH('a','▸'+pad(pspec.lbl,9),'slot',i):spH('d',' '+pad(pspec.lbl,9),'slot',i))+' ';
+      vr+=(foc?spH('i',' '+pad(v,9),'slot',i):(pd.dot?spH('r',' '+pad(v,9),'slot',i):spH('v',' '+pad(v,9),'slot',i)))+' ';
     });
     L.push(lr); L.push(vr);
   }
@@ -6883,8 +6960,8 @@ function renderMaster(L){
   specs.forEach((pspec,i)=>{
     const foc=i===S.mParam;
     const v=fmtVal(pspec,sl[pspec.key]??0);
-    lr+=(foc?sp('a','▸'+pad(pspec.lbl,9)):sp('d',' '+pad(pspec.lbl,9)))+' ';
-    vr+=(foc?sp('i',' '+pad(v,9)):' '+pad(v,9))+' ';
+    lr+=(foc?spH('a','▸'+pad(pspec.lbl,9),'mst',i):spH('d',' '+pad(pspec.lbl,9),'mst',i))+' ';
+    vr+=(foc?spH('i',' '+pad(v,9),'mst',i):spH('v',' '+pad(v,9),'mst',i))+' ';
   });
   L.push(lr); L.push(vr);
   L.push('');
@@ -6908,8 +6985,8 @@ function renderSettings(L){
   let lr='   ', vr='   ';
   SETTINGS.forEach((it,i)=>{
     const foc=i===(S.setSel||0);
-    lr+=(foc?sp('a','▸'+pad(it.n,8)):sp('d',' '+pad(it.n,8)))+' ';
-    vr+=(foc?sp('i',' '+pad(it.v(),8)):' '+pad(it.v(),8))+' ';
+    lr+=(foc?spH('a','▸'+pad(it.n,8),'set',i):spH('d',' '+pad(it.n,8),'set',i))+' ';
+    vr+=(foc?spH('i',' '+pad(it.v(),8),'set',i):spH('v',' '+pad(it.v(),8),'set',i))+' ';
   });
   L.push(lr); L.push(vr);
   L.push('');
