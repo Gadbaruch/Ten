@@ -97,6 +97,7 @@ const FTYPES=['off','lp','hp','bp','ntc','peq','lsh','hsh'];
    band at all. 20Hz..20kHz is the full ten octaves; the FILT module already
    went to 16k, so the fx slots were the odd ones out. */
 const xFreq=v=>20*Math.pow(1000,clamp(v,0,1));
+const xSpray=v=>Math.pow(clamp(v,0,1),3.3);      // 0.5 -> ~0.10, 1 -> 1
 const xHz=v=>{const f=xFreq(v);return f>=1000?(f/1000).toFixed(f<10000?2:1)+'k':Math.round(f)+'Hz';};
 const XFT=['lp','hp','bp','ntc','peq','lsh','hsh','fmnt','vowel'];
 const XFT_W={lp:'lowpass',hp:'highpass',bp:'bandpass',ntc:'notch',
@@ -484,7 +485,11 @@ const FX_P=sl=>{
               fmt:v=>(1+v*55).toFixed(0)+'/s'}),
          SP('pitch','p3','lin',{min:0,max:1,step:1/48,
               fmt:v=>{const st=Math.round((v-0.5)*48);return (st>0?'+':'')+st+'st';}}),
-         SP('spray','p4','lin',{min:0,max:1,step:0.05}),
+         /* spray was linear and the whole useful range lived under 0.1, so the
+            knob was unusable past a tenth of its travel. v^3.3 puts today's
+            0.1 at the midpoint and shows the actual lookback. */
+         SP('spray','p4','lin',{min:0,max:1,step:0.02,
+            fmt:v=>Math.round(12+xSpray(v)*1600)+'ms'}),
          SP('rand','p6','lin',{min:0,max:1,step:0.05}),
          SP('width','p7','lin',{min:0,max:1,step:0.05}),
          SP('fdbk','p5','lin',{min:0,max:0.92,step:0.04}),
@@ -717,7 +722,8 @@ let fxwReady=false;
     constructor(){super();
       this.N=Math.floor(sampleRate*4);
       this.bL=new Float32Array(this.N); this.bR=new Float32Array(this.N);
-      this.w=0; this.g=[]; this.next=0; this.fl=0; this.fr=0; this.nrm=1; this.par=1;}
+      this.w=0; this.g=[]; this.next=0; this.fl=0; this.fr=0; this.nrm=1; this.par=1;
+      this.fill=0;}
     process(ins,outs,par){
       const inp=ins[0], out=outs[0]; if(!out||!out[0])return true;
       const oL=out[0], oR=out[1]||null;
@@ -740,7 +746,15 @@ let fxwReady=false;
                reverse, and pan alternating L/R instead of scattered — a clean
                pitched delay tap. Turning it up dissolves that into a cloud. */
             const det=Math.pow(2,(r*rnd*7)/12);
-            const back=Math.floor((0.012+sp*1.6*((1-rnd)+rnd*u*u))*sampleRate);
+            /* never read further back than has actually been recorded, or
+               max spray reads an empty buffer and the effect is silent for
+               its first second and a half */
+            /* spray is a SCATTER WIDTH, not a delay time. The deterministic
+               term used to be the full window, so max spray was a fixed 1.6s
+               tap reading whatever silence preceded the note. Anchor it near
+               the recent past instead; u*u keeps the random side recent too. */
+            let back=Math.floor((0.012+sp*1.6*((1-rnd)*0.15+rnd*u*u))*sampleRate);
+            const cap=this.fill-96; if(back>cap)back=cap>0?cap:0;
             this.par=-this.par;
             const pan=wide*((1-rnd)*this.par+rnd*r);
             this.g.push({p:0,len:glen,pos:(this.w-back+N)%N,
@@ -774,6 +788,7 @@ let fxwReady=false;
         if(sr>0.98||sr<-0.98)sr=sr>0?0.98:-0.98;
         oL[i]=sl; if(oR)oR[i]=sr;
         this.w=this.w+1; if(this.w>=N)this.w=0;
+        if(this.fill<N)this.fill++;
       }
       return true;}}
   class D extends AudioWorkletProcessor{
@@ -1700,7 +1715,7 @@ class Engine{
         P('size').value=0.004+p1*p1*0.6;                       // 4ms .. 600ms
         P('dens').value=1+clamp(fx.p2??0.3,0,1)*55;
         P('rate').value=Math.pow(2,Math.round(((fx.p3??0.5)-0.5)*48)/12);
-        P('spray').value=clamp(fx.p4??0.3,0,1);
+        P('spray').value=xSpray(fx.p4??0.3);
         P('fb').value=clamp(fx.p5??0,0,0.92);
         P('rand').value=clamp(fx.p6??0.5,0,1);
         P('wide').value=clamp(fx.p7??0.7,0,1);
