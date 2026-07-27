@@ -276,6 +276,15 @@ const SETTINGS=[
  {n:'mode',   v:()=>SCALES[CFG.scale][0],      a:d=>CFG.scale=fmod(CFG.scale+d,SCALES.length)},
  {n:'vel',    v:()=>String(Math.round(clamp(CFG.kvel??0.9,0.02,1)*127)), a:d=>EXP.bump(d*0.05)},
  {n:'midi in',v:()=>EXP.midiOn?['off','solo','+kbd'][CFG.midiIn|0]:'off', a:d=>EXP.cycleMidi(d)},
+ {n:'hid',    v:()=>HE.on?(HE.srcName||'on').slice(0,8):'off',
+              a:d=>{if(HE.on)HE.disconnect(); else HE.connect(d<0?1:2);}},
+ {n:'hid keys',v:()=>HE.learn?(HE.learn.i+'/'+HE.learn.order.length):(HE.map?String(Object.keys(HE.map).length):'—'),
+              a:()=>HE.startLearn()},
+ {n:'hid trig',v:()=>Math.round(HE.cfg().trig*100)+'%', a:d=>HE.set('trig',clamp(HE.cfg().trig+d*0.01,0.05,0.6))},
+ {n:'hid curve',v:()=>HE.cfg().gamma.toFixed(2), a:d=>HE.set('gamma',clamp(HE.cfg().gamma+d*0.05,0.2,2))},
+ {n:'hid floor',v:()=>Math.round(HE.cfg().floor*127)+'', a:d=>HE.set('floor',clamp(HE.cfg().floor+d*0.02,0,0.5))},
+ {n:'hid range',v:()=>HE.cfg().auto?'auto':'fixed',
+              a:()=>{const C=HE.cfg(); HE.set('auto',C.auto?0:1); if(!C.auto){HE.set('soft',HEDEF.soft);HE.set('hard',HEDEF.hard);}}},
 ];
 function basePreset(name){return{
   name, cat:'misc', tr:0, prep:null,
@@ -3127,10 +3136,7 @@ const EXP={
   noteOn(ch,note,vel){
     const pi=S.layer===1?S.curPreset:S.editSnd;
     const code=KEYFOR[note-(60+S.octs[pi]*12)];
-    if(code&&!liveV[code]&&S.layer>0){        // in range: take the real key path
-      this.pend=vel; this.synth=true;
-      try{document.dispatchEvent(new KeyboardEvent('keydown',{code,key:code,bubbles:true}));}
-      finally{this.synth=false; this.pend=null;}
+    if(code&&this.keyDown(code,vel)){         // in range: take the real key path
       this.held[ch+':'+note]={code};
       return;
     }
@@ -3140,9 +3146,7 @@ const EXP={
   },
   noteOff(ch,note){
     const k=ch+':'+note, v=this.held[k]; if(!v)return; delete this.held[k];
-    if(v.code){this.synth=true;
-      try{document.dispatchEvent(new KeyboardEvent('keyup',{code:v.code,key:v.code,bubbles:true}));}
-      finally{this.synth=false;}}
+    if(v.code)this.keyUp(v.code);
     else if(v.h&&v.h.release)v.h.release(AC.currentTime+0.005);
   },
   voicesOf(ch,note){
@@ -3159,7 +3163,221 @@ const EXP={
       this.pressNote(ch,+k.slice(k.indexOf(':')+1),x);
   },
   allOff(){for(const k in this.held){const [a,b]=k.split(':'); this.noteOff(+a,+b);}},
+
+  /* solo = something else is playing the notes, so the board's own keystrokes
+     must be ignored. True for midi-solo and always true for a hid keyboard,
+     which types as well as sensing. */
+  solo(){return (this.midiOn&&(CFG.midiIn|0)===1)||HE.on;},
+  /* key-level entry points shared by hid and by in-range midi notes */
+  keyDown(code,vel){
+    if(liveV[code]||S.layer<1)return false;
+    this.pend=vel; this.synth=true;
+    try{document.dispatchEvent(new KeyboardEvent('keydown',{code,key:code,bubbles:true}));}
+    finally{this.synth=false; this.pend=null;}
+    return true;
+  },
+  keyUp(code){
+    this.synth=true;
+    try{document.dispatchEvent(new KeyboardEvent('keyup',{code,key:code,bubbles:true}));}
+    finally{this.synth=false;}
+  },
+  keyPress(code,x){
+    const h=liveV[code];
+    if(h&&h.voices)for(const v of h.voices)v.setPressure(x);
+  },
 };
+/* ---------------- hall-effect keyboards over WebHID ---------------------
+   The board's analog stream is the only trigger — we never look at its
+   keystrokes (those are typing, and arrive at the actuation point with too
+   little of the stroke measured to get a velocity from). A note fires when
+   travel crosses a SOFTWARE threshold, so set actuation deep (2-3mm) or park
+   the playing keys on a layer with no keycode and the board stops spraying
+   text; velocity is unaffected either way.
+
+   Velocity = the steepest single frame of the downstroke. A hard hit is over
+   in one or two frames at 250Hz, so anything that needs a multi-ms ramp
+   measures a key that already stopped moving. Peak slope degrades gracefully:
+   a one-frame slam still yields a finite, monotonic number.
+
+   Two transports, same estimator on normalised travel + timestamps:
+     · analogsense — Keychron raw-HID matrix, request/response (0xA9 0x31)
+     · rongyuan    — MonsGeek FUN60 / Attack Shark, event-driven push (0x1B)
+   Neither is verified against hardware here. `hid dump` prints raw reports
+   and `hid probe` names the slot a held key moves, for debugging on the day. */
+/* slope ends in travel-per-ms, read off the report's captures at ~250Hz: a soft
+   tap moves 0.03-0.06 of travel per frame (0.0075-0.015/ms), a slam goes rest to
+   bottomed inside one frame (~0.25/ms). Starting too high pins soft playing on
+   the floor; `auto` refines both ends as you play. */
+const HEDEF={rest:0.03,trig:0.15,look:1,gamma:0.5,soft:0.005,hard:0.250,floor:0.08,auto:1};
+const HE={
+  on:false, srcName:'', dev:null, kind:0,          // 1 = analogsense, 2 = rongyuan
+  keys:{},                                          // keyId -> stroke state
+  map:null,                                         // keyId -> TEN key code
+  fps:0, _fN:0, _fT:0, lastVel:0, lastId:null,
+  learn:null, dump:0, dumped:[], probe:0, probeBest:null,
+  cfg(){return Object.assign({},HEDEF,CFG.he||{});},
+  set(k,v){CFG.he=Object.assign({},CFG.he||{},{[k]:v}); saveCfg();},
+
+  /* ---- transport ---- */
+  async connect(kind){
+    if(!navigator.hid){flash('no WebHID here — use Chrome or Edge');return false;}
+    const filters=kind===2?[{vendorId:0x3151}]:[{vendorId:0x3434},{usagePage:0xFF60}];
+    let devs;
+    try{devs=await navigator.hid.requestDevice({filters});}
+    catch(err){flash('hid: '+(err&&err.message||err));return false;}
+    if(!devs||!devs.length){flash('no device chosen');return false;}
+    const d=devs[0];
+    try{if(!d.opened)await d.open();}catch(err){flash('hid open failed: '+(err&&err.message||err));return false;}
+    this.dev=d; this.kind=kind; this.srcName=d.productName||'hid';
+    this.keys={}; this._fN=0; this._fT=performance.now(); this.fps=0;
+    this.map=(CFG.he&&CFG.he.map)||null;
+    d.oninputreport=e=>this.report(e);
+    if(kind===2)await this.ryEnable(); else this.kcRequest();
+    this.on=true;
+    this.watch=setInterval(()=>this.tick(),60);
+    flash('hid: '+this.srcName+(this.map?'':' — run `hid learn` to map the keys'));
+    dirty=true; return true;
+  },
+  disconnect(){
+    this.on=false; clearInterval(this.watch);
+    for(const id in this.keys)this.release(id);
+    if(this.dev){try{this.dev.oninputreport=null;}catch(_){} try{this.dev.close();}catch(_){}}
+    this.dev=null; this.keys={}; flash('hid off'); dirty=true;
+  },
+  async ryEnable(){                                  // FUN60: one feature report turns analog on
+    const b=new Uint8Array(64); b[0]=0x1B; b[1]=0x01;
+    let sum=0; for(let i=0;i<7;i++)sum+=b[i];
+    b[7]=(255-sum)&0xff;
+    try{await this.dev.sendFeatureReport(0,b);}catch(err){flash('fun60 enable failed: '+(err&&err.message||err));}
+  },
+  kcRequest(){                                       // Keychron: ask for the whole matrix
+    if(!this.dev||!this.on&&this._started)return;
+    const b=new Uint8Array(32); b[0]=0xA9; b[1]=0x31;
+    this.chunk=0; this._reqAt=performance.now(); this._started=1;
+    /* exactly ONE request in flight — pipelining two per frame buries the MCU
+       and the chunks carry no sequence number to resync against */
+    this.dev.sendReport(0,b).catch(()=>{this._started=0;});
+  },
+  tick(){                                            // watchdog: the board went quiet
+    if(!this.on)return;
+    if(this.kind===1&&performance.now()-(this._reqAt||0)>60)this.kcRequest();
+  },
+  report(e){
+    const d=new Uint8Array(e.data.buffer);
+    if(this.dump>0){this.dump--; this.dumped.push([...d].slice(0,20).map(x=>x.toString(16).padStart(2,'0')).join(' '));
+      if(!this.dump)console.log('HID dump:\n'+this.dumped.join('\n'));}
+    const t=performance.now();
+    if(this.kind===2){                               // [0x1B, lo, hi, keyId]
+      if(d[0]!==0x1B)return;
+      const raw=d[1]|(d[2]<<8), id=d[3];
+      this.full=Math.max(this.full||1,raw);          // firmware scale differs per model
+      this.sample(id,raw/(this.full||1),t);
+      this.frame(t);
+      return;
+    }
+    /* analog and RGB share this pipe, so demux on the command byte. Whether the
+       reply repeats 0xA9 is the one thing I could not check without the board —
+       `hid dump` shows it, and this handles either framing. */
+    if(d[0]===0xA8)return;                           // RGB reply
+    const off=(d[0]===0xA9)?2:0;
+    const c=this.chunk||0;
+    if(c>=4)return;                                  // surplus report: ignore, don't wrap
+    for(let i=0;i<30;i++){
+      const v=d[off+i]; if(v===undefined)break;
+      this.sample(c*30+i,Math.max(0,v-5)/230,t);     // 5/235 is the library's dead zone
+    }
+    this.chunk=c+1;
+    if(this.chunk>=4){this.frame(t); this.kcRequest();}
+  },
+  frame(t){
+    this._fN++;
+    if(t-this._fT>=500){this.fps=Math.round(this._fN*1000/(t-this._fT)); this._fN=0; this._fT=t; dirty=true;}
+  },
+
+  /* ---- stroke tracking + velocity ---- */
+  sample(id,v,t){
+    const C=this.cfg();
+    let k=this.keys[id];
+    if(!k)k=this.keys[id]={st:0,pv:0,pt:t,peak:0,top:0,code:null};
+    const dt=Math.max(0.5,t-k.pt), slope=(v-k.pv)/dt;
+    if(this.probe&&v>0.25&&(!this.probeBest||v>this.probeBest.v))this.probeBest={id,v};
+    if(k.st===0){                                    // resting
+      if(v<=C.rest){k.pv=v; k.pt=t; return;}
+      k.st=1; k.peak=Math.max(0,slope); k.top=v; k.wait=0;
+      /* fall straight through to the trigger test: a slam crosses rest and
+         bottoms out on the SAME frame, and waiting for the next one is 4ms
+         of latency on exactly the hits that need it least */
+    }
+    if(k.st===1){                                    // downstroke, not yet spoken
+      k.peak=Math.max(k.peak,slope); k.top=Math.max(k.top,v);
+      if(v<=C.rest){k.st=0;}                         // a nudge that never got there
+      else if(v>=C.trig){
+        // bottomed out, or learning (which only needs identity): no point waiting
+        if(k.wait>=C.look||v>0.97||this.learn){this.fire(id,k,v);}
+        else k.wait++;
+      }
+    }else if(k.st===2){                              // sounding
+      if(v<C.rest*0.8){this.release(id);}
+      else if(k.code){
+        const x=C.trig<0.99?clamp((v-C.trig)/(1-C.trig),0,1):v;
+        EXP.keyPress(k.code,x);                      // the rest of the stroke is expression
+      }
+    }
+    k.pv=v; k.pt=t;
+  },
+  fire(id,k,v){
+    const C=this.cfg();
+    if(this.learn){this.learnHit(id); k.st=2; k.code=null; return;}
+    const code=this.map&&this.map[id];
+    k.st=2; k.code=null;
+    this.lastId=id;
+    if(!code)return;
+    const vel=this.vel(k.peak,C);
+    this.lastVel=vel;
+    if(EXP.keyDown(code,vel)){
+      k.code=code;                                   // only track it if it actually spoke
+      /* seed pressure from the depth we fired at, so a swell patch speaks now
+         rather than on the next frame */
+      EXP.keyPress(code,C.trig<0.99?clamp(((v??C.trig)-C.trig)/(1-C.trig),0,1):(v??0));
+    }
+  },
+  release(id){
+    const k=this.keys[id]; if(!k)return;
+    if(k.st===2&&k.code)EXP.keyUp(k.code);
+    k.st=0; k.code=null; k.peak=0; k.top=0;
+  },
+  vel(slope,C){
+    if(C.auto){                                      // learn the ends of your own playing
+      if(slope>0&&(slope<C.soft||!C.soft))this.set('soft',Math.max(0.001,slope*0.98+C.soft*0.02));
+      if(slope>C.hard)this.set('hard',slope);
+      C=this.cfg();
+    }
+    const lo=Math.min(C.soft,C.hard*0.5), hi=Math.max(C.hard,lo*1.5);
+    const n=clamp((slope-lo)/(hi-lo),0,1);
+    return clamp(C.floor+(1-C.floor)*Math.pow(n,C.gamma),0.02,1);
+  },
+
+  /* ---- key learn: press each playing key in turn, we record which slot moved ---- */
+  startLearn(){
+    if(!this.on){flash('connect a hid keyboard first');return;}
+    this.learn={i:0,map:{},order:Object.keys(NOTEKEYS)};
+    flash('LEARN: press '+this.learn.order[0]+' on the keyboard · esc cancels');
+    dirty=true;
+  },
+  learnHit(id){
+    const L=this.learn;
+    if(L.map[id]!==undefined)return;                 // that slot is already spoken for
+    L.map[id]=L.order[L.i++];
+    if(L.i<L.order.length){flash('LEARN '+L.i+'/'+L.order.length+' · press '+L.order[L.i]);}
+    else{
+      this.map=L.map; this.set('map',L.map); this.learn=null;
+      flash('◎ hid keys mapped — '+Object.keys(L.map).length+' keys');
+    }
+    dirty=true;
+  },
+  cancelLearn(){if(this.learn){this.learn=null;flash('learn cancelled');dirty=true;return true;}return false;},
+};
+
 const liveV={}, pend={}, rPend={}, nlive={};
 const retroBuf=Array.from({length:10},()=>[]);
 let eraseHold=null, muteHold=null, stepCur=0, taps=[];
@@ -3532,6 +3750,7 @@ document.addEventListener('keydown',e=>{
     return;}
   if(c==='Enter'){e.preventDefault(); if(!e.repeat)diveIn(); return;}
   if(c==='Escape'){e.preventDefault();
+    if(HE.cancelLearn())return;
     const h=curHolder();
     if(S.layer===3&&MODULES[S.curMod].prs&&S.libStash){   // leaving explorer: restore what you came in with
       const st=S.libStash; S.libStash=null;
@@ -3847,7 +4066,7 @@ document.addEventListener('keydown',e=>{
     e.preventDefault();
     /* midi solo: the board's own keystrokes are noise — only the events EXP
        synthesises for a midi note get through, so a note can't fire twice */
-    if(EXP.midiOn&&(CFG.midiIn|0)===1&&!EXP.synth)return;
+    if(EXP.solo()&&!EXP.synth)return;
     const pi=S.layer===1?S.curPreset:S.editSnd;
     const midi=60+S.octs[pi]*12+NOTEKEYS[c];
     const hitVel=EXP.take();          // MIDI velocity if this key came from EXP, else the c/v value
@@ -4602,7 +4821,15 @@ function renderSettings(L){
   L.push('   '+sp('d','listen  off = new lanes skip listening and start at defLen bars'));
   L.push('   '+sp('d','smix    smart mixer: listens per channel + master, trims harsh/loud channels live'));
   L.push('   '+sp('d','/       here = generate a whole song (4 sections + arrangement + dj drops)'));
-  L.push('   '+sp('d','vel     laptop-keyboard velocity — c / v step it while you play (z / x = octave)'));
+  {const C=HE.cfg();
+   L.push('   '+sp('d','hid     ↑ = fun60/rongyuan · ↓ = keychron/analogsense · again = disconnect'));
+   if(HE.on)L.push('   '+sp('a','        '+HE.srcName)+sp('d','  frames ')+sp(HE.fps<125?'r':'a',HE.fps+'Hz')+
+     sp('d','  last vel ')+sp('a',String(Math.round(HE.lastVel*127)))+
+     sp('d','  slope '+C.soft.toFixed(3)+'…'+C.hard.toFixed(3)+(C.auto?' (auto)':''))+
+     sp('d',HE.lastId!=null?'  last slot '+HE.lastId:''));
+   if(HE.learn)L.push('   '+sp('ri',' LEARN ')+sp('a',' press '+HE.learn.order[HE.learn.i]+' on the keyboard')+
+     sp('d','  ('+HE.learn.i+'/'+HE.learn.order.length+')  esc = cancel'));
+   L.push('   '+sp('d','vel     laptop-keyboard velocity — c / v step it while you play (z / x = octave)'));}
   L.push('   '+sp('d','midi in velocity + per-note pressure from any midi controller · aftertouch,'));
   L.push('   '+sp('d','        channel pressure and CC11/2/1 all drive the MOD src \'press\' · MPE ready'));
   L.push('   '+sp('d','scale   on = non-drum notes snap to key+mode — or, if a PLAY chord slot has'));

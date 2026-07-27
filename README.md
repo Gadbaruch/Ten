@@ -89,6 +89,26 @@ next note.) `sync` is hard sync: the operator locks to whatever `dest`
 points at and its **ratio becomes the sync sweep**, not its pitch — the
 classic tearing lead. Non-integer ratios are where the character lives.
 
+**Hall-effect keyboards, direct.** SETTINGS `hid` connects an analog keyboard
+over WebHID — `↓` for Keychron/AnalogSense (raw-HID matrix, request/response),
+`↑` for MonsGeek FUN60 / Attack Shark (RongYuan, event-driven push, no firmware
+mod needed). TEN never reads the board's keystrokes: the analog stream is the
+only trigger, so set actuation deep (2–3mm) or park the playing keys on a layer
+with no keycode and it stops spraying text. Velocity is unaffected either way,
+because the trigger point is a software number (`hid trig`, default 15% of
+travel — shallow, so soft playing still speaks).
+
+Velocity is the **steepest single frame** of the downstroke. A hard hit is over
+in one or two frames at 250Hz, so anything needing a multi-ms ramp is measuring
+a key that already stopped moving. `hid range` auto-learns the ends of your own
+playing; `hid curve` (gamma, default 0.5) and `hid floor` shape the rest. The
+remaining travel *after* the trigger becomes per-note pressure, so the same
+press that sounded the note goes on shaping it.
+
+Run `hid keys` once per board: press each playing key in turn and TEN records
+which matrix slot moved. Key IDs are matrix positions and differ per model, so
+there is no table to ship — but the mapping is saved once you've done it.
+
 **Velocity and pressure.** The laptop keyboard has no sensors, so it plays
 at a fixed velocity you step with `c` / `v` while playing — the same way
 `z` / `x` move the octave. Recorded notes keep whatever velocity they were
