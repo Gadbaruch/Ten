@@ -2233,7 +2233,12 @@ class Engine{
       v.rootFreq=v._rf0*rat;
       if(v._nr0!==undefined)v.noteRatio=v._nr0*rat;
       v.midi=midi;
-      try{v.oscRefresh(E,'rat',gl);}catch(_){}
+      /* `this` is the engine — oscRefresh needs it for setWave/syncWave. This
+         used to pass a bare `E`, which does not exist in this scope, so every
+         legato retune threw ReferenceError into a silent catch and the pitch
+         never moved. Errors here are reported, never swallowed. */
+      try{v.oscRefresh(this,'rat',gl);}
+      catch(err){ if(!this._rtErr){this._rtErr=1; flash('retune: '+(err&&err.message||err));} }
       did=true;
     }
     return did;
