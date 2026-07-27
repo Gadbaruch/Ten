@@ -2232,7 +2232,10 @@ class Engine{
      built at, so sample/noise roots that were never frequencies survive. */
   retune(pi,midi,at){
     const p=S.presets[pi];
-    const gl=Math.max(0.004,(p.vox&&p.vox.glide)||0.02);
+    /* glide 0 must mean INSTANT. `||0.02` treated 0 as falsy and forced 20ms
+       of slur on every legato move. 4ms is inaudible but still click-free. */
+    const g0=(p.vox&&p.vox.glide)||0;
+    const gl=g0>0.001?g0:0.004;
     if(p.cat==='proc'){
       const e=this.cn&&this.cn[pi];
       if(!e||!e.node)return false;
@@ -2327,7 +2330,11 @@ class Engine{
     const st=this.monoPush(pi,midi,vel);
     const already=st.length>1;
     let voices=[];
-    if(!(mv===2&&already&&this.retune(pi,midi)))
+    /* `at` is the QUANTIZED time. Dropping it here meant a legato note moved
+       the pitch the instant the key went down while the first note of the
+       phrase was correctly quantized — so only the notes played on top of a
+       held note came in off the grid. */
+    if(!(mv===2&&already&&this.retune(pi,midi,at)))
       voices=[this.noteOn(at,pi,midi,vel,pad)].map(v=>{v.live=true;return v;});
     return {voices,release:t=>{
       if(pcHandle){pcHandle();pcHandle=null;}
@@ -2336,7 +2343,7 @@ class Engine{
       const prev=this.monoPop(pi,midi);
       if(!wasTop)return;                       // an under-note let go: keep playing
       if(prev){
-        if(mv===2&&this.retune(pi,prev.midi))return;
+        if(mv===2&&this.retune(pi,prev.midi,t))return;
         const v=this.noteOn(Math.max(t,AC.currentTime),pi,prev.midi,prev.vel,prev.midi);
         v.live=true; return;
       }
