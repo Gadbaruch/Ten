@@ -2673,8 +2673,15 @@ class Engine{
            Carry the held length across the quantize instead: a 40ms tap stays
            a 40ms note wherever it lands on the grid. */
         release(t){if(this.released)return;this.released=true;
-          const held=Math.max(0,(t||AC.currentTime)-bornAt);
-          send({t:'off',id,at:at+Math.max(0.02,held)});},
+          const rt=t||AC.currentTime;
+          /* Honour an explicit release time whenever it is already past the
+             note start — the recorder passes gridTime(start+dur), which is
+             the length it wrote to the lane, and rebuilding that from the
+             keydown added the quantize offset on top and made the monitored
+             note longer than the recorded one. Only a release that lands
+             BEFORE the note-on needs the tap length carried across. */
+          send({t:'off',id,at:rt>=at+0.02?rt
+            :at+Math.max(0.02,Math.max(0,rt-bornAt))});},
         /* A kill must be able to SHORTEN an already-scheduled release: the
            sequencer releases a note when it schedules it, so a later mono
            steal arrived after `released` was set and did nothing — the stolen
