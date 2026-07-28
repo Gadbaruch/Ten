@@ -6564,6 +6564,14 @@ const onKeyDown=e=>{
         if(!S.mSel&&T.playing)requestSwitch(S.curPat,posNow());
       }else S.arrParam=fmod((S.arrParam||0)+d,ARRP.length);
     }
+    else if(S.layer===1&&e.altKey){          // pan, the partner of alt+↑↓ level
+      const p=S.presets[S.curPreset];
+      p.mix.pan=clamp(Math.round((p.mix.pan+d*0.1)*10)/10,-1,1);
+      engine.refresh(S.curPreset);
+      const pn=p.mix.pan;
+      flash(p.name+' pan '+(pn===0?'centre':(pn<0?'L':'R')+Math.round(Math.abs(pn)*100)));
+      dirtySave=true;
+    }
     else if(S.layer===1)S.curPreset=fmod(S.curPreset+d,10);
     else if(S.layer===2){
       /* Params flow left to right and spill into the next rack at the ends —
@@ -6987,15 +6995,20 @@ function mouseFocus(kind,i){
   else if(kind==='msl'){S.mSlot=i; S.mDj=null; S.mParam=0;}
   else if(kind==='dj'){S.mDj=i; S.mParam=0;}
   else if(kind==='ch'){ if(S.layer>=2)S.editSnd=i; else S.curPreset=i; }
+  /* the desk rows: pick the channel, then the drag replays the real binding
+     (alt+↑↓ level, alt+←→ pan) rather than growing a second way to set them */
+  else if(kind==='lvl'||kind==='pan'){ S.curPreset=i; if(S.layer>=2)S.editSnd=i; }
   else if(kind==='cell')stepCur=i;          // jump the loop cursor to a cell
   dirty=true;
 }
 /* tabs and rows are selections, not values — dragging one should not spin it */
 const MOUSE_SELECT_ONLY=new Set(['mod','sl','msl','dj','ch','cell']);
+function mouseArrow(code,o){
+  onKeyDown({code,key:code,shiftKey:false,altKey:false,metaKey:false,ctrlKey:false,
+    repeat:false,preventDefault(){},...o});
+}
 function mouseBump(dir,shift,alt){
-  onKeyDown({code:dir>0?'ArrowUp':'ArrowDown',key:dir>0?'ArrowUp':'ArrowDown',
-    shiftKey:!!shift,altKey:!!alt,metaKey:false,ctrlKey:false,repeat:false,
-    preventDefault(){}});
+  mouseArrow(dir>0?'ArrowUp':'ArrowDown',{shiftKey:!!shift,altKey:!!alt});
 }
 const hitOf=t=>{
   for(let n=t;n&&n!==screen;n=n.parentElement){
@@ -7009,7 +7022,7 @@ screen.addEventListener('pointerdown',e=>{
   e.preventDefault();                       // focus stays on body: keys keep working
   mouseFocus(hit.kind,hit.i);
   MOUSE.on=!MOUSE_SELECT_ONLY.has(hit.kind);
-  MOUSE.acc=0; MOUSE.y=e.clientY; MOUSE.kind=hit.kind; MOUSE.moved=false;
+  MOUSE.acc=0; MOUSE.y=e.clientY; MOUSE.x=e.clientX; MOUSE.kind=hit.kind; MOUSE.moved=false;
   try{screen.setPointerCapture(e.pointerId);}catch(_){}
 });
 screen.addEventListener('pointermove',e=>{
@@ -7017,13 +7030,18 @@ screen.addEventListener('pointermove',e=>{
   e.preventDefault();
   /* clientY delta, not movementY: movementY is distorted by pointer capture
      and OS acceleration, and is absent on synthetic events. */
-  MOUSE.acc+=MOUSE.y-e.clientY;             // up = increase, like the arrow keys
-  MOUSE.y=e.clientY;
+  /* pan is a horizontal control, so drag it horizontally — dragging a pan pot
+     up and down would be a lie about what it does */
+  if(MOUSE.kind==='pan'){ MOUSE.acc+=e.clientX-MOUSE.x; }
+  else MOUSE.acc+=MOUSE.y-e.clientY;        // up = increase, like the arrow keys
+  MOUSE.y=e.clientY; MOUSE.x=e.clientX;
   const STEP=6;                             // px per increment
   while(Math.abs(MOUSE.acc)>=STEP){
     const d=MOUSE.acc>0?1:-1;
     MOUSE.acc-=d*STEP; MOUSE.moved=true;
-    mouseBump(d,e.shiftKey,e.altKey);
+    if(MOUSE.kind==='lvl')mouseArrow(d>0?'ArrowUp':'ArrowDown',{altKey:true});
+    else if(MOUSE.kind==='pan')mouseArrow(d>0?'ArrowRight':'ArrowLeft',{altKey:true});
+    else mouseBump(d,e.shiftKey,e.altKey);
   }
 });
 const mouseUp=e=>{
@@ -7210,19 +7228,53 @@ function renderArr(L,pos){
     sp('d','   enter → edit pattern '+S.curPat));
 }
 
+/* Live per-channel meters. The analyser hanging off each channel's panner is
+   already there for the auto-mix, so this costs one read per channel per frame
+   and no new nodes. Peak-hold with a slow fall, because a bar that tracks the
+   waveform instantly reads as noise rather than level. */
+const METER={pk:new Array(10).fill(0), buf:new Float32Array(256)};
+const BARS=' ▁▂▃▄▅▆▇█';
+function chLevel(i){
+  const b=engine.buses[i]; if(!b||!b.an)return 0;
+  b.an.getFloatTimeDomainData(METER.buf);
+  let mx=0;
+  for(let k=0;k<METER.buf.length;k++){const a=METER.buf[k]<0?-METER.buf[k]:METER.buf[k]; if(a>mx)mx=a;}
+  METER.pk[i]=mx>METER.pk[i]?mx:METER.pk[i]*0.86;
+  return METER.pk[i];
+}
+/* level -> bar index, on a dB-ish curve: a linear map spends most of its
+   travel on the top 6dB and reads as an on/off lamp. */
+const meterCh=v=>BARS[clamp(Math.round(Math.pow(clamp(v,0,1),0.35)*8),0,8)];
+const panCh=v=>v<-0.66?'L··':v<-0.22?'‹··':v<0.22?'·C·':v<0.66?'··›':'··R';
+
 function renderPat(L,pos){
   const pat=S.patterns[S.editPat];
   const edit=pat.state==='edit';
   const anc=editAnchor();
-  L.push('  '+sp('d','channels  (digits select · again = mute · shift+digit = solo · shift+↑↓ = swap preset)'));
+  L.push('  '+sp('d','channels  (digit select · again mute · shift+digit solo · alt+↑↓ level · alt+←→ pan)'));
   let row='   ';
   for(let i=0;i<10;i++){
     const m=pat.lanes[i].mute, so=pat.lanes[i].solo;
     let cell=(so?'*':m?'‑':' ')+`${i}${pad(S.presets[i].name,5)}`+(so?'*':m?'‑':' ');
     const cls=i===S.curPreset?(so?'ai':m?'ri':'i'):(so?'a':m?'r':'d');
-    row+=sp(cls,cell);
+    row+=spH(cls,cell,'ch',i);
   }
   L.push(row);
+  /* the desk: fader, meter and pan under each name, same columns */
+  let fr='   ', mr='   ';
+  for(let i=0;i<10;i++){
+    const mx=S.presets[i].mix||{lvl:0.8,pan:0};
+    const m=pat.lanes[i].mute, so=pat.lanes[i].solo;
+    const lit=i===S.curPreset;
+    const lvl=Math.round(mx.lvl*100);
+    fr+=spH(lit?'a':'d',' '+pad(String(lvl).padStart(3)+'%',6)+' ','lvl',i);
+    // meter goes dark when muted, so the row reads as the mix you actually hear
+    const audible=!m&&(!pat.lanes.some(l=>l.solo)||so);
+    const bar=audible?meterCh(chLevel(i)):' ';
+    mr+=spH(m?'r':so?'a':lit?'a':'d',' '+bar+' '+panCh(mx.pan)+'  ','pan',i);
+  }
+  L.push(fr);
+  L.push(mr);
   L.push('');
   const lanes=[];
   for(let i=0;i<10;i++)if(i===S.curPreset||pat.lanes[i].events.length)lanes.push(i);
@@ -7265,9 +7317,9 @@ function renderPat(L,pos){
     const ql=pat.lanes[S.curPreset], oc=S.octs[S.curPreset], tr=S.presets[S.curPreset].tr||0;
     L.push('  '+sp('d','kb ')+sp('a',(oc>=0?'+':'')+oc)+sp('d','(z/x)')+
       sp('d',' tr ')+sp('a',(tr>=0?'+':'')+tr)+sp('d','(↑↓)')+
-      sp('d','   q:')+(CFG.qOn?sp('a',Math.round((ql.qlive??1)*100)+'%'):sp('r','off'))+sp('d',' live (q toggle · ⇧Q snap lane)')+'   '+
-      (pat.state==='rec'?(T.playing?sp('r','● REC — held notes replace lane · hold ⌫ = silence'):sp('r','● armed — press space')):
-      sp('d','letters play live · tab = REC · / = edit'))+
+      sp('d','   q:')+(CFG.qOn?sp('a',Math.round((ql.qlive??1)*100)+'%'):sp('r','off'))+sp('d',' (q · ⇧Q snap)')+'   '+
+      (pat.state==='rec'?(T.playing?sp('r','● REC — held notes replace the lane'):sp('r','● armed — press space')):
+      sp('d','letters play · tab REC · / edit'))+
       '   '+sp('d','enter → channel '+S.curPreset));
   }
 }
