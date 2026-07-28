@@ -2135,6 +2135,8 @@ class Engine{
       const srI=1/sampleRate;
       let PARAMS=[];
       ${src}
+
+      const MAXV=20;              // sounding voices per procedural channel
       class P extends AudioWorkletProcessor{
         constructor(){super();this.v=[];this.ev=[];this.p=new Float32Array(8);
           this.dc=0; this.g=1; this.dcR=0; this.lastF=0; this.mg=1; this.perc=0;
@@ -2285,9 +2287,27 @@ class Engine{
                guillotines notes mid-decay — which is exactly the 'notes cut
                off randomly' symptom. Steal the oldest not-already-fading voice
                and let it fall over ~40ms instead. */
-            if(this.v.length>36){
-              for(let k=0;k<this.v.length;k++)
-                if(!this.v[k]._fd){this.v[k]._fd=1;break;}
+            /* VOICE CAP. Stealing began at 36 and faded over 0.9s, so a fast
+               passage on a long-ringing model piled up dozens of voices that
+               all still cost CPU and all still fed the bus. Cap the sounding
+               voices and steal the QUIETEST one — an inaudible tail is the
+               right thing to sacrifice, an oldest-first rule would cut the
+               note you are still holding. 30ms fade: fast enough to free the
+               slot, slow enough not to click. */
+            let live=0;
+            for(let k=0;k<this.v.length;k++)
+              if(this.v[k]._fd===undefined&&!this.v[k].done)live++;
+            while(live>MAXV){
+              let qi=-1,q=Infinity;
+              for(let k=0;k<this.v.length;k++){
+                const vo=this.v[k];
+                if(vo._fd!==undefined||vo.done)continue;
+                const pk=vo._pk===undefined?1e9:vo._pk;   // brand new = never the victim
+                if(pk<q){q=pk;qi=k;}
+              }
+              if(qi<0)break;
+              this.v[qi]._fd=1; this.v[qi]._fdr=0.0007;   // ~30ms
+              live--;
             }
             if(this.v.length>64)this.v.splice(0,this.v.length-64);}
           else if(d.t==='off'){
