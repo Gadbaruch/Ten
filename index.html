@@ -4365,10 +4365,14 @@ const EXP={
   },
   allOff(){for(const k in this.held){const [a,b]=k.split(':'); this.noteOff(+a,+b);}},
 
-  /* solo = something else is playing the notes, so the board's own keystrokes
-     must be ignored. True for midi-solo and always true for a hid keyboard,
-     which types as well as sensing. */
-  solo(){return (this.midiOn&&(CFG.midiIn|0)===1)||HE.on;},
+  /* solo = something else is playing the notes, so keystrokes must be ignored.
+     For midi that is all of them. For a hall-effect board it is NOT: the laptop
+     keyboard is still a keyboard and must go on working while hid is on. The
+     browser cannot say which keyboard a keydown came from — but an HE keystroke
+     always has an analog stroke behind it, so suppress only keys the board is
+     actually touching and let everything else through. */
+  solo(){return this.midiOn&&(CFG.midiIn|0)===1;},
+  muted(code){return this.solo()||HE.owns(code);},
   /* key-level entry points shared by hid and by in-range midi notes */
   keyDown(code,vel){
     if(liveV[code]||S.layer<1)return false;
@@ -4420,6 +4424,11 @@ const KC_SLOTS={34:'KeyW',35:'KeyE',37:'KeyT',38:'KeyY',39:'KeyU',41:'KeyO',42:'
 const HE={
   on:false, srcName:'', dev:null, kind:0,          // 1 = analogsense, 2 = rongyuan
   keys:{},                                          // keyId -> stroke state
+  recent:{},                                        // TEN key code -> last time the board touched it
+  /* Is this keystroke the analog board's, rather than the laptop's? Refreshed
+     for as long as the key is off its rest position, so a held key (and its
+     auto-repeat) stays suppressed, and released 200ms after it comes back up. */
+  owns(code){return this.on&&(performance.now()-(this.recent[code]||-1e9))<200;},
   map:null,                                         // keyId -> TEN key code
   fps:0, _fN:0, _fT:0, lastVel:0, lastId:null,
   learn:null, dump:0, dumped:[], probe:0, probeBest:null,
@@ -4498,7 +4507,7 @@ const HE={
     dirty=true; return true;
   },
   disconnect(){
-    this.on=false; clearInterval(this.watch);
+    this.on=false; clearInterval(this.watch); this.recent={};
     for(const id in this.keys)this.release(id);
     if(this.dev){try{this.dev.oninputreport=null;}catch(_){} try{this.dev.close();}catch(_){}}
     this.dev=null; this.keys={}; flash('hid off'); dirty=true;
@@ -4589,6 +4598,9 @@ const HE={
        an enormous slope and fire a pianissimo note at 127. */
     const P=this.fps>0?1000/this.fps:4;
     const dt=clamp(t-k.pt,P*0.4,P*3.5), slope=(v-k.pv)/dt;
+    /* claim the key while it is off rest, so its typed keystroke is ignored and
+       the laptop keyboard's identical keystroke is not */
+    if(v>C.rest&&this.map){const mc=this.map[id]; if(mc)this.recent[mc]=t;}
     if(this.probe&&v>0.25&&(!this.probeBest||v>this.probeBest.v))this.probeBest={id,v};
     if(k.st===0){                                    // resting
       if(v<=C.rest){k.pv=v; k.pt=t; return;}
@@ -6940,7 +6952,7 @@ const onKeyDown=e=>{
     e.preventDefault();
     /* midi solo: the board's own keystrokes are noise — only the events EXP
        synthesises for a midi note get through, so a note can't fire twice */
-    if(EXP.solo()&&!EXP.synth)return;
+    if(EXP.muted(c)&&!EXP.synth)return;
     const pi=S.layer===1?S.curPreset:S.editSnd;
     const midi=60+S.octs[pi]*12+NOTEKEYS[c];
     const hitVel=EXP.take();          // MIDI velocity if this key came from EXP, else the c/v value
