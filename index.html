@@ -3511,7 +3511,7 @@ function focusedKey(){           // the param key under the cursor in the sound 
   const M=MODULES[S.curMod]; if(!M||!M.id||M.prs)return null;
   const pre=S.presets[S.editSnd];
   const specs=paramsFor(S.curMod,M.flat?null:modHolder(pre,M.id)[M.id][S.curSlot]);
-  return (specs[S.layer===3?S.slotParam:S.curParam]||{}).key;
+  return (specs[flatView(S.curMod)?S.curParam:S.slotParam]||{}).key;
 }
 function learnTarget(){          // resolve the focused param → a mod target (dst enum or a learned address)
   if(S.layer<2)return null;
@@ -4066,9 +4066,41 @@ function _prsAction(d){
   dirty=true;
 }
 
-function curAddr(){ // resolved (mi,si,px) for the focused parameter in sound layers
-  if(S.layer===3)return [S.curMod,S.curSlot,S.slotParam];
-  return [S.curMod,MODULES[S.curMod].flat?-1:S.curSlot,S.curParam];
+/* A rack whose params render as one inline row: PRST, the flat modules, and OSC
+   on proc/audio channels (which show their own field list). Everything else is
+   a slot rack, and a slot rack is addressed the same way on EVERY layer. */
+function flatView(mi){
+  const M=MODULES[mi];
+  if(!M||!M.id||M.prs||M.flat)return true;
+  /* OSC on a proc/audio channel shows its own field list INSTEAD of the
+     operator rack — but only in the channel view. The rack view always draws
+     the real ten operators, so answering 'flat' there pointed the edit at the
+     code cursor while the highlight followed the slot cursor: arrows moved the
+     ▸ and ↑ rewrote whatever index the code cursor happened to hold, usually
+     0, which is the waveform enum. */
+  return S.layer!==3&&M.id==='osc'&&(isCodeCh(S.editSnd)||isAudioCh(S.editSnd));
+}
+/* True when the OSC view on screen is the code/audio field list rather than the
+   operator rack. Those fields are edited by codeAction/audAction against their
+   OWN spec lists, so anything that resolves a param against OSC_P must refuse
+   here rather than write an operator nobody can see. */
+const oscFieldView=mi=>MODULES[mi]&&MODULES[mi].id==='osc'&&S.layer!==3&&
+  (isCodeCh(S.editSnd)||isAudioCh(S.editSnd));
+/* Resolved (mi,si,px) for the focused parameter. This used to fork on
+   S.layer===3, which meant layer 2 addressed slot racks with S.curParam — a
+   cursor the layer-2 navigation pinned to 0. Param 0 of every slot rack is its
+   TYPE enum, so editing from layer 2 did not nudge a value, it rewrote the
+   slot and stamped p:0 into any automation being recorded. One cursor now:
+   slot racks are S.slotParam wherever you are. */
+function curAddr(){
+  const M=MODULES[S.curMod];
+  if(flatView(S.curMod))return [S.curMod,M&&M.flat?-1:S.curSlot,S.curParam];
+  const hold=modHolder(S.presets[S.editSnd],M.id);
+  const n=paramsFor(S.curMod,hold[M.id][S.curSlot]).length;
+  /* clamp here, not just in the render: a kit pad swap or a slot type change
+     shortens the spec list under a live cursor */
+  S.slotParam=clamp(S.slotParam|0,0,Math.max(0,n-1));
+  return [S.curMod,S.curSlot,S.slotParam];
 }
 /* shift+↑↓ = per-note tweak: the change applies ONLY to the last-played note.
    Works on any channel, any module — no play slot or type needed. */
@@ -4077,8 +4109,8 @@ function prepTweak(d,m){
   if(S.prepFocus==null){flash('play a note first — shift-tweaks land on that note only');return;}
   const [mi,si,px]=curAddr(); const M=MODULES[mi];
   if(!M.id||M.prs){flash('focus a sound parameter');return;}
-  if(S.layer===2&&!M.flat){flash('enter → edit slots');return;}
-  const slot=M.flat?null:pre[M.id][si];
+  if(oscFieldView(mi)){flash('code params cannot be prepped per note');return;}
+  const slot=M.flat?null:modHolder(pre,M.id)[M.id][si];
   const specs=paramsFor(mi,slot), spec=specs[px]; if(!spec)return;
   pushUndo('prep');
   pre.prep=pre.prep||{notes:{}};
@@ -4095,7 +4127,6 @@ function adjustParam(d,m){
   pushUndo('tweak');
   const [mi,si,px]=curAddr(); const M=MODULES[mi];
   if(!M.id){flash('reserved');return;}
-  if(S.layer===2&&!M.flat){flash('enter → edit slots');return;}
   const pre=S.presets[S.editSnd], holder=modHolder(pre,M.id);
   const slot=M.flat?null:holder[M.id][si];
   const specs=paramsFor(mi,slot), spec=specs[px]; if(!spec)return;
@@ -4120,10 +4151,13 @@ function adjustParam(d,m){
 function resetParam(){
   const [mi,si,px]=curAddr(); const M=MODULES[mi];
   if(!M.id)return;
-  if(S.layer===2&&!M.flat){flash('enter → edit slots');return;}
+  /* PRST is not a rack — presets have no `prs` key, so resolving a slot here
+     threw. The layer-2 guard used to catch it by accident; now it is explicit. */
+  if(M.prs)return;
+  if(oscFieldView(mi)){flash('code params: ←→ then ↑↓ · ⌫ resets rack params only');return;}
   const pre=S.presets[S.editSnd];
   if(S.prepFocus!=null&&pre.prep&&pre.prep.notes&&pre.prep.notes[S.prepFocus]){
-    const slot0=M.flat?null:pre[M.id][si];
+    const slot0=M.flat?null:modHolder(pre,M.id)[M.id][si];
     const specs0=paramsFor(mi,slot0), spec0=specs0[px];
     const key=M.id+':'+(M.flat?'-':si)+':'+(spec0&&spec0.key);
     const node=pre.prep.notes[S.prepFocus];
@@ -4140,7 +4174,14 @@ function resetParam(){
   pushUndo('reset');
   let dv;
   if(M.flat)dv=basePreset('')[M.id][spec.key];
-  else dv=RACK_MK[M.id](si)[spec.key];
+  else{
+    /* MOD's dest/slot#/amt/center live inside routes[] and are reached only
+       through the spec accessors, so reading the key off a fresh slot gave
+       undefined and wrote it straight back. */
+    const fresh=RACK_MK[M.id](si);
+    dv=spec.get?spec.get(fresh):fresh[spec.key];
+    if(dv===undefined)return;
+  }
   writeParam(S.editSnd,mi,si,px,dv);
   flash(spec.lbl+' reset'); dirty=true;
 }
@@ -6093,7 +6134,8 @@ function diveIn(){
   if(S.layer===0){
     if(S.mSel){S.layer=-2;S.mSlot=S.mSlot||0;S.mDj=null;S.mParam=0;dirty=true;return;}
     S.editPat=S.curPat;S.layer=1;}
-  else if(S.layer===1){S.editSnd=S.curPreset;S.layer=2;S.curMod=0;S.curParam=0;}  // land on PRESET
+  else if(S.layer===1){S.editSnd=S.curPreset;S.layer=2;S.curMod=0;S.curParam=0;
+    S.curSlot=0;S.slotParam=0;}  // land on PRESET, cursor rewound
   else if(S.layer===2){
     const M=MODULES[S.curMod];
     if(M.prs){
@@ -6102,7 +6144,7 @@ function diveIn(){
       S.libStash={name:p.name,cat:p.cat||'misc',data:presetData(p)};  // browsing is audition-only
       S.layer=3;
     }
-    else if(M.slot){S.layer=3;S.slotParam=0;}
+    else if(M.slot)S.layer=3;    // same strip, same params — keep the cursor
     else flash('no slots here');
   }
   dirty=true;
@@ -6397,7 +6439,7 @@ const onKeyDown=e=>{
       pushUndo('cell clear');
       const cell=cellOf(lp), t0=curCell(lp)*cell;
       if(S.layer===3)lp.clear(ev=>ev.m===S.curMod&&(ev.s??-1)===S.curSlot&&ev.t>=t0-1e-9&&ev.t<t0+cell-1e-9);
-      else if(S.layer===2)lp.clear(ev=>ev.m===S.curMod&&ev.t>=t0-1e-9&&ev.t<t0+cell-1e-9);
+      else if(S.layer===2)lp.clear(ev=>ev.m===S.curMod&&(ev.s??-1)===S.curSlot&&ev.t>=t0-1e-9&&ev.t<t0+cell-1e-9);
       else lp.clear(ev=>ev.t>=t0-1e-9&&ev.t<t0+cell-1e-9);
       if(S.layer===1&&!lp.events.length)lp.auto=true;
       dirty=true; dirtySave=true; return;}
@@ -6463,7 +6505,7 @@ const onKeyDown=e=>{
     else if(S.layer===2){
       const mi2=n===0?9:n-1;
       if(!MODULES[mi2].id){flash('reserved for future modules');return;}
-      S.curMod=mi2;S.curParam=0;S.curSlot=0;}
+      S.curMod=mi2;S.curParam=0;S.curSlot=0;S.slotParam=0;}
     else if(MODULES[S.curMod].prs){        // explorer: digit loads the nth entry on the page
       const p=S.presets[S.editSnd], pool=libAll().filter(en=>en.cat===(p.cat||'misc'));
       const idx=Math.floor((S.libSel||0)/10)*10+(n===0?9:n-1);
@@ -6472,21 +6514,24 @@ const onKeyDown=e=>{
     else {
       const si=n===0?9:n-1, M=MODULES[S.curMod];
       if(si===S.curSlot&&M.slot&&!M.prs){        // same slot again = bypass on/off
-        const sl=S.presets[S.editSnd][M.id][si];
+        const sl=modHolder(S.presets[S.editSnd],M.id)[M.id][si];
         pushUndo('bypass');
         sl.off=sl.off?0:1;
         engine.rebuildRack(S.editSnd); engine.refresh(S.editSnd);
         if(M.id==='osc')engine.oscLive(S.editSnd,'off');   // mute the operator now, not next note
         flash(M.name+' slot '+((si+1)%10)+(sl.off?' BYPASSED':' back on'));
         dirtySave=true;
-      }else{S.curSlot=si;S.slotParam=0;}
+      }else S.curSlot=si;      // hold the param index, as shift+←→ does; curAddr clamps
     }
     dirty=true; return;
   }
 
   if(c==='ArrowLeft'||c==='ArrowRight'){e.preventDefault();
     const d=c==='ArrowRight'?1:-1;
-    if(inEdit()){
+    if(inEdit()&&!(e.shiftKey&&S.layer>=2)){
+      /* EDIT owns the plain arrows (they walk the loop cells), but it used to
+         swallow shift too — so in EDIT you could change neither slot nor param
+         and could only ever place points on whatever was already focused. */
       const l2=curLoop(); stepCur=fmod(curCell(l2)+d,stepCells(l2));
     }
     else if(S.layer===0){
@@ -6500,27 +6545,45 @@ const onKeyDown=e=>{
     }
     else if(S.layer===1)S.curPreset=fmod(S.curPreset+d,10);
     else if(S.layer===2){
-      const pre2=S.presets[S.editSnd], stops=[];
-      MODULES.forEach((M2,mi2)=>{
-        if(M2.prs)prsFieldDefs().forEach((_,pi2)=>stops.push([mi2,pi2,0]));
-        else if(M2.flat)M2.flat.forEach((_,pi2)=>stops.push([mi2,pi2,0]));
-        else if(M2.slot){
-          if(M2.id==='osc'&&isCodeCh(S.editSnd)){CODEF().forEach((_,pi2)=>stops.push([mi2,pi2,0]));return;}
-          if(M2.id==='osc'&&isAudioCh(S.editSnd)){AUDF.forEach((_,pi2)=>stops.push([mi2,pi2,0]));return;}
-          const act2=[];
-          pre2[M2.id].forEach((sl2,si2)=>{if(M2.abbr(sl2)!=='···')act2.push(si2);});
-          if(!act2.length)act2.push(0);
-          act2.forEach(si2=>stops.push([mi2,0,si2]));   // each ACTIVE slot is a stop
-        }else if(M2.id)stops.push([mi2,0,0]);
-      });
-      let idx=stops.findIndex(st=>st[0]===S.curMod&&
-        (MODULES[S.curMod].slot&&!(MODULES[S.curMod].id==='osc'&&(isAudioCh(S.editSnd)||isCodeCh(S.editSnd)))?st[2]===S.curSlot:st[1]===S.curParam));
-      if(idx<0)idx=stops.findIndex(st=>st[0]===S.curMod);
-      if(idx<0)idx=0;
-      if(e.shiftKey){const cm=S.curMod;let j=idx,g=0;
-        do{j=fmod(j+d,stops.length);g++;}while(stops[j][0]===cm&&g<stops.length);idx=j;}
-      else idx=fmod(idx+d,stops.length);
-      S.curMod=stops[idx][0]; S.curParam=stops[idx][1]; S.curSlot=stops[idx][2];
+      /* Params flow left to right and spill into the next rack at the ends —
+         the same gesture whether the rack is flat or holds slots. shift picks
+         the SLOT, because digits already pick the rack and doing it twice left
+         slots with no control of their own. On a rack with no slots shift still
+         jumps rack, so the chord is never dead. */
+      const pre2=S.presets[S.editSnd];
+      const stepMod=dir=>{                       // next rack that actually exists
+        let i=S.curMod,g=0;
+        do{ i=fmod(i+dir,MODULES.length); g++; }while(!MODULES[i].id&&g<MODULES.length);
+        return i;
+      };
+      const nParams=mi2=>{
+        const M2=MODULES[mi2];
+        if(M2.prs)return prsFieldDefs().length;
+        if(M2.flat)return M2.flat.length;
+        if(M2.id==='osc'&&isCodeCh(S.editSnd))return CODEF().length;
+        if(M2.id==='osc'&&isAudioCh(S.editSnd))return AUDF.length;
+        if(M2.slot)return paramsFor(mi2,modHolder(pre2,M2.id)[M2.id][S.curSlot]).length;
+        return 1;
+      };
+      const setParam=(mi2,px)=>{ if(flatView(mi2))S.curParam=px; else S.slotParam=px; };
+      if(e.shiftKey&&!flatView(S.curMod)){
+        /* Keep the param index across the slot change — curAddr clamps it. It
+           used to zero, which is fine until you are in mod-loop EDIT, where the
+           plain arrows belong to the cell cursor: the param was then pinned at
+           0 (the type enum) with no key left to move it. Holding position also
+           happens to be what you want when comparing one param across slots. */
+        S.curSlot=fmod(S.curSlot+d,10);
+      }else if(e.shiftKey){
+        S.curMod=stepMod(d); S.curParam=0; S.slotParam=0;
+      }else{
+        const cur=flatView(S.curMod)?S.curParam:S.slotParam;
+        const np=cur+d;
+        if(np>=0&&np<nParams(S.curMod))setParam(S.curMod,np);
+        else{
+          S.curMod=stepMod(d);
+          setParam(S.curMod,d>0?0:Math.max(0,nParams(S.curMod)-1));
+        }
+      }
     }
     else if(MODULES[S.curMod].prs){        // explorer: page
       S.libSel=Math.max(0,(S.libSel||0)+d*10);
@@ -6895,11 +6958,11 @@ const screen=document.getElementById('screen');
    note keys keep playing mid-drag. */
 const MOUSE={on:false,acc:0,y:0,kind:null,moved:false};
 function mouseFocus(kind,i){
-  if(kind==='cp'||kind==='set'){ if(S.layer===-3)S.setSel=i; else S.curParam=i; }
+  if(kind==='cp'||kind==='set'){ if(S.layer===-1)S.setSel=i; else S.curParam=i; }
   else if(kind==='slot')S.slotParam=i;
   else if(kind==='mst')S.mParam=i;
   else if(kind==='sl'){S.curSlot=i; S.slotParam=0;}
-  else if(kind==='mod'){S.curMod=i; S.curParam=0; S.slotParam=0;}
+  else if(kind==='mod'){S.curMod=i; S.curParam=0; S.slotParam=0; S.curSlot=0;}
   else if(kind==='msl'){S.mSlot=i; S.mDj=null; S.mParam=0;}
   else if(kind==='dj'){S.mDj=i; S.mParam=0;}
   else if(kind==='ch'){ if(S.layer>=2)S.editSnd=i; else S.curPreset=i; }
@@ -6973,6 +7036,49 @@ function loopBadge(){
   const lane=S.layer===1?sp('d',' lane ')+sp('a',S.curPreset+pad(S.presets[S.curPreset].name,5))+' ':' ';
   const len=lp._cap?sp('r','listening…'):sp('a',cnt+'×'+UNIT_NAMES[lp.unit])+sp('d',' ('+(Math.round(lp.len*100)/100)+'b)');
   return stateBadge(h.state)+lane+len;
+}
+/* The strip and the param rows a slot rack shows. Layer 2 and layer 3 now draw
+   the SAME thing from the same code — the only reason a filter felt deeper than
+   a voice was that this lived exclusively in the rack view.
+   Abbreviations are capped: MOD's are unbounded and a fully routed rack pushed
+   the strip past the 104ch page width, which re-centres every other line. */
+/* Trim a line of markup to n VISIBLE characters, leaving tags intact. */
+function clipLine(html,n){
+  let out='',seen=0,i=0;
+  while(i<html.length){
+    if(html[i]==='<'){const j=html.indexOf('>',i); if(j<0)break; out+=html.slice(i,j+1); i=j+1; continue;}
+    if(seen>=n){                                  // close anything still open
+      const rest=html.slice(i).match(/<\/[^>]+>/g)||[];
+      return out+'…'+rest.join('');
+    }
+    out+=html[i]; seen++; i++;
+  }
+  return out;
+}
+function rackStrip(L,rackA,M){
+  let tabs='  ';
+  rackA.forEach((sl,i)=>{
+    const ab=M.abbr(sl), sh=ab.length>7?ab.slice(0,7):ab;
+    const lbl=` ${(i+1)%10}${sl.off?'×':''}${sh} `;
+    tabs+=(i===S.curSlot?spH('i',lbl,'sl',i):(sl.off?spH('d',lbl,'sl',i)
+      :ab!=='···'?spH('a',lbl,'sl',i):spH('d',lbl,'sl',i)));
+  });
+  L.push(tabs);
+}
+function rackParams(L,pre,specs){
+  S.slotParam=clamp(S.slotParam|0,0,Math.max(0,specs.length-1));
+  for(let ofs=0;ofs<specs.length;ofs+=5){
+    let lr='   ', vr='   ';
+    specs.slice(ofs,ofs+5).forEach((pspec,j)=>{
+      const i=ofs+j, foc=i===S.slotParam;
+      const pd=prepDisp(pre,S.curMod,S.curSlot,pspec);
+      const v=(pd.dot?'•':'')+fmtVal(pspec,pd.v);
+      lr+=(foc?spH('a','▸'+pad(pspec.lbl,9),'slot',i):spH('d',' '+pad(pspec.lbl,9),'slot',i))+' ';
+      vr+=(foc?spH('i',' '+pad(v,9),'slot',i)
+             :(pd.dot?spH('r',' '+pad(v,9),'slot',i):spH('v',' '+pad(v,9),'slot',i)))+' ';
+    });
+    L.push(lr); L.push(vr);
+  }
 }
 function gridRow(lp,cell,phCell,charFor,cur=-1,hit){
   const n=Math.ceil(lp.len/cell-1e-9);
@@ -7240,18 +7346,17 @@ function renderSnd(L,pos){
     });
     L.push(lr); L.push(vr);
     L.push('');
-    L.push('   '+sp('d','←→ flows through params → next module · shift+←→ jumps module · ↑↓ adjust · ⌫ reset'));
+    L.push('   '+sp('d','←→ params → next rack · shift+←→ jumps rack · digits rack · ↑↓ adjust · ⌫ reset'));
   }else if(M.slot){
-    let srow='   ';
-    pre[M.id].forEach((sl,i)=>{
-      const ab=M.abbr(sl);
-      const lbl=` ${(i+1)%10}${ab} `;
-      srow+=(i===S.curSlot?sp('i',lbl):(ab!=='···'?sp('a',lbl):sp('d',lbl)));
-    });
-    L.push('  '+sp('d','slots:'));
-    L.push(srow);
+    /* modHolder, not pre[M.id]: on a kit channel the rack you EDIT belongs to
+       the focused pad, and rendering the channel's rack here would show one
+       set of values while every edit went to another. */
+    const rackA=modHolder(pre,M.id)[M.id];
+    rackStrip(L,rackA,M);
     L.push('');
-    L.push('   '+sp('d','enter → edit slots · digits pick module'));
+    rackParams(L,pre,paramsFor(S.curMod,rackA[S.curSlot]));
+    L.push('');
+    L.push('   '+sp('d','←→ params → next rack · shift+←→ slot · digits rack · enter → full rack view'));
   }else{
     L.push('   '+sp('d','(reserved)'));
   }
@@ -7305,28 +7410,10 @@ function renderSlots(L){
   layerBanner(L,pre);
   if(!M.slot){L.push('   '+sp('d','no slots'));return;}
   const rackA=modHolder(pre,M.id)[M.id];
-  let tabs='  ';
-  rackA.forEach((sl,i)=>{
-    const ab=M.abbr(sl);
-    const lbl=` ${(i+1)%10}${sl.off?'×':''}${ab} `;
-    tabs+=(i===S.curSlot?spH('i',lbl,'sl',i):(sl.off?spH('d',lbl,'sl',i):ab!=='···'?spH('a',lbl,'sl',i):spH('d',lbl,'sl',i)));
-  });
-  L.push(tabs);
+  rackStrip(L,rackA,M);
   L.push('');
   const sl=rackA[S.curSlot];
-  const specs=paramsFor(S.curMod,sl);
-  S.slotParam=Math.min(S.slotParam,specs.length-1);
-  for(let ofs=0;ofs<specs.length;ofs+=5){
-    let lr='   ', vr='   ';
-    specs.slice(ofs,ofs+5).forEach((pspec,j)=>{
-      const i=ofs+j, foc=i===S.slotParam;
-      const pd=prepDisp(pre,S.curMod,S.curSlot,pspec);
-      const v=(pd.dot?'•':'')+fmtVal(pspec,pd.v);
-      lr+=(foc?spH('a','▸'+pad(pspec.lbl,9),'slot',i):spH('d',' '+pad(pspec.lbl,9),'slot',i))+' ';
-      vr+=(foc?spH('i',' '+pad(v,9),'slot',i):(pd.dot?spH('r',' '+pad(v,9),'slot',i):spH('v',' '+pad(v,9),'slot',i)))+' ';
-    });
-    L.push(lr); L.push(vr);
-  }
+  rackParams(L,pre,paramsFor(S.curMod,sl));
   L.push('');
   // per-module summary line
   let sum='  '+sp('d','rack: ');
@@ -7353,7 +7440,10 @@ function renderSlots(L){
       sum+=(i===S.curSlot?sp('a','  '+((i+1)%10)+ab):sp('d','  '+((i+1)%10)+ab));
     });
   }
-  L.push(sum);
+  /* Hard cap: this line is assembled from unbounded per-slot descriptions and
+     a fully routed MOD rack reached 248ch, which shoves the whole centred page
+     sideways. Trim on the rendered text, so short racks look exactly as before. */
+  L.push(clipLine(sum,100));
   L.push('');
   // mod loop, scoped to this slot (dim dots = other slots of this module)
   const ml=pre.modLoop, mEdit=ml.state==='edit';
@@ -7370,11 +7460,11 @@ function renderSlots(L){
     evSlot.some(e=>e.t>=a-1e-9&&e.t<b-1e-9)?'▪':
     evMod.some(e=>e.t>=a-1e-9&&e.t<b-1e-9)?'∙':'·',mEdit?curCell(ml):-1,'cell'));
   if(mEdit)L.push('  '+sp('i',' EDIT ')+' '+sp('a',(curCell(ml)+1)+'/'+stepCells(ml))+
-    sp('d','  ←→ cursor · ↑↓ set point for focused param · ⌫ clear cell'));
+    sp('d','  ←→ cursor · shift+←→ slot · ↑↓ set point · ⌫ clear cell'));
   L.push('');
   const hints={osc:'dest routes fm/ring/sync at any op · sync: ratio = the sweep, pitch follows the master · edits are live on held notes',
     flt:'peq/lsh/hsh use gain — stack EQ bands alongside filters',
-    mod:'src = env/lfo/vel/key/rnd/press (live per-note pressure) · dest = amp/pitch/filt/pan/op · cmd+C then cmd+V learns any param',
+    mod:'src = env/lfo/vel/key/rnd/press · dest = amp/pitch/filt/pan/op · cmd+C then cmd+V learns any param',
     fx:'serial chain top to bottom · dist holds every drive/crush curve (drv + crush retired into it)',
     ply:'chord (±strum: + low→high, − high→low) · arp needs transport · grv = this part’s groove · rpit = per-note random pitch'};
   L.push('   '+sp('d','←→ flows params → next slot · shift+←→ jumps slot · digits pick slot · ↑↓ value'));
