@@ -2097,7 +2097,11 @@ class Engine{
     const keys=new Set();
     for(const m2 in p.prep.notes)for(const key in (p.prep.notes[m2].k||{})){
       const id=key.split(':')[0];
-      if(id==='amp'||id==='fx'||id==='mix')keys.add(key);
+      /* Derive from MODULES rather than literals: 'amp' has not been a rack
+         since v13 (folded into 'mod'), and 'mod' — the rack that replaced it —
+         was missing, so a per-note override on a MOD slot never triggered the
+         rebuild it needs. */
+      if(id==='fx'||id==='mix'||id==='mod'||id==='amp')keys.add(key);
     }
     if(!keys.size)return;
     const node=p.prep.notes[midi];
@@ -3635,7 +3639,7 @@ function layerInit(){
     S.patterns[S.editPat].lanes.forEach(l=>{l.clear();l.auto=true;delete l._cap;});
     flash('⟲ pattern '+S.editPat+' re-initialized (all lanes)');
   }else if(S.layer>=2){
-    pushUndo('sound init');
+    pushUndo('channel init');
     const pi=S.editSnd, cat=S.presets[pi].cat||'misc';
     S.presets[pi]=initPreset(cat);
     engine.rebuildRack(pi); engine.refresh(pi);
@@ -3916,7 +3920,11 @@ function prsFieldDefs(){
     {k:'rnd',  v:()=>'↕ roll'},
     {k:'wild', v:()=>(CFG.wild??50)+'%'}];
 }
-const PRSFIELDS=['engine','type','prst','save','rnd','wild'];   // legacy stops reference (nav uses prsFieldDefs)
+/* (There was a PRSFIELDS array here: a second, hand-written copy of the PRST
+   field keys that nothing referenced, already missing half of them and still
+   listing 'type' from before the engine split. Deleted — prsFieldDefs() is the
+   only source of truth, and a decoy list is how a renamer concludes it is
+   finished.) */
 const AUDF=[
  SP('gain','gain','lin',{min:0,max:1,step:0.05}),
  SP('pitch','semis','lin',{min:-24,max:24,step:1,fmt:v=>v+'st'}),
@@ -3987,8 +3995,11 @@ function _prsAction(d){
       dirty=true; return;
     }
     if(f==='sound'){                 // this pad's instrument type
+      /* A pad is a synth chain: kit, audio and proc are ENGINES, not
+         categories a pad can hold. Guarding two of them by name let 'proc'
+         through, which installs a procedural preset as a pad. */
       const cat=CATS[fmod(CATS.indexOf(kcat)+d,CATS.length)];
-      if(cat==='kit'||cat==='audio'){dirty=true;return;}
+      if(!SYNTHCATS.includes(cat)){dirty=true;return;}
       const pool=libAll().filter(en=>en.cat===cat);
       if(pool.length){const kp=libToPreset(pool[0]);kp.cat=cat;p.kit[pcOf(S.prepFocus)]=kp;}
       else K.cat=cat;
@@ -4068,7 +4079,11 @@ function _prsAction(d){
   else if(f==='wild'){
     CFG.wild=clamp((CFG.wild??50)+d*5,0,100); saveCfg();
     flash('rnd wildness '+CFG.wild+'% — low = tame/typical, high = more slots & motion');}
-  else randomizeChannel(pi);
+  else if(f==='rnd')randomizeChannel(pi);
+  /* Anything unmatched used to fall into randomizeChannel and reroll the whole
+     channel. A field key renamed in one place and not the other would have
+     destroyed the user's sound rather than doing nothing — say so instead. */
+  else flash('unhandled PRST field: '+f);
   dirty=true;
 }
 
@@ -4114,7 +4129,7 @@ function prepTweak(d,m){
   const pre=S.presets[S.editSnd];
   if(S.prepFocus==null){flash('play a note first — shift-tweaks land on that note only');return;}
   const [mi,si,px]=curAddr(); const M=MODULES[mi];
-  if(!M.id||M.prs){flash('focus a sound parameter');return;}
+  if(!M.id||M.prs){flash('focus a channel parameter');return;}
   if(oscFieldView(mi)){flash('code params cannot be prepped per note');return;}
   const slot=M.flat?null:modHolder(pre,M.id)[M.id][si];
   const specs=paramsFor(mi,slot), spec=specs[px]; if(!spec)return;
@@ -6510,7 +6525,7 @@ const onKeyDown=e=>{
     }
     else if(S.layer===2){
       const mi2=n===0?9:n-1;
-      if(!MODULES[mi2].id){flash('reserved for future modules');return;}
+      if(!MODULES[mi2].id){flash('reserved for future racks');return;}
       S.curMod=mi2;S.curParam=0;S.curSlot=0;S.slotParam=0;}
     else if(MODULES[S.curMod].prs){        // explorer: digit loads the nth entry on the page
       const p=S.presets[S.editSnd], pool=libAll().filter(en=>en.cat===(p.cat||'misc'));
@@ -7120,7 +7135,7 @@ function render(){
     {t:'ARRANGE',on:S.layer===0},
     S.layer===-2?{t:'MASTER 0',on:true}
       :{t:'PATTERN '+(S.layer>0?S.editPat:S.curPat),on:S.layer===1},
-    {t:'SOUND '+(S.layer>1?S.editSnd+' '+S.presets[S.editSnd].name:(S.layer===-2?'':S.curPreset)),on:S.layer===2},
+    {t:'CHANNEL '+(S.layer>1?S.editSnd+' '+S.presets[S.editSnd].name:(S.layer===-2?'':S.curPreset)),on:S.layer===2},
     {t:MODULES[S.curMod].prs?'LIBRARY':MODULES[S.curMod].name+' RACK',on:S.layer===3},
   ];
   if(S.layer===-2)path.splice(3,2);             // master is a leaf
@@ -7199,7 +7214,7 @@ function renderPat(L,pos){
   const pat=S.patterns[S.editPat];
   const edit=pat.state==='edit';
   const anc=editAnchor();
-  L.push('  '+sp('d','presets   (digits select · again = mute · shift+digit = solo · shift+↑↓ = swap sound)'));
+  L.push('  '+sp('d','channels  (digits select · again = mute · shift+digit = solo · shift+↑↓ = swap preset)'));
   let row='   ';
   for(let i=0;i<10;i++){
     const m=pat.lanes[i].mute, so=pat.lanes[i].solo;
@@ -7253,7 +7268,7 @@ function renderPat(L,pos){
       sp('d','   q:')+(CFG.qOn?sp('a',Math.round((ql.qlive??1)*100)+'%'):sp('r','off'))+sp('d',' live (q toggle · ⇧Q snap lane)')+'   '+
       (pat.state==='rec'?(T.playing?sp('r','● REC — held notes replace lane · hold ⌫ = silence'):sp('r','● armed — press space')):
       sp('d','letters play live · tab = REC · / = edit'))+
-      '   '+sp('d','enter → sound '+S.curPreset));
+      '   '+sp('d','enter → channel '+S.curPreset));
   }
 }
 
@@ -7338,7 +7353,7 @@ function renderSnd(L,pos){
     L.push(lr); L.push(vr);
     stackStrip(L,p);
     L.push('');
-    if(onLayer)L.push('   '+sp('d','←→ field · ↑↓ set · this pad is a full chain — every module edits it · ⌫ resets the pad'));
+    if(onLayer)L.push('   '+sp('d','←→ field · ↑↓ set · this pad is a full chain — every rack edits it · ⌫ resets the pad'));
     else L.push('   '+sp('d','←→ field · ↑↓ act · stack = off/stack/split · layer = add & edit · enter → library'));
   }
   else if(M.flat){
@@ -7386,7 +7401,7 @@ function layerBanner(L,pre){     // which kit pad you're editing
   const K=kitSlot(pre,S.prepFocus), pc=pcOf(S.prepFocus);
   if(M.prs)return;
   L.push('  '+sp('r','◆ pad '+NN[pc])+sp('a',' '+K.name+' ('+(K.cat||'kik')+')')+
-    sp('d',' — this pad is its own full chain; every module edits THIS pad'));
+    sp('d',' — this pad is its own full chain; every rack edits THIS pad'));
 }
 function prepDisp(pre,mi,si,spec){
   const holder=modHolder(pre,MODULES[mi].id);
@@ -7459,7 +7474,7 @@ function renderSlots(L){
   const evMod=ml.events.filter(e=>e.m===S.curMod);
   /* armed has to READ as armed — this was dim grey next to the point count,
      which is indistinguishable from not being armed at all */
-  L.push('  '+sp('d','mod loop (slot '+((S.curSlot+1)%10)+'): '+evSlot.length+' pts · module '+evMod.length)
+  L.push('  '+sp('d','mod loop (slot '+((S.curSlot+1)%10)+'): '+evSlot.length+' pts · rack '+evMod.length)
     +(ml.state==='rec'?sp('r',T.playing?'   ● REC — param moves record here':'   ● armed — press space'):'')
     +sp('d','  ·  ⇧⌫ clear slot pts'));
   L.push('   '+gridRow(ml,cellM,phM,(a,b)=>
@@ -7575,7 +7590,7 @@ function renderSettings(L){
 function renderHelp(L){
   const rows=[
     ['space','play / stop (restart from 0)'],
-    ['enter / esc','navigate layers: arrange › pattern › sound › module slots'],    ['` or tab','hold = REC (momentary default) · latch mode in settings makes it toggle'],
+    ['enter / esc','session › arrange › pattern › channel › rack — enter deeper, esc up'],    ['` or tab','hold = REC (momentary default) · latch mode in settings makes it toggle'],
     ['p (arrange) · shift+P','EDIT mode on/off (step cursor) · esc leaves it'],
     ['/','VARIATION: musical changes in the ballpark of what\u2019s already there'],
     ['shift+/','FRESH: a genuinely different (but musical) style — new key, groove, sounds'],
@@ -7583,11 +7598,11 @@ function renderHelp(L){
     ['/ (session layer)','generate a whole SONG: intro/build/drop/break + dj-automated arrangement'],
     ['dj pads + arr REC/EDIT','held pads record as timed fx windows (≈) · in edit they toggle at the cursor'],
     ['a s d f g h j k l ; (arrange)','DJ pads — hold = momentary fx · shift = latch · edit them inside MASTER 0'],
-    ['0-9','arrange: part · pattern: channel · sound: module · rack: slot (same digit = bypass)'],
+    ['0-9','arrange: part · pattern: channel · channel: rack · rack: slot (same digit = bypass)'],
     ['a w s e d f t g y h u j k o l p ; \'','play notes · z/x keyboard register · c/v velocity'],
     ['← →','move focus / edit cursor'],
     ['↑ ↓','adjust focused value · option=×0.1 · transpose in the pattern layer'],
-    ['shift+↑↓ (sound)','tweak the LAST-PLAYED NOTE only — • marks prepped params · ⌫ removes'],
+    ['cmd+↑↓ (in a channel)','tweak the LAST-PLAYED NOTE only — • marks prepped params · ⌫ removes'],
     ['- =','loop length ±1 unit — every layer, never parameter values'],
     ['shift+- =','nudge the loop’s content ±1 unit (option = half unit)'],
     ['same digit again (pattern)','mute / unmute that channel’s lane'],
@@ -7595,9 +7610,9 @@ function renderHelp(L){
     ['z x','keyboard register — where your keys sit (per channel, playing only)'],
     ['↑ ↓ (pattern)','transpose the channel ±1 octave — recorded notes included'],
     ['shift+↑↓ (pattern)','swap the channel’s sound: prev/next library preset of its type'],
-    ['module 1 PRST','browse/type/save/randomize · stack/layer fields · enter = library'],
+    ['rack 1 PRST','browse/type/save/randomize · stack/layer fields · enter = library'],
     ['PRST ▸engine','Kit · Synth · Procedural · Audio  (Sampler and Grain next)'],
-    ['module 4 MOD','one source (env/lfo/vel/key/rnd/press) → routes: each target has own amt+range'],
+    ['rack 4 MOD','one source (env/lfo/vel/key/rnd/press) → routes: each target has own amt+range'],
     ['cmd+C on a MOD slot','arm it · then cmd+V on a filter/osc/mix param maps a route there'],
     ['q','live quantize ON/OFF (global) — what you hear is exactly what records'],
     ['shift+Q (in pattern)','snap the selected lane to the grid now (for takes recorded with q off)'],
@@ -7605,7 +7620,7 @@ function renderHelp(L){
     ['empty lane + REC','lane listens, then suggests 1/2/4/8/16 bars'],
     ['hold a note (while REC)','replaces whatever was on that lane underneath'],
     ['hold backspace (while REC)','records silence — erases the lane under the playhead'],
-    ['backspace (tap)','sound/slots: reset param · pattern: clear lane (re-arms listening)'],
+    ['backspace (tap)','channel/rack: reset param · pattern: clear lane (re-arms listening)'],
     ['shift+backspace (in arrange)','clear ALL lanes of the selected pattern'],
     ['[  ]  \\  - =','loop half / double+dup / unit / ±1 unit (arrange+pattern)'],
     ['←→ / ↑↓ (in arrange)','groove · amount · humanize · switch mode — params on the arrows'],

@@ -1,7 +1,7 @@
 # TEN — keyboard-only groovebox
 
 An OP-1-inspired music instrument that lives entirely on a computer keyboard.
-Ten of everything: patterns, channels, module slots, rack slots — all on the
+Ten of everything: patterns, channels, racks, slots — all on the
 `0-9` keys, with meaning depending on which **layer** you're in.
 
 **Play it:** https://gadbaruch.github.io/Ten/ — or just open `index.html`
@@ -19,15 +19,20 @@ ARRANGE       digits select parts · slots ARE song sections (0 intro … 9 outr
   │           0,0 selects MASTER — the unique channel on the far right
   ├─ MASTER 0   fx rack (sends + mix inserts, limiter stock) + dj pad editor
   └─ PATTERN  digits pick channel (again=mute, shift=solo) · letters play notes
-      └─ SOUND    digits pick module — 1 PRST 2 OSC 3 FILT 4 MOD
-          └─ RACK     │       5 FX 6 VOICE 7 MIX 0 PLAY
-                      └─ every module is a 10-slot rack; digits pick a slot,
-                        the same digit again BYPASSES it
+      └─ CHANNEL  digits pick a rack — 1 PRST 2 OSC 3 FILT 4 MOD
+          │                            5 FX 6 VOICE 7 MIX 0 PLAY
+          │         every rack holds 10 slots; shift+←→ picks the slot and
+          │         its params are editable right here
+          └─ RACK     the same rack, roomier — digits pick a slot,
+                      the same digit again BYPASSES it
 ```
 
 The full ladder is always visible up top — you are the lit rung; `enter`
-goes deeper, `esc` goes up. `←→` walk every focusable field (`shift+←→`
-jumps modules/parts). `↑↓` adjust values (shift ×10, option ×0.1);
+goes deeper, `esc` goes up. Since slot params are editable from CHANNEL,
+`enter` into a RACK is optional — it is the same rack with more room.
+`←→` walk params and spill into the next rack at either end; **`shift+←→`
+picks the SLOT** (digits already pick the rack). `↑↓` adjust values
+(shift ×10, option ×0.1);
 `cmd+↑↓` tweaks the **last-played note only** (prepared-piano on any
 channel — `•` marks prepped params, `⌫` removes). `-`/`=` resize loops,
 `shift+-/=` nudge a loop's content. `q` toggles live quantize anywhere
@@ -56,7 +61,7 @@ a sensible power-of-two length, wrapped from your entry point. Classic
 momentary/latch REC modes are in settings. An empty pattern's first hit
 **sets the One** (transport retriggers on it).
 
-**Sound = racks.** Every module is 10 slots: operators (add/fm/ring/**sync**
+**A channel is racks.** Every rack is 10 slots: operators (add/fm/ring/**sync**
 with free dest routing, phase + rtrg/free trig, incl. an `smp` sampler wave —
 drop an audio file on an op), filters incl. EQ bands, a **MOD** rack, an
 **FX** chain, and **PLAY**. The MOD rack unifies modulation — each slot
@@ -170,7 +175,7 @@ browsing auditions safely: `enter` keeps, `esc` restores your sound.
 **complete independent instrument** — its own oscillators, filters, mod
 rack, fx, everything. Octaves just transpose, so C2/C3/C4 all play pad C
 at different pitches. Play a pad and it becomes the one you see and edit:
-PRST shows that pad's type/sound/level/pan, and every module (OSC, FILT,
+PRST shows that pad's engine/pad/sound/prst/level/pan, and every rack (OSC, FILT,
 MOD, VOICE, FX) edits *that pad*. `rnd` on PRST rerolls the whole kit;
 `⌫` resets the focused pad.
 
@@ -210,7 +215,9 @@ top to bottom; each section is banner-commented in this order:
 1. **Looper class** — the generic loop primitive (events in beats).
 2. **Settings (CFG)**, scales, groove templates, undo helpers.
 3. **Param spec system** — `MODULES` table + `SP()` specs; every parameter
-   is addressed as `(module, slot, param)`; `getV/setV/adjust/fmtVal` are
+   is addressed as `(rack, slot, param)` — the code still calls a rack a
+   `module` (`MODULES`, `S.curMod`), which is the one place the two
+   vocabularies differ; `getV/setV/adjust/fmtVal` are
    the only ways values are read/written/displayed.
 4. **Presets** — `basePreset()` shape, factory presets, library
    (localStorage `ten-lib-v1`), seeded generator.
