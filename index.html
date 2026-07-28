@@ -98,6 +98,7 @@ const FTYPES=['off','lp','hp','bp','ntc','peq','lsh','hsh'];
    went to 16k, so the fx slots were the odd ones out. */
 const xFreq=v=>20*Math.pow(1000,clamp(v,0,1));
 const xSpray=v=>Math.pow(clamp(v,0,1),3.3);      // 0.5 -> ~0.10, 1 -> 1
+const xFbT=v=>0.02*Math.pow(100,clamp(v,0,1));   // 20ms .. 2s, exponential
 const xHz=v=>{const f=xFreq(v);return f>=1000?(f/1000).toFixed(f<10000?2:1)+'k':Math.round(f)+'Hz';};
 const XFT=['lp','hp','bp','ntc','peq','lsh','hsh','fmnt','vowel'];
 const XFT_W={lp:'lowpass',hp:'highpass',bp:'bandpass',ntc:'notch',
@@ -241,7 +242,7 @@ function rpitApply(midi,sl){
   }
   return m+r()*(sl.p1||0)/100;                             // cents ride on top
 }
-const mkFx  =()=>({typ:0,p1:0.3,p2:0.3,p3:0.5,p4:0.3,p5:0,p6:0.5,p7:0.7,mix:0.3});
+const mkFx  =()=>({typ:0,p1:0.3,p2:0.3,p3:0.5,p4:0.3,p5:0,p6:0.5,p7:0.7,p8:0.45,mix:0.3});
 const mkPly =()=>({typ:0,p1:2,p2:0,p3:1,p4:60,p5:0,p6:0});   // p5 spare · p6 stage(post/pre)
 /* v17 fx migration, applied once per stored rack: standalone drv/crush become
    the equivalent `dist` curve, and verb size moves off the old linear 0.3..4.3s
@@ -493,6 +494,8 @@ const FX_P=sl=>{
          SP('rand','p6','lin',{min:0,max:1,step:0.05}),
          SP('width','p7','lin',{min:0,max:1,step:0.05}),
          SP('fdbk','p5','lin',{min:0,max:0.92,step:0.04}),
+         SP('ftime','p8','lin',{min:0,max:1,step:0.02,
+            fmt:v=>{const t=xFbT(v);return t>=1?t.toFixed(2)+'s':Math.round(t*1000)+'ms';}}),
          SP('mix','mix','lin',{min:0,max:1,step:0.05})],
   };
   return base.concat(tail[t]||[]);
@@ -718,12 +721,18 @@ let fxwReady=false;
       {name:'spray',defaultValue:0.3, minValue:0,    maxValue:1,  automationRate:'k-rate'},
       {name:'fb',   defaultValue:0,   minValue:0,    maxValue:0.92,automationRate:'k-rate'},
       {name:'rand', defaultValue:0.5, minValue:0,    maxValue:1,  automationRate:'k-rate'},
-      {name:'wide', defaultValue:0.7, minValue:0,    maxValue:1,  automationRate:'k-rate'}];}
+      {name:'wide', defaultValue:0.7, minValue:0,    maxValue:1,  automationRate:'k-rate'},
+      {name:'fbt',  defaultValue:0.3, minValue:0.005,maxValue:2,  automationRate:'k-rate'}];}
     constructor(){super();
       this.N=Math.floor(sampleRate*4);
       this.bL=new Float32Array(this.N); this.bR=new Float32Array(this.N);
-      this.w=0; this.g=[]; this.next=0; this.fl=0; this.fr=0; this.nrm=1; this.par=1;
-      this.fill=0;}
+      this.w=0; this.g=[]; this.next=0; this.nrm=1; this.par=1; this.fill=0;
+      /* Feedback gets its OWN delay line. Closing the loop through the grain
+         lookback made the repeat period a side effect of spray — and a
+         different one per grain once randomised, so it never repeated at any
+         particular rate, it just smeared. */
+      this.fN=Math.floor(sampleRate*2);
+      this.fA=new Float32Array(this.fN); this.fB=new Float32Array(this.fN); this.fw=0;}
     process(ins,outs,par){
       const inp=ins[0], out=outs[0]; if(!out||!out[0])return true;
       const oL=out[0], oR=out[1]||null;
@@ -731,13 +740,16 @@ let fxwReady=false;
       const n=oL.length, N=this.N;
       const size=par.size[0], dens=par.dens[0], rt=par.rate[0], sp=par.spray[0], fb=par.fb[0];
       const rnd=par.rand[0], wide=par.wide[0];
+      let fd=Math.floor(par.fbt[0]*sampleRate);
+      if(fd<1)fd=1; if(fd>this.fN-1)fd=this.fN-1;
       const glen=Math.max(48,Math.floor(size*sampleRate));
       const per=Math.max(8,Math.floor(sampleRate/(dens>0.5?dens:0.5)));
       for(let i=0;i<n;i++){
         /* feedback re-records the cloud, which is what turns a grain sprinkle
            into an evolving wash rather than a delay line */
-        this.bL[this.w]=(iL?iL[i]:0)+this.fl*fb;
-        this.bR[this.w]=(iR?iR[i]:0)+this.fr*fb;
+        let fr2=this.fw-fd; if(fr2<0)fr2+=this.fN;
+        this.bL[this.w]=(iL?iL[i]:0)+this.fA[fr2]*fb;
+        this.bR[this.w]=(iR?iR[i]:0)+this.fB[fr2]*fb;
         if(--this.next<=0){
           this.next=per;
           if(this.g.length<64){
@@ -782,7 +794,8 @@ let fxwReady=false;
         const tgt=1/Math.sqrt(1+this.g.length*0.55);
         this.nrm+=(tgt-this.nrm)*0.0016;
         sl*=this.nrm; sr*=this.nrm;
-        this.fl=sl; this.fr=sr;                  // pre-makeup: loop gain is just fb
+        this.fA[this.fw]=sl; this.fB[this.fw]=sr;   // pre-makeup: loop gain is just fb
+        this.fw=this.fw+1; if(this.fw>=this.fN)this.fw=0;
         sl*=1.9; sr*=1.9;
         if(sl>0.98||sl<-0.98)sl=sl>0?0.98:-0.98;
         if(sr>0.98||sr<-0.98)sr=sr>0?0.98:-0.98;
@@ -1719,6 +1732,7 @@ class Engine{
         P('fb').value=clamp(fx.p5??0,0,0.92);
         P('rand').value=clamp(fx.p6??0.5,0,1);
         P('wide').value=clamp(fx.p7??0.7,0,1);
+        P('fbt').value=xFbT(fx.p8??0.45);
         cur.connect(gn); gn.connect(wet);
       }
     }else if(t==='verb'){
