@@ -2351,6 +2351,15 @@ class Engine{
                 if(vo._fd<=0)vo.done=true;
               }
               if(!(x===x)||x<-64||x>64)continue;
+              /* Reap voices that have gone inaudible. Nothing marked a model
+                 done once it had decayed away, so a fast passage left dozens
+                 of silent modal synths still rendering every sample — wasted
+                 CPU, and a voice meter that kept climbing. Peak-hold with a
+                 30ms decay, so a zero crossing cannot trigger it, and only
+                 after 0.5s so slow attacks are safe. */
+              const ax=x<0?-x:x;
+              vo._pk=ax>(vo._pk||0)?ax:(vo._pk||0)*0.99931;
+              if(vo._pk<0.0001&&vo._t>0.5){vo.done=true;continue;}
               x*=(vo._amp!==undefined?vo._amp:1);
               const pn=vo._pan||0;
               sm  += x*(pn>0?1-pn*0.85:1);
