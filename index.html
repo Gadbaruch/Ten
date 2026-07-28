@@ -4435,7 +4435,12 @@ function render(v,p){
   ${extra}
   // release: a played note that is let go damps rather than rings on
   if(v.rel){ v.env*=(1-v._rr); if(v.env<0.0006) v.done=true; }
-  if(t>${atk} && Math.abs(y)<1e-5 && t>0.25) v.done=true;
+  /* peak-hold, NOT the raw sample: a ringing tone crosses zero hundreds of
+     times a second, so testing |y| killed the voice at whichever crossing
+     happened to land near zero — and the quieter the tail got, the likelier
+     that was, so a long decay was cut off before it rang out. */
+  v._q=Math.abs(y)>v._q?Math.abs(y):(v._q||0)*0.9997;
+  if(t>${atk} && v._q<1e-5 && t>0.25) v.done=true;
   y=Math.tanh(y*(1+p[7]*3));
   v.t+=srI;
   return y*v.vel*v.env*0.5*(0.4+0.6*p[0]);
@@ -4482,7 +4487,12 @@ function render(v,p){
   y=Math.tanh(y*(1+p[7]*2.6));
   v.dc+=(y-v.dc)*0.0006; y-=v.dc;
   if(v.rel){ v.env*=(1-v._rr); if(v.env<0.0006)v.done=true; }
-  if(t>0.3&&Math.abs(y)<1e-5)v.done=true;
+  /* peak-hold, NOT the raw sample: a ringing tone crosses zero hundreds of
+     times a second, so testing |y| killed the voice at whichever crossing
+     happened to land near zero — and the quieter the tail got, the likelier
+     that was, so a long decay was cut off before it rang out. */
+  v._q=Math.abs(y)>v._q?Math.abs(y):(v._q||0)*0.9997;
+  if(t>0.3&&v._q<1e-5)v.done=true;
   v.t+=srI;
   return y*v.vel*v.env*0.5*(0.4+0.6*p[0]);
 }`);
@@ -4984,7 +4994,12 @@ function render(v,p){
   y = Math.tanh(y*(1+p[7]*2.5));
   v.dc+=(y-v.dc)*0.0006; y-=v.dc;
   if(v.rel){ v.env*=(1-v._rr); if(v.env<0.0006)v.done=true; }
-  if(t>0.3 && Math.abs(y)<1e-5) v.done=true;
+  /* peak-hold, NOT the raw sample: a ringing tone crosses zero hundreds of
+     times a second, so testing |y| killed the voice at whichever crossing
+     happened to land near zero — and the quieter the tail got, the likelier
+     that was, so a long decay was cut off before it rang out. */
+  v._q=Math.abs(y)>v._q?Math.abs(y):(v._q||0)*0.9997;
+  if(t>0.3 && v._q<1e-5) v.done=true;
   v.t+=srI;
   return y*v.vel*v.env*0.5*(0.4+0.6*p[0]);
 }`);
@@ -5177,7 +5192,12 @@ function render(v,p){
   y=Math.tanh(y*(0.9+p[6]*0.7+p[7]*2.2));
   v.dc+=(y-v.dc)*0.0005; y-=v.dc;
   if(v.rel){ v.env*=(1-v._rr); if(v.env<0.0005)v.done=true; }
-  if(t>0.4&&Math.abs(y)<1e-5)v.done=true;
+  /* peak-hold, NOT the raw sample: a ringing tone crosses zero hundreds of
+     times a second, so testing |y| killed the voice at whichever crossing
+     happened to land near zero — and the quieter the tail got, the likelier
+     that was, so a long decay was cut off before it rang out. */
+  v._q=Math.abs(y)>v._q?Math.abs(y):(v._q||0)*0.9997;
+  if(t>0.4&&v._q<1e-5)v.done=true;
   v.t+=srI;
   return y*v.vel*v.env*0.5*(0.4+0.6*p[0]);
 }`, 1);
