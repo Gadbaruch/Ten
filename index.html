@@ -5249,10 +5249,266 @@ function render(v,p){
   return y*v.vel*v.env*0.5*(0.4+0.6*p[0]);
 }`, 1);
 _mk('trumpet','blown',CODE_DEFAULT);
+
+/* ============ ACOUSTIC DRUMS ============================================
+   Cymbals, hats and shakers are the sounds that resisted resynthesis earlier
+   — an open hi-hat needed more numbers than the sample it came from. So none
+   of these try to be a recording. They are built from the mechanism instead:
+   an inharmonic plate, a stochastic pile of beans, a head with wires under
+   it. Cheap, and they respond to a knob the way the real object responds to
+   its size. */
+
+/* CYMBAL — splash to gong.
+   A circular plate has dense INHARMONIC modes, and a large one is nonlinear:
+   energy poured into the low modes migrates upward over about a second.
+   That upward cascade IS the gong bloom — without it a gong is just a big
+   splash. Modelled as a wash whose band rises and swells while the struck
+   partials decay underneath it. */
+_mk('cymbal','metal',`
+PARAMS = ['size','decay','tone','strike','bloom','wash','sizzle','drive']
+var RAT=[1,1.41,1.83,2.24,2.67,3.16,3.74,4.31,5.12,6.03,7.24,8.61];
+function noteOn(v,f,vel,p){
+  v.f=f; v.vel=vel; v.t=0; v.rel=false; v.env=1; v._q=0;
+  var sz=p[0];
+  v.sz=sz;
+  v.base=1100*Math.pow(0.055,sz)*(f/261.6);   // splash ~1.1kHz down to gong ~60Hz
+  v.dec=(0.18+p[1]*1.6)*(0.35+sz*7.5);        // 0.2s .. ~13s
+  v.ph=[]; v.am=[];
+  for(var i=0;i<RAT.length;i++){v.ph[i]=Math.random()*6.2832; v.am[i]=1/(1+i*0.42);}
+  v.b1=0;v.l1=0;v.b2=0;v.l2=0;v.hz=0;v.dc=0;
+}
+function noteOff(v){ v.rel=true }
+function render(v,p){
+  var t=v.t, y=0;
+  for(var i=0;i<RAT.length;i++){
+    var fi=v.base*RAT[i]*(1+p[2]*0.18*((i%3)-1));
+    if(fi>sampleRate*0.47)continue;
+    var e=Math.exp(-t/(v.dec/(1+i*0.5)));      // high modes go first
+    v.ph[i]+=6.2832*fi*srI;
+    y+=v.am[i]*e*Math.sin(v.ph[i]);
+  }
+  y*=0.5;
+  /* the wash: the hundreds of modes too dense to run individually. Its band
+     RISES while it swells, which is the energy cascade you hear as bloom. */
+  var rise=0.02+v.sz*p[4]*1.6;
+  var bl=(1-Math.exp(-t/rise))*Math.exp(-t/(v.dec*0.85));
+  var fc=6.2832*(300+(1800+7000*p[6])*(0.15+bl*1.5))*srI;
+  if(fc>2.2)fc=2.2;
+  var nz=_noise();
+  var h1=nz-v.l1-0.55*v.b1; v.b1+=fc*h1; v.l1+=fc*v.b1;
+  y+=v.b1*bl*(0.35+p[5]*2.4);
+  // stick contact
+  if(t<0.008) y+=_noise()*p[3]*1.1*Math.exp(-t/0.0018);
+  v.dc+=(y-v.dc)*0.0004; y-=v.dc;
+  if(v.rel){ v.env*=(1-v._rr); if(v.env<0.0006)v.done=true; }
+  v._q=Math.abs(y)>v._q?Math.abs(y):v._q*0.9997;
+  if(t>0.2&&v._q<1e-5)v.done=true;
+  y=Math.tanh(y*(1+p[7]*3));
+  v.t+=srI;
+  return y*v.vel*v.env*0.5;
+}`);
+
+/* HI-HAT — two plates clamped together, so the modes are the same family as
+   the cymbal but the clamping kills the low ones and shortens everything.
+   'open' is literally how much the plates are apart: it lengthens the decay
+   and lets more of the body through. */
+_mk('hihat','metal',`
+PARAMS = ['open','tone','metal','strike','damp','body','trem','drive']
+var RAT=[1,1.34,1.79,2.38,3.07,3.81,4.62,5.71];
+function noteOn(v,f,vel,p){
+  v.f=f; v.vel=vel; v.t=0; v.rel=false; v.env=1; v._q=0;
+  v.base=(280+p[2]*520)*(f/261.6);
+  v.dec=0.028+p[0]*p[0]*1.05;                  // closed tick .. open wash
+  v.ph=[]; for(var i=0;i<RAT.length;i++)v.ph[i]=Math.random()*6.2832;
+  v.b1=0;v.l1=0;v.hz=0;v.pz=0;
+}
+function noteOff(v){ v.rel=true }
+function render(v,p){
+  var t=v.t, y=0;
+  for(var i=0;i<RAT.length;i++){
+    var fi=v.base*RAT[i]*(1+p[1]*0.2*((i%2)?1:-1));
+    if(fi>sampleRate*0.47)continue;
+    v.ph[i]+=6.2832*fi*srI;
+    y+=Math.sin(v.ph[i]);
+  }
+  y*=0.16;
+  y+=_noise()*(0.5+p[2]*0.8);
+  /* a hat is almost all top end — the clamped plates cancel the low modes,
+     so this highpass is the instrument, not a tone control */
+  var fc=6.2832*(2600+p[1]*7000)*srI; if(fc>2.2)fc=2.2;
+  var h=y-v.l1-0.35*v.b1; v.b1+=fc*h; v.l1+=fc*v.b1;
+  var out=y-v.l1;                               // highpass = in - lowpass
+  var e=Math.exp(-t/v.dec);
+  e=e*e*(1-p[4])+e*p[4];                        // damp: hard tick vs let ring
+  out*=e;
+  if(t<0.004) out+=_noise()*p[3]*0.8*Math.exp(-t/0.0012);
+  out+=v.l1*p[5]*0.35*Math.exp(-t/(v.dec*0.6)); // a little body through the middle
+  if(v.rel){ v.env*=(1-v._rr); if(v.env<0.0006)v.done=true; }
+  v._q=Math.abs(out)>v._q?Math.abs(out):v._q*0.9997;
+  if(t>0.05&&v._q<1e-5)v.done=true;
+  out=Math.tanh(out*(1+p[7]*3));
+  v.t+=srI;
+  return out*v.vel*v.env*0.5;
+}`);
+
+/* SHAKER — stochastic, after Perry Cook's PhISEM. There is no waveform here:
+   a pile of particles holds energy, each sample there is some chance a
+   collision happens, and every collision pings the shell resonance. Bean
+   count and shell frequency between them give maraca, cabasa, sand and
+   tambourine out of the same four lines. */
+_mk('shaker','noise',`
+PARAMS = ['beans','color','decay','shell','rattle','spread','trem','drive']
+function noteOn(v,f,vel,p){
+  v.f=f; v.vel=vel; v.t=0; v.rel=false; v.env=1; v._q=0;
+  v.n=4+Math.floor(p[0]*p[0]*220);             // 4 beans .. a fistful of sand
+  v.eng=vel*(0.55+0.45*vel);
+  v.dk=Math.exp(-1/((0.02+p[2]*p[2]*1.1)*sampleRate));
+  v.fc=(320+p[1]*p[1]*7800)*(f/261.6);         // wooden .. metallic .. sandy
+  v.q=0.997-p[3]*0.02;
+  v.b=0; v.l=0; v.snd=0;
+}
+function noteOff(v){ v.rel=true }
+function render(v,p){
+  v.eng*=v.dk;
+  var x=0;
+  // collision probability rides the remaining energy: dense at the attack,
+  // thinning to individual grains as it dies — which is what a shaker does
+  var pr=v.eng*v.n*0.0016;
+  if(Math.random()<pr) x=_noise()*(0.6+p[4]*1.6);
+  var fc=6.2832*v.fc*srI; if(fc>2.2)fc=2.2;
+  var damp=2*(1-v.q);
+  var h=x-v.l-damp*v.b; v.b+=fc*h; v.l+=fc*v.b;
+  var y=v.b*(1.6+p[3]*3.2);
+  if(v.rel){ v.env*=(1-v._rr); if(v.env<0.0006)v.done=true; }
+  v._q=Math.abs(y)>v._q?Math.abs(y):v._q*0.9997;
+  if(v.t>0.05&&v.eng<0.00002&&v._q<1e-5)v.done=true;
+  y=Math.tanh(y*(1+p[7]*3));
+  v.t+=srI;
+  return y*v.env*0.5;
+}`);
+
+/* CLAP — not one sound. A clap is three or four hands landing a few
+   milliseconds apart, then the room. The gap between the slaps is the whole
+   character: tight is one pair of hands, wide is a crowd. */
+_mk('clap','noise',`
+PARAMS = ['spread','tone','hands','tail','room','width','trem','drive']
+function noteOn(v,f,vel,p){
+  v.f=f; v.vel=vel; v.t=0; v.rel=false; v.env=1; v._q=0;
+  v.n=2+Math.floor(p[2]*4);                    // 2..6 slaps
+  v.gap=0.004+p[0]*0.028;                      // 4ms tight .. 32ms ragged crowd
+  v.off=[]; for(var i=0;i<v.n;i++)v.off[i]=i*v.gap*(0.75+Math.random()*0.5);
+  v.fc=(700+p[1]*p[1]*2600)*(f/261.6);
+  v.tail=0.03+p[3]*p[3]*0.75;
+  v.b=0;v.l=0;v.b2=0;v.l2=0;v.dc=0;
+}
+function noteOff(v){ v.rel=true }
+function render(v,p){
+  var t=v.t, x=0;
+  for(var i=0;i<v.n;i++){
+    var dt=t-v.off[i];
+    if(dt>=0&&dt<0.006) x+=_noise()*Math.exp(-dt/0.0012)*(1-i*0.12);
+  }
+  // the room behind them — this is what stops it sounding like static
+  var last=v.off[v.n-1];
+  if(t>=last) x+=_noise()*0.5*Math.exp(-(t-last)/v.tail)*p[4];
+  var fc=6.2832*v.fc*srI; if(fc>2.2)fc=2.2;
+  var h=x-v.l-0.6*v.b; v.b+=fc*h; v.l+=fc*v.b;   // bandpass = the hand cavity
+  var y=v.b*2.4;
+  v.dc+=(y-v.dc)*0.0006; y-=v.dc;
+  if(v.rel){ v.env*=(1-v._rr); if(v.env<0.0006)v.done=true; }
+  v._q=Math.abs(y)>v._q?Math.abs(y):v._q*0.9997;
+  if(t>0.08&&v._q<1e-5)v.done=true;
+  y=Math.tanh(y*(1+p[7]*3));
+  v.t+=srI;
+  return y*v.vel*v.env*0.5;
+}`);
+
+/* SNARE — a head with wires lying under it. The wires do not have their own
+   envelope: they rattle when the head MOVES, so their noise is gated by the
+   head's own displacement. That coupling is why a snare buzzes in sympathy
+   and why it chokes when you damp the head. */
+_mk('snare','membrane',`
+PARAMS = ['tune','snappy','decay','tone','body','wires','trem','drive']
+var RAT=[1,1.59,2.14,2.30,2.65];
+function noteOn(v,f,vel,p){
+  v.f=f; v.vel=vel; v.t=0; v.rel=false; v.env=1; v._q=0;
+  v.base=f*(0.55+p[0]*1.3);
+  v.dec=0.045+p[2]*0.32;
+  v.ph=[]; for(var i=0;i<RAT.length;i++)v.ph[i]=Math.random()*6.2832;
+  v.wd=0.03+p[5]*0.34;
+  v.b=0;v.l=0;v.b2=0;v.l2=0;v.dc=0;
+}
+function noteOff(v){ v.rel=true }
+function render(v,p){
+  var t=v.t, head=0;
+  for(var i=0;i<RAT.length;i++){
+    var fi=v.base*RAT[i];
+    if(fi>sampleRate*0.47)continue;
+    v.ph[i]+=6.2832*fi*srI;
+    head+=Math.sin(v.ph[i])*Math.exp(-t/(v.dec/(1+i*0.35)))/(1+i*0.6);
+  }
+  head*=0.55;
+  // wires: noise the head lets through in proportion to how hard it is moving
+  var gate=Math.abs(head)*2.2; if(gate>1)gate=1;
+  var wires=_noise()*Math.exp(-t/v.wd)*(0.25+gate*0.9);
+  var fc=6.2832*(1400+p[3]*p[3]*7000)*srI; if(fc>2.2)fc=2.2;
+  var h=wires-v.l-0.5*v.b; v.b+=fc*h; v.l+=fc*v.b;
+  var y=head*(0.35+p[4]*1.1)+(v.b*2.0)*(0.2+p[1]*2.2);
+  if(t<0.003) y+=_noise()*0.5*Math.exp(-t/0.0009);
+  v.dc+=(y-v.dc)*0.0005; y-=v.dc;
+  if(v.rel){ v.env*=(1-v._rr); if(v.env<0.0006)v.done=true; }
+  v._q=Math.abs(y)>v._q?Math.abs(y):v._q*0.9997;
+  if(t>0.06&&v._q<1e-5)v.done=true;
+  y=Math.tanh(y*(1+p[7]*3.5));
+  v.t+=srI;
+  return y*v.vel*v.env*0.5;
+}`);
+
+/* KICK — a big head drops in pitch as its tension releases, the beater adds
+   a click, and the shell adds a lower resonance a moment later. The pitch
+   drop is the sound; without it you have a sine, not a drum. */
+_mk('kick','membrane',`
+PARAMS = ['tune','punch','decay','click','body','sub','trem','drive']
+function noteOn(v,f,vel,p){
+  v.f=f; v.vel=vel; v.t=0; v.rel=false; v.env=1; v._q=0;
+  v.f0=(38+p[0]*72)*(f/261.6*0.6+0.4);
+  v.drop=1+p[1]*p[1]*7.5;                      // how far above f0 it starts
+  v.pk=Math.exp(-1/((0.006+p[1]*0.05)*sampleRate));
+  v.pf=v.f0*v.drop;
+  v.dec=0.08+p[2]*p[2]*1.1;
+  v.ph=0; v.ph2=0; v.b=0; v.l=0; v.dc=0;
+}
+function noteOff(v){ v.rel=true }
+function render(v,p){
+  var t=v.t;
+  v.pf=v.f0+(v.pf-v.f0)*v.pk;                  // the drop, per sample
+  v.ph+=6.2832*v.pf*srI;
+  var e=Math.exp(-t/v.dec);
+  var y=Math.sin(v.ph)*e;
+  // shell/port: a lower mode that arrives just after the head
+  v.ph2+=6.2832*v.f0*0.5*srI;
+  y+=Math.sin(v.ph2)*Math.exp(-t/(v.dec*1.6))*p[5]*0.7*(1-Math.exp(-t/0.012));
+  y*=(0.5+p[4]*0.9);
+  if(t<0.006){                                  // beater
+    var nz=_noise();
+    var fc=6.2832*3200*srI;
+    var h=nz-v.l-0.7*v.b; v.b+=fc*h; v.l+=fc*v.b;
+    y+=(nz-v.l)*p[3]*0.9*Math.exp(-t/0.0013);
+  }
+  v.dc+=(y-v.dc)*0.0003; y-=v.dc;
+  if(v.rel){ v.env*=(1-v._rr); if(v.env<0.0006)v.done=true; }
+  v._q=Math.abs(y)>v._q?Math.abs(y):v._q*0.9997;
+  if(t>0.06&&v._q<1e-5)v.done=true;
+  y=Math.tanh(y*(1+p[7]*4));
+  v.t+=srI;
+  return y*v.vel*v.env*0.5;
+}`);
+
 /* Output trim, measured per model against a plain saw on the normal synth
    engine (osc saw @0.85, no filter, vel 0.9) = the reference every instrument
    is levelled to. Re-measure and update this table if a model changes. */
-const PROCGAIN={bell:0.855,kalimba:0.801,xylophone:0.475,marimba:0.412,vibraphone:0.404,
+const PROCGAIN={cymbal:0.477,hihat:0.868,shaker:0.561,clap:2.040,snare:0.510,kick:0.496,
+  bell:0.855,kalimba:0.801,xylophone:0.475,marimba:0.412,vibraphone:0.404,
   steeldrum:0.966,woodblock:0.867,string:0.892,bowed:1.272,clarinet:0.455,
   flute:0.554,harmonica:0.676,accordion:0.998,saxophone:0.686,skindrum:0.601,
   'e-piano':0.658,hammond:0.584,tine:0.692,trumpet:0.873};
@@ -5531,6 +5787,62 @@ PROCPRE.skindrum=[
    playing one. How long a struck instrument rings is set by its preset's
    release, not by ignoring the key. */
 const PROCPERC=new Set();
+/* drum banks. cp = the model's own eight params; env shapes the amp on top.
+   Percussive sustain 0 so the tail is the model's decay, not the envelope. */
+PROCPRE.cymbal=[
+  PP('Splash 8"',   [0.02,0.30,0.55,0.60,0.25,0.55,0.70,0.10],null,[0.001,9,0,0.09]),
+  PP('Crash 16"',   [0.30,0.55,0.50,0.55,0.45,0.65,0.55,0.12],null,[0.001,7,0,0.20]),
+  PP('Ride Bell',   [0.22,0.40,0.30,0.75,0.20,0.30,0.35,0.10],null,[0.001,8,0,0.14]),
+  PP('China Trash', [0.42,0.50,0.85,0.65,0.35,0.80,0.80,0.28],null,[0.001,8,0,0.16]),
+  PP('Sizzle Ride', [0.34,0.62,0.45,0.40,0.40,0.70,0.90,0.10],null,[0.001,7,0,0.22]),
+  PP('Tam-tam',     [0.72,0.80,0.40,0.45,0.75,0.75,0.45,0.14],null,[0.002,5,0,0.45]),
+  PP('Temple Gong', [0.90,0.90,0.25,0.35,0.90,0.60,0.25,0.10],null,[0.004,4,0,0.70]),
+  PP('Deep Gong',   [1.00,1.00,0.18,0.30,1.00,0.55,0.15,0.08],null,[0.006,3,0,0.90])];
+PROCPRE.hihat=[
+  PP('Tight Closed',[0.02,0.55,0.50,0.60,0.85,0.10,0.5,0.10],null,[0.001,9,0,0.03]),
+  PP('Closed',      [0.08,0.50,0.45,0.55,0.65,0.15,0.5,0.10],null,[0.001,9,0,0.04]),
+  PP('Pedal',       [0.14,0.35,0.35,0.70,0.75,0.30,0.5,0.12],null,[0.001,9,0,0.05]),
+  PP('Half Open',   [0.38,0.55,0.55,0.50,0.35,0.20,0.5,0.10],null,[0.001,8,0,0.10]),
+  PP('Open',        [0.72,0.60,0.60,0.45,0.15,0.20,0.5,0.10],null,[0.001,7,0,0.22]),
+  PP('Sloppy Open', [0.92,0.70,0.75,0.40,0.10,0.30,0.5,0.18],null,[0.001,6,0,0.35]),
+  PP('Dark Closed', [0.06,0.20,0.30,0.55,0.70,0.35,0.5,0.10],null,[0.001,9,0,0.04]),
+  PP('Glass Tick',  [0.03,0.90,0.85,0.75,0.80,0.05,0.5,0.08],null,[0.001,9,0,0.03])];
+PROCPRE.shaker=[
+  PP('Maraca',      [0.18,0.45,0.30,0.45,0.35,0.5,0.5,0.08],null,[0.001,9,0,0.05]),
+  PP('Cabasa',      [0.62,0.62,0.26,0.55,0.55,0.5,0.5,0.10],null,[0.001,9,0,0.05]),
+  PP('Sand Shaker', [0.88,0.78,0.34,0.30,0.25,0.5,0.5,0.06],null,[0.001,8,0,0.08]),
+  PP('Wood Shaker', [0.30,0.22,0.28,0.60,0.45,0.5,0.5,0.10],null,[0.001,9,0,0.05]),
+  PP('Tambourine',  [0.45,0.88,0.42,0.72,0.75,0.5,0.5,0.12],null,[0.001,8,0,0.10]),
+  PP('Sleigh Bells',[0.55,0.95,0.55,0.80,0.85,0.5,0.5,0.10],null,[0.001,7,0,0.16]),
+  PP('Guiro Scrape',[0.75,0.35,0.55,0.65,0.90,0.5,0.5,0.20],null,[0.002,6,0,0.14]),
+  PP('Rain Stick',  [0.95,0.55,0.75,0.35,0.20,0.5,0.5,0.05],null,[0.004,4,0,0.30])];
+PROCPRE.clap=[
+  PP('Tight Clap',  [0.10,0.55,0.35,0.30,0.45,0.5,0.5,0.10],null,[0.001,9,0,0.05]),
+  PP('Studio Clap', [0.28,0.50,0.55,0.45,0.65,0.5,0.5,0.12],null,[0.001,8,0,0.09]),
+  PP('Room Clap',   [0.40,0.42,0.70,0.70,0.85,0.5,0.5,0.10],null,[0.001,7,0,0.16]),
+  PP('Crowd',       [0.85,0.45,1.00,0.75,0.75,0.5,0.5,0.10],null,[0.002,6,0,0.20]),
+  PP('Rimmy Snap',  [0.05,0.85,0.20,0.20,0.30,0.5,0.5,0.16],null,[0.001,9,0,0.04]),
+  PP('Dark Clap',   [0.30,0.18,0.55,0.50,0.60,0.5,0.5,0.10],null,[0.001,8,0,0.10]),
+  PP('808 Handclap',[0.22,0.62,0.60,0.35,0.55,0.5,0.5,0.14],null,[0.001,9,0,0.07]),
+  PP('Stadium',     [0.95,0.40,1.00,1.00,1.00,0.5,0.5,0.08],null,[0.003,5,0,0.35])];
+PROCPRE.snare=[
+  PP('Studio Snare',[0.42,0.55,0.35,0.50,0.45,0.40,0.5,0.12],null,[0.001,9,0,0.08]),
+  PP('Fat Backbeat',[0.30,0.62,0.55,0.35,0.70,0.50,0.5,0.16],null,[0.001,8,0,0.12]),
+  PP('Tight Crack', [0.62,0.75,0.20,0.70,0.30,0.25,0.5,0.18],null,[0.001,9,0,0.06]),
+  PP('Piccolo',     [0.85,0.68,0.22,0.75,0.25,0.30,0.5,0.14],null,[0.001,9,0,0.06]),
+  PP('Rimshot',     [0.55,0.85,0.14,0.85,0.20,0.18,0.5,0.30],null,[0.001,9,0,0.05]),
+  PP('Brushed',     [0.38,0.30,0.50,0.40,0.35,0.75,0.5,0.06],null,[0.002,8,0,0.14]),
+  PP('Deep Wood',   [0.16,0.45,0.62,0.28,0.85,0.40,0.5,0.14],null,[0.001,8,0,0.16]),
+  PP('Rattle Trap', [0.50,1.00,0.45,0.60,0.30,0.90,0.5,0.22],null,[0.001,8,0,0.14])];
+PROCPRE.kick=[
+  PP('Studio Kick', [0.35,0.45,0.45,0.45,0.60,0.35,0.5,0.12],null,[0.001,9,0,0.10]),
+  PP('808 Boom',    [0.10,0.30,0.90,0.20,0.75,0.55,0.5,0.08],null,[0.002,6,0,0.35]),
+  PP('909 Punch',   [0.30,0.70,0.40,0.55,0.55,0.30,0.5,0.20],null,[0.001,8,0,0.09]),
+  PP('Tight Thump', [0.45,0.55,0.25,0.40,0.50,0.20,0.5,0.14],null,[0.001,9,0,0.06]),
+  PP('Sub Drop',    [0.05,0.20,1.00,0.15,0.85,0.80,0.5,0.06],null,[0.003,5,0,0.50]),
+  PP('Clicky Kick', [0.40,0.62,0.35,0.90,0.45,0.25,0.5,0.16],null,[0.001,9,0,0.08]),
+  PP('Floor Tom',   [0.72,0.35,0.60,0.35,0.70,0.25,0.5,0.10],null,[0.001,8,0,0.16]),
+  PP('Distort Kick',[0.28,0.75,0.45,0.60,0.60,0.40,0.5,0.85],null,[0.001,8,0,0.10])];
 const PROCNAMES = Object.keys(PROCLIB);
 /* Sensible starting rack for a procedural channel. The amp envelope sits at
    sustain 1 with a long decay, so while a key is held it does nothing at all —
