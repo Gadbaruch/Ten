@@ -5816,6 +5816,17 @@ const onKeyDown=e=>{
         if(mode===2){const was=pat.state;pat.state=pat.state==='rec'?'on':'rec';   // latch
           if(was==='rec')finalizeCaptures(true); else pushUndo('take');}
         else if(pat.state!=='rec'){pushUndo('take');pat.state='rec';}              // momentary arm
+        /* In a sound layer the same key also arms the channel's MOD LOOP, so
+           holding it and moving a param records the move. Nothing ever set
+           this state — cycleState() was written for it and never wired up —
+           so parameter automation had no way to be armed at all. */
+        if(S.layer>=2&&!isAudioCh(S.editSnd)){
+          const ml=S.presets[S.editSnd].modLoop;
+          if(mode===2)ml.state=ml.state==='rec'?'on':'rec';
+          else if(ml.state!=='rec')ml.state='rec';
+          if(ml.state==='rec'&&!T.playing)
+            flash('● armed — press space; automation records against the loop');
+        }
       }
       dirty=true;dirtySave=true;}
     return;}
@@ -6255,6 +6266,10 @@ document.addEventListener('keyup',e=>{
     if(engine.audRec)engine.audRecStop();
     const pat=S.layer>=1?S.patterns[S.editPat]:null;      // pattern rec (notes), pattern + sound layers
     if(pat&&pat.state==='rec'){pat.state='on';finalizeCaptures(true);dirty=true;dirtySave=true;}
+    if(S.layer>=2&&!isAudioCh(S.editSnd)){               // ...and disarm the mod loop with it
+      const ml=S.presets[S.editSnd].modLoop;
+      if(ml.state==='rec'){ml.state='on';dirty=true;dirtySave=true;}
+    }
   }
   let relAt=AC.currentTime+0.005;
   if(pend[c]){
@@ -6909,8 +6924,11 @@ function renderSlots(L){
   const phM=T.playing?Math.floor(fmod(posNow(),ml.len)/cellM):-1;
   const evSlot=ml.events.filter(e=>e.m===S.curMod&&(e.s??-1)===S.curSlot);
   const evMod=ml.events.filter(e=>e.m===S.curMod);
-  L.push('  '+sp('d','mod loop (slot '+((S.curSlot+1)%10)+'): '+evSlot.length+' pts · module '+evMod.length+
-    (ml.state==='rec'?'  ● value moves record':'')+'  ·  ⇧⌫ clear slot pts'));
+  /* armed has to READ as armed — this was dim grey next to the point count,
+     which is indistinguishable from not being armed at all */
+  L.push('  '+sp('d','mod loop (slot '+((S.curSlot+1)%10)+'): '+evSlot.length+' pts · module '+evMod.length)
+    +(ml.state==='rec'?sp('r',T.playing?'   ● REC — param moves record here':'   ● armed — press space'):'')
+    +sp('d','  ·  ⇧⌫ clear slot pts'));
   L.push('   '+gridRow(ml,cellM,phM,(a,b)=>
     evSlot.some(e=>e.t>=a-1e-9&&e.t<b-1e-9)?'▪':
     evMod.some(e=>e.t>=a-1e-9&&e.t<b-1e-9)?'∙':'·',mEdit?curCell(ml):-1,'cell'));
