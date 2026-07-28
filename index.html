@@ -2298,12 +2298,28 @@ class Engine{
             for(let k=0;k<this.v.length;k++)
               if(this.v[k]._fd===undefined&&!this.v[k].done)live++;
             while(live>MAXV){
+              /* Quietest-first is right for tails and WRONG for new notes: a
+                 slow-attack model has not got loud yet, so the note you just
+                 played is the quietest thing in the array and gets stolen on
+                 arrival. Fast playing then kills every note as it starts, and
+                 the channel goes silent while showing a full voice count.
+                 Protect the young; among the rest take the quietest; if they
+                 are all young, take the oldest. */
               let qi=-1,q=Infinity;
               for(let k=0;k<this.v.length;k++){
                 const vo=this.v[k];
                 if(vo._fd!==undefined||vo.done)continue;
-                const pk=vo._pk===undefined?1e9:vo._pk;   // brand new = never the victim
+                if(vo._t<0.18)continue;                   // still finding its voice
+                const pk=vo._pk===undefined?1e9:vo._pk;
                 if(pk<q){q=pk;qi=k;}
+              }
+              if(qi<0){
+                let ot=-1;
+                for(let k=0;k<this.v.length;k++){
+                  const vo=this.v[k];
+                  if(vo._fd!==undefined||vo.done)continue;
+                  if(vo._t>ot){ot=vo._t;qi=k;}
+                }
               }
               if(qi<0)break;
               this.v[qi]._fd=1; this.v[qi]._fdr=0.0007;   // ~30ms
