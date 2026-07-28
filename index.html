@@ -747,9 +747,12 @@ let fxwReady=false;
       for(let i=0;i<n;i++){
         /* feedback re-records the cloud, which is what turns a grain sprinkle
            into an evolving wash rather than a delay line */
-        let fr2=this.fw-fd; if(fr2<0)fr2+=this.fN;
-        this.bL[this.w]=(iL?iL[i]:0)+this.fA[fr2]*fb;
-        this.bR[this.w]=(iR?iR[i]:0)+this.fB[fr2]*fb;
+        /* Input only. Writing feedback in here put the grain lookback INSIDE
+           the loop, so every repeat was delayed by ftime PLUS however far back
+           that grain happened to read — spray silently added itself to the
+           repeat rate, and randomised it per grain. */
+        this.bL[this.w]=(iL?iL[i]:0);
+        this.bR[this.w]=(iR?iR[i]:0);
         if(--this.next<=0){
           this.next=per;
           if(this.g.length<64){
@@ -794,6 +797,8 @@ let fxwReady=false;
         const tgt=1/Math.sqrt(1+this.g.length*0.55);
         this.nrm+=(tgt-this.nrm)*0.0016;
         sl*=this.nrm; sr*=this.nrm;
+        let fr2=this.fw-fd; if(fr2<0)fr2+=this.fN;
+        sl+=this.fA[fr2]*fb; sr+=this.fB[fr2]*fb;   // echo the cloud, period = ftime
         this.fA[this.fw]=sl; this.fB[this.fw]=sr;   // pre-makeup: loop gain is just fb
         this.fw=this.fw+1; if(this.fw>=this.fN)this.fw=0;
         sl*=1.9; sr*=1.9;
