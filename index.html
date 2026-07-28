@@ -2315,10 +2315,22 @@ class Engine{
           /* Headroom target, once per block. Count only voices that are still
              AUDIBLE — a voice that has decayed to nothing is taking no headroom,
              so letting it inflate the count made held notes duck for no reason. */
-          let nA=0;
+          /* Headroom from actual LEVEL, not voice count. Counting voices
+             punished quiet ones just as hard as loud ones, so a pile of
+             ringing tails divided the gain by sqrt(n) and a fresh strike came
+             in up to 18dB down — recovering only as the count fell, which is
+             what a smashed vibraphone sounded like. Summing estimated energy
+             instead means near-silent tails cost almost nothing, while a real
+             chord still gets its headroom. */
+          let est=0;
           for(let k=0;k<V.length;k++){const vo=V[k];
-            if(!vo.done&&(vo._amp===undefined||vo._amp>0.02))nA++;}
-          const vnT=nA>1?1/Math.sqrt(nA):1;
+            if(vo.done)continue;
+            const va=(vo._amp===undefined?1:vo._amp);
+            if(va<=0.02)continue;
+            const pk=(vo._pk===undefined?0.35:vo._pk)*va;   // new voice: assume mid
+            est+=pk*pk;}
+          est=Math.sqrt(est);
+          const vnT=est>0.7?0.7/est:1;
           if(this.vn===undefined)this.vn=vnT;
           for(let i=0;i<N;i++){
             if(this.ev.length){
