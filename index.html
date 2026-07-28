@@ -2662,11 +2662,19 @@ class Engine{
       const e=this.codeNode(pi), id=e.id++;
       const f=440*Math.pow(2,(midi-69)/12);
       const send=m=>this.codeSend(pi,m);
+      const bornAt=AC.currentTime;      // when the key actually went down
       send({t:'on',id,f,vel,at,key:midi});            // the worklet schedules it
       const sh={midi,pad:padMidi==null?midi:padMidi,released:false,killed:false,press:0,
         pressN:[],nodes:[],p,
+        /* Live quantize schedules the note-on into the future, so a fast tap
+           releases BEFORE it. Clamping the off to `at` put it in the same
+           sample as the on — a zero-length note, silent. The synth never had
+           this because Voice.release clamps to startAt+5ms.
+           Carry the held length across the quantize instead: a 40ms tap stays
+           a 40ms note wherever it lands on the grid. */
         release(t){if(this.released)return;this.released=true;
-          send({t:'off',id,at:Math.max(at,t||AC.currentTime)});},
+          const held=Math.max(0,(t||AC.currentTime)-bornAt);
+          send({t:'off',id,at:at+Math.max(0.02,held)});},
         /* A kill must be able to SHORTEN an already-scheduled release: the
            sequencer releases a note when it schedules it, so a later mono
            steal arrived after `released` was set and did nothing — the stolen
