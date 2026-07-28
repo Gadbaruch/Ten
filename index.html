@@ -3970,7 +3970,13 @@ function _prsAction(d){
   const pi=S.editSnd, p=S.presets[pi];
   const defs=prsFieldDefs(), f=(defs[S.curParam]||defs[0]).k;
   const K=edKit(p);
-  if(K&&f!=='type'){                 // ---- editing one kit pad (a whole preset chain) ----
+  /* ENGINE is the one field that belongs to the CHANNEL even when a pad is
+     focused — it is how you leave the kit engine at all. This guard still
+     named the field 'type', which is what the field was called before the
+     engine/category split, so on a kit channel with a pad focused the engine
+     field fell into the pad branch, matched none of its cases, and silently
+     did nothing. The kit engine could be entered but never left. */
+  if(K&&f!=='engine'){               // ---- editing one kit pad (a whole preset chain) ----
     pushUndo('kit pad');
     const kcat=K.cat||'kik';
     if(f==='pad'){                   // step through the 12 pads with the arrows
