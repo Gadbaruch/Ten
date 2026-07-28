@@ -300,7 +300,7 @@ const SETTINGS=[
  {n:'vel',    v:()=>String(Math.round(clamp(CFG.kvel??0.9,0.02,1)*127)), a:d=>EXP.bump(d*0.05)},
  {n:'midi in',v:()=>EXP.midiOn?['off','solo','+kbd'][CFG.midiIn|0]:'off', a:d=>EXP.cycleMidi(d)},
  {n:'hid',    v:()=>HE.on?(HE.srcName||'on').slice(0,8):'off',
-              a:d=>{if(HE.on)HE.disconnect(); else HE.connect(d<0?1:2);}},
+              a:()=>{if(HE.on)HE.disconnect(); else HE.connect();}},
  {n:'hid keys',v:()=>HE.learn?(HE.learn.i+'/'+HE.learn.order.length):(HE.map?String(Object.keys(HE.map).length):'—'),
               a:()=>HE.startLearn()},
  {n:'hid trig',v:()=>Math.round(HE.cfg().trig*100)+'%', a:d=>HE.set('trig',clamp(HE.cfg().trig+d*0.01,0.05,0.6))},
@@ -4410,6 +4410,13 @@ const EXP={
    bottomed inside one frame (~0.25/ms). Starting too high pins soft playing on
    the floor; `auto` refines both ends as you play. */
 const HEDEF={rest:0.03,trig:0.15,look:1,gamma:0.5,soft:0.005,hard:0.250,floor:0.08,auto:1};
+/* The Keychron full-matrix report is a fixed 6x16 row-major scan, so the slot a
+   playing key lands in is known in advance and `hid keys` is not needed on these
+   boards. Slot = row*16+col; this is the K2 HE / Q3 HE order (Q1 and Q5 are 15
+   and 19 columns wide — learn those). Anything not listed is left unmapped. */
+const KC_SLOTS={34:'KeyW',35:'KeyE',37:'KeyT',38:'KeyY',39:'KeyU',41:'KeyO',42:'KeyP',
+                49:'KeyA',50:'KeyS',51:'KeyD',52:'KeyF',53:'KeyG',54:'KeyH',55:'KeyJ',
+                56:'KeyK',57:'KeyL',58:'Semicolon',59:'Quote'};
 const HE={
   on:false, srcName:'', dev:null, kind:0,          // 1 = analogsense, 2 = rongyuan
   keys:{},                                          // keyId -> stroke state
@@ -4419,24 +4426,56 @@ const HE={
   cfg(){return Object.assign({},HEDEF,CFG.he||{});},
   set(k,v){CFG.he=Object.assign({},CFG.he||{},{[k]:v}); saveCfg();},
 
-  /* ---- transport ---- */
-  async connect(kind){
+  /* ---- transport ----
+     ONE picker listing every supported board, and the transport is chosen from
+     what came back. Filtering per-kind meant the arrow you pressed silently
+     decided which keyboards were even offered: press the wrong one and a
+     perfectly good keyboard just isn't in the chooser, with nothing to say why. */
+  async connect(){
     if(!navigator.hid){flash('no WebHID here — use Chrome or Edge');return false;}
-    const filters=kind===2?[{vendorId:0x3151}]:[{vendorId:0x3434},{usagePage:0xFF60}];
+    const filters=[{vendorId:0x3151},                    // RongYuan: MonsGeek/Akko/Attack Shark
+                   {vendorId:0x3434},{vendorId:0x362D},  // Keychron HE, Lemokey
+                   {vendorId:0x31E3},{vendorId:0x1532},  // Wooting, Razer
+                   {vendorId:0x19f5},{vendorId:0x352D},  // NuPhy, DrunkDeer
+                   {vendorId:0x373b},{vendorId:0x372E}]; // Madlions, Bytech
     let devs;
     try{devs=await navigator.hid.requestDevice({filters});}
     catch(err){flash('hid: '+(err&&err.message||err));return false;}
     if(!devs||!devs.length){flash('no device chosen');return false;}
-    const d=devs[0];
-    try{if(!d.opened)await d.open();}catch(err){flash('hid open failed: '+(err&&err.message||err));return false;}
-    this.dev=d; this.kind=kind; this.srcName=d.productName||'hid';
+
+    const kind=devs[0].vendorId===0x3151?2:1;
+    /* The RongYuan boards split the job over two HID interfaces: a 0xFFFF/0x02
+       collection that takes the enable command, and a SEPARATE interface
+       carrying the analog stream — whose primary usage is Consumer Control, so
+       it is not the obvious one either. WebHID hands those back as distinct
+       HIDDevice objects, so gather every granted sibling and sort them out. */
+    let cfgDev=devs[0], inDev=devs[0];
+    if(kind===2){
+      const pool=[...devs];
+      try{for(const d of await navigator.hid.getDevices())
+        if(d.vendorId===devs[0].vendorId&&d.productId===devs[0].productId&&!pool.includes(d))pool.push(d);
+      }catch(_){}
+      let c=null,i=null;
+      for(const d of pool)for(const col of d.collections||[]){
+        if(col.usagePage===0xFFFF&&col.usage===0x02)c=c||d;
+        else if((col.usagePage&0xFF00)===0xFF00)     i=i||d;
+      }
+      cfgDev=c||i||devs[0]; inDev=i||c||devs[0];
+    }
+    try{for(const d of new Set([cfgDev,inDev]))if(!d.opened)await d.open();}
+    catch(err){flash('hid open failed: '+(err&&err.message||err)
+      +' — close any other tab holding this keyboard');return false;}
+
+    this.dev=inDev; this.cfgDev=cfgDev; this.kind=kind;
+    this.srcName=inDev.productName||'hid';
     this.keys={}; this._fN=0; this._fT=performance.now(); this.fps=0;
-    this.map=(CFG.he&&CFG.he.map)||null;
-    d.oninputreport=e=>this.report(e);
-    if(kind===2)await this.ryEnable(); else this.kcRequest();
+    this.full=0; this.chunk=0; this._started=0; this.ready=0;
+    this.map=(CFG.he&&CFG.he.map)||(kind===1?KC_SLOTS:null);
+    inDev.oninputreport=e=>this.report(e);
     this.on=true;
+    if(kind===2)await this.ryEnable(); else this.kcProbe();
     this.watch=setInterval(()=>this.tick(),60);
-    flash('hid: '+this.srcName+(this.map?'':' — run `hid learn` to map the keys'));
+    flash('hid: '+this.srcName+(this.map?'':' — run `hid keys` to map the keys'));
     dirty=true; return true;
   },
   disconnect(){
@@ -4449,42 +4488,68 @@ const HE={
     const b=new Uint8Array(64); b[0]=0x1B; b[1]=0x01;
     let sum=0; for(let i=0;i<7;i++)sum+=b[i];
     b[7]=(255-sum)&0xff;
-    try{await this.dev.sendFeatureReport(0,b);}catch(err){flash('fun60 enable failed: '+(err&&err.message||err));}
+    /* the enable command goes to the CONFIG interface, which is not the one the
+       analog reports come back on */
+    try{await (this.cfgDev||this.dev).sendFeatureReport(0,b);}
+    catch(err){flash('fun60 enable failed: '+(err&&err.message||err));}
+  },
+  kcProbe(){                                         // Keychron: what can this firmware do?
+    const b=new Uint8Array(32); b[0]=0xA9; b[1]=0x01;
+    this._reqAt=performance.now();
+    this.dev.sendReport(0,b).catch(err=>flash('hid probe failed: '+(err&&err.message||err)));
+    /* stock firmware answers without the marker and only does one key per round
+       trip — far too slow for velocity. Say so rather than sitting silent. */
+    setTimeout(()=>{if(this.on&&!this.ready){this.ready=1; this.kcRequest();}},300);
   },
   kcRequest(){                                       // Keychron: ask for the whole matrix
-    if(!this.dev||!this.on&&this._started)return;
+    if(!this.dev||!this.on)return;
     const b=new Uint8Array(32); b[0]=0xA9; b[1]=0x31;
     this.chunk=0; this._reqAt=performance.now(); this._started=1;
     /* exactly ONE request in flight — pipelining two per frame buries the MCU
-       and the chunks carry no sequence number to resync against */
+       and the chunks carry no sequence number to resync against. The counter is
+       zeroed as the request goes out, so alignment is re-derived every frame
+       instead of accumulating: a dropped report costs one frame, not the stream. */
     this.dev.sendReport(0,b).catch(()=>{this._started=0;});
   },
   tick(){                                            // watchdog: the board went quiet
     if(!this.on)return;
-    if(this.kind===1&&performance.now()-(this._reqAt||0)>60)this.kcRequest();
+    if(this.kind===1&&this.ready&&performance.now()-(this._reqAt||0)>60)this.kcRequest();
   },
   report(e){
-    const d=new Uint8Array(e.data.buffer);
+    /* e.data is a DataView over the report WITHOUT the report id. Taking
+       .buffer alone ignores byteOffset/byteLength and can shift every byte. */
+    const d=new Uint8Array(e.data.buffer,e.data.byteOffset,e.data.byteLength);
     if(this.dump>0){this.dump--; this.dumped.push([...d].slice(0,20).map(x=>x.toString(16).padStart(2,'0')).join(' '));
       if(!this.dump)console.log('HID dump:\n'+this.dumped.join('\n'));}
     const t=performance.now();
     if(this.kind===2){                               // [0x1B, lo, hi, keyId]
       if(d[0]!==0x1B)return;
       const raw=d[1]|(d[2]<<8), id=d[3];
-      this.full=Math.max(this.full||1,raw);          // firmware scale differs per model
-      this.sample(id,raw/(this.full||1),t);
+      /* seed a plausible full-travel count and let it grow. Seeding from the
+         first sample makes the first key press of a session read as bottomed
+         out whatever it actually was — every session starts on a fortissimo. */
+      if(!this.full)this.full=350;
+      if(raw>this.full)this.full=raw;                // firmware scale differs per model
+      this.sample(id,Math.min(raw/this.full,1),t);
       this.frame(t);
       return;
     }
-    /* analog and RGB share this pipe, so demux on the command byte. Whether the
-       reply repeats 0xA9 is the one thing I could not check without the board —
-       `hid dump` shows it, and this handles either framing. */
-    if(d[0]===0xA8)return;                           // RGB reply
-    const off=(d[0]===0xA9)?2:0;
+    /* analog and RGB share this pipe, so demux on the command byte: 0xA9 is the
+       analog channel, 0xA8 the RGB one. Both put a two byte header in front of
+       the payload. Anything else is not ours. */
+    if(d[0]!==0xA9)return;
+    if(d[1]===0x01){                                 // capability reply
+      this.ready=1;
+      const full=d[31]===0x45;
+      flash(full?'hid: full-matrix analog v'+d[2]
+                :'hid: STOCK firmware — one key per round trip, too slow for velocity');
+      this.kcRequest();
+      return;
+    }
     const c=this.chunk||0;
     if(c>=4)return;                                  // surplus report: ignore, don't wrap
     for(let i=0;i<30;i++){
-      const v=d[off+i]; if(v===undefined)break;
+      const v=d[2+i]; if(v===undefined)break;
       this.sample(c*30+i,Math.max(0,v-5)/230,t);     // 5/235 is the library's dead zone
     }
     this.chunk=c+1;
@@ -4500,7 +4565,11 @@ const HE={
     const C=this.cfg();
     let k=this.keys[id];
     if(!k)k=this.keys[id]={st:0,pv:0,pt:t,peak:0,top:0,code:null};
-    const dt=Math.max(0.5,t-k.pt), slope=(v-k.pv)/dt;
+    /* Clamp dt to a sane window around the measured frame period. Two reports
+       delivered back to back after a stalled event loop would otherwise read as
+       an enormous slope and fire a pianissimo note at 127. */
+    const P=this.fps>0?1000/this.fps:4;
+    const dt=clamp(t-k.pt,P*0.4,P*3.5), slope=(v-k.pv)/dt;
     if(this.probe&&v>0.25&&(!this.probeBest||v>this.probeBest.v))this.probeBest={id,v};
     if(k.st===0){                                    // resting
       if(v<=C.rest){k.pv=v; k.pt=t; return;}
@@ -4548,10 +4617,25 @@ const HE={
     k.st=0; k.code=null; k.peak=0; k.top=0;
   },
   vel(slope,C){
-    if(C.auto){                                      // learn the ends of your own playing
-      if(slope>0&&(slope<C.soft||!C.soft))this.set('soft',Math.max(0.001,slope*0.98+C.soft*0.02));
-      if(slope>C.hard)this.set('hard',slope);
-      C=this.cfg();
+    if(C.auto){
+      /* Learn the ends of your own playing — but they have to be able to come
+         BACK. A pure min/max ratchet only ever widens: one accidental brush
+         pins `soft` at the floor, one wild slam pins `hard` at the ceiling, and
+         from then on everything real is squashed into the middle of a range
+         nothing reaches. So the ends chase fast toward a new extreme and creep
+         slowly back in when nothing is beating them. */
+      let s=C.soft,h=C.hard;
+      if(slope>0.0005){
+        if(slope<s)s=Math.max(0.0005,slope*0.7+s*0.3);   // new soft end: move most of the way
+        else       s=s*0.9995+slope*0.0005;              // nothing softer lately: drift up
+        if(slope>h)h=slope*0.7+h*0.3;
+        else       h=Math.max(s*3,h*0.9995+slope*0.0005);
+        /* keep them in RAM and only persist occasionally — `set` writes
+           localStorage, and one write per keystroke is a lot of writes */
+        C.soft=s; C.hard=h;
+        CFG.he=Object.assign({},CFG.he||{},{soft:s,hard:h});
+        if(((this._save=(this._save|0)+1)&31)===0)saveCfg();
+      }
     }
     const lo=Math.min(C.soft,C.hard*0.5), hi=Math.max(C.hard,lo*1.5);
     const n=clamp((slope-lo)/(hi-lo),0,1);
@@ -7901,7 +7985,7 @@ function renderSettings(L){
   L.push('   '+sp('d','smix    smart mixer: listens per channel + master, trims harsh/loud channels live'));
   L.push('   '+sp('d','/       here = generate a whole song (4 sections + arrangement + dj drops)'));
   {const C=HE.cfg();
-   L.push('   '+sp('d','hid     ↑ = fun60/rongyuan · ↓ = keychron/analogsense · again = disconnect'));
+   L.push('   '+sp('d','hid     connect an analog keyboard · again = disconnect'));
    if(HE.on)L.push('   '+sp('a','        '+HE.srcName)+sp('d','  frames ')+sp(HE.fps<125?'r':'a',HE.fps+'Hz')+
      sp('d','  last vel ')+sp('a',String(Math.round(HE.lastVel*127)))+
      sp('d','  slope '+C.soft.toFixed(3)+'…'+C.hard.toFixed(3)+(C.auto?' (auto)':''))+

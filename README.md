@@ -95,9 +95,13 @@ points at and its **ratio becomes the sync sweep**, not its pitch — the
 classic tearing lead. Non-integer ratios are where the character lives.
 
 **Hall-effect keyboards, direct.** SETTINGS `hid` connects an analog keyboard
-over WebHID — `↓` for Keychron/AnalogSense (raw-HID matrix, request/response),
-`↑` for MonsGeek FUN60 / Attack Shark (RongYuan, event-driven push, no firmware
-mod needed). TEN never reads the board's keystrokes: the analog stream is the
+over WebHID. One chooser lists every supported board and the transport is picked
+from what you chose — Keychron/Lemokey HE use the raw-HID matrix
+(request/response); MonsGeek FUN60, Akko and Attack Shark use the RongYuan
+event-driven push, which needs no firmware mod. On the Keychron the playing keys
+are already mapped, so it plays as soon as it connects; other boards number their
+keys by matrix position, so run `hid keys` once. TEN never reads the board's
+keystrokes: the analog stream is the
 only trigger, so set actuation deep (2–3mm) or park the playing keys on a layer
 with no keycode and it stops spraying text. Velocity is unaffected either way,
 because the trigger point is a software number (`hid trig`, default 15% of
@@ -111,8 +115,13 @@ remaining travel *after* the trigger becomes per-note pressure, so the same
 press that sounded the note goes on shaping it.
 
 Run `hid keys` once per board: press each playing key in turn and TEN records
-which matrix slot moved. Key IDs are matrix positions and differ per model, so
-there is no table to ship — but the mapping is saved once you've done it.
+which matrix slot moved. Key IDs are matrix positions and differ per model. The
+Keychron 6x16 scan order (K2 HE, Q3 HE) ships built in; everything else needs
+the one pass, and the mapping is saved once you've done it.
+
+If the chooser is empty, another tab is probably still holding the keyboard —
+WebHID grants are per page, and the analog protocols are request/response, so
+two pages will fight over the same pipe. Close the other one first.
 
 **Velocity and pressure.** The laptop keyboard has no sensors, so it plays
 at a fixed velocity you step with `c` / `v` while playing — the same way
