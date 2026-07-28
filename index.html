@@ -5260,169 +5260,6 @@ _mk('trumpet','blown',CODE_DEFAULT);
    Age and character live in JITTER (pitch wander) and SHIMMER (amplitude
    wander) — a young trained voice has almost none, an old one has plenty,
    and that single pair is most of what reads as 'grainy'. */
-_mk('voice','formant',`
-PARAMS = ['gender','vowel','breath','age','singers','vibrato','press','drive']
-/* F1..F4 for a e i o u, male tract. Everything else scales off these. */
-var VF=[[730,1090,2440,3400],[530,1840,2480,3500],[270,2290,3010,3500],
-        [570,840,2410,3200],[300,870,2240,3100]];
-var VA=[1,0.82,0.66,0.46];   // upper formants carry more, to survive the source tilt
-function noteOn(v,f,vel,p){
-  v.f=f; v.vel=vel; v.t=0; v.rel=false; v.env=0; v._q=0;
-  var n=1+Math.floor(p[4]*p[4]*7);          // 1 soloist .. 8 voices
-  v.n=n; v.ph=[]; v.jf=[]; v.jt=[]; v.sh=[]; v.det=[];
-  for(var i=0;i<n;i++){
-    v.ph[i]=Math.random();
-    v.jf[i]=0; v.jt[i]=0; v.sh[i]=1;
-    // a choir is people who cannot agree on the note or the moment
-    v.det[i]=n>1?(Math.random()*2-1)*(0.004+p[4]*0.016):0;
-  }
-  v.vph=Math.random()*6.2832;
-  v.b=[0,0,0,0]; v.l=[0,0,0,0];
-  v.tilt=0; v.hp=0; v.dc=0;
-}
-function noteOff(v){ v.rel=true }
-function render(v,p){
-  var t=v.t;
-  /* tract length: male 1.0 -> female ~1.17 -> child ~1.32. One multiplier
-     moves every formant, which is the whole of it. */
-  var scale=0.94+p[0]*0.42;
-  var x=p[1]*4, vi=Math.floor(x); if(vi>3)vi=3; var fr=x-vi;
-  var vib=Math.sin(v.vph)*p[5]*0.035;
-  v.vph+=6.2832*(4.6+p[5]*1.8)*srI;
-  var jit=p[3]*p[3];
-  var src=0;
-  for(var i=0;i<v.n;i++){
-    // jitter: a slow random walk on the period, the thing that ages a voice
-    v.jt[i]+=(Math.random()*2-1)*0.0007*(0.06+jit);
-    v.jt[i]*=0.9993;
-    var fi=v.f*(1+v.det[i]+vib+v.jt[i]);
-    var inc=fi*srI;
-    v.ph[i]+=inc; if(v.ph[i]>=1)v.ph[i]-=1;
-    /* glottal pulse: closed for most of the cycle, one asymmetric bump when
-       it opens. A plain saw has the wrong spectrum and sounds like a synth. */
-    var oq=0.36+p[6]*0.30;                  // open quotient: pressed .. breathy
-    var g=0;
-    if(v.ph[i]<oq){
-      var u=v.ph[i]/oq;
-      g=u*u*(3-2*u)-u;                      // rises then snaps shut
-      g*=3.2;
-    }
-    // shimmer rides with jitter
-    v.sh[i]+=((1+(Math.random()*2-1)*jit*0.35)-v.sh[i])*0.0012;
-    src+=g*v.sh[i];
-  }
-  src/=Math.sqrt(v.n);
-  // aspiration: turbulence at the glottis, not a noise layer on top
-  var br=p[2]*p[2];
-  src+=_noise()*br*0.55*(0.4+0.6*br);
-  /* A glottal pulse falls about 12dB/octave, so without this the fundamental
-     buries every formant and the vowel reads as a buzzing organ. Subtracting
-     the low-passed copy flattens the source, which is what lets the tract
-     resonances actually be the loudest thing. 'press' sets how much. */
-  var tf=0.010+p[6]*0.045;
-  v.tilt+=(src-v.tilt)*tf;
-  var sig=src-v.tilt*(0.62+p[6]*0.30);
-  var y=0;
-  for(var k=0;k<4;k++){
-    var f0=VF[vi][k]+(VF[vi+1>4?4:vi+1][k]-VF[vi][k])*fr;
-    var fc=6.2832*f0*scale*srI; if(fc>2.0)fc=2.0;
-    var q=0.10+0.05*k;                      // higher formants are broader
-    var h=sig-v.l[k]-q*v.b[k]; v.b[k]+=fc*h; v.l[k]+=fc*v.b[k];
-    y+=v.b[k]*VA[k];
-  }
-  y*=2.6;
-  // singers never start together
-  var atk=0.012+p[4]*0.10;
-  v.env+=((v.rel?0:1)-v.env)*(v.rel?v._rr:1/(atk*sampleRate));
-  if(v.rel&&v.env<0.0005){v.done=true;return 0}
-  v.dc+=(y-v.dc)*0.0004; y-=v.dc;
-  y=Math.tanh(y*(1+p[7]*3));
-  v.t+=srI;
-  return y*v.vel*v.env*0.5;
-}`);
-
-/* BASS — a plucked string over a body. Electric and upright are the same
-   string; what differs is what it is bolted to. A solid body gives the
-   string back almost nothing, so it rings long and even. A double bass has
-   a big air cavity (~60Hz) and a top plate (~200Hz) that both feed energy
-   back, which is where the thump and the growl come from — and which is why
-   an upright dies faster: the body is spending the string's energy. */
-_mk('bass','waveguide',`
-PARAMS = ['upright','body','decay','pluck','tone','growl','attack','drive']
-function noteOn(v,f,vel,p){
-  v.f=f; v.vel=vel; v.t=0; v.rel=false; v.env=1; v._q=0;
-  var L=Math.max(12,Math.round(sampleRate/f));
-  v.L=L; v.buf=new Float32Array(Math.max(L,Math.round(sampleRate/24)));
-  v.i=0; v.y=0;
-  // pluck position sets a comb notch — near the bridge is thin and nasal
-  var k=Math.max(1,Math.round(L*(0.06+p[3]*0.40)));
-  for(var n=0;n<L;n++)v.buf[n]=_noise();
-  for(var n=L-1;n>=k;n--)v.buf[n]-=v.buf[n-k]*0.75;
-  // finger vs pick: how much of the excitation survives the low-pass of flesh
-  var sm=0.28+(1-p[6])*0.6;
-  for(var n=1;n<L;n++)v.buf[n]=v.buf[n]*(1-sm)+v.buf[n-1]*sm;
-  v.b1=0;v.l1=0;v.b2=0;v.l2=0;v.b3=0;v.l3=0;
-  v.dc=0; v.lp=0; v.gz=0;
-}
-function noteOff(v){ v.rel=true }
-function render(v,p){
-  var up=p[0];
-  var s=v.buf[v.i];
-  // loop filter: every trip round the string loses treble
-  var d=0.04+p[4]*0.30+up*0.12;
-  v.y=(1-d)*s+d*v.y;
-  /* an upright bleeds energy into its body, so it decays faster no matter
-     how the decay knob is set */
-  var loss=0.999975-(1-p[2])*0.00010-up*0.00006;
-  if(v.rel)loss-=0.0006;
-  v.buf[v.i]=v.y*loss;
-  v.i++; if(v.i>=v.L)v.i=0;
-  var x=s;
-  // growl: the string slapping the fingerboard, strongest while it is loud
-  if(p[5]>0.01){
-    var g=Math.abs(x)*p[5]*2.2;
-    if(g>1)g=1;
-    x+=Math.tanh(x*8)*g*0.22;
-  }
-  /* a solid body gives nothing back, so an electric would be far quieter
-     than an upright at the same setting — compensate on the dry string */
-  var y=x*(0.55+(1-up)*0.55);
-  /* the body: air cavity + top plate. Only the upright really has them, so
-     both scale with 'upright' as well as the body knob. */
-  var amt=p[1]*(0.25+up*1.5);
-  if(amt>0.01){
-    var f1=6.2832*(58+p[1]*26)*srI;
-    var h1=x-v.l1-0.16*v.b1; v.b1+=f1*h1; v.l1+=f1*v.b1;
-    var f2=6.2832*(196+p[1]*70)*srI;
-    var h2=x-v.l2-0.26*v.b2; v.b2+=f2*h2; v.l2+=f2*v.b2;
-    var f3=6.2832*(430+p[1]*180)*srI;
-    var h3=x-v.l3-0.5*v.b3; v.b3+=f3*h3; v.l3+=f3*v.b3;
-    y+=(v.b1*1.5+v.b2*0.9+v.b3*0.35)*amt;
-  }
-  v.dc+=(y-v.dc)*0.0003; y-=v.dc;
-  if(v.rel){ v.env*=(1-v._rr); if(v.env<0.0005)v.done=true; }
-  v._q=Math.abs(y)>v._q?Math.abs(y):v._q*0.9997;
-  if(v.t>0.3&&v._q<1e-5)v.done=true;
-  y=Math.tanh(y*(1+p[7]*3));
-  v.t+=srI;
-  return y*v.vel*v.env*0.5;
-}`);
-
-
-/* ============ ACOUSTIC DRUMS ============================================
-   Hats and shakers are the sounds that resisted resynthesis earlier
-   — an open hi-hat needed more numbers than the sample it came from. So none
-   of these try to be a recording. They are built from the mechanism instead:
-   an inharmonic plate, a stochastic pile of beans, a head with wires under
-   it. Cheap, and they respond to a knob the way the real object responds to
-   its size. */
-
-/* CYMBAL — splash to gong.
-   A circular plate has dense INHARMONIC modes, and a large one is nonlinear:
-   energy poured into the low modes migrates upward over about a second.
-   That upward cascade IS the gong bloom — without it a gong is just a big
-   splash. Modelled as a wash whose band rises and swells while the struck
-   partials decay underneath it. */
 _mk('hihat','metal',`
 PARAMS = ['open','tone','metal','strike','damp','body','trem','drive']
 var RAT=[1,1.34,1.79,2.38,3.07,3.81,4.62,5.71];
@@ -5578,7 +5415,7 @@ function render(v,p){
 /* Output trim, measured per model against a plain saw on the normal synth
    engine (osc saw @0.85, no filter, vel 0.9) = the reference every instrument
    is levelled to. Re-measure and update this table if a model changes. */
-const PROCGAIN={voice:0.87,bass:0.98,hihat:0.868,shaker:0.561,clap:2.040,kick:0.496,
+const PROCGAIN={hihat:0.868,shaker:0.561,clap:2.040,kick:0.496,
   bell:0.855,kalimba:0.801,xylophone:0.475,marimba:0.412,vibraphone:0.404,
   steeldrum:0.966,woodblock:0.867,string:0.892,bowed:1.272,clarinet:0.455,
   flute:0.554,harmonica:0.676,accordion:0.998,saxophone:0.686,skindrum:0.601,
@@ -5616,6 +5453,12 @@ function applyProcPreset(pi,pre){
   });
   p.name=pre.n.slice(0,5).toUpperCase();
   engine.rebuildRack(pi); engine.refresh(pi); engine.codeCfg(pi);
+  /* codeCfg carries the filter, mod and voice config — NOT the model's own
+     eight params. Without this the worklet kept the previous preset's values
+     and only the name changed, so switching preset did nothing you could
+     hear. Changing MODEL appeared to work only because a new source rebuilds
+     the node, which sends the params as a side effect. */
+  engine.codeParams(pi);
 }
 const procPresets=m=>PROCPRE[m]||[];
 
@@ -5896,28 +5739,6 @@ PROCPRE.kick=[
   PP('Clicky Kick', [0.40,0.62,0.35,0.90,0.45,0.25,0.5,0.16],null,[0.001,9,0,0.08]),
   PP('Floor Tom',   [0.72,0.35,0.60,0.35,0.70,0.25,0.5,0.10],null,[0.001,8,0,0.16]),
   PP('Distort Kick',[0.28,0.75,0.45,0.60,0.60,0.40,0.5,0.85],null,[0.001,8,0,0.10])];
-PROCPRE.voice=[
-  PP('Baritone Ah', [0.10,0.00,0.15,0.20,0.00,0.30,0.35,0.06],null,[0.03,4,1,0.20],[0,1,0,0.3,0]),
-  PP('Tenor Eh',    [0.30,0.25,0.20,0.25,0.00,0.45,0.45,0.06],null,[0.03,4,1,0.22],[0,1,0,0.3,0]),
-  PP('Soprano Ah',  [0.85,0.00,0.18,0.12,0.00,0.55,0.40,0.05],null,[0.04,4,1,0.22],[0,1,0,0.3,0]),
-  PP('Alto Oo',     [0.62,1.00,0.22,0.22,0.00,0.40,0.35,0.05],null,[0.04,4,1,0.24],[0,1,0,0.3,0]),
-  PP('Breathy Ee',  [0.70,0.50,0.75,0.30,0.00,0.35,0.85,0.05],null,[0.05,4,1,0.26],[0,1,0,0.4,0]),
-  PP('Old Man Oh',  [0.05,0.75,0.45,0.90,0.00,0.25,0.30,0.10],null,[0.05,4,1,0.24],[0,1,0,0.3,0]),
-  PP('Child Ee',    [1.00,0.50,0.30,0.35,0.00,0.50,0.55,0.05],null,[0.03,4,1,0.20],[0,1,0,0.3,0]),
-  PP('Small Choir', [0.45,0.00,0.30,0.35,0.45,0.40,0.45,0.05],null,[0.08,3,1,0.35],[0,1,0,0.7,0]),
-  PP('Big Choir',   [0.50,0.20,0.35,0.45,1.00,0.35,0.40,0.05],null,[0.14,3,1,0.50],[0,1,0,0.9,0]),
-  PP('Ghost Choir', [0.75,1.00,0.85,0.60,0.75,0.60,0.90,0.04],null,[0.20,2,1,0.70],[0,1,0,1.0,0])];
-PROCPRE.bass=[
-  PP('P-Bass Finger',[0.00,0.30,0.72,0.28,0.35,0.10,0.30,0.10],null,[0.001,9,1,0.10]),
-  PP('J-Bass Bridge',[0.00,0.22,0.68,0.72,0.55,0.08,0.55,0.10],null,[0.001,9,1,0.09]),
-  PP('Pick Bass',    [0.00,0.25,0.62,0.22,0.62,0.18,0.85,0.16],null,[0.001,9,1,0.08]),
-  PP('Flatwound Dub',[0.05,0.45,0.80,0.18,0.12,0.05,0.15,0.08],null,[0.001,9,1,0.14]),
-  PP('Upright Jazz', [0.85,0.75,0.42,0.30,0.22,0.30,0.20,0.08],null,[0.002,8,1,0.12]),
-  PP('Upright Slap', [1.00,0.90,0.30,0.20,0.35,0.75,0.55,0.14],null,[0.001,9,1,0.09]),
-  PP('Arco Body',    [0.95,1.00,0.55,0.45,0.18,0.15,0.10,0.06],null,[0.004,7,1,0.20]),
-  PP('Growl Bass',   [0.55,0.65,0.60,0.35,0.45,1.00,0.60,0.28],null,[0.001,8,1,0.10]),
-  PP('Sub Round',    [0.15,0.55,0.85,0.12,0.08,0.03,0.12,0.06],null,[0.002,9,1,0.16]),
-  PP('Fretless Sing',[0.35,0.60,0.88,0.40,0.28,0.20,0.18,0.08],null,[0.003,8,1,0.18])];
 const PROCNAMES = Object.keys(PROCLIB);
 /* Sensible starting rack for a procedural channel. The amp envelope sits at
    sustain 1 with a long decay, so while a key is held it does nothing at all —
@@ -5932,7 +5753,15 @@ function procDefaults(p){
   Object.assign(p.vox,{mode:0,uni:1,sprd:12,wide:0.5,slop:0.004,glide:0});
 }
 const PMODEL_ALIAS={piano:'e-piano'};
-const resolveModel=n=>(n&&PMODEL_ALIAS[n])||n;
+/* A patch can name a model that no longer exists — renamed, or retired like
+   cymbal/snare/voice/bass were. Falling through to the default code block
+   left the channel making a sound nobody chose and, worse, with an empty
+   preset list that threw. Land on a real model instead. */
+const resolveModel=n=>{
+  if(!n)return n;
+  const a=PMODEL_ALIAS[n]||n;
+  return PROCLIB[a]?a:'bell';
+};
 const procSrc = p => _PRE + ((p.pmodel && PROCLIB[resolveModel(p.pmodel)]) ? PROCLIB[resolveModel(p.pmodel)].src : CODE_DEFAULT);
 
 
