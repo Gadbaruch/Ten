@@ -6447,8 +6447,15 @@ function mouseFocus(kind,i){
   else if(kind==='slot')S.slotParam=i;
   else if(kind==='mst')S.mParam=i;
   else if(kind==='sl'){S.curSlot=i; S.slotParam=0;}
+  else if(kind==='mod'){S.curMod=i; S.curParam=0; S.slotParam=0;}
+  else if(kind==='msl'){S.mSlot=i; S.mDj=null; S.mParam=0;}
+  else if(kind==='dj'){S.mDj=i; S.mParam=0;}
+  else if(kind==='ch'){ if(S.layer>=2)S.editSnd=i; else S.curPreset=i; }
+  else if(kind==='cell')stepCur=i;          // jump the loop cursor to a cell
   dirty=true;
 }
+/* tabs and rows are selections, not values — dragging one should not spin it */
+const MOUSE_SELECT_ONLY=new Set(['mod','sl','msl','dj','ch','cell']);
 function mouseBump(dir,shift,alt){
   onKeyDown({code:dir>0?'ArrowUp':'ArrowDown',key:dir>0?'ArrowUp':'ArrowDown',
     shiftKey:!!shift,altKey:!!alt,metaKey:false,ctrlKey:false,repeat:false,
@@ -6465,7 +6472,8 @@ screen.addEventListener('pointerdown',e=>{
   const hit=hitOf(e.target); if(!hit)return;
   e.preventDefault();                       // focus stays on body: keys keep working
   mouseFocus(hit.kind,hit.i);
-  MOUSE.on=true; MOUSE.acc=0; MOUSE.y=e.clientY; MOUSE.kind=hit.kind; MOUSE.moved=false;
+  MOUSE.on=!MOUSE_SELECT_ONLY.has(hit.kind);
+  MOUSE.acc=0; MOUSE.y=e.clientY; MOUSE.kind=hit.kind; MOUSE.moved=false;
   try{screen.setPointerCapture(e.pointerId);}catch(_){}
 });
 screen.addEventListener('pointermove',e=>{
@@ -6493,7 +6501,7 @@ screen.addEventListener('wheel',e=>{
   const hit=hitOf(e.target); if(!hit)return;
   e.preventDefault();
   mouseFocus(hit.kind,hit.i);
-  mouseBump(e.deltaY<0?1:-1,e.shiftKey,e.altKey);
+  if(!MOUSE_SELECT_ONLY.has(hit.kind))mouseBump(e.deltaY<0?1:-1,e.shiftKey,e.altKey);
 },{passive:false});
 screen.addEventListener('contextmenu',e=>{if(hitOf(e.target))e.preventDefault();});
 const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;');
@@ -6514,12 +6522,13 @@ function loopBadge(){
   const len=lp._cap?sp('r','listening…'):sp('a',cnt+'×'+UNIT_NAMES[lp.unit])+sp('d',' ('+(Math.round(lp.len*100)/100)+'b)');
   return stateBadge(h.state)+lane+len;
 }
-function gridRow(lp,cell,phCell,charFor,cur=-1){
+function gridRow(lp,cell,phCell,charFor,cur=-1,hit){
   const n=Math.ceil(lp.len/cell-1e-9);
   let out='';
   for(let i=0;i<n;i++){
     const ch=charFor(i*cell,(i+1)*cell);
-    out+=(i===cur)?sp('i',ch):(i===phCell)?sp('ai',ch):ch;
+    out+=hit?( (i===cur)?spH('i',ch,hit,i):(i===phCell)?spH('ai',ch,hit,i):spH('g',ch,hit,i) )
+           :((i===cur)?sp('i',ch):(i===phCell)?sp('ai',ch):ch);
     if(cell<1&&i%4===3&&i<n-1)out+=sp('d','│');
     else if(cell>=1&&(i+1)*cell%4===0&&i<n-1)out+=sp('d','│');
   }
@@ -6642,7 +6651,7 @@ function renderPat(L,pos){
     const lane=pat.lanes[li];
     if(isAudioCh(li)){
       const cnt2=(lane.count%1?lane.count.toFixed(1):lane.count)+({s:'st',b:'bt',B:'br'})[lane.unit];
-      L.push('  '+(li===S.curPreset?sp('a',` ${li}${pad(S.presets[li].name,5)} `):sp('d',` ${li}${pad(S.presets[li].name,5)} `))+
+      L.push('  '+(li===S.curPreset?spH('a',` ${li}${pad(S.presets[li].name,5)} `,'ch',li):spH('d',` ${li}${pad(S.presets[li].name,5)} `,'ch',li))+
         sp('d',pad(lane.solo?'SOLO':lane.mute?'MUTE':cnt2,6))+' '+
         (engine.audBuf[li]?sp('a','≈≈≈ '+(engine.audName[li]||'clip')+' ≈≈≈'):sp('d','≈ no clip — drop audio or tab-record'))+
         (engine.audRec&&engine.audRec.pi===li?sp('r','  ● REC'):''));
@@ -6656,7 +6665,7 @@ function renderPat(L,pos){
     const ph=T.playing?Math.floor(fmod(pos-anc,lane.len)/cell):-1;
     const cnt=(lane.count%1?lane.count.toFixed(1):lane.count)+({s:'st',b:'bt',B:'br'})[lane.unit];
     let lbl=` ${li}${pad(S.presets[li].name,5)} `;
-    L.push('  '+(lane.mute?sp('r',lbl):li===S.curPreset?sp('a',lbl):sp('d',lbl))+
+    L.push('  '+(lane.mute?spH('r',lbl,'ch',li):li===S.curPreset?spH('a',lbl,'ch',li):spH('d',lbl,'ch',li))+
       sp('d',pad(lane.solo?'SOLO':lane.mute?'MUTE':lane.auto?'new':cnt,6))+' '+
       gridRow(lane,cell,ph,(a,b)=>{
         const hits=lane.events.filter(e=>e.t>=a-1e-9&&e.t<b-1e-9);
@@ -6688,7 +6697,7 @@ function renderSnd(L,pos){
   const pre=S.presets[S.editSnd], ml=pre.modLoop;
   const edit=ml.state==='edit';
   let tabs='  ';
-  MODULES.forEach((m,i)=>{if(!m.id)return;tabs+=(i===S.curMod?sp('i',` ${m.k}${m.name} `):sp('d',` ${m.k}${m.name} `));});
+  MODULES.forEach((m,i)=>{if(!m.id)return;tabs+=(i===S.curMod?spH('i',` ${m.k}${m.name} `,'mod',i):spH('d',` ${m.k}${m.name} `,'mod',i));});
   L.push(tabs);
   L.push('');
   // this channel's pattern lane — visible (and recordable) from the sound layer
@@ -6904,7 +6913,7 @@ function renderSlots(L){
     (ml.state==='rec'?'  ● value moves record':'')+'  ·  ⇧⌫ clear slot pts'));
   L.push('   '+gridRow(ml,cellM,phM,(a,b)=>
     evSlot.some(e=>e.t>=a-1e-9&&e.t<b-1e-9)?'▪':
-    evMod.some(e=>e.t>=a-1e-9&&e.t<b-1e-9)?'∙':'·',mEdit?curCell(ml):-1));
+    evMod.some(e=>e.t>=a-1e-9&&e.t<b-1e-9)?'∙':'·',mEdit?curCell(ml):-1,'cell'));
   if(mEdit)L.push('  '+sp('i',' EDIT ')+' '+sp('a',(curCell(ml)+1)+'/'+stepCells(ml))+
     sp('d','  ←→ cursor · ↑↓ set point for focused param · ⌫ clear cell'));
   L.push('');
@@ -6942,14 +6951,14 @@ function renderMaster(L){
   S.master.forEach((sl2,i)=>{
     const ab=sl2.typ?XTYPES[sl2.typ]:'···';
     const lbl=` ${(i+1)%10}${ab}${sl2.typ?(Math.round(sl2.rt)===1?'ˢ':'ᵐ'):''} `;
-    tabs+=(!onDj&&i===(S.mSlot||0)?sp('i',lbl):(sl2.typ?sp('a',lbl):sp('d',lbl)));
+    tabs+=(!onDj&&i===(S.mSlot||0)?spH('i',lbl,'msl',i):(sl2.typ?spH('a',lbl,'msl',i):spH('d',lbl,'msl',i)));
   });
   L.push(tabs);
   let djr='  ';
   S.dj.forEach((sl2,i)=>{
     const on=djHeld[i]||djLatch[i]||djAuto[i];
     const lbl=` ${DJKEYS[i]}${sl2.typ?XTYPES[sl2.typ]:'···'}${djLatch[i]?'●':on?'▸':''} `;
-    djr+=(onDj&&i===S.mDj?sp('i',lbl):on?sp('r',lbl):(sl2.typ?sp('a',lbl):sp('d',lbl)));
+    djr+=(onDj&&i===S.mDj?spH('i',lbl,'dj',i):on?spH('r',lbl,'dj',i):(sl2.typ?spH('a',lbl,'dj',i):spH('d',lbl,'dj',i)));
   });
   L.push(djr+sp('d',' hold=audition ⇧=latch'));
   L.push('');
