@@ -2359,7 +2359,11 @@ class Engine{
                  after 0.5s so slow attacks are safe. */
               const ax=x<0?-x:x;
               vo._pk=ax>(vo._pk||0)?ax:(vo._pk||0)*0.99931;
-              if(vo._pk<0.0001&&vo._t>0.5){vo.done=true;continue;}
+              /* RELEASED notes only. A held note can be legitimately silent —
+                 a deep tremolo, a gate, an LFO on amp — and reaping it would
+                 kill a note that was about to come back, permanently. Only a
+                 note that has had its note-off can be safely called finished. */
+              if(vo._off&&vo._pk<0.0001&&vo._t>0.5){vo.done=true;continue;}
               x*=(vo._amp!==undefined?vo._amp:1);
               const pn=vo._pan||0;
               sm  += x*(pn>0?1-pn*0.85:1);
