@@ -4443,28 +4443,47 @@ const HE={
     catch(err){flash('hid: '+(err&&err.message||err));return false;}
     if(!devs||!devs.length){flash('no device chosen');return false;}
 
-    const kind=devs[0].vendorId===0x3151?2:1;
-    /* The RongYuan boards split the job over two HID interfaces: a 0xFFFF/0x02
-       collection that takes the enable command, and a SEPARATE interface
-       carrying the analog stream — whose primary usage is Consumer Control, so
-       it is not the obvious one either. WebHID hands those back as distinct
-       HIDDevice objects, so gather every granted sibling and sort them out. */
-    let cfgDev=devs[0], inDev=devs[0];
+    /* Gather every interface of the chosen board, including granted siblings the
+       chooser did not hand back, then pick by COLLECTION rather than by array
+       position: these boards expose two or three HID interfaces and devs[0] is
+       just as likely to be the typing one, which opens fine and never answers. */
+    const pool=[...devs];
+    try{for(const d of await navigator.hid.getDevices())
+      if(!pool.includes(d)&&devs.some(x=>x.vendorId===d.vendorId&&x.productId===d.productId))pool.push(d);
+    }catch(_){}
+    const cols=d=>(d.collections||[]).map(c=>
+      '0x'+c.usagePage.toString(16).toUpperCase()+'/0x'+c.usage.toString(16).toUpperCase()).join(' ');
+    console.log('HE interfaces:\n'+pool.map(d=>
+      '  '+d.productName+' '+d.vendorId.toString(16)+':'+d.productId.toString(16)+' ['+cols(d)+']').join('\n'));
+
+    const has=(d,pg,us)=>(d.collections||[]).some(c=>c.usagePage===pg&&(us==null||c.usage===us));
+    const vend=d=>(d.collections||[]).some(c=>(c.usagePage&0xFF00)===0xFF00);
+    const kind=pool.some(d=>d.vendorId===0x3151)?2:1;
+    let cfgDev,inDev;
     if(kind===2){
-      const pool=[...devs];
-      try{for(const d of await navigator.hid.getDevices())
-        if(d.vendorId===devs[0].vendorId&&d.productId===devs[0].productId&&!pool.includes(d))pool.push(d);
-      }catch(_){}
-      let c=null,i=null;
-      for(const d of pool)for(const col of d.collections||[]){
-        if(col.usagePage===0xFFFF&&col.usage===0x02)c=c||d;
-        else if((col.usagePage&0xFF00)===0xFF00)     i=i||d;
-      }
-      cfgDev=c||i||devs[0]; inDev=i||c||devs[0];
+      cfgDev=pool.find(d=>has(d,0xFFFF,0x02));
+      inDev =pool.find(d=>d!==cfgDev&&vend(d))||cfgDev;
+      cfgDev=cfgDev||inDev;
+    }else{
+      inDev=pool.find(d=>has(d,0xFF60))||pool.find(vend)||pool[0];
+      cfgDev=inDev;
     }
-    try{for(const d of new Set([cfgDev,inDev]))if(!d.opened)await d.open();}
-    catch(err){flash('hid open failed: '+(err&&err.message||err)
-      +' — close any other tab holding this keyboard');return false;}
+    if(!inDev){flash('hid: no vendor collection on that device — pick the keyboard itself, not a sub-entry');return false;}
+
+    /* Open what we can; only the stream interface is fatal. An interface that
+       refuses to open is usually one macOS has claimed, not a reason to give up
+       on the ones that did open. */
+    let oerr=null;
+    for(const d of new Set([inDev,cfgDev])){
+      if(d.opened)continue;
+      try{await d.open();}catch(err){oerr=err; if(d===inDev)break;}
+    }
+    if(!inDev.opened){
+      flash('hid open failed: '+(oerr&&oerr.message||oerr||'?')
+        +' — another tab or app has this keyboard, or macOS Input Monitoring is off for Chrome');
+      return false;
+    }
+    if(kind===2&&!cfgDev.opened){cfgDev=inDev;}   // fall back to enabling on the stream interface
 
     this.dev=inDev; this.cfgDev=cfgDev; this.kind=kind;
     this.srcName=inDev.productName||'hid';
