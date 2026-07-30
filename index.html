@@ -269,7 +269,7 @@ const SCALES=[['maj',[0,2,4,5,7,9,11]],['min',[0,2,3,5,7,8,10]],['dor',[0,2,3,5,
   ['mix',[0,2,4,5,7,9,10]],['pmaj',[0,2,4,7,9]],['pmin',[0,3,5,7,10]],
   ['hmin',[0,2,3,5,7,8,11]],['chr',[0,1,2,3,4,5,6,7,8,9,10,11]]];
 const KEYN=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
-const CFG=Object.assign({looper:1,overdub:0,listen:1,defLen:1,scaleOn:0,key:0,scale:0,wild:50,amix:1,qOn:1},
+const CFG=Object.assign({looper:1,overdub:0,listen:1,defLen:1,scaleOn:0,key:0,scale:0,wild:50,amix:1,qOn:1,vgrid:1},
   (()=>{try{return JSON.parse(localStorage.getItem('ten-cfg'))||{};}catch(_){return{};}})());
 if(CFG.looper===undefined)CFG.looper=1;   // momentary is the default; retro opt-in from settings
 const saveCfg=()=>{try{localStorage.setItem('ten-cfg',JSON.stringify(CFG));}catch(_){}};
@@ -7493,7 +7493,10 @@ function vGrid(L,pat,pos,anc,chans){
   for(let r=0;r<VROWS;r++){
     const abs=base+r;
     const beat=abs*step;
-    let line=(r===playRow?sp('a','▸'):' ')+sp('d',String((abs%16)+1).padStart(3)+' ');
+    /* gutter is 4 wide so a cell's glyph lands at column 6 — the middle of the
+       channel label above it. At 5 the whole grid sat two characters right of
+       the strip and stopped reading as "under its channel". */
+    let line=(r===playRow?sp('a','▸'):' ')+sp('d',String((abs%16)+1).padStart(2)+' ');
     for(const i of chans){
       const lane=pat.lanes[i];
       let ch='·', cls='d';
