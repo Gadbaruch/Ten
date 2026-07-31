@@ -553,14 +553,22 @@ const SETTINGS=[
  {n:'vel',    v:()=>String(Math.round(clamp(CFG.kvel??0.9,0.02,1)*127)), a:d=>EXP.bump(d*0.05)},
  {n:'midi in',v:()=>EXP.midiOn?['off','solo','+kbd'][CFG.midiIn|0]:'off', a:d=>EXP.cycleMidi(d)},
  {n:'hid',    v:()=>HE.on?(HE.srcName||'on').slice(0,8):'off',
-              a:d=>{if(HE.on)HE.disconnect(); else HE.connect(d<0?1:2);}},
+              a:()=>{if(HE.on)HE.disconnect(); else HE.connect();}},
  {n:'hid keys',v:()=>HE.learn?(HE.learn.i+'/'+HE.learn.order.length):(HE.map?String(Object.keys(HE.map).length):'—'),
               a:()=>HE.startLearn()},
  {n:'hid trig',v:()=>Math.round(HE.cfg().trig*100)+'%', a:d=>HE.set('trig',clamp(HE.cfg().trig+d*0.01,0.05,0.6))},
  {n:'hid curve',v:()=>HE.cfg().gamma.toFixed(2), a:d=>HE.set('gamma',clamp(HE.cfg().gamma+d*0.05,0.2,2))},
  {n:'hid floor',v:()=>Math.round(HE.cfg().floor*127)+'', a:d=>HE.set('floor',clamp(HE.cfg().floor+d*0.02,0,0.5))},
+ /* Switching to auto starts learning from wherever the fixed range currently
+    sits. Switching back to fixed leaves the fixed range alone — it used to
+    overwrite it with the generic HEDEF numbers, which planted the wrong ceiling
+    on whichever board was plugged in. */
  {n:'hid range',v:()=>HE.cfg().auto?'auto':'fixed',
-              a:()=>{const C=HE.cfg(); HE.set('auto',C.auto?0:1); if(!C.auto){HE.set('soft',HEDEF.soft);HE.set('hard',HEDEF.hard);}}},
+              a:()=>{const C=HE.cfg();
+                     if(!C.auto){HE.set('aSoft',C.soft); HE.set('aHard',C.hard);}
+                     HE.set('auto',C.auto?0:1);}},
+ {n:'hid hard',v:()=>HE.cfg().hard.toFixed(3), a:d=>HE.set('hard',clamp(HE.cfg().hard+d*0.005,0.02,HE_MAX_SLOPE))},
+ {n:'hid soft',v:()=>HE.cfg().soft.toFixed(3), a:d=>HE.set('soft',clamp(HE.cfg().soft+d*0.001,0.0005,0.08))},
 ];
 function basePreset(name){return{
   name, cat:'misc', tr:0, trs:0, prep:null,
@@ -4888,10 +4896,14 @@ const EXP={
   },
   allOff(){for(const k in this.held){const [a,b]=k.split(':'); this.noteOff(+a,+b);}},
 
-  /* solo = something else is playing the notes, so the board's own keystrokes
-     must be ignored. True for midi-solo and always true for a hid keyboard,
-     which types as well as sensing. */
-  solo(){return (this.midiOn&&(CFG.midiIn|0)===1)||HE.on;},
+  /* solo = something else is playing the notes, so keystrokes must be ignored.
+     For midi that is all of them. For a hall-effect board it is NOT: the laptop
+     keyboard is still a keyboard and must go on working while hid is on. The
+     browser cannot say which keyboard a keydown came from — but an HE keystroke
+     always has an analog stroke behind it, so suppress only keys the board is
+     actually touching and let everything else through. */
+  solo(){return this.midiOn&&(CFG.midiIn|0)===1;},
+  muted(code){return this.solo()||HE.owns(code);},
   /* key-level entry points shared by hid and by in-range midi notes */
   keyDown(code,vel){
     if(liveV[code]||S.layer<1)return false;
@@ -4932,38 +4944,186 @@ const EXP={
    tap moves 0.03-0.06 of travel per frame (0.0075-0.015/ms), a slam goes rest to
    bottomed inside one frame (~0.25/ms). Starting too high pins soft playing on
    the floor; `auto` refines both ends as you play. */
-const HEDEF={rest:0.03,trig:0.15,look:1,gamma:0.5,soft:0.005,hard:0.250,floor:0.08,auto:1};
+/* These are the numbers the sibling MIDI tool has been running on a FUN60, and
+   they are fixed there — no learning of any kind. Auto-range is off by default
+   here for the same reason: it is a second mechanism that can only make the map
+   worse until it converges, and every velocity complaint so far has traced back
+   to a learned end rather than to the slope maths. `hid range` turns it on.
+   floor is 1/127 so the quietest hit is velocity 1, matching the tool exactly. */
+const HEDEF={rest:0.03,trig:0.15,look:1,gamma:0.5,soft:0.005,hard:0.130,floor:1/127,auto:0};
+/* Fastest slope a finger can actually produce, in travel/ms. Full key travel in
+   2ms is already superhuman; anything above this is a measurement artifact. */
+const HE_MAX_SLOPE=0.5;
+/* Bumped when a change invalidates a learned velocity range. The travel-count
+   fix rescaled every slope, so ranges learned before it are meaningless and
+   would otherwise sit there squashing real hits for thousands of keystrokes. */
+const HE_RANGE_VER=3;
+/* The hard end is a property of the BOARD, not of taste. A Keychron polls a
+   whole matrix every 4ms, so a slam shows up as one enormous step; the FUN60
+   reports each key as it moves and the same slam arrives spread over several
+   samples, topping out near half the slope. 0.130 is the FUN60 figure, measured
+   on hardware; the Keychron entry is separate so tuning one cannot move the
+   other. */
+const HE_HARD={1:0.250,2:0.090};
+/* The soft end matters as much: set it at 0 and the quietest real taps still
+   land near a third of full velocity, because the curve has nowhere to put
+   them. Both ends below are fitted from 37 labelled hits on a FUN60 — 19 soft,
+   18 hard — using the same 12th/88th percentile rule the MIDI tool's wizard
+   applies, so they are measurements rather than taste. */
+const HE_SOFT={1:0.005,2:0.012};
+/* A saved end outside these bounds cannot have come from playing — it is the
+   residue of a bug, and version stamps are not enough to catch it: a stamp
+   written by a build that failed to clear the value marks the bad value as
+   current, which is exactly what happened here. Judge the value itself. */
+const HE_SANE={soft:[0.0002,0.08], hard:[0.01,HE_MAX_SLOPE]};
+/* The Keychron full-matrix report is a fixed 6x16 row-major scan, so the slot a
+   playing key lands in is known in advance and `hid keys` is not needed on these
+   boards. Slot = row*16+col; this is the K2 HE / Q3 HE order (Q1 and Q5 are 15
+   and 19 columns wide — learn those). Anything not listed is left unmapped. */
+const KC_SLOTS={34:'KeyW',35:'KeyE',37:'KeyT',38:'KeyY',39:'KeyU',41:'KeyO',42:'KeyP',
+                49:'KeyA',50:'KeyS',51:'KeyD',52:'KeyF',53:'KeyG',54:'KeyH',55:'KeyJ',
+                56:'KeyK',57:'KeyL',58:'Semicolon',59:'Quote'};
+/* RongYuan boards number keys by matrix position, id = column*6 + row + 1.
+   Confirmed against a full learn pass on a FUN60, and it is a property of the
+   matrix wiring rather than the model, so it should hold across the family —
+   `hid keys` still overrides it for any board that disagrees. Shipping it means
+   a FUN60 plays the moment it connects, like the Keychron already does. */
+const RY_SLOTS={1:'Escape',2:'Tab',3:'CapsLock',4:'ShiftLeft',5:'ControlLeft',7:'Digit1',
+                8:'KeyQ',9:'KeyA',13:'Digit2',14:'KeyW',15:'KeyS',16:'KeyZ',17:'MetaLeft',
+                19:'Digit3',20:'KeyE',21:'KeyD',22:'KeyX',23:'AltLeft',25:'Digit4',26:'KeyR',
+                27:'KeyF',28:'KeyC',31:'Digit5',32:'KeyT',33:'KeyG',34:'KeyV',37:'Digit6',
+                38:'KeyY',39:'KeyH',40:'KeyB',41:'Space',43:'Digit7',44:'KeyU',45:'KeyJ',
+                46:'KeyN',49:'Digit8',50:'KeyI',51:'KeyK',52:'KeyM',55:'Digit9',56:'KeyO',
+                57:'KeyL',58:'Comma',61:'Digit0',62:'KeyP',63:'Semicolon',64:'Period',
+                65:'AltRight',67:'Minus',68:'BracketLeft',69:'Quote',70:'Slash',73:'Equal',
+                74:'BracketRight',81:'Enter'};
 const HE={
   on:false, srcName:'', dev:null, kind:0,          // 1 = analogsense, 2 = rongyuan
   keys:{},                                          // keyId -> stroke state
+  recent:{},                                        // TEN key code -> last time the board touched it
+  /* Is this keystroke the analog board's, rather than the laptop's? Refreshed
+     for as long as the key is off its rest position, so a held key (and its
+     auto-repeat) stays suppressed, and released 200ms after it comes back up. */
+  owns(code){return this.on&&(performance.now()-(this.recent[code]||-1e9))<200;},
   map:null,                                         // keyId -> TEN key code
-  fps:0, _fN:0, _fT:0, lastVel:0, lastId:null,
+  fps:0, period:0, _fN:0, _fT:0, _fL:0, _fD:[], lastVel:0, lastId:null,
   learn:null, dump:0, dumped:[], probe:0, probeBest:null,
-  cfg(){return Object.assign({},HEDEF,CFG.he||{});},
+  cfg(){
+    /* Drop a velocity range learned before the travel-count fix. Those slopes
+       were measured against a wrong full-scale, so the saved ends are simply
+       the wrong units — keeping them makes every hard hit read about a third of
+       what it should. Runs once, then the stamp stops it. */
+    /* Throw away a saved range that cannot be right. Judged on the value, not
+       on a version stamp — a build that stamped without clearing leaves a bad
+       value looking current, and no later stamp can tell the difference. */
+    if(CFG.he){
+      const bad=(k,b)=>{const v=CFG.he[k];
+        return v!==undefined&&(!(v>0)||v<b[0]||v>b[1]);};
+      /* Two reasons to drop a saved range. Out of physical bounds is obvious.
+         The other is that until rv 3 the auto-range wrote what it learned into
+         `soft`/`hard` — the same keys the configured range uses — so any board
+         default was shadowed by whatever the last session happened to learn,
+         permanently and invisibly. Those values have to go once. */
+      if(bad('soft',HE_SANE.soft)||bad('hard',HE_SANE.hard)||
+         bad('aSoft',HE_SANE.soft)||bad('aHard',HE_SANE.hard)||
+         CFG.he.rv!==HE_RANGE_VER){
+        const c=Object.assign({},CFG.he);
+        delete c.soft; delete c.hard; delete c.aSoft; delete c.aHard;
+        c.rv=HE_RANGE_VER; CFG.he=c; saveCfg();
+      }
+    }
+    const d=this.kind?Object.assign({},HEDEF,{hard:HE_HARD[this.kind]||HEDEF.hard,
+                                              soft:HE_SOFT[this.kind]||HEDEF.soft}):HEDEF;
+    const c=Object.assign({},d,CFG.he||{});
+    if(!(c.aSoft>0))c.aSoft=c.soft;      // learning starts from the fixed range
+    if(!(c.aHard>0))c.aHard=c.hard;
+    return c;
+  },
   set(k,v){CFG.he=Object.assign({},CFG.he||{},{[k]:v}); saveCfg();},
 
-  /* ---- transport ---- */
-  async connect(kind){
+  /* ---- transport ----
+     ONE picker listing every supported board, and the transport is chosen from
+     what came back. Filtering per-kind meant the arrow you pressed silently
+     decided which keyboards were even offered: press the wrong one and a
+     perfectly good keyboard just isn't in the chooser, with nothing to say why. */
+  async connect(){
     if(!navigator.hid){flash('no WebHID here — use Chrome or Edge');return false;}
-    const filters=kind===2?[{vendorId:0x3151}]:[{vendorId:0x3434},{usagePage:0xFF60}];
+    const filters=[{vendorId:0x3151},                    // RongYuan: MonsGeek/Akko/Attack Shark
+                   {vendorId:0x3434},{vendorId:0x362D},  // Keychron HE, Lemokey
+                   {vendorId:0x31E3},{vendorId:0x1532},  // Wooting, Razer
+                   {vendorId:0x19f5},{vendorId:0x352D},  // NuPhy, DrunkDeer
+                   {vendorId:0x373b},{vendorId:0x372E}]; // Madlions, Bytech
     let devs;
     try{devs=await navigator.hid.requestDevice({filters});}
     catch(err){flash('hid: '+(err&&err.message||err));return false;}
     if(!devs||!devs.length){flash('no device chosen');return false;}
-    const d=devs[0];
-    try{if(!d.opened)await d.open();}catch(err){flash('hid open failed: '+(err&&err.message||err));return false;}
-    this.dev=d; this.kind=kind; this.srcName=d.productName||'hid';
+
+    /* Gather every interface of the chosen board, including granted siblings the
+       chooser did not hand back, then pick by COLLECTION rather than by array
+       position: these boards expose two or three HID interfaces and devs[0] is
+       just as likely to be the typing one, which opens fine and never answers. */
+    const pool=[...devs];
+    try{for(const d of await navigator.hid.getDevices())
+      if(!pool.includes(d)&&devs.some(x=>x.vendorId===d.vendorId&&x.productId===d.productId))pool.push(d);
+    }catch(_){}
+    const cols=d=>(d.collections||[]).map(c=>
+      '0x'+c.usagePage.toString(16).toUpperCase()+'/0x'+c.usage.toString(16).toUpperCase()).join(' ');
+    console.log('HE interfaces:\n'+pool.map(d=>
+      '  '+d.productName+' '+d.vendorId.toString(16)+':'+d.productId.toString(16)+' ['+cols(d)+']').join('\n'));
+
+    const has=(d,pg,us)=>(d.collections||[]).some(c=>c.usagePage===pg&&(us==null||c.usage===us));
+    const vend=d=>(d.collections||[]).some(c=>(c.usagePage&0xFF00)===0xFF00);
+    const kind=pool.some(d=>d.vendorId===0x3151)?2:1;
+    let cfgDev,inDev;
+    if(kind===2){
+      cfgDev=pool.find(d=>has(d,0xFFFF,0x02));
+      inDev =pool.find(d=>d!==cfgDev&&vend(d))||cfgDev;
+      cfgDev=cfgDev||inDev;
+    }else{
+      inDev=pool.find(d=>has(d,0xFF60))||pool.find(vend)||pool[0];
+      cfgDev=inDev;
+    }
+    if(!inDev){flash('hid: no vendor collection on that device — pick the keyboard itself, not a sub-entry');return false;}
+
+    /* Open what we can; only the stream interface is fatal. An interface that
+       refuses to open is usually one macOS has claimed, not a reason to give up
+       on the ones that did open. */
+    let oerr=null;
+    for(const d of new Set([inDev,cfgDev])){
+      if(d.opened)continue;
+      try{await d.open();}catch(err){oerr=err; if(d===inDev)break;}
+    }
+    if(!inDev.opened){
+      flash('hid open failed: '+(oerr&&oerr.message||oerr||'?')
+        +' — another tab or app has this keyboard, or macOS Input Monitoring is off for Chrome');
+      return false;
+    }
+    if(kind===2&&!cfgDev.opened){cfgDev=inDev;}   // fall back to enabling on the stream interface
+
+    /* Drop a learned range that cannot mean anything any more: one from before
+       the travel-count fix (wrong units), or one learned on a different family
+       of board — see HE_HARD. Both checks must run BEFORE the stamps are
+       written, or stamping is what makes the stale range look current. */
+    if(CFG.he&&(CFG.he.rv!==HE_RANGE_VER||(CFG.he.k!==undefined&&CFG.he.k!==kind))){
+      const c=Object.assign({},CFG.he);
+      delete c.soft; delete c.hard; delete c.aSoft; delete c.aHard; CFG.he=c;
+    }
+    CFG.he=Object.assign({},CFG.he||{},{k:kind,rv:HE_RANGE_VER}); saveCfg();
+
+    this.dev=inDev; this.cfgDev=cfgDev; this.kind=kind;
+    this.srcName=inDev.productName||'hid';
     this.keys={}; this._fN=0; this._fT=performance.now(); this.fps=0;
-    this.map=(CFG.he&&CFG.he.map)||null;
-    d.oninputreport=e=>this.report(e);
-    if(kind===2)await this.ryEnable(); else this.kcRequest();
+    this.full=0; this.chunk=0; this._started=0; this.ready=0;
+    this.map=(CFG.he&&CFG.he.map)||(kind===1?KC_SLOTS:RY_SLOTS);
+    inDev.oninputreport=e=>this.report(e);
     this.on=true;
+    if(kind===2)await this.ryEnable(); else this.kcProbe();
     this.watch=setInterval(()=>this.tick(),60);
-    flash('hid: '+this.srcName+(this.map?'':' — run `hid learn` to map the keys'));
+    flash('hid: '+this.srcName+(this.map?'':' — run `hid keys` to map the keys'));
     dirty=true; return true;
   },
   disconnect(){
-    this.on=false; clearInterval(this.watch);
+    this.on=false; clearInterval(this.watch); this.recent={};
     for(const id in this.keys)this.release(id);
     if(this.dev){try{this.dev.oninputreport=null;}catch(_){} try{this.dev.close();}catch(_){}}
     this.dev=null; this.keys={}; flash('hid off'); dirty=true;
@@ -4972,58 +5132,121 @@ const HE={
     const b=new Uint8Array(64); b[0]=0x1B; b[1]=0x01;
     let sum=0; for(let i=0;i<7;i++)sum+=b[i];
     b[7]=(255-sum)&0xff;
-    try{await this.dev.sendFeatureReport(0,b);}catch(err){flash('fun60 enable failed: '+(err&&err.message||err));}
+    /* the enable command goes to the CONFIG interface, which is not the one the
+       analog reports come back on */
+    try{await (this.cfgDev||this.dev).sendFeatureReport(0,b);}
+    catch(err){flash('fun60 enable failed: '+(err&&err.message||err));}
+  },
+  kcProbe(){                                         // Keychron: what can this firmware do?
+    const b=new Uint8Array(32); b[0]=0xA9; b[1]=0x01;
+    this._reqAt=performance.now();
+    this.dev.sendReport(0,b).catch(err=>flash('hid probe failed: '+(err&&err.message||err)));
+    /* stock firmware answers without the marker and only does one key per round
+       trip — far too slow for velocity. Say so rather than sitting silent. */
+    setTimeout(()=>{if(this.on&&!this.ready){this.ready=1; this.kcRequest();}},300);
   },
   kcRequest(){                                       // Keychron: ask for the whole matrix
-    if(!this.dev||!this.on&&this._started)return;
+    if(!this.dev||!this.on)return;
     const b=new Uint8Array(32); b[0]=0xA9; b[1]=0x31;
     this.chunk=0; this._reqAt=performance.now(); this._started=1;
     /* exactly ONE request in flight — pipelining two per frame buries the MCU
-       and the chunks carry no sequence number to resync against */
+       and the chunks carry no sequence number to resync against. The counter is
+       zeroed as the request goes out, so alignment is re-derived every frame
+       instead of accumulating: a dropped report costs one frame, not the stream. */
     this.dev.sendReport(0,b).catch(()=>{this._started=0;});
   },
   tick(){                                            // watchdog: the board went quiet
     if(!this.on)return;
-    if(this.kind===1&&performance.now()-(this._reqAt||0)>60)this.kcRequest();
+    if(this.kind===1&&this.ready&&performance.now()-(this._reqAt||0)>60)this.kcRequest();
   },
   report(e){
-    const d=new Uint8Array(e.data.buffer);
+    /* e.data is a DataView over the report WITHOUT the report id. Taking
+       .buffer alone ignores byteOffset/byteLength and can shift every byte. */
+    const d=new Uint8Array(e.data.buffer,e.data.byteOffset,e.data.byteLength);
     if(this.dump>0){this.dump--; this.dumped.push([...d].slice(0,20).map(x=>x.toString(16).padStart(2,'0')).join(' '));
       if(!this.dump)console.log('HID dump:\n'+this.dumped.join('\n'));}
     const t=performance.now();
     if(this.kind===2){                               // [0x1B, lo, hi, keyId]
       if(d[0]!==0x1B)return;
       const raw=d[1]|(d[2]<<8), id=d[3];
-      this.full=Math.max(this.full||1,raw);          // firmware scale differs per model
-      this.sample(id,raw/(this.full||1),t);
+      /* Seed the full-travel count and let it grow. 350 is right: a capture
+         that actually bottomed keys out reports every value as an exact integer
+         over 365, with full presses at 340-363, matching the published Attack
+         Shark teardown. A brief experiment with 75 — read off earlier captures
+         whose deepest press happened to be shallow — made every press clip at
+         1.0, which poisoned the auto-learned range and capped velocity around a
+         third of full scale. Seeding from the first sample instead would make
+         the first press of every session read as bottomed out. */
+      if(!this.full)this.full=350;
+      if(raw>this.full)this.full=raw;                // firmware scale differs per model
+      this.sample(id,Math.min(raw/this.full,1),t);
       this.frame(t);
       return;
     }
-    /* analog and RGB share this pipe, so demux on the command byte. Whether the
-       reply repeats 0xA9 is the one thing I could not check without the board —
-       `hid dump` shows it, and this handles either framing. */
-    if(d[0]===0xA8)return;                           // RGB reply
-    const off=(d[0]===0xA9)?2:0;
+    /* analog and RGB share this pipe, so demux on the command byte: 0xA9 is the
+       analog channel, 0xA8 the RGB one. Both put a two byte header in front of
+       the payload. Anything else is not ours. */
+    if(d[0]!==0xA9)return;
+    if(d[1]===0x01){                                 // capability reply
+      this.ready=1;
+      const full=d[31]===0x45;
+      flash(full?'hid: full-matrix analog v'+d[2]
+                :'hid: STOCK firmware — one key per round trip, too slow for velocity');
+      this.kcRequest();
+      return;
+    }
     const c=this.chunk||0;
     if(c>=4)return;                                  // surplus report: ignore, don't wrap
     for(let i=0;i<30;i++){
-      const v=d[off+i]; if(v===undefined)break;
+      const v=d[2+i]; if(v===undefined)break;
       this.sample(c*30+i,Math.max(0,v-5)/230,t);     // 5/235 is the library's dead zone
     }
     this.chunk=c+1;
     if(this.chunk>=4){this.frame(t); this.kcRequest();}
   },
+  /* The sampling period has to be the MEDIAN GAP BETWEEN REPORTS, not a count
+     over wall-clock time. On an event-driven board reports only arrive while a
+     key is moving, so counting them over half a second averages in all the
+     silence and under-reports the rate several times over. That matters because
+     the period sets the floor `dt` is clamped to: under-report it and the
+     sub-millisecond bursts a hard hit arrives in get widened, dividing the slope
+     down. Soft hits never noticed — their gaps are already wider than the floor
+     — so the symptom was hard hits alone stuck around half velocity. */
   frame(t){
     this._fN++;
-    if(t-this._fT>=500){this.fps=Math.round(this._fN*1000/(t-this._fT)); this._fN=0; this._fT=t; dirty=true;}
+    if(this._fL){
+      const d=t-this._fL;
+      if(d>0.05&&d<200){ this._fD.push(d); if(this._fD.length>240)this._fD.shift(); }
+    }
+    this._fL=t;
+    if(!this.period||(this._fN&31)===0){
+      const a=this._fD.slice().sort((x,y)=>x-y);
+      if(a.length)this.period=a[a.length>>1];
+    }
+    if(t-this._fT>=500){
+      this.fps=this.period?Math.round(1000/this.period):0;
+      this._fN=0; this._fT=t; dirty=true;
+    }
   },
 
   /* ---- stroke tracking + velocity ---- */
   sample(id,v,t){
     const C=this.cfg();
     let k=this.keys[id];
-    if(!k)k=this.keys[id]={st:0,pv:0,pt:t,peak:0,top:0,code:null};
-    const dt=Math.max(0.5,t-k.pt), slope=(v-k.pv)/dt;
+    if(!k)k=this.keys[id]={st:0,pv:0,pt:t,peak:0,top:0,code:null,fireV:0,fireT:0};
+    /* Clamp dt to a sane window around the measured frame period. Two reports
+       delivered back to back after a stalled event loop would otherwise read as
+       an enormous slope and fire a pianissimo note at 127. */
+    /* Absolute 0.5ms floor as well as the period-relative one: no finger crosses
+       meaningful travel inside half a millisecond, and on a push-based board the
+       median gap tracks how many keys are moving rather than how fast one is
+       sampled. Ceiling never below 12ms so a long gap before a stroke is not
+       treated as part of it. Same guards as the MIDI tool. */
+    const P=this.period>0?this.period:4;
+    const dt=clamp(t-k.pt,Math.max(0.5,P*0.4),Math.max(P*3.5,12)), slope=(v-k.pv)/dt;
+    /* claim the key while it is off rest, so its typed keystroke is ignored and
+       the laptop keyboard's identical keystroke is not */
+    if(v>C.rest&&this.map){const mc=this.map[id]; if(mc)this.recent[mc]=t;}
     if(this.probe&&v>0.25&&(!this.probeBest||v>this.probeBest.v))this.probeBest={id,v};
     if(k.st===0){                                    // resting
       if(v<=C.rest){k.pv=v; k.pt=t; return;}
@@ -5037,23 +5260,48 @@ const HE={
       if(v<=C.rest){k.st=0;}                         // a nudge that never got there
       else if(v>=C.trig){
         // bottomed out, or learning (which only needs identity): no point waiting
-        if(k.wait>=C.look||v>0.97||this.learn){this.fire(id,k,v);}
+        if(k.wait>=C.look||v>0.97||this.learn){this.fire(id,k,v,t);}
         else k.wait++;
       }
     }else if(k.st===2){                              // sounding
       if(v<C.rest*0.8){this.release(id);}
-      else if(k.code){
-        const x=C.trig<0.99?clamp((v-C.trig)/(1-C.trig),0,1):v;
-        EXP.keyPress(k.code,x);                      // the rest of the stroke is expression
+      /* Re-attack. A key resting past the trigger — fingers parked, a high
+         zero, a press that stopped short — sits here, and from there a
+         full-force hit makes no sound at all. A light touch missing is fine;
+         mashing a key and hearing silence is not.
+
+         The key must have SETTLED first. Without that, an ordinary press that
+         keeps accelerating past the trigger on its way to bottoming out fires a
+         second note — which is the double-hit this was meant to avoid. A finger
+         that has come to rest and then drives down is unambiguous; a single
+         continuous downstroke never stops moving. */
+      else if(k.calm&&slope>=0.02&&v>k.fireV+0.08&&t-k.fireT>40){
+        this.release(id);
+        k.st=1; k.peak=Math.max(0,slope); k.top=v; k.wait=0;
+        this.fire(id,k,v,t);
+      }
+      else{
+        /* "calm" must be ELAPSED stillness, never one unchanged sample. The
+           Keychron path re-steps all 96 keys every frame and the RongYuan one
+           repeats a key until it moves, so a single dv=0 test marks a key
+           settled the instant anything else reports — and the rest of its own
+           downstroke then reads as a fresh attack and fires a second note. */
+        k.calm=(t-(k.moveT||k.fireT))>60;   // BEFORE recording this sample's move:
+        if(Math.abs(v-k.pv)>0.004)k.moveT=t; // the re-attack sample IS movement
+        if(k.code){
+          const x=C.trig<0.99?clamp((v-C.trig)/(1-C.trig),0,1):v;
+          EXP.keyPress(k.code,x);                    // the rest of the stroke is expression
+        }
       }
     }
     k.pv=v; k.pt=t;
   },
-  fire(id,k,v){
+  fire(id,k,v,t){
     const C=this.cfg();
     if(this.learn){this.learnHit(id); k.st=2; k.code=null; return;}
     const code=this.map&&this.map[id];
     k.st=2; k.code=null;
+    k.fireV=v; k.fireT=t||k.pt; k.calm=0; k.moveT=t||k.pt;   // re-attack baseline
     this.lastId=id;
     if(!code)return;
     const vel=this.vel(k.peak,C);
@@ -5071,14 +5319,44 @@ const HE={
     k.st=0; k.code=null; k.peak=0; k.top=0;
   },
   vel(slope,C){
-    if(C.auto){                                      // learn the ends of your own playing
-      if(slope>0&&(slope<C.soft||!C.soft))this.set('soft',Math.max(0.001,slope*0.98+C.soft*0.02));
-      if(slope>C.hard)this.set('hard',slope);
-      C=this.cfg();
+    if(C.auto){
+      /* Learn the ends of your own playing — but they have to be able to come
+         BACK. A pure min/max ratchet only ever widens: one accidental brush
+         pins `soft` at the floor, one wild slam pins `hard` at the ceiling, and
+         from then on everything real is squashed into the middle of a range
+         nothing reaches. So the ends chase fast toward a new extreme and creep
+         slowly back in when nothing is beating them. */
+      /* Learned ends live in their OWN keys. Sharing storage with the
+         configured range meant a value the auto-range happened to learn was
+         written straight over the board default and then shadowed it forever —
+         `cfg()` merges saved config on top of the defaults, so a learned 0.25
+         silently outranked the 0.090 this board needs, whatever the default
+         said and long after auto had been switched off. */
+      let s=C.aSoft,h=C.aHard;
+      /* Never learn the hard end from a physically impossible stroke. A finger
+         cannot cross the key in under a couple of milliseconds, so anything past
+         HE_MAX_SLOPE is a timing artifact — a burst of queued reports, a stalled
+         event loop, or a mis-scaled travel count. One of those pins `hard` at
+         ten times any real hit, and since the ends only creep back at 0.05% a
+         hit it never recovers: every genuine mash then reads about a third of
+         full velocity. Clamp what can be learned; the clamp below still maps a
+         freakishly fast reading to full velocity. */
+      if(slope>0.0005&&slope<=HE_MAX_SLOPE){
+        if(slope<s)s=Math.max(0.0005,slope*0.7+s*0.3);   // new soft end: move most of the way
+        else       s=s*0.9995+slope*0.0005;              // nothing softer lately: drift up
+        if(slope>h)h=slope*0.7+h*0.3;
+        else       h=Math.max(s*3,h*0.9995+slope*0.0005);
+        /* keep them in RAM and only persist occasionally — `set` writes
+           localStorage, and one write per keystroke is a lot of writes */
+        C.aSoft=s; C.aHard=h;
+        CFG.he=Object.assign({},CFG.he||{},{aSoft:s,aHard:h});
+        if(((this._save=(this._save|0)+1)&31)===0)saveCfg();
+      }
     }
-    const lo=Math.min(C.soft,C.hard*0.5), hi=Math.max(C.hard,lo*1.5);
+    const S=C.auto?C.aSoft:C.soft, H=C.auto?C.aHard:C.hard;
+    const lo=Math.min(S,H*0.5), hi=Math.max(H,lo*1.5);
     const n=clamp((slope-lo)/(hi-lo),0,1);
-    return clamp(C.floor+(1-C.floor)*Math.pow(n,C.gamma),0.02,1);
+    return clamp(C.floor+(1-C.floor)*Math.pow(n,C.gamma),1/127,1);
   },
 
   /* ---- key learn: press each playing key in turn, we record which slot moved ---- */
@@ -7482,7 +7760,7 @@ const onKeyDown=e=>{
     e.preventDefault();
     /* midi solo: the board's own keystrokes are noise — only the events EXP
        synthesises for a midi note get through, so a note can't fire twice */
-    if(EXP.solo()&&!EXP.synth)return;
+    if(EXP.muted(c)&&!EXP.synth)return;
     const wasHeld=new Set(kbHeld); kbHeld.add(c);
     const pi=S.layer===1?S.curPreset:S.editSnd;
     const midi=60+S.oct*12+NOTEKEYS[c];
@@ -9042,7 +9320,7 @@ function renderSettings(L){
   L.push('   '+sp('d','smix    smart mixer: listens per channel + master, trims harsh/loud channels live'));
   L.push('   '+sp('d','/       here = generate a whole song (4 sections + arrangement + dj drops)'));
   {const C=HE.cfg();
-   L.push('   '+sp('d','hid     ↑ = fun60/rongyuan · ↓ = keychron/analogsense · again = disconnect'));
+   L.push('   '+sp('d','hid     connect an analog keyboard · again = disconnect'));
    if(HE.on)L.push('   '+sp('a','        '+HE.srcName)+sp('d','  frames ')+sp(HE.fps<125?'r':'a',HE.fps+'Hz')+
      sp('d','  last vel ')+sp('a',String(Math.round(HE.lastVel*127)))+
      sp('d','  slope '+C.soft.toFixed(3)+'…'+C.hard.toFixed(3)+(C.auto?' (auto)':''))+
