@@ -4421,6 +4421,20 @@ const HEDEF={rest:0.03,trig:0.15,look:1,gamma:0.5,soft:0.005,hard:0.250,floor:0.
 const KC_SLOTS={34:'KeyW',35:'KeyE',37:'KeyT',38:'KeyY',39:'KeyU',41:'KeyO',42:'KeyP',
                 49:'KeyA',50:'KeyS',51:'KeyD',52:'KeyF',53:'KeyG',54:'KeyH',55:'KeyJ',
                 56:'KeyK',57:'KeyL',58:'Semicolon',59:'Quote'};
+/* RongYuan boards number keys by matrix position, id = column*6 + row + 1.
+   Confirmed against a full learn pass on a FUN60, and it is a property of the
+   matrix wiring rather than the model, so it should hold across the family —
+   `hid keys` still overrides it for any board that disagrees. Shipping it means
+   a FUN60 plays the moment it connects, like the Keychron already does. */
+const RY_SLOTS={1:'Escape',2:'Tab',3:'CapsLock',4:'ShiftLeft',5:'ControlLeft',7:'Digit1',
+                8:'KeyQ',9:'KeyA',13:'Digit2',14:'KeyW',15:'KeyS',16:'KeyZ',17:'MetaLeft',
+                19:'Digit3',20:'KeyE',21:'KeyD',22:'KeyX',23:'AltLeft',25:'Digit4',26:'KeyR',
+                27:'KeyF',28:'KeyC',31:'Digit5',32:'KeyT',33:'KeyG',34:'KeyV',37:'Digit6',
+                38:'KeyY',39:'KeyH',40:'KeyB',41:'Space',43:'Digit7',44:'KeyU',45:'KeyJ',
+                46:'KeyN',49:'Digit8',50:'KeyI',51:'KeyK',52:'KeyM',55:'Digit9',56:'KeyO',
+                57:'KeyL',58:'Comma',61:'Digit0',62:'KeyP',63:'Semicolon',64:'Period',
+                65:'AltRight',67:'Minus',68:'BracketLeft',69:'Quote',70:'Slash',73:'Equal',
+                74:'BracketRight',81:'Enter'};
 const HE={
   on:false, srcName:'', dev:null, kind:0,          // 1 = analogsense, 2 = rongyuan
   keys:{},                                          // keyId -> stroke state
@@ -4498,7 +4512,7 @@ const HE={
     this.srcName=inDev.productName||'hid';
     this.keys={}; this._fN=0; this._fT=performance.now(); this.fps=0;
     this.full=0; this.chunk=0; this._started=0; this.ready=0;
-    this.map=(CFG.he&&CFG.he.map)||(kind===1?KC_SLOTS:null);
+    this.map=(CFG.he&&CFG.he.map)||(kind===1?KC_SLOTS:RY_SLOTS);
     inDev.oninputreport=e=>this.report(e);
     this.on=true;
     if(kind===2)await this.ryEnable(); else this.kcProbe();
@@ -4553,15 +4567,15 @@ const HE={
     if(this.kind===2){                               // [0x1B, lo, hi, keyId]
       if(d[0]!==0x1B)return;
       const raw=d[1]|(d[2]<<8), id=d[3];
-      /* Seed the full-travel count and let it grow. Measured, not guessed:
-         exported FUN60 traces peaked at ~75 raw counts on a full mash, so the
-         old 350 crushed every press into the bottom fifth of the range — deep
-         presses failed to reach the trigger and slopes read as near-silent.
-         Seeding LOW is the safe direction: too low merely clips hard hits at
-         full velocity, too high silently swallows the whole dynamic range.
-         Seeding from the first sample instead would make the first press of
-         every session read as bottomed out, whatever it actually was. */
-      if(!this.full)this.full=75;
+      /* Seed the full-travel count and let it grow. 350 is right: a capture
+         that actually bottomed keys out reports every value as an exact integer
+         over 365, with full presses at 340-363, matching the published Attack
+         Shark teardown. A brief experiment with 75 — read off earlier captures
+         whose deepest press happened to be shallow — made every press clip at
+         1.0, which poisoned the auto-learned range and capped velocity around a
+         third of full scale. Seeding from the first sample instead would make
+         the first press of every session read as bottomed out. */
+      if(!this.full)this.full=350;
       if(raw>this.full)this.full=raw;                // firmware scale differs per model
       this.sample(id,Math.min(raw/this.full,1),t);
       this.frame(t);
@@ -4640,7 +4654,13 @@ const HE={
         this.fire(id,k,v,t);
       }
       else{
-        if(Math.abs(slope)<0.004)k.calm=1;            // has come to rest since it spoke
+        /* "calm" must be ELAPSED stillness, never one unchanged sample. The
+           Keychron path re-steps all 96 keys every frame and the RongYuan one
+           repeats a key until it moves, so a single dv=0 test marks a key
+           settled the instant anything else reports — and the rest of its own
+           downstroke then reads as a fresh attack and fires a second note. */
+        k.calm=(t-(k.moveT||k.fireT))>60;   // BEFORE recording this sample's move:
+        if(Math.abs(v-k.pv)>0.004)k.moveT=t; // the re-attack sample IS movement
         if(k.code){
           const x=C.trig<0.99?clamp((v-C.trig)/(1-C.trig),0,1):v;
           EXP.keyPress(k.code,x);                    // the rest of the stroke is expression
@@ -4654,7 +4674,7 @@ const HE={
     if(this.learn){this.learnHit(id); k.st=2; k.code=null; return;}
     const code=this.map&&this.map[id];
     k.st=2; k.code=null;
-    k.fireV=v; k.fireT=t||k.pt; k.calm=0;      // baseline for the re-attack test
+    k.fireV=v; k.fireT=t||k.pt; k.calm=0; k.moveT=t||k.pt;   // re-attack baseline
     this.lastId=id;
     if(!code)return;
     const vel=this.vel(k.peak,C);
