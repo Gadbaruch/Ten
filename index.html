@@ -10,6 +10,10 @@
        own, and the hardware may end up with one LED colour per key — better to
        find out now whether the layout reads without any colour at all. */
     --bg:#0b0d10; --fg:#eef2f3; --dim:#69777c; --acc:#ffffff; --rec:#c9d1d3; --grid:#20262a;
+    /* how far a fill bleeds past its text, in BOTH halves of the screen — the
+       gap between channels is one character minus twice this, so one number
+       keeps the strip and the grid agreeing */
+    --bleed:1px;
   }
   html,body{margin:0;padding:0;background:var(--bg);color:var(--fg);}
   body{display:flex;justify-content:center;min-height:100vh;}
@@ -18,6 +22,7 @@
     /* 1.75 puts ~7.8px of background between rows, which is one character
        width — so the black lines the cells leave behind are the same weight
        horizontally and vertically. */
+    font-family:var(--fnt,ui-monospace,'SF Mono',Menlo,Consolas,monospace);
     font-size:13px;line-height:1.75;margin:24px 12px;user-select:none;
     min-width:104ch;   /* fixed layout width: content changes must not re-center the page */
   }
@@ -32,7 +37,62 @@
      back, so the cells close up on each other while every character stays
      exactly where the monospace grid put it. Vertical padding on an inline
      box doesn't move the line either — it just fills more of the leading. */
-  .k,.ks,.kq,.kqs,.kp,.kqp,.ksp,.cur,.i{padding:2.5px 2.5px;margin:0 -2.5px;}
+  /* The bleed that closes the gaps in the STRIP. Scoped to spans: grid cells
+     carry the same fill classes and were picking up a -2.5px margin that made
+     every column 5px wider than its own slot, which is what ate the spacing
+     between them. 1px rather than 2.5px leaves 5.8px of air instead of 2.8 —
+     the same in both halves, because the strip and the grid have to agree. */
+  span.k,span.ks,span.kq,span.kqs,span.kp,span.kqp,span.ksp,span.cur,span.i{
+    padding:2.5px var(--bleed);margin:0 calc(-1 * var(--bleed));}
+  /* a blank line is a whole 23px; this is the same break at a third the cost */
+  .gap{font-size:1px;line-height:8px;display:inline-block;}
+  .ln{line-height:1.75;}
+  /* The grid is a row of independent columns, not shared rows. Each column
+     divides the same height by its own step count, so nine lanes of different
+     lengths all end level. Backgrounds clip to the padding box so the
+     transparent borders read as the black lines between cells. */
+  .grid{display:flex;align-items:flex-start;}
+  .gcol{display:flex;flex-direction:column;flex:none;}
+  /* min-height:0 and flex:none, or a flex item refuses to go below its content
+     height — which is the floor that stopped short cells shrinking at all.
+     The horizontal bleed matches the strip's, so a fill is the same width in
+     both halves of the screen. */
+  /* border-right is the gap between columns, so it has to be a whole
+     character wide to match the strip above — the earlier `1ch - 5px` was
+     paying for the 2.5px bleed twice and left barely three pixels of air. */
+  .gc{box-sizing:border-box;position:relative;overflow:hidden;white-space:pre;
+      flex:none;min-height:0;
+      border-bottom:2.8px solid var(--bg);
+      border-right:calc(1ch - 2 * var(--bleed)) solid var(--bg);
+      margin-left:calc(-1 * var(--bleed));padding:0 var(--bleed);
+      background-clip:padding-box;}
+  .gcol{position:relative;}
+  /* the note layer sits over the grid, inside the cell's lit width */
+  .nlay{position:absolute;left:0;top:0;bottom:0;right:calc(1ch - 2 * var(--bleed));
+        overflow:hidden;pointer-events:none;}
+  /* rows that line up with the grid's columns but are pictures, not text */
+  .crow{display:flex;align-items:center;}
+  .ccell{flex:none;box-sizing:border-box;
+         border-right:calc(1ch - 2 * var(--bleed)) solid transparent;
+         margin-left:calc(-1 * var(--bleed));padding:0 var(--bleed);
+         overflow:hidden;white-space:pre;}
+  .mrow{height:9px;background:var(--k);position:relative;}
+  .mfill{position:absolute;top:0;bottom:0;background:var(--fg);opacity:.6;}
+  .mL{right:50%;}  .mR{left:50%;}
+  .gut .gc{border-right-width:0;}
+  .cur{background:var(--kss);}
+  .cur.inv{background:var(--fg);color:var(--bg);}
+  /* a note with no room for a letter: a block at the column its pitch maps to */
+  .pk{position:absolute;background:currentColor;border-radius:1px;}
+  /* a cell that runs into the one below it — how a loop unit longer than a
+     16th shows as one block instead of two rows that happen to be adjacent */
+  .j{padding-bottom:5.4px;}
+  /* ...and inside the block, a ruler: every other row sits back a shade and
+     every beat steps forward one, so a four-row block still reads as four
+     rows. Inset shadow rather than another background, because the fill
+     underneath is already saying something else. */
+  .z{box-shadow:inset 0 0 0 999px var(--zsh);}
+  .bt{box-shadow:inset 0 0 0 999px var(--bsh);}
   /* Every fill is one of three states — plain, silenced, focused — optionally
      LIFTED because the playhead is on it. Lift is one number, so the playhead
      reads the same amount brighter wherever it is, and a muted channel you are
@@ -92,11 +152,6 @@ class Looper{
   }
   halve(){this.count=Math.max(0.25,this.count/2);}
   inc(d){this.count=clamp(Math.round((this.count+d)*4)/4,0.25,256);}
-  cycleUnit(){                         // keep the real length; only the ±unit grain changes
-    const L=this.len;
-    this.unit=UNIT_ORDER[(UNIT_ORDER.indexOf(this.unit)+1)%UNIT_ORDER.length];
-    this.count=clamp(Math.round(L/UNITS[this.unit]*4)/4,0.25,256);
-  }
   clear(pred){this.events=pred?this.events.filter(e=>!pred(e)):[];}
   occur(from,to,cb){
     const L=this.len; if(L<=0)return;
@@ -310,7 +365,7 @@ const KEYN=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
    these three, so tuning the feel is three knobs rather than a hunt through
    hex literals. Lightness is in percent. */
 const CFG=Object.assign({looper:1,overdub:0,listen:1,defLen:1,scaleOn:0,key:0,scale:0,wild:35,amix:1,qOn:1,vgrid:1,
-  uiCell:9,uiLift:11,uiDim:5,uiText:62},
+  uiCell:9,uiLift:11,uiDim:5,uiText:62,theme:'dark',font:'mono',rowH:14},
   (()=>{try{return JSON.parse(localStorage.getItem('ten-cfg'))||{};}catch(_){return{};}})());
 if(CFG.looper===undefined)CFG.looper=1;   // momentary is the default; retro opt-in from settings
 const saveCfg=()=>{try{localStorage.setItem('ten-cfg',JSON.stringify(CFG));}catch(_){}};
@@ -324,34 +379,169 @@ function snapToPCs(midi,pcs){          // nearest note whose pitch-class is allo
   return midi;
 }
 const scalePCs=()=>SCALES[CFG.scale][1].map(x=>(x+CFG.key)%12);
+/* The channel list, and the measured character width the grid lays itself out
+   with. Both live up here because setup code below reaches for them: a `let`
+   or `const` further down is not merely unset, it THROWS. */
+const CHANS=()=>[1,2,3,4,5,6,7,8,9];
+/* CLIPS — the thing that replaces arrange › pattern › channel › rack.
+
+   Hold a channel's digit and press a letter: if that letter is empty the
+   channel's whole state goes into it, and if it is full the channel becomes
+   it. Sound, rack, loop, everything — so two clips on one channel can be
+   different instruments. Hold 0 instead and the letter holds every channel
+   at once, which is a scene.
+
+   Nothing is nested. There is no pattern to be inside of and no rack to walk
+   down to; a clip is a place a channel can BE, and the letters are the places. */
+const CLIPKEYS='awsedftgyhujkolp;\'';
+const clipOf=c=>{const n=NOTEKEYS[c]; return n===undefined?-1:n;};
+/* what a channel starts as when it has never been anything — the kind of part
+   that channel is for, so a fresh clip on 1 is a kick and not silence */
+const CHKIND=[null,'kik','snr','hh','bass','keys','chord','lead','pad','plk'];
+/* what a channel IS: its sound and what it plays. Both, or a clip is only
+   half a place. */
+function grabClip(pi){
+  return {p:presetData(S.presets[pi]),
+          lane:S.patterns[S.editPat].lanes[pi].toJSON(),
+          oct:S.presets[pi].tr||0};
+}
+function putClip(pi,c){
+  if(!c)return false;
+  applyPresetData(pi,c.p.name||S.presets[pi].name,c.p.cat||S.presets[pi].cat,c.p);
+  if(c.lane)S.patterns[S.editPat].lanes[pi]=Looper.from(c.lane);
+  engine.rebuildRack(pi); engine.refresh(pi);
+  return true;
+}
+function clipSlot(pi,k){ (S.clips[pi]=S.clips[pi]||{}); return S.clips[pi][k]; }
+/* a channel that has never been anything yet: the kind it is for, and silence */
+function freshClip(pi){
+  const cat=CHKIND[pi]||'misc';
+  const pool=libAll().filter(en=>en.cat===cat);
+  if(pool.length)applyPresetData(pi,pool[0].name,cat,pool[0].data);
+  else{const np=genPreset(cat,Math.random,clamp(CFG.wild??35,0,100)/100);
+       applyPresetData(pi,np.name,cat,presetData(np));}
+  const l=new Looper('B',1,'on'); l.auto=true;
+  S.patterns[S.editPat].lanes[pi]=l;
+  engine.rebuildRack(pi); engine.refresh(pi);
+}
+/* YOU ARE IN A CLIP. Not saving to one, not recalling one — in it. Whatever
+   you change is what that clip now is, because the clip IS the channel while
+   you are there. Leaving writes nothing down as a separate act; it simply
+   stops being the place your edits land.
+
+   That is the difference between a clip and a preset slot, and it is the whole
+   reason there is no save key: a save key means there is a version of this you
+   could lose, and there isn't one. */
+function goClip(pi,k){
+  S.clipAt=S.clipAt||{};
+  const at=S.clipAt[pi]??0;
+  if(at===k)return;
+  S.clips[pi]=S.clips[pi]||{};
+  S.clips[pi][at]=grabClip(pi);          // where you were keeps what you did
+  pushUndo('clip');
+  if(S.clips[pi][k])putClip(pi,S.clips[pi][k]);
+  else freshClip(pi);                    // somewhere new starts as the kind it is
+  S.clipAt[pi]=k;
+  flash('ch '+pi+' · clip '+CLIPKEYS[k]+(S.clips[pi][k]?'':' — new'));
+  recClip(pi,k);
+  dirty=true; dirtySave=true;
+}
+/* the same move on 0, every channel at once */
+function goScene(k){
+  S.sceneAt=S.sceneAt??0;
+  if(S.sceneAt===k)return;
+  S.scenes=S.scenes||{};
+  S.scenes[S.sceneAt]=CHANS().map(i=>grabClip(i));
+  pushUndo('scene');
+  if(S.scenes[k])S.scenes[k].forEach((c,n)=>putClip(CHANS()[n],c));
+  else CHANS().forEach(i=>freshClip(i));
+  S.sceneAt=k;
+  flash('scene '+CLIPKEYS[k]+(S.scenes[k]?'':' — new'));
+  recClip(0,k);
+  dirty=true; dirtySave=true;
+}
+/* a recall while the master lane is recording becomes part of the arrangement:
+   the master's loop is the song now, and this is what goes in it */
+function recClip(pi,k){
+  const ml=S.patterns[S.editPat].lanes[0];
+  if(!ml||S.patterns[S.editPat].state!=='rec'||!T.playing)return;
+  const t=fmod(qnext(gridNow(),0.25)-editAnchor(),ml.len);
+  ml.clear(ev=>ev.clip!==undefined&&ev.ch===pi&&Math.abs(ev.t-t)<1e-6);
+  ml.events.push({t,clip:k,ch:pi,dur:0.25});
+  dirtySave=true;
+}
+const CH_LOW=1;
+var CHW=7.8, CHWdone=false;
 /* one hue, one saturation, lightness does all the work — see the greyscale note */
-const uiGrey=l=>'hsl(200 11% '+clamp(l,0,100).toFixed(1)+'%)';
-/* Called once here as well as from the settings knobs — the custom properties
-   do not exist until something sets them, and an unresolved var() makes the
-   whole declaration invalid, which silently removed every cell fill on load. */
+/* One hue and one saturation per palette; lightness does the rest. `up` says
+   whether cells sit above the background (dark) or below it (light), so the
+   same three knobs describe every palette. */
+const THEMES={
+  dark: {n:'dark', hue:200,sat:11,up:1, bg:'#0b0d10',fg:'#eef2f3',dim:'#69777c',acc:'#ffffff',rec:'#c9d1d3'},
+  term: {n:'term', hue:132,sat:44,up:1, bg:'#04080a',fg:'#7dffa6',dim:'#2c6b45',acc:'#d8ffe6',rec:'#ffd166'},
+  amber:{n:'amber',hue:34, sat:60,up:1, bg:'#0a0704',fg:'#ffc45e',dim:'#7a5620',acc:'#fff0cf',rec:'#ff8a5e'},
+  light:{n:'light',hue:210,sat:8, up:0, bg:'#f3f3ee',fg:'#15181a',dim:'#8d9398',acc:'#000000',rec:'#5c6266'},
+};
+const THEME_ORDER=['dark','term','amber','light'];
+/* A true DOS face has to be embedded to be guaranteed; these are the nearest
+   things already on the machine, so the switch works with nothing to download. */
+const FONTS={
+  mono:"ui-monospace,'SF Mono',Menlo,Consolas,monospace",
+  dos: "'Px437 IBM VGA 8x16','Perfect DOS VGA 437','IBM Plex Mono','Andale Mono','Courier New',monospace",
+  term:"'Courier New',Courier,'Nimbus Mono PS',monospace",
+};
+const FONT_ORDER=['mono','dos','term'];
+/* Called once at load as well as from the settings knobs — the custom
+   properties do not exist until something sets them, and an unresolved var()
+   makes the whole declaration invalid, which silently removed every fill. */
 function applyTheme(){
   const r=document.documentElement.style;
+  const t=THEMES[CFG.theme]||THEMES.dark;
   const base=CFG.uiCell??9, lift=CFG.uiLift??11, dn=CFG.uiDim??5;
-  r.setProperty('--k',  uiGrey(base));
-  r.setProperty('--ks', uiGrey(base+lift));
-  r.setProperty('--kss',uiGrey(base+lift*2));
-  r.setProperty('--kq', uiGrey(base-dn));
-  r.setProperty('--kqs',uiGrey(base-dn+lift));
-  r.setProperty('--un', uiGrey(CFG.uiText??62));
+  const g=l=>'hsl('+t.hue+' '+t.sat+'% '+clamp(t.up?l:96-l,0,100).toFixed(1)+'%)';
+  r.setProperty('--bg',t.bg); r.setProperty('--fg',t.fg); r.setProperty('--dim',t.dim);
+  r.setProperty('--acc',t.acc); r.setProperty('--rec',t.rec);
+  r.setProperty('--k',  g(base));
+  r.setProperty('--ks', g(base+lift));
+  r.setProperty('--kss',g(base+lift*2));
+  r.setProperty('--kq', g(base-dn));
+  r.setProperty('--kqs',g(base-dn+lift));
+  r.setProperty('--un', g(CFG.uiText??62));
+  /* barely there on purpose — the gaps between cells are what divides them,
+     so this only has to hint at where the beat is */
+  r.setProperty('--zsh',t.up?'rgba(0,0,0,0.07)':'rgba(0,0,0,0.02)');
+  r.setProperty('--bsh',t.up?'rgba(255,255,255,0.018)':'rgba(255,255,255,0.35)');
+  r.setProperty('--fnt',FONTS[CFG.font]||FONTS.mono);
+  CHWdone=false;      // a new face means a new advance width
 }
 applyTheme();
-const heldPCs=new Map();               // pitch-class -> count, from chord-master channels
-const pcsNow=()=>heldPCs.size?[...heldPCs.keys()]:scalePCs();
+const heldPCs=new Map();               // pitch-class -> count, from GLOBAL chord channels
+/* The chord you last played stays the reference after you let go. Snapping back
+   to the written scale the instant a hand lifted meant every other channel
+   lurched at the end of each chord — the harmony has to hold until you change
+   it, or until the chord slot goes back to `local` and hands the scale back. */
+let chordHold=[];
+const anyGlobalChord=()=>S.presets.some(p=>p&&p.ply&&
+  p.ply.some(sl=>sl.typ===1&&!sl.off&&Math.round(sl.p3===undefined?1:sl.p3)===1));
+const pcsNow=()=>heldPCs.size?[...heldPCs.keys()]
+  :(chordHold.length&&anyGlobalChord()?chordHold:scalePCs());
 function addPC(pc){heldPCs.set(pc,(heldPCs.get(pc)||0)+1);}
 function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);else heldPCs.set(pc,n);}
 const SETTINGS=[
  {n:'grid',   v:()=>CFG.vgrid?'vertical':'lanes',a:()=>CFG.vgrid=CFG.vgrid?0:1},
  /* the look, as knobs — turn them while looking at the thing they change */
+ {n:'theme',  v:()=>(THEMES[CFG.theme]||THEMES.dark).n,
+              a:d=>{const i=THEME_ORDER.indexOf(CFG.theme||'dark');
+                    CFG.theme=THEME_ORDER[fmod(i+d,THEME_ORDER.length)];applyTheme();}},
+ {n:'font',   v:()=>CFG.font||'mono',
+              a:d=>{const i=FONT_ORDER.indexOf(CFG.font||'mono');
+                    CFG.font=FONT_ORDER[fmod(i+d,FONT_ORDER.length)];applyTheme();}},
  {n:'cell',   v:()=>(CFG.uiCell??9)+'%',      a:d=>{CFG.uiCell=clamp((CFG.uiCell??9)+d,0,40);applyTheme();}},
  {n:'lift',   v:()=>(CFG.uiLift??11)+'%',     a:d=>{CFG.uiLift=clamp((CFG.uiLift??11)+d,1,40);applyTheme();}},
  {n:'dim',    v:()=>(CFG.uiDim??5)+'%',       a:d=>{CFG.uiDim=clamp((CFG.uiDim??5)+d,0,20);applyTheme();}},
  {n:'text',   v:()=>(CFG.uiText??62)+'%',     a:d=>{CFG.uiText=clamp((CFG.uiText??62)+d,20,100);applyTheme();}},
- {n:'rows',   v:()=>String(CFG.vrows??32),    a:d=>CFG.vrows=clamp((CFG.vrows??32)+d*4,8,64)},
+ {n:'rows',   v:()=>String(CFG.vrows??16),    a:d=>CFG.vrows=clamp((CFG.vrows??16)+d*4,8,64)},
+ {n:'rowpx',  v:()=>(CFG.rowH??14)+'px',      a:d=>CFG.rowH=clamp((CFG.rowH??14)+d,5,30)},
  {n:'looper', v:()=>['retro','mmnt','latch'][CFG.looper||0], a:d=>CFG.looper=fmod((CFG.looper||0)+d,3)},
  {n:'rec',    v:()=>['ovwrt','ovdub','smart'][CFG.overdub||0], a:d=>CFG.overdub=fmod((CFG.overdub||0)+d,3)},
  {n:'listen', v:()=>CFG.listen?'on':'off',     a:()=>CFG.listen=CFG.listen?0:1},
@@ -451,7 +641,10 @@ const MOD_P=sl=>{                    // unified: source picks which extra fields
         if(v>=n&&n<8){m.routes.push(mkRoute());m.rsel=n;}else m.rsel=fmod(Math.round(v),n);}}),
     SP('dest','dst','enum',{opts:MDST,fmt:tgtFmt, get:m=>modRt(m).dst, set:(m,v)=>{modRt(m).dst=v;modRt(m).tgt=null;}}),
     SP('slot#','idx','lin',{min:0,max:10,step:1,fmt:v=>v?String(v):'all', get:m=>modRt(m).idx, set:(m,v)=>modRt(m).idx=v}),
-    SP('amt','amt','lin',{min:s>=3?0:-200,max:200,step:5,fmt:v=>v+'%', get:m=>modRt(m).amt, set:(m,v)=>modRt(m).amt=v}),
+    /* negative for EVERY source, not just env and lfo. Velocity that opens
+       the filter is one idea; velocity that closes it is another, and there
+       was no way to ask for the second. */
+    SP('amt','amt','lin',{min:-200,max:200,step:5,fmt:v=>v+'%', get:m=>modRt(m).amt, set:(m,v)=>modRt(m).amt=v}),
     SP('center','ctr','lin',{min:-100,max:100,step:5,fmt:v=>(v>0?'+':'')+v+'%', get:m=>modRt(m).ctr||0, set:(m,v)=>modRt(m).ctr=v})];
   if(s===0)return base.slice(0,5);  // off: src+route+dest+slot#+amt navigate; set src to activate
   if(s===1)return base.concat([SP('atk','a','time'),SP('dec','d','time'),
@@ -571,7 +764,8 @@ const PLY_P=sl=>{
   if(sl.typ===1)return T(
     SP('chord','p1','enum',{opts:CHORDS.map(c=>c[0])}),
     SP('strum','p2','lin',{min:-0.06,max:0.06,step:0.005,fmt:v=>Math.round(v*1000)+'ms'}),
-    SP('role','p3','enum',{opts:['play','mstr']}));
+    SP('role','p3','enum',{opts:['local','global'],
+      get:o=>o.p3===undefined?1:o.p3, set:(o,v)=>{o.p3=v;}}));
   if(sl.typ===2)return T(
     SP('div','p1','enum',{opts:ARPDIV}),
     SP('mode','p2','enum',{opts:ARPMODE}),
@@ -604,7 +798,7 @@ const PLY_P=sl=>{
 };
 
 const MODULES=[
- {k:'1',id:null,name:'—'},      // PRST → the Inst rows in the channel strip (i)
+ {k:'1',id:'prs',name:'PRST',prs:true},
  {k:'2',id:'osc',name:'OSC', slot:true,params:OSC_P,abbr:s=>s.amt>0.001?WAVES[s.wav]:'···'},
  {k:'3',id:'flt',name:'FILT',slot:true,params:FLT_P,abbr:s=>s.typ?FTYPES[s.typ]:'···'},
  {k:'4',id:'mod',name:'MOD', slot:true,params:MOD_P,abbr:s=>{if(!s.src)return '···';
@@ -654,8 +848,12 @@ function adjust(spec,v,dir,m=1){
    binding through rs() — otherwise reaching for latch would fire all of them.
    The `!KM.sl` fallback keeps synthetic events (and any state desync after a
    focus loss) behaving as plain shift rather than dying silently. */
-const KM={sl:false,sr:false};
-const rs=e=>!!e.shiftKey&&(KM.sr||!KM.sl);
+const KM={sl:false,sr:false,srLatch:false,altLatch:false};
+/* Latch works on the MODIFIERS too: hold latch, tap shift or option, and it
+   stays down until you tap it again. Two-handed chords on a laptop keyboard
+   are the thing that stops being playable first. */
+const rs=e=>KM.srLatch||(!!e.shiftKey&&(KM.sr||!KM.sl));
+const altOf=e=>KM.altLatch||!!e.altKey;
 const LATCH={held:false,used:false,on:false};
 /* HELD KEYS SCOPE THE ARROWS. The arrows always mean "adjust"; the key you are
    holding says adjust WHAT. tab = the loop, m = tempo. `used` records whether
@@ -664,6 +862,7 @@ const HOLD={tab:false,tabAt:0,tabUsed:false,tabLatch:false,m:false,mUsed:false,
             c:false,cUsed:false,     // CHANNEL: the mix of the channel you are on
             n:false,nUsed:false,     // NOTES:   the pitch of what it plays
             i:false,iUsed:false,     // INST:    which sound it is at all
+            dig:-1,digUsed:false,    // a channel digit held: the letters become ITS clips
             r:false,rUsed:false,rLatch:false};   // RND: the dice, and how loaded they are
 /* Randomize re-rolls the SAME lane every time it comes round. `every` is the
    loop length it last fired against, so a length change is picked up. */
@@ -688,6 +887,8 @@ function latchArmHeld(){
 /* the one gesture that puts the desk back: everything latched, off */
 function latchReleaseAll(){
   let n=0;
+  if(KM.srLatch){KM.srLatch=false; n++;}
+  if(KM.altLatch){KM.altLatch=false; n++;}
   if(AUTORND.on){AUTORND.on=false; n++;}
   if(LATCH.on){
     LATCH.on=false; n++;
@@ -705,7 +906,12 @@ function unitStep(lp,d){
   const i=UNIT_ORDER.indexOf(lp.unit), j=clamp(i+d,0,UNIT_ORDER.length-1);
   if(j===i)return false;
   const L=lp.len; lp.unit=UNIT_ORDER[j];
-  lp.count=clamp(Math.round(L/UNITS[lp.unit]*4)/4,0.25,256);
+  /* Going UP, round the count up to a whole one: three beats asked for in bars
+     is one bar, not 0.75 of one. A fractional count of a big unit is a worse
+     description of the same length than a whole count of a small one — you
+     changed unit to stop thinking in the old grain. Going down is always exact. */
+  const raw=L/UNITS[lp.unit];
+  lp.count=clamp(d>0?Math.max(1,Math.ceil(raw-1e-9)):Math.round(raw*4)/4,0.25,256);
   return true;
 }
 /* Remember a loop exactly as it was captured, so it can be put back. */
@@ -769,7 +975,7 @@ function loopOps(e,c,lp){
   }
   return false;
 }
-const kmult=e=>e.altKey?0.1:rs(e)?10:1;
+const kmult=e=>altOf(e)?0.1:rs(e)?10:1;
 function fmtVal(spec,v){
   if(spec.type==='enum')return spec.opts[clamp(Math.round(v),0,spec.opts.length-1)]??'?';
   if(spec.fmt)return spec.fmt(v);
@@ -844,9 +1050,14 @@ const PRESETS0=()=>[
 ].map(foldMod);
 
 /* ---------------- state ---------------------------------------------- */
-const mkPattern=()=>({state:'on',sw:0,lanes:Array.from({length:10},()=>{const l=new Looper('s',16,'on');l.auto=true;return l;})});
+const mkPattern=()=>({state:'on',sw:0,lanes:Array.from({length:10},(_,i)=>{
+  /* lane 0 belongs to the MASTER — the arrangement lane. It is a fixed four
+     bars rather than auto, because a song section is a decision, not something
+     to be inferred from what you happened to play. */
+  const l=i===0?new Looper('B',4,'on'):new Looper('s',16,'on');
+  l.auto=i!==0; return l;})});
 const S={
-  metro:false, layer:1, hum:0,
+  metro:false, layer:1, hum:0, clips:{}, scenes:{}, clipAt:{}, sceneAt:0,
   grv:{typ:0,amt:0},                       // global groove: type + amount %
   oct:0,                                   // ONE keyboard register, global — not per channel
   curPat:0, editPat:0, curPreset:4, editSnd:4,
@@ -1108,6 +1319,23 @@ function scheduleRange(from,to){
       }
     }
   }
+  /* THE MASTER LANE IS THE ARRANGEMENT. Clip recalls and dj windows recorded
+     onto it fire here, so a performance of switching sounds around plays back
+     as one — which is the whole reason the arrange layer existed. */
+  {const a0=actAt(from+1e-6), ml=S.patterns[a0.pat].lanes[0];
+   if(ml&&ml.events.length)ml.occur(from-a0.anchor,to-a0.anchor,(t,e)=>{
+     const at=t+a0.anchor;
+     if(e.clip!==undefined){
+       const ms=Math.max(0,(timeAt(at)-AC.currentTime)*1000);
+       setTimeout(()=>{ if(e.ch===0)goScene(e.clip); else goClip(e.ch,e.clip);
+         dirty=true; },ms);
+     }else if(e.dj!==undefined&&S.dj[e.dj]&&S.dj[e.dj].typ){
+       const ms=Math.max(0,(timeAt(at)-AC.currentTime)*1000), key=e.dj;
+       const durMs=Math.max(100,(e.dur||1)*spb()*1000);
+       setTimeout(()=>{djAuto[key]=1;djApply(true);},ms);
+       setTimeout(()=>{delete djAuto[key];djApply(true);},ms+durMs);
+     }
+   });}
   const bounds=[from,to];
   for(const a of acts)if(a.start>from&&a.start<to)bounds.push(a.start);
   bounds.sort((x,y)=>x-y);
@@ -1116,7 +1344,7 @@ function scheduleRange(from,to){
     const a=actAt(s0+1e-6), pat=S.patterns[a.pat];
     const fresh=!a._seen; a._seen=true;      // first scheduled range of this act
     const anySolo=pat.lanes.some(l=>l.solo);
-    for(let li=0;li<10;li++){
+    for(let li=1;li<10;li++){      // lane 0 is the master's own timeline
       const lane=pat.lanes[li];
       if(isAudioCh(li)){
         if((anySolo?!lane.solo:lane.mute)||(muteHold&&muteHold.lane===li))continue;
@@ -2947,7 +3175,7 @@ class Engine{
     /* kit pads carry their own PLAY rack (chord/arp/flam/humanize per pad) */
     const kp=isKit(chan)?kitSlot(chan,midi):null;
     const p=kp?{...chan,ply:kp.ply}:chan;
-    const isMaster=p.ply.some(sl=>sl.typ===1&&!sl.off&&Math.round(sl.p3)===1);
+    const isMaster=p.ply.some(sl=>sl.typ===1&&!sl.off&&Math.round(sl.p3===undefined?1:sl.p3)===1);
     /* global scaling: snap non-drum channels to the held chord (from a chord-
        master channel) or to the global scale. masters define, they don't follow */
     if(CFG.scaleOn&&!isDrumCat(p.cat)&&!isMaster)midi=snapToPCs(midi,pcsNow());
@@ -2972,6 +3200,7 @@ class Engine{
     for(let i2=0;i2<p.ply.length;i2++){  // chord slots BEFORE the arp expand pre-pool
       const sl=p.ply[i2];
       if(sl.typ===1&&!sl.off&&(arpIdx<0||i2<arpIdx)){
+        if(Math.round(sl.p6||0)===1&&durSec!=null)continue;   // already in the lane
         const ch=CHORDS[clamp(Math.round(sl.p1),0,CHORDS.length-1)][1];
         midis=midis.flatMap(m=>ch.map(o=>m+o));
         pads=pads.flatMap(m=>ch.map(o=>m+o)); strum=sl.p2||0;   // a chord on a kit still spans pads
@@ -2981,7 +3210,8 @@ class Engine{
     /* random pitch. With an arp running the offset belongs on each arp STEP,
        so arpTick does it there instead of once for the whole held note. */
     const rpS=arpIdx<0?p.ply.find(sl=>sl.typ===13&&!sl.off):null;
-    if(rpS)midis=midis.map(m=>rpitApply(m,rpS));
+    if(rpS&&!(Math.round(rpS.p6||0)===1&&durSec!=null))     // same double-apply
+      midis=midis.map(m=>rpitApply(m,rpS));
     const rpPre=!!(rpS&&Math.round(rpS.p6||0)===1);
     if((chordPre||rpPre)&&durSec==null&&T.playing)   // live play: write every sounding note into the lane
       for(const m of midis)recPlayNote(pi,posNow(),Math.round(m),vel,0.25);
@@ -2989,6 +3219,7 @@ class Engine{
     if(isMaster){                       // this channel's held notes define the chord
       const pcs=[...new Set(midis.map(m=>pcOf(m)))];
       pcs.forEach(addPC);
+      chordHold=pcs.slice();          // ...and it survives the release
       if(durSec!=null)setTimeout(()=>pcs.forEach(subPC),Math.max(20,durSec*1000));
       else pcHandle=()=>pcs.forEach(subPC);
     }
@@ -3188,13 +3419,28 @@ function sessAll(){try{const x=JSON.parse(localStorage.getItem(SESSKEY));return 
 function sessStore(slots){try{localStorage.setItem(SESSKEY,JSON.stringify({v:1,slots}));}catch(_){flash('session save failed — storage full?');}}
 const LIBKEY='ten-lib-v1';
 let libMigrated=false;
-function libAll(){try{const x=JSON.parse(localStorage.getItem(LIBKEY));
+let libCache=null, libNoCache=null;
+function libAll(){
+  if(libCache)return libCache;
+  try{const x=JSON.parse(localStorage.getItem(LIBKEY));
   const items=Array.isArray(x)?x:(x&&x.items)||[];
   if(!libMigrated&&(!x||Array.isArray(x)||(x.v||0)<3)){   // v3: drv/crush → dist · verb size curve
     libMigrated=true; items.forEach(en=>en&&fx17p(en.data)); libStore(items);
   }
-  return items;}catch(_){return[];}}
-function libStore(a){libMigrated=true;
+  return libCache=items;}catch(_){return libCache=[];}}
+/* preset -> its number within its category, which is what the Inst row shows.
+   Built once per library change instead of scanned per channel per frame. */
+function libNos(){
+  if(libNoCache)return libNoCache;
+  const m=new Map(), n={};
+  for(const en of libAll()){
+    if(!en)continue;
+    n[en.cat]=(n[en.cat]||0)+1;
+    m.set(en.cat+'\u0000'+en.name,n[en.cat]);
+  }
+  return libNoCache=m;
+}
+function libStore(a){libMigrated=true; libCache=null; libNoCache=null;
   try{localStorage.setItem(LIBKEY,JSON.stringify({v:3,items:a}));}catch(_){} if(typeof prepCache!=='undefined')prepCache.clear();}
 function presetData(p){const {modLoop,...rest}=p;return JSON.parse(JSON.stringify(rest));}
 function mulberry32(a){return function(){let t=a+=0x6D2B79F5;t=Math.imul(t^t>>>15,t|1);
@@ -3252,7 +3498,16 @@ function setPresetData(pi,name,cat,data){   // same, no undo — for composite g
   if(Array.isArray(data.kit))p.kit=data.kit.map(k=>k?modToRoutes(foldMod(k)):null);
   modToRoutes(p);      // v13 library entries carry flat mod slots → routes
   p.mod.forEach(m=>{if(m.routes)m.routes=JSON.parse(JSON.stringify(m.routes));});  // no aliasing with the library
-  p.tr=data.tr||0;
+  p.tr=data.tr||0; p.trs=data.trs||0;
+  /* MIX used to be a MODULE, so the loop above carried level and pan with
+     everything else. Retiring that rack quietly stopped them travelling — a
+     pasted channel or a recalled clip came back at whatever the destination
+     happened to be sitting at. They are part of what a channel IS. */
+  if(data.mix)p.mix={...p.mix,...data.mix};
+  if(data.pmodel!==undefined)p.pmodel=data.pmodel;
+  if(data.psel!==undefined)p.psel=data.psel;
+  if(Array.isArray(data.kit))p.kit=JSON.parse(JSON.stringify(data.kit));
+  if(data.au)p.au={...p.au,...data.au};
   p.modLoop=S.presets[pi].modLoop;      // the channel's mod loop stays
   S.presets[pi]=p;
   engine.rebuildRack(pi); engine.refresh(pi);
@@ -3383,7 +3638,7 @@ function genPreset(cat,rnd,wild=0.5){
     ?{typ:pick(wild>0.6?[1,2,3,4,5,XDIST,12]:[1,2,4]),p1:+R(0.15,0.5).toFixed(2),p2:+R(0.2,0.5).toFixed(2),mix:+R(0.1,0.2+0.35*wild).toFixed(2)}
     :{typ:8,p1:+R(0.38,0.49+0.28*wild).toFixed(2),p2:0,mix:1};
   if(wild>0.5&&P(0.3))p.fx[1]={typ:pick([1,2,5,12]),p1:+R(0.1,0.5).toFixed(2),p2:+R(0.1,0.5).toFixed(2),mix:+R(0.1,0.35).toFixed(2)};
-  if(cat==='chord'&&P(0.6))p.ply[0]={typ:1,p1:RI(0,4),p2:+R(0,0.02).toFixed(3),p3:0};
+  if(cat==='chord'&&P(0.6))p.ply[0]={typ:1,p1:RI(0,4),p2:+R(0,0.02).toFixed(3),p3:1};
   if((cat==='plk'||cat==='lead')&&wild>0.6&&P(0.2))p.ply[0]={typ:2,p1:2,p2:0,p3:1};
   if((cat==='lead'||cat==='bass')&&P(0.25))p.vox.glide=+R(0.02,0.1).toFixed(2);
   if(cat==='pad'||cat==='lead'||cat==='chord')Object.assign(p.vox,{uni:pick(wild>0.5?[3,5,7]:[1,3,5]),sprd:RI(6,15)*2});
@@ -4153,6 +4408,33 @@ const SYNTHCATS=CATS.filter(c=>c!=='kit'&&c!=='audio'&&c!=='proc');
 const engineOf=p=>p.cat==='kit'?'kit':p.cat==='audio'?'audio':p.cat==='proc'?'proc':'synth';
 const engineName=p=>(ENGINES.find(e=>e.k===engineOf(p))||{}).n||'Synth';
 const engShort=p=>({kit:'Kit',synth:'Synth',proc:'Proc',audio:'Audio'})[engineOf(p)]||'Synth';
+/* One line for what a channel IS. Engine and category had a row each, which
+   spent two thirds of the strip's height on facts you glance at once a session
+   — and the useful half of each was already implied by the name. So the KIND
+   rides with the name: 'kik VES7' says both in the space one said one. */
+/* One line for what a channel IS: engine initial, category, preset number.
+   'S Keys 3' beats 'KI05' because two thirds of it mean something without
+   having to remember what you called it. */
+function instLabel(p,w){
+  if(!p)return '';
+  const W=w||8;
+  const e=({kit:'K',synth:'S',proc:'P',audio:'A'})[engineOf(p)]||'S';
+  if(p.cat==='audio')return W>=6?'A clip':'clip';
+  if(p.cat==='proc')return ('P '+(p.pmodel||'—')).slice(0,W);
+  const t=(p.cat||'misc').slice(0,4), T2=t.charAt(0).toUpperCase()+t.slice(1);
+  const n=presetNo(p);
+  /* drop the spaces before dropping the number — the number is the half you
+     cannot reconstruct by looking at anything else on screen */
+  const full=e+' '+T2+' '+n;
+  return full.length<=W?full:(e+T2+n).slice(0,W);
+}
+/* where this preset sits in its category — the number you would call it by */
+function presetNo(p){
+  try{ const n=libNos().get((p.cat||'misc')+'\u0000'+p.name);
+       if(n)return String(n);
+       const m=/(\d+)\s*$/.exec(p.name||'');    // rolled/edited: its own trailing digits
+       return m?String(+m[1]):'·'; }catch(_){ return '·'; }
+}
 function setEngine(pi,key){
   const p=S.presets[pi], was=engineOf(p);
   if(key===was)return false;
@@ -4265,6 +4547,12 @@ function instAction(field,d){
   S.curParam=i; _prsAction(d);
   S.curParam=keepParam; S.editSnd=keepSnd;
   dirty=true; dirtySave=true;
+}
+/* the Instrument row: what this preset IS, then how its voices behave */
+const VOXI=MODULES.findIndex(m=>m.id==='vox');
+function instFields(){
+  return prsFieldDefs().concat(
+    (MODULES[VOXI].flat||[]).map(spec=>({k:spec.lbl,spec})));
 }
 function prsAction(d){
   const f0=(prsFieldDefs()[S.curParam]||{}).k;
@@ -4414,11 +4702,14 @@ const oscFieldView=mi=>MODULES[mi]&&MODULES[mi].id==='osc'&&S.layer!==3&&
 function curAddr(){
   const M=MODULES[S.curMod];
   if(flatView(S.curMod))return [S.curMod,M&&M.flat?-1:S.curSlot,S.curParam];
-  const hold=modHolder(S.presets[S.editSnd],M.id);
+  const pre=S.presets[S.editSnd], hold=modHolder(pre,M.id);
   const n=paramsFor(S.curMod,hold[M.id][S.curSlot]).length;
   /* clamp here, not just in the render: a kit pad swap or a slot type change
-     shortens the spec list under a live cursor */
-  S.slotParam=clamp(S.slotParam|0,0,Math.max(0,n-1));
+     shortens the spec list under a live cursor. One PAST the end is legal when
+     the rack has room — that index is the '+', and clamping it away is what
+     made the cell reachable but not pressable. */
+  const extra=freeSlotHere(pre)!=null?1:0;
+  S.slotParam=clamp(S.slotParam|0,0,Math.max(0,n-1+extra));
   return [S.curMod,S.curSlot,S.slotParam];
 }
 /* shift+↑↓ = per-note tweak: the change applies ONLY to the last-played note.
@@ -4443,12 +4734,13 @@ function prepTweak(d,m){
   dirty=true; dirtySave=true;
 }
 function adjustParam(d,m){
-  pushUndo('tweak');
   const [mi,si,px]=curAddr(); const M=MODULES[mi];
   if(!M.id){flash('reserved');return;}
   const pre=S.presets[S.editSnd], holder=modHolder(pre,M.id);
   const slot=M.flat?null:holder[M.id][si];
-  const specs=paramsFor(mi,slot), spec=specs[px]; if(!spec)return;
+  const specs=paramsFor(mi,slot), spec=specs[px];
+  if(!spec){ if(px>=specs.length)openSlotHere(); return; }   // past the end = the '+'
+  pushUndo('tweak');
   const ml=pre.modLoop;
   if(ml.state==='edit'&&S.layer>=2&&holder===pre){   // mod-loop records channel params only
     const cell=cellOf(ml), t0=curCell(ml)*cell;
@@ -4813,6 +5105,8 @@ const HE={
 const liveV={}, pend={}, rPend={}, nlive={};
 const retroBuf=Array.from({length:10},()=>[]);
 let eraseHold=null, muteHold=null, stepCur=0, stepWalked=false, taps=[];
+let gridAt=-1;                        // which L entry is the grid's markup
+const rawAt=new Set();                // ...and which others are markup too
 const kbHeld=new Set();               // note keys physically down, for chord-vs-sequence
 const liveMute=Array.from({length:10},()=>0);   // >0 = a live key overrides recorded notes on this lane
 const isAudioCh=pi=>S.presets[pi].cat==='audio';
@@ -6502,6 +6796,10 @@ function diveIn(){
   else if(S.layer===1){S.editSnd=S.curPreset;S.layer=2;S.curMod=0;S.curParam=0;
     S.curSlot=0;S.slotParam=0;}  // land on PRESET, cursor rewound
   else if(S.layer===2){
+    /* There is nowhere deeper to go. The rack page showed the same slots and
+       the same params this view already has — one more level to walk for a
+       screen you were already looking at. The library is the exception: it is
+       a different thing (a list to browse), not a deeper view of this one. */
     const M=MODULES[S.curMod];
     if(M.prs){
       const p=S.presets[S.editSnd], pool=libAll().filter(en=>en.cat===(p.cat||'misc'));
@@ -6509,8 +6807,7 @@ function diveIn(){
       S.libStash={name:p.name,cat:p.cat||'misc',data:presetData(p)};  // browsing is audition-only
       S.layer=3;
     }
-    else if(M.slot)S.layer=3;    // same strip, same params — keep the cursor
-    else flash('no slots here');
+    else flash('everything is already here — ⇧←→ picks a slot, ←→ its params');
   }
   dirty=true;
 }
@@ -6570,7 +6867,18 @@ const onKeyDown=e=>{
   syncCaps(e);
   if(e.code==='ShiftLeft'){const fresh=!KM.sl; KM.sl=true;
     if(!e.repeat&&fresh){LATCH.used=false; latchArmHeld();} return;}
-  if(e.code==='ShiftRight'){KM.sr=true; return;}
+  if(e.code==='ShiftRight'){KM.sr=true;
+    if(!e.repeat){
+      if(KM.srLatch){KM.srLatch=false; flash('shift released'); dirty=true;}
+      else if(KM.sl){KM.srLatch=true; LATCH.used=true; flash('⇧ shift latched'); dirty=true;}
+    }
+    return;}
+  if(e.code==='AltLeft'||e.code==='AltRight'){
+    if(!e.repeat){
+      if(KM.altLatch){KM.altLatch=false; flash('option released'); dirty=true;}
+      else if(KM.sl){KM.altLatch=true; LATCH.used=true; flash('⌥ option latched'); dirty=true;}
+    }
+    return;}
   if(KM.sl)LATCH.used=true;         // latch was held WITH something: not a tap
 
   if(e.metaKey||e.ctrlKey){
@@ -6667,8 +6975,8 @@ const onKeyDown=e=>{
       if(slots[S.sessSel]){slots[S.sessSel]=null;sessStore(slots);
         flash('slot '+((S.sessSel+1)%10)+' cleared');dirty=true;}
     }
-    else if(c==='Slash'&&!e.repeat){                // '/' in SESSION = generate a whole song (⇧⌥ = wild)
-      pushUndo('song gen'); genSong(rs(e)&&e.altKey); S.layer=0;
+    else if(c==='Backquote'&&!e.repeat){            // '`' in SESSION = generate a whole song (⇧⌥ = wild)
+      pushUndo('song gen'); genSong(rs(e)&&altOf(e)); S.layer=0;
     }
     else if(c==='Space'&&!e.repeat)T.playing?stop():play();
     return;
@@ -6736,9 +7044,6 @@ const onKeyDown=e=>{
   if(c==='Backquote'){e.preventDefault();
     if(!e.repeat){HOLD.r=true; HOLD.rUsed=false; HOLD.rLatch=KM.sl; if(KM.sl)LATCH.used=true;}
     return;}
-  if(c==='Slash'){e.preventDefault();      // legacy alias for `
-    if(!e.repeat)roll(rs(e)?(e.altKey?'wild':'fresh'):'var');
-    return;}
   if(S.layer===0&&DJCODE[c]!==undefined){e.preventDefault();     // DJ pads: full home row
     if(e.repeat)return;
     const k=DJCODE[c];
@@ -6794,26 +7099,6 @@ const onKeyDown=e=>{
     dirty=true; return;}
 
   const lp=curLoop();
-  if(c==='Minus'||c==='Equal'){        // loop length only — values live on the arrows
-    const d=c==='Equal'?1:-1;
-    if(rs(e)){                    // shift = nudge the content within the loop
-      if(S.layer===1&&isAudioCh(S.curPreset)){flash('audio lanes can’t nudge yet');return;}
-      if(!lp.events.length){flash('nothing to nudge');return;}
-      pushUndo('nudge');
-      const u=UNITS[lp.unit]||1, amt=(e.altKey?0.5:1)*u*d, L=lp.len;
-      lp.events.forEach(ev=>ev.t=fmod(ev.t+amt,L));
-      flash('↔ nudge '+(d>0?'+':'−')+(e.altKey?u/2:u)+' beat'+(u*(e.altKey?0.5:1)>1?'s':'')+
-        ' ('+lp.unit+(e.altKey?'/2':'')+')');
-      dirty=true; dirtySave=true; return;
-    }
-    pushUndo('length');
-    lp.inc(d); if(S.layer===1)lp.auto=false;
-    dirty=true; dirtySave=true; return;
-  }
-  if(c==='BracketLeft'){pushUndo('length');lp.halve(); if(S.layer===1)lp.auto=false; dirty=true;dirtySave=true;return;}
-  if(c==='BracketRight'){pushUndo('length');lp.double(!rs(e)); if(S.layer===1)lp.auto=false; dirty=true;dirtySave=true;return;}
-  if(c==='Backslash'){pushUndo('length');lp.cycleUnit(); if(S.layer===1)lp.auto=false; dirty=true;dirtySave=true;return;}
-
   if(c==='Backspace'&&HOLD.tab){e.preventDefault();
     if(loopOps(e,c,curLoop()))HOLD.tabUsed=true;
     return;}
@@ -6879,6 +7164,7 @@ const onKeyDown=e=>{
   }
   if(/^Digit\d$/.test(c)){
     const n=+c.slice(5);
+    if(!e.repeat&&S.layer>=1&&!rs(e)&&!altOf(e)){HOLD.dig=n; HOLD.digUsed=false;}
     if(S.layer===0){
       if(S.arr.state==='edit'){
         pushUndo('place');
@@ -6897,7 +7183,7 @@ const onKeyDown=e=>{
         S.arr.events.push({t,pattern:n}); dirtySave=true;
       }
     }
-    else if(S.layer===1){
+    else if(S.layer>=1){
       const l2=S.patterns[S.editPat].lanes[n];
       if(rs(e)||e.altKey){
         const kind=rs(e)?'solo':'mute';
@@ -6919,18 +7205,12 @@ const onKeyDown=e=>{
         }
         dirty=true; dirtySave=true;
       }else if(n===0){                     // 0 = the master strip, at the row's end
-        S.mSel=true; S.layer=-2; S.mSlot=S.mSlot||0; S.mDj=null; S.mParam=0;
+        /* stays on the pattern: the master is a channel now, and picking a
+           channel has never meant leaving the view it lives in */
+        S.mSel=true; S.mSlot=S.mSlot||0; S.mDj=null; S.mParam=0;
         flash('master'); dirty=true;
-      }else if(n===S.curPreset){           // same digit again = mute toggle
-        l2.mute=!l2.mute;
-        flash('lane '+n+' '+S.presets[n].name+(l2.mute?' MUTED':' on'));
-        dirtySave=true;
-      }else S.curPreset=n;
+      }else{S.mSel=false; S.curPreset=n; if(S.layer>=2)S.editSnd=n;}   // the view follows
     }
-    else if(S.layer===2){
-      const mi2=n===0?9:n-1;
-      if(!MODULES[mi2].id){flash('reserved for future racks');return;}
-      S.curMod=mi2;S.curParam=0;S.curSlot=0;S.slotParam=0;}
     else if(MODULES[S.curMod].prs){        // explorer: digit loads the nth entry on the page
       const p=S.presets[S.editSnd], pool=libAll().filter(en=>en.cat===(p.cat||'misc'));
       const idx=Math.floor((S.libSel||0)/10)*10+(n===0?9:n-1);
@@ -6985,13 +7265,21 @@ const onKeyDown=e=>{
         EXP.bump(dv*0.05);
         flash('vel '+Math.round(clamp(CFG.kvel??0.9,0.02,1)*127));
       }
-      else if(vert){pn.tr=clamp((pn.tr||0)+dv,-3,3); flash(pn.name+' '+trLabel(pn));}
-      else{pn.trs=clamp((pn.trs||0)+dv,-12,12); flash(pn.name+' '+trLabel(pn));}
+      /* ONE number, in semitones. Octaves and semitones were separately
+         clamped at ±3 and ±12, so the two gated each other: twelve semitones
+         up and the semitone key stopped working even though the channel had
+         two octaves of room left. Both keys now move the same total. */
+      else{
+        const step2=vert?12:1;
+        const tot=clamp(trSemis(pn)+dv*step2,-36,36);
+        pn.tr=0; pn.trs=tot;
+        flash(pn.name+' '+trLabel(pn));
+      }
       HOLD.nUsed=true; dirty=true; dirtySave=true; return;
     }
     if(HOLD.m){                                    // tempo: shift ×10, option ×0.1
       if(c==='ArrowUp'||c==='ArrowDown'){
-        const step=e.altKey?0.1:rs(e)?10:1, d2=c==='ArrowUp'?1:-1;
+        const step=altOf(e)?0.1:rs(e)?10:1, d2=c==='ArrowUp'?1:-1;
         setBpm(Math.round((T.bpm+step*d2)*10)/10);
         flash('bpm '+T.bpm); HOLD.mUsed=true; dirty=true; dirtySave=true;
       }
@@ -7017,6 +7305,15 @@ const onKeyDown=e=>{
         if(!S.mSel&&T.playing)requestSwitch(S.curPat,posNow());
       }else S.arrParam=fmod((S.arrParam||0)+d,ARRP.length);
     }
+    else if(S.mSel&&S.layer>=2){                     // master: ←→ walks its params
+      const slM=S.master[S.mSlot||0];
+      const nP=FX_P(slM).length+1+(S.master.some(x=>!x.typ)?1:0);
+      if(rs(e)){const live=S.master.map((x,k)=>x.typ?k:-1).filter(k=>k>=0);
+        if(live.length){const at=live.indexOf(S.mSlot||0);
+          S.mSlot=live[fmod((at<0?0:at)+d,live.length)]; S.mParam=0;}}
+      else S.mParam=clamp((S.mParam||0)+d,0,nP-1);
+      dirty=true; return;
+    }
     else if(S.layer===1){S.curPreset=CH_LOW+fmod(S.curPreset-CH_LOW+d,10-CH_LOW); stepWalked=false;}
     else if(S.layer===2){
       /* Params flow left to right and spill into the next rack at the ends —
@@ -7032,11 +7329,12 @@ const onKeyDown=e=>{
       };
       const nParams=mi2=>{
         const M2=MODULES[mi2];
-        if(M2.prs)return prsFieldDefs().length;
+        if(M2.prs)return instFields().length;
         if(M2.flat)return M2.flat.length;
         if(M2.id==='osc'&&isCodeCh(S.editSnd))return CODEF().length;
         if(M2.id==='osc'&&isAudioCh(S.editSnd))return AUDF.length;
-        if(M2.slot)return paramsFor(mi2,modHolder(pre2,M2.id)[M2.id][S.curSlot]).length;
+        if(M2.slot){const base=paramsFor(mi2,modHolder(pre2,M2.id)[M2.id][S.curSlot]).length;
+          return base+(freeSlotHere(pre2)!=null&&mi2===S.curMod?1:0);}
         return 1;
       };
       const setParam=(mi2,px)=>{ if(flatView(mi2))S.curParam=px; else S.slotParam=px; };
@@ -7108,7 +7406,31 @@ const onKeyDown=e=>{
         }
         dirty=true; return;
       }
+      {const flds=instFields(), fd=flds[S.curParam];
+       if(fd&&fd.spec){                       // voice half: an ordinary param
+         pushUndo('voice');
+         const pv=S.presets[S.editSnd];
+         pv.vox[fd.spec.key]=adjust(fd.spec,pv.vox[fd.spec.key],d,kmult(e));
+         engine.refresh(S.editSnd); dirty=true; dirtySave=true; return;
+       }}
       prsAction(d); return;
+    }
+    if(S.mSel&&S.layer>=2){                          // master: same row, same rules
+      const slM=S.master[S.mSlot||0];
+      const specs=FX_P(slM).concat([SP('route','rt','enum',{opts:['mstr','send']})]);
+      const spec=specs[S.mParam];
+      if(!spec){                                     // on the '+': open an insert
+        const free=S.master.findIndex(x=>!x.typ);
+        if(free<0){flash('master rack is full');return;}
+        pushUndo('master slot'); S.mSlot=free; S.mParam=0;
+        flash('new master insert — ↑↓ picks what it is');
+      }else{
+        pushUndo('master');
+        if(spec.set)spec.set(slM,adjust(spec,getSP(slM,spec),d,kmult(e)));
+        else slM[spec.key]=adjust(spec,slM[spec.key],d,kmult(e));
+        engine.rebuildMaster();
+      }
+      dirty=true; dirtySave=true; return;
     }
     if(S.layer>=2){adjustParam(d,kmult(e));return;}   // shift=×10 · option=×0.1 (prep lives on cmd)
     if(S.layer===1){                      // ⌥↑↓ transposes THIS CHANNEL; z/x move the one global kb register
@@ -7135,6 +7457,27 @@ const onKeyDown=e=>{
   if(c==='KeyI'&&S.layer>0&&!e.repeat&&!e.metaKey){
     e.preventDefault(); HOLD.i=true; HOLD.iUsed=false; return;}
 
+  /* A LETTER MEANS A CLIP WHILE A CHANNEL IS HELD. The note keys are the
+     instrument until you say which channel you are filing, and then the same
+     row is the shelf you file it on. Nothing new to learn and nothing nested. */
+  if(c in NOTEKEYS&&!e.repeat&&S.layer>=1&&HOLD.dig>=0){
+    e.preventDefault();
+    const k=clipOf(c);
+    HOLD.digUsed=true;
+    if(HOLD.dig===0)goScene(k);
+    else goClip(HOLD.dig,k);
+    return;
+  }
+  /* the master's own pads: the dj row, where you are rather than off in a
+     layer you had to leave the mix to reach */
+  if(S.mSel&&S.layer>=1&&DJCODE[c]!==undefined&&!e.repeat&&HOLD.dig<0){
+    e.preventDefault();
+    const k=DJCODE[c];
+    const ml=S.patterns[S.editPat].lanes[0];
+    if(S.patterns[S.editPat].state==='rec'&&T.playing&&!djLatch[k])djRecStart[k]=posNow();
+    djPress(k,rs(e));
+    return;
+  }
   if(c in NOTEKEYS&&!e.repeat&&S.layer>0){
     e.preventDefault();
     /* midi solo: the board's own keystrokes are noise — only the events EXP
@@ -7242,6 +7585,7 @@ document.addEventListener('keyup',e=>{
   kbHeld.delete(c);
   if(/^Digit\d$/.test(c)){                          // momentary mute/solo ends here
     const n=+c.slice(5);
+    if(HOLD.dig===n){HOLD.dig=-1; HOLD.digUsed=false;}
     if(MOM[n]){
       const lane=S.patterns[S.editPat].lanes[n];
       if(MOM[n].latch)flash('lane '+n+' '+MOM[n].kind.toUpperCase()+' held');
@@ -7264,7 +7608,7 @@ document.addEventListener('keyup',e=>{
     const used=HOLD.rUsed, wantLatch=HOLD.rLatch;
     HOLD.r=false; HOLD.rUsed=false; HOLD.rLatch=false;
     if(used)return;
-    const scope=HOLD.c?'sound':HOLD.n?'notes':null;
+    const scope=HOLD.i?'sound':HOLD.n?'notes':null;   // i = the instrument, n = what it plays
     const mode=rs(e)?(e.altKey?'wild':'fresh'):'var';
     if(wantLatch){
       if(AUTORND.on&&AUTORND.ch===S.curPreset){AUTORND.on=false;flash('auto-roll off');}
@@ -7367,7 +7711,8 @@ document.addEventListener('keyup',e=>{
 });
 window.addEventListener('blur',()=>{
   KM.sl=false; KM.sr=false; LATCH.used=false; HOLD.tab=false; HOLD.m=false; kbHeld.clear();
-  HOLD.c=false; HOLD.n=false; HOLD.r=false; HOLD.i=false;
+  HOLD.c=false; HOLD.n=false; HOLD.r=false; HOLD.i=false; HOLD.dig=-1;
+  KM.srLatch=false; KM.altLatch=false;
   eraseHold=null;
   for(const c in liveV){liveV[c]&&liveV[c].release&&liveV[c].release(AC.currentTime);delete liveV[c];}
   for(let i=0;i<10;i++){engine.monoClear(i); engine.seqClear(i);}
@@ -7376,7 +7721,9 @@ window.addEventListener('blur',()=>{
 
 /* ---------------- persistence + migration ---------------------------- */
 const LS='ten-v1';
-function serialize(){return JSON.stringify({v:17,bpm:T.bpm,metro:S.metro,hum:S.hum,grv:S.grv,oct:S.oct,master:S.master,dj:S.dj,arrOn:S.arrOn!==false,
+const SAVEV=18;                       // bump BOTH: serialize writes it, load checks it
+function serialize(){return JSON.stringify({v:SAVEV,bpm:T.bpm,metro:S.metro,hum:S.hum,grv:S.grv,oct:S.oct,master:S.master,dj:S.dj,arrOn:S.arrOn!==false,
+  clips:S.clips,scenes:S.scenes,clipAt:S.clipAt,sceneAt:S.sceneAt,
   arr:S.arr,
   patterns:S.patterns.map(p=>({state:p.state==='edit'?'on':p.state,sw:p.sw||0,lanes:p.lanes})),
   presets:S.presets.map(p=>({...p,modLoop:p.modLoop.toJSON()}))});}
@@ -7404,7 +7751,13 @@ function convertV3Preset(sp,i){ // v3-and-earlier preset data -> v4 racks
 }
 function load(json){
   try{
-    const o=JSON.parse(json); if(!o||o.v<1||o.v>17)return false;
+    const o=JSON.parse(json);
+    /* ONE constant, read by both sides. This said `o.v>17` while serialize()
+       had moved to 18 — so every save the app made was rejected by the app,
+       demo content took its place, and the autosave wrote that over the only
+       copy. A version bump has two halves and I only did one. */
+    if(!o||o.v<1)return false;
+    if(o.v>SAVEV){console.warn('save is v'+o.v+', this build reads up to v'+SAVEV);return false;}
     T.bpm=o.bpm||120; S.metro=!!o.metro; S.hum=o.hum??0;
     S.grv=o.grv||{typ:0,amt:0};
     S.master=Array.isArray(o.master)
@@ -7492,6 +7845,10 @@ function load(json){
       const KM={a:0,s:1,d:2,h:3,j:4,k:5,l:6,';':7,"'":8,w:9};
       S.arr.events.forEach(ev=>{if(typeof ev.dj==='string')ev.dj=KM[ev.dj]??0;});
     }
+    S.clips=o.clips&&typeof o.clips==='object'?o.clips:{};
+    S.scenes=o.scenes&&typeof o.scenes==='object'?o.scenes:{};
+    S.clipAt=o.clipAt&&typeof o.clipAt==='object'?o.clipAt:{};
+    S.sceneAt=o.sceneAt||0;
     if(S.curPreset<CH_LOW)S.curPreset=CH_LOW;   // 0 is the master strip now
     if(S.editSnd<CH_LOW)S.editSnd=CH_LOW;
     for(let i=0;i<10;i++){engine.rebuildRack(i);engine.refresh(i);}
@@ -7527,7 +7884,18 @@ document.addEventListener('drop',e=>{
   }
   f.text().then(t=>{flash(load(t)?'session loaded':'load failed');dirty=true;dirtySave=true;});
 });
-if(!load(localStorage.getItem(LS)))demoContent();
+/* If the saved session will not load, the 1.5s autosave is about to write demo
+   content straight over it — the failure and the loss are one and the same
+   event, and by the time you notice, the only copy is gone. So: keep the raw
+   text under a recovery key first, and say so. */
+{const raw=localStorage.getItem(LS);
+ if(!load(raw)){
+   if(raw&&raw.length>200){
+     try{localStorage.setItem(LS+'-recover',raw);}catch(_){}
+     setTimeout(()=>flash('previous session could not be loaded — a copy is in '+LS+'-recover'),300);
+   }
+   demoContent();
+ }}
 libInit();
 if(CFG.midiIn|0)EXP.connect(true);   // reconnect silently if midi in was left on
 
@@ -7662,13 +8030,21 @@ function clipLine(html,n){
    what happens to it after. The racks still exist underneath — this is a way of
    LOOKING at them, not a new data model, so a slot is still (module, index) and
    every mod route and mod-loop event still addresses the same thing it did. */
+/* Two rows, because these are two kinds of thing. PRST and VOICE are settings
+   OF THE CHANNEL — one of each, always there. The chain below is a variable
+   number of slots you add to and take away. Putting them in one row made the
+   two look interchangeable, and made 'the chain' start in the wrong place. */
+/* Signal order, one row. Instrument holds the two things that are settings OF
+   the channel rather than steps in its chain — which preset it is, and how its
+   voices behave — so they sit together at the head instead of being scattered
+   through the racks. */
 const CHAIN=[
-  {n:'Play',  ids:['ply']},
-  {n:'Sound', ids:['osc']},
-  {n:'Filter',ids:['flt']},
-  {n:'Mod',   ids:['mod']},
-  {n:'Voice', ids:['vox']},
-  {n:'FX',    ids:['fx']},
+  {n:'Instrument', ids:['prs','vox']},
+  {n:'Notes',      ids:['ply']},
+  {n:'Sound',      ids:['osc']},
+  {n:'Filters',    ids:['flt']},
+  {n:'Mods',       ids:['mod']},
+  {n:'FX',         ids:['fx']},
 ];
 /* Cell width comes from how many slots are actually open, so the chain always
    fits the same 92 columns everything else uses. A channel with six mod slots
@@ -7680,29 +8056,74 @@ const ctrIn=(t0,w)=>{const t=t0.length>w?t0.slice(0,w):t0;
 /* Every slot worth showing: the ones in use, plus the first free one in each
    section as a '+'. Ten empty boxes per rack was ten questions you had not
    asked; one '+' is the only one you might. */
-function sectionChips(pre){
-  return CHAIN.map(sec=>{
+function sectionChips(pre,defs){
+  return (defs||CHAIN).map(sec=>{
     const items=[]; let plus=null;
     for(const id of sec.ids){
       const mi=MODULES.findIndex(m=>m.id===id); if(mi<0)continue;
       const M=MODULES[mi];
+      /* the preset cell says what the channel IS, in the same words the Inst
+         row uses — one name for one thing, wherever you read it */
+      if(M.prs){ items.push({mi,si:-1,M,label:instLabel(pre,13),prs:true}); continue; }
+      if(M.id==='vox')continue;              // folded into the preset cell above
+      /* On a procedural or audio channel the OSC rack is not nine oscillators —
+         it is the one model's parameters. Nine slots offered eight things that
+         do not exist. */
+      if(M.id==='osc'&&(isCodeCh(S.editSnd)||isAudioCh(S.editSnd))){
+        items.push({mi,si:0,M,label:isCodeCh(S.editSnd)?(pre.pmodel||'proc'):'clip'});
+        continue;
+      }
       if(M.flat){ items.push({mi,si:-1,M,label:M.name.toLowerCase()}); continue; }
       const rack=modHolder(pre,id)[id]||[];
       rack.forEach((sl,si)=>{
         const ab=M.abbr(sl);
         if(ab!=='···')items.push({mi,si,M,label:(sl.off?'×':'')+ab,off:!!sl.off});
-        else if(!plus)plus={mi,si,M,label:'+',isPlus:true};
+        else if(!plus)plus={mi,si,M,label:'+',isPlus:true};   // remembered, drawn on the param row
       });
+      /* An EMPTY rack still gets one cell. Showing nothing meant there was no
+         way to reach the stage at all — you could not add the first Play slot
+         because you could not put the cursor anywhere in Play. */
+      if(!items.length&&plus){items.push({...plus,label:'—',empty:true}); plus=null;}
     }
     return {sec,items,plus};
   });
 }
-const chipList=pre=>sectionChips(pre).flatMap(g=>g.items.concat(g.plus?[g.plus]:[]));
+const chipList=pre=>sectionChips(pre).flatMap(g=>g.items);
+/* the first free slot in the rack you are on, or null if it is full */
+const freeSlotHere=pre=>{const M=MODULES[S.curMod];
+  if(!M||!M.slot)return null;
+  const rack=modHolder(pre,M.id)[M.id]||[];
+  const si=rack.findIndex(sl=>M.abbr(sl)==='···');
+  return si<0?null:si;};
 function chipIndex(chips){
   const i=chips.findIndex(c=>c.mi===S.curMod&&(c.si===S.curSlot||c.si===-1));
   return i<0?0:i;
 }
 function gotoChip(c){ if(!c)return; S.curMod=c.mi; if(c.si>=0)S.curSlot=c.si; S.slotParam=0; }
+/* one label row over one row of cells — the shape a param row already uses */
+/* Every rack gets the SAME share of the row, and its open slots split that
+   share evenly. So a rack's position never moves as you add to it — only the
+   cells inside get narrower — and the widest a rack ever has to be is however
+   many slots it can hold at one letter each. Labels grow with the cell. */
+function chainRow(L,pre,groups){
+  const RW=Math.max(10,Math.floor(92/groups.length));
+  let lab='   ', cells='   ';
+  for(const g of groups){
+    const all=g.items, n=Math.max(1,all.length);
+    const cw=Math.max(1,Math.floor(RW/n));
+    const lit=cw>=3?cw-1:cw;                 // keep a gap once there is room for one
+    lab+=sp('d',pad(' '+g.sec.n,RW));
+    let used=0;
+    for(const c of all){
+      const on=c.mi===S.curMod&&(c.si===S.curSlot||c.si===-1);
+      cells+=spH(on?'i':(c.empty||c.off?'d k':'v k'),ctrIn(c.label,lit),'mod',c.mi)
+            +' '.repeat(cw-lit);
+      used+=cw;
+    }
+    cells+=' '.repeat(Math.max(0,RW-used));
+  }
+  L.push(lab); L.push(cells);
+}
 function rackStrip(L,rackA,M){
   let tabs='  ';
   rackA.forEach((sl,i)=>{
@@ -7717,8 +8138,13 @@ function rackStrip(L,rackA,M){
    own below the values of the first five, which read as a second slot. Squeeze
    the column instead — the whole rack is one horizontal move again. */
 function rackParams(L,pre,specs){
-  S.slotParam=clamp(S.slotParam|0,0,Math.max(0,specs.length-1));
-  const n=Math.max(1,specs.length);
+  /* '+' is the last cell of the param row: reaching the end of what this slot
+     has and pressing on is how you get another one. It is not a button parked
+     somewhere else — it is the next thing to the right. */
+  const free=freeSlotHere(pre);
+  const extra=free!=null?1:0;
+  S.slotParam=clamp(S.slotParam|0,0,Math.max(0,specs.length-1+extra));
+  const n=Math.max(1,specs.length+extra);
   const w=clamp(Math.floor(88/n)-1,5,10);
   let lr='   ', vr='   ';
   specs.forEach((pspec,i)=>{
@@ -7729,7 +8155,22 @@ function rackParams(L,pre,specs){
     vr+=(foc?spH('i',' '+pad(v,w),'slot',i)
            :(pd.dot?spH('r k',' '+pad(v,w),'slot',i):spH('v k',' '+pad(v,w),'slot',i)))+' ';
   });
+  if(extra){
+    const i=specs.length, foc=i===S.slotParam;
+    lr+=sp('d',' '+pad('new',w))+' ';
+    vr+=spH(foc?'i':'d k',' '+pad('+',w),'slot',i)+' ';
+  }
   L.push(lr); L.push(vr);
+}
+/* Turn the '+' into a real slot: the first free one in this rack, selected,
+   with the cursor on its type so the next keypress says what it becomes. */
+function openSlotHere(){
+  const pre=S.presets[S.editSnd], si=freeSlotHere(pre);
+  if(si==null){flash('rack is full');return false;}
+  pushUndo('new slot');
+  S.curSlot=si; S.slotParam=0;
+  flash('new '+MODULES[S.curMod].name.toLowerCase()+' slot — ↑↓ picks what it is');
+  dirty=true; dirtySave=true; return true;
 }
 function gridRow(lp,cell,phCell,charFor,cur=-1,hit){
   const n=Math.ceil(lp.len/cell-1e-9);
@@ -7746,6 +8187,7 @@ function gridRow(lp,cell,phCell,charFor,cur=-1,hit){
 
 function render(){
   const L=[];
+  gridAt=-1; rawAt.clear();   // only the pattern layer emits markup
   const pos=posNow();
   const bar=Math.floor(pos/4)+1, beat=Math.floor(fmod(pos,4))+1;
   const tState=T.playing?sp('ai',' ▶ ')+sp('a',` ${(''+bar).padStart(3,'0')}.${beat}`):sp('d','■ stop');
@@ -7788,10 +8230,14 @@ function render(){
 
   L.push('');
   L.push(sp('d','─'.repeat(W)));
-  L.push('  loop: '+loopBadge()+'   '+sp('d','`/tab REC  P edit  / rnd  -/= len  [ ]½/×2  \\ unit  ⌫ '+(S.layer>=2?'reset':'clear')));
-  L.push('  '+sp('d','space play   enter/esc layers   0-9 select   ↑↓ values (⌥×0.1)   ,/. bpm   F1 help'));
   if(performance.now()<flashUntil)L.push('  '+sp('a','▸ '+flashMsg));
-  screen.innerHTML=L.join('\n');
+  /* Lines are BLOCKS now, not one text flow: a pre gives every line the same
+     height, which is exactly what stops the grid compressing on its own. The
+     grid's lines go inside one wrapper so a single transform squashes them
+     together — and the wrapper's height is set to what the squashed content
+     actually occupies, since transforms are invisible to layout. */
+  screen.innerHTML=L.map((l,i)=>
+    (i===gridAt||rawAt.has(i))?l:'<div class="ln">'+(l===''?' ':l)+'</div>').join('');
 }
 
 function renderArr(L,pos){
@@ -7856,8 +8302,6 @@ function renderArr(L,pos){
    the mixer: 1-9 are music, 0 is the master, exactly where the key is.
    presets[0] is retired rather than reindexed — renumbering every saved
    pattern to gain one channel is not a trade worth making. */
-const CHANS=()=>[1,2,3,4,5,6,7,8,9];
-const CH_LOW=1;
 const METER={pk:new Array(11).fill(0), buf:new Float32Array(256)};
 function masterLevel(){
   const a=engine.mAn; if(!a)return 0;
@@ -7879,6 +8323,19 @@ function chLevel(i){
    travel on the top 6dB and reads as an on/off lamp. */
 const meterCh=v=>BARS[clamp(Math.round(Math.pow(clamp(v,0,1),0.35)*8),0,8)];
 /* 50L .. C .. 50R — an amount you can read, not a picture of a knob */
+/* eighths, upward — a level is a height, so the bar is one */
+const VBLK=' \u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588';
+function fillBar(v,w){
+  return VBLK[clamp(Math.round(clamp(v,0,1)*8),0,8)].repeat(w);
+}
+/* pan on a track: a rule with the marker where the signal sits */
+function panBar(v,w){
+  const mid=(w-1)/2;
+  const at=clamp(Math.round(mid+clamp(v,-1,1)*mid),0,w-1);
+  let out='';
+  for(let k=0;k<w;k++)out+=k===at?'\u2588':(k===mid?'\u2502':'\u2500');
+  return out;
+}
 const panCh=v=>{
   const n=Math.round(Math.abs(v)*50);
   return n<1?'  C':(String(n)+(v<0?'L':'R')).padStart(3);
@@ -7894,7 +8351,7 @@ const panCh=v=>{
    time from the pattern anchor and every column wraps at its own loop point,
    exactly as playback does. A 3-beat lane against a 4-beat one visibly
    phases, which the lane view could only imply. */
-const VROWS=()=>CFG.vrows??32;                // ceiling on rows drawn
+const VROWS=()=>CFG.vrows??16;                // one bar of rows — everything squeezes into it
 const CELLW=8;                                // lit characters in one cell; the 9th is the gap
 const COLW=CELLW+1;                           // ...so this is the column pitch
 const GUTW=4;                                 // the left label / row-number column
@@ -7911,83 +8368,189 @@ const velCls=v=>'n'+clamp(Math.round((v??0.9)*5),0,5);
    White boxes are reserved for the cursor. A playing note is bright, not
    boxed — otherwise half the grid is boxes and the cursor stops meaning
    anything. */
-function vGrid(L,pat,pos,anc,chans,cap){
+/* EVERY CHANNEL IS THE SAME HEIGHT AND ITS OWN RESOLUTION.
+
+   Not text rows: a row is shared by all nine columns, so the moment one lane
+   is four bars every other lane gets sliced the same way. So the grid is a row
+   of COLUMNS, each dividing the same vertical budget by its own step count.
+   Length becomes density instead of a scroll.
+
+   Inside a column the notes are not characters — they are BARS, absolutely
+   placed: down the column for time (so a held note is a long bar, which is the
+   thing a letter could never show) and across it for pitch. The pitch axis is
+   scaled to the notes actually in that lane, so a bassline and a lead each get
+   the full width instead of both huddling in one corner of a fixed range. */
+/* declared with the other globals — applyTheme() runs long before this point
+   in the file and writes CHWdone, which a `let` down here would put in TDZ */
+function measureChar(){
+  const p2=document.createElement('span');
+  p2.textContent='0'.repeat(100);
+  p2.style.cssText='position:absolute;visibility:hidden;white-space:pre;';
+  screen.appendChild(p2);
+  const w=p2.getBoundingClientRect().width/100;
+  p2.remove();
+  if(w>0)CHW=w;
+}
+function gridHTML(pat,pos,anc,chans){
   const step=0.25;
-  let maxSteps=1;
-  for(const i of chans){const l=pat.lanes[i];
-    if(l&&!isAudioCh(i))maxSteps=Math.max(maxSteps,Math.round(l.len/step));}
-  const rows=Math.min(maxSteps,cap||VROWS());
-  const nowStep={}, nSteps={};
-  for(const i of chans){
-    const l=pat.lanes[i];
-    nSteps[i]=l&&!isAudioCh(i)?Math.round(l.len/step):0;
-    nowStep[i]=(T.playing&&l&&nSteps[i])?Math.floor(fmod(pos-anc,l.len)/step):-1;
-  }
-  // unit ticks come from the focused channel, so the gutter shows ITS grain
-  const cu=pat.lanes[S.curPreset], uStep=cu?Math.max(1,Math.round(UNITS[cu.unit]/step)):4;
-  /* Where the white box sits. Playing and not editing, it RIDES this channel's
-     playhead — so the box is always telling you where you are, and stepping
-     into the grid picks it up exactly where the light was rather than throwing
-     you back to the top. In edit it stops and answers to the arrows. */
-  const soloing=pat.lanes.some(l=>l.solo);
-  const dim=i=>pat.lanes[i].mute||(soloing&&!pat.lanes[i].solo);
+  /* A row was a whole 22.75px line because it used to BE one. It is a div
+     now, and at one bar the numbers down the side had more air between them
+     than they had height — so the budget is its own number, tunable. */
+  const H=Math.round(VROWS()*(CFG.rowH??14));
   const editing=pat.state==='edit';
-  const parked=cu?Math.round(curCell(cu)*cellOf(cu)/step):-1;
-  const curRow=editing?parked:(nowStep[S.curPreset]>=0?nowStep[S.curPreset]:parked);
-  for(let r=0;r<rows;r++){
-    const tick=r%uStep===0;                       // a unit boundary for the focused lane
-    let line=sp(tick?'a':r%4===0?'v':'d',String(r+1).padStart(GUTW))+' ';
-    for(const i of chans){
-      const lane=pat.lanes[i], n=nSteps[i];
-      /* base fill for this channel, and the lifted one the playhead uses —
-         the same proportional step everywhere, so the moving cell reads as
-         one thing across nine columns instead of nine different marks */
-      const sel=i===S.curPreset, kBase=sel?(dim(i)?'kqs':'ks'):dim(i)?'kq':'k';
-      const kLift=sel?(dim(i)?'ks':'ksp'):dim(i)?'kqp':'kp';
-      if(!n){ line+=(isAudioCh(i)&&r===0?sp('d '+kBase,ctr('≈')):sp(kBase,' '.repeat(CELLW)))+' '; continue; }
-      if(r>=n){ line+=' '.repeat(COLW); continue; }   // past this loop's end — no cell, no fill
-      const t=r*step;
-      const hits=lane.events.filter(e=>e.t>=t-1e-9&&e.t<t+step-1e-9)
-                            .sort((x,y)=>x.midi-y.midi);      // low to high, so a chord reads
-      /* a note RELEASING in this cell, with nothing starting — the only thing
-         worth a mark in an otherwise empty cell, because it is the difference
-         between a note still ringing and one that has stopped */
-      const offs=hits.length?false:lane.events.some(e=>{
-        const end=e.t+(e.dur||0.25);
-        return end>t-1e-9&&end<t+step-1e-9;
-      });
-      const playing=nowStep[i]===r;
-      const cursor=i===S.curPreset&&curRow===r;
-      /* CELLW characters of room, so a chord can print as CEG instead of
-         collapsing to one '≡' that told you a stack was there and nothing
-         about what was in it. Past five notes the last slot becomes '+'. */
-      const shown=hits.length>CELLW?hits.slice(0,CELLW-1):hits;
-      const more=hits.length>CELLW;
-      const txt=shown.map(h=>PCH[heardMidi(i,h.midi)%12]).join('')+(more?'+':'');
-      const lp=' '.repeat(Math.max(0,Math.floor((CELLW-txt.length)/2)));
-      const rp=' '.repeat(Math.max(0,CELLW-txt.length-lp.length));
-      const kc=playing?kLift:kBase;                 // the playhead IS the fill
-      const empty=offs?'.':' ';                     // a lone '.' means a note released here
-      let cell;
-      /* dim() before the flash: a channel you cannot hear must not light up as
-         though it just sounded. */
-      if(cursor)         cell=sp(editing?'i':'v cur',hits.length?lp+txt+rp:ctr(empty));
-      else if(dim(i))    cell=sp('d '+kc,hits.length?lp+txt+rp:ctr(empty));
-      else if(!hits.length)cell=sp('d '+kc,ctr(empty));
-      else if(playing)   cell=sp('w '+kc,lp+txt+rp);       // flashes as it sounds
-      else{
-        /* one span per note for its own velocity brightness, all of them inside
-           a single filled wrapper — the fill and its padding belong to the CELL */
-        let inner=esc(lp);
-        for(const h of shown)inner+=sp(velCls(h.vel),PCH[heardMidi(i,h.midi)%12]);
-        if(more)inner+=sp('d','+');
-        cell=spRaw(kc,inner+esc(rp));
-      }
-      line+=cell+' ';
+  const soloing=pat.lanes.some(l=>l.solo);
+  const dimOf=i=>pat.lanes[i].mute||(soloing&&!pat.lanes[i].solo);
+  const CW=CELLW*CHW;                         // a cell's lit width in pixels
+
+  const cu=pat.lanes[S.curPreset];
+  const curStep=cu?Math.round(curCell(cu)*cellOf(cu)/step):-1;
+  const nowOf=i=>{const l=pat.lanes[i];
+    return (T.playing&&l&&l.len>0)?Math.floor(fmod(pos-anc,l.len)/step):-1;};
+
+  let h='<div class="grid">';
+  {const raw=cu?Math.max(1,Math.round(cu.len/step)):16;
+   /* the same last-resort packing the columns do. Without it a 16-bar loop
+      gave the gutter 256 cells that could not shrink below their floor, and
+      the column it was supposed to be labelling was a third of its height. */
+   const gper=Math.max(1,Math.ceil(raw/Math.max(1,Math.floor(H/5.4))));
+   const n=Math.ceil(raw/gper), ch=H/n;
+   const u=Math.max(1,Math.round((cu?Math.max(1,Math.round(UNITS[cu.unit]/step)):4)/gper));
+   h+='<div class="gcol gut" style="width:'+(GUTW+1)+'ch">';
+   for(let r=0;r<n;r++){
+     const tick=r%u===0;
+     const txt=(ch>=13||(tick&&ch*u>=13))?String(r*gper+1).padStart(GUTW)+(tick?'│':' '):'';
+     h+='<div class="gc '+(tick?'a':r%4===0?'v':'d')+'" style="height:'+ch.toFixed(2)+
+        'px;line-height:'+ch.toFixed(2)+'px">'+txt+'</div>';
+   }
+   h+='</div>';}
+
+  for(const i of chans){
+    const lane=pat.lanes[i], sel=i===S.curPreset, dim=dimOf(i);
+    const n16=(lane&&!isAudioCh(i))?Math.max(1,Math.round(lane.len/step)):0;
+    h+='<div class="gcol" style="width:'+COLW+'ch">';
+    if(!n16){ h+='<div class="gc k" style="height:'+H+'px"></div></div>'; continue; }
+    /* a cell cannot render below about five pixels, so past that density the
+       column would grow instead of staying level — the last resort, and only
+       then, is more than one 16th to a cell */
+    const per=Math.max(1,Math.ceil(n16/Math.max(1,Math.floor(H/5.4))));
+    const n=Math.ceil(n16/per), ch=H/n;
+    const u=Math.max(1,Math.round(Math.max(1,Math.round(UNITS[lane.unit]/step))/per));
+    const now=nowOf(i), nowR=now<0?-1:Math.floor(now/per);
+    const curR=curStep<0?-1:Math.floor(curStep/per);
+    const base=sel?(dim?'kqs':'ks'):dim?'kq':'k';
+    const lift=sel?'ksp':dim?'kqs':'ks';       // the one you are on flashes hardest
+    for(let r=0;r<n;r++){
+      const playing=nowR===r, cursor=sel&&(editing?curR===r:(nowR>=0?nowR===r:curR===r));
+      const atUnit=(r+1)%u===0||r+1>=n;
+      const rule=r%4===0?' bt':(r%2?' z':'');
+      let cls=(playing?lift:base)+rule;
+      if(cursor)cls='cur'+rule+(editing?' inv':'');
+      /* the gap does the dividing: a hair inside a unit, a full line at its
+         edge. You see every cell AND where the unit ends, which the solid
+         block could only do one of. */
+      const g=atUnit?(ch>=11?2.6:ch>=7?1.6:1):(ch>=11?0.9:ch>=7?0.6:0);
+      h+='<div class="gc '+cls+'" style="height:'+ch.toFixed(2)+'px;line-height:'+
+         ch.toFixed(2)+'px;border-bottom-width:'+g+'px" data-h="cell:'+r+'"></div>';
     }
-    L.push(line);
+    /* the notes, over the top of the grid rather than inside its cells */
+    /* only what actually SOUNDS: occur() skips events at or past the loop end,
+       so drawing them put bars below the grid for notes you cannot hear —
+       usually the tail of a phrase left behind when the loop was halved */
+    const evs=lane.events.filter(e=>e.t<lane.len-1e-9);
+    if(evs.length){
+      let lo=Infinity, hi=-Infinity;
+      for(const e of evs){const m=heardMidi(i,e.midi); if(m<lo)lo=m; if(m>hi)hi=m;}
+      if(hi-lo<4){const c2=Math.round((lo+hi)/2); lo=c2-2; hi=c2+2;}
+      const span=hi-lo+1, nw=Math.max(1.4,CW/span);
+      h+='<div class="nlay">';
+      for(const e of evs){
+        const m=heardMidi(i,e.midi);
+        const top=(e.t/step)/n16*H;
+        const full=Math.max(1.6,((e.dur||0.25)/step)/n16*H-0.6);
+        const left=(m-lo)/span*CW;
+        const cls=dim?'n1':velCls(e.vel);
+        const bar=(y,ht)=>'<i class="pk '+cls+'" style="top:'+y.toFixed(1)+
+          'px;height:'+ht.toFixed(1)+'px;left:'+left.toFixed(1)+'px;width:'+nw.toFixed(1)+'px"></i>';
+        /* A note held past the loop point is still sounding when the loop comes
+           round, so it is drawn where it will be heard: the tail re-enters at
+           the top. Cutting it off at the bottom drew a note shorter than it is. */
+        h+=bar(top,Math.min(full,H-top));
+        let over=full-(H-top);
+        for(let g=0;over>0.5&&g<4;g++){ h+=bar(0,Math.min(over,H)); over-=H; }
+      }
+      h+='</div>';
+    }
+    h+='</div>';
   }
-  if(maxSteps>rows)L.push('   '+sp('d','… '+(maxSteps-rows)+' more steps — longest loop does not fit'));
+  return h+'</div>';
+}
+/* One row, one cell per channel, lined up with the grid columns above it.
+   Anything that is better SEEN than read gets built with this rather than
+   with characters. */
+function colRow(cls,cellFn){
+  let h='<div class="crow"><div class="ccell" style="width:calc('+(GUTW+1)+'ch + var(--bleed))"></div>';
+  /* +1px because the cell bleeds 1px left, exactly as the strip's do — without
+     it every column owes a pixel and the ninth is ten short */
+  for(const i of CHANS())h+='<div class="ccell '+cls+
+    '" style="width:calc('+COLW+'ch + var(--bleed))">'+(cellFn(i)||'')+'</div>';
+  return h+'</div>';
+}
+/* Level, left to right, under the column it belongs to. A meter is a moving
+   thing; putting it in a text row meant one of eight glyphs and a lot of
+   flicker between them. */
+function meterRow(pat){
+  const soloing=pat.lanes.some(l=>l.solo);
+  return colRow('mrow',i=>{
+    const m=pat.lanes[i].mute, so=pat.lanes[i].solo;
+    const audible=!m&&(!soloing||so);
+    const v=audible?clamp(chLevel(i),0,1):0;
+    /* Opening out from the centre, one side per stereo channel, with the
+       levels taken through the same equal-power law the panner uses — so a
+       channel pushed right LOOKS pushed right instead of needing the number
+       above it read. Two meters in the space of one. */
+    const th=(clamp((S.presets[i].mix||{pan:0}).pan,-1,1)+1)/2*(Math.PI/2);
+    const g=Math.pow(v,0.55)*100;
+    const l=(g*Math.cos(th)).toFixed(1), r=(g*Math.sin(th)).toFixed(1);
+    return '<i class="mfill mL" style="width:'+l+'%"></i>'+
+           '<i class="mfill mR" style="width:'+r+'%"></i>';
+  });
+}
+/* What each channel is sounding RIGHT NOW, under its own column — the names
+   the pixels gave up, put back where they belong instead of on one line that
+   could only ever describe the channel you happened to be on. */
+function liveRow(pat,pos,anc){
+  const nm=m=>NN[((m%12)+12)%12]+(Math.floor(m/12)-1);
+  return colRow('lrow',i=>{
+    const lane=pat.lanes[i];
+    if(!lane||isAudioCh(i)||!T.playing)return '';
+    const t=fmod(pos-anc,lane.len);
+    const on=lane.events.filter(e=>{const en=e.t+(e.dur||0.25);
+      return e.t<=t+1e-9&&en>t-1e-9&&e.t<lane.len-1e-9}).sort((a,b)=>a.midi-b.midi);
+    if(!on.length)return '';
+    const txt=on.slice(0,3).map(e=>nm(heardMidi(i,e.midi))).join(' ')+(on.length>3?'+':'');
+    return sp(i===S.curPreset?'a':'v',txt.slice(0,CELLW));
+  });
+}
+/* What is sounding, or — when you are editing — what is under the cursor.
+   The pixels give you shape and lose the names; this is where the names went. */
+function noteReadout(pat,pos,anc){
+  const i=S.curPreset, lane=pat.lanes[i];
+  if(!lane||isAudioCh(i))return '';
+  const nm=m=>NN[((m%12)+12)%12]+(Math.floor(m/12)-1);
+  if(pat.state==='edit'){
+    const cell=cellOf(lane), t0=curCell(lane)*cell;
+    const at=lane.events.filter(e=>e.t>=t0-1e-9&&e.t<t0+cell-1e-9)
+      .sort((a,b)=>a.midi-b.midi).map(e=>nm(heardMidi(i,e.midi)));
+    return '   '+sp('i',' EDIT ')+' '+sp('a',(curCell(lane)+1)+'/'+stepCells(lane))+
+      (at.length?'  '+sp('v',at.join(' ')):sp('d','  —'));
+  }
+  if(!T.playing)return '';
+  const t=fmod(pos-anc,lane.len);
+  const on=lane.events.filter(e=>{const en=e.t+(e.dur||0.25);
+    return e.t<=t+1e-9&&en>t-1e-9&&e.t<lane.len-1e-9;}).sort((a,b)=>a.midi-b.midi);
+  /* grey, and only the channel you are on: a readout you have to scan is not
+     a readout, and nine of them at once was nothing but movement */
+  return '   '+sp('d','▸ '+(on.length?on.map(e=>nm(heardMidi(i,e.midi))).join(' '):''));
 }
 
 function renderPat(L,pos){
@@ -8005,8 +8568,10 @@ function renderPat(L,pos){
      somebody else. Same treatment for both, because they are the same fact. */
   const dimmed=i=>pat.lanes[i].mute||(soloing&&!pat.lanes[i].solo);
   /* focused and silenced are independent facts, so the fill carries both */
-  const K=i=>i===S.curPreset?(dimmed(i)?'kqs':'ks'):dimmed(i)?'kq':'k';
-  const T=i=>i===S.curPreset?'a':dimmed(i)?'d':'u';   // white only where you are
+  /* the master is a channel, so selecting it must UNselect the others —
+     two lit columns read as two cursors */
+  const K=i=>(i===S.curPreset&&!S.mSel)?(dimmed(i)?'kqs':'ks'):dimmed(i)?'kq':'k';
+  const T=i=>(i===S.curPreset&&!S.mSel)?'a':dimmed(i)?'d':'u';
   /* centre in exactly w — anything longer is cut, because one over-long cell
      shunts every column to its right and the strip stops lining up with the grid */
   const ctrC=(t0,w)=>{const t=t0.length>w?t0.slice(0,w):t0;
@@ -8016,42 +8581,30 @@ function renderPat(L,pos){
     /* the number is the thing you press, so the number is what gets the box */
     ['Ch',  i=>{
       const m=pat.lanes[i].mute, so=pat.lanes[i].solo;
-      const tag=String(i)+(so?' S':m?' M':'');
+      const tag=String(i)+(so?' S':m?' M':'');   // the meter moved to its own row
       /* the white box marks WHERE YOU ARE — unless you are editing, when the
          step cursor takes it over and two full-white marks would compete */
-      const sel=i===S.curPreset&&!edit;
+      const sel=i===S.curPreset&&!edit&&!S.mSel;   // the master takes the cursor with it
       return spH(sel?'i':T(i)+' '+K(i),ctrC(tag,CELLW),'ch',i)+' ';
     }, ()=>spH(S.mSel&&!edit?'i':'v k',ctrC('0',CELLW),'mst0',0)+' '],
-    ['Inst',i=>spH(T(i)+' '+K(i),ctrC(S.presets[i].name,CELLW),'ch',i)+' ',
+    ['Inst',i=>spH(T(i)+' '+K(i),ctrC(instLabel(S.presets[i]),CELLW),'ch',i)+' ',
             ()=>sp((S.mSel?'a':'v')+' '+(S.mSel?'ks':'k'),ctrC('MASTR',CELLW))+' '],
 
     /* meter sits ON the volume row: the number you set and the level you got,
        side by side, which is the only way to tell a quiet mix from a dead one */
-    ['Vol', i=>{
+    /* level and pan are one decision about where a channel sits, so they read
+       as one line; the meter went up to the number, which had room */
+    /* Level fills from the left, pan sits on a track with the centre marked.
+       Two pictures instead of two numbers: you are setting a balance, and a
+       balance is a shape. The eighth-blocks give 32 positions across 4 cells,
+       which is finer than the values themselves. */
+    ['Mix', i=>{
       const mx=S.presets[i].mix||{lvl:0.8,pan:0};
-      const m=pat.lanes[i].mute, so=pat.lanes[i].solo;
-      const audible=!m&&(!soloing||so);
-      const bar=audible?meterCh(chLevel(i)):' ';
-      return spH(T(i)+' '+K(i),
-        ' '+bar+' '+String(Math.round(mx.lvl*100)).padStart(3)+'V ','lvl',i)+' ';
-    }, ()=>sp((S.mSel?'a':'v')+' '+(S.mSel?'ks':'k'),' '+meterCh(masterLevel())+' '+
-        String(Math.round((S.master&&S.mLvl!==undefined?S.mLvl:1)*100)).padStart(3)+'V ')+' '],
+      return spH(T(i)+' '+K(i),fillBar(mx.lvl,3)+panBar(mx.pan,5),'lvl',i)+' ';
+    }, ()=>sp((S.mSel?'a':'v')+' '+(S.mSel?'ks':'k'),
+        fillBar(S.master&&S.mLvl!==undefined?S.mLvl:1,3)+'\u2500\u2500\u2502\u2500\u2500')+' '],
 
-    /* what the channel IS, next to how loud it is — the two facts you want
-       side by side when you are deciding whether it belongs in the mix */
-    ['Eng', i=>sp(T(i)+' '+K(i),ctrC(engShort(S.presets[i]),CELLW))+' ',
-            ()=>sp((S.mSel?'a':'v')+' '+(S.mSel?'ks':'k'),ctrC('bus',CELLW))+' '],
-    ['Type',i=>{
-      const p2=S.presets[i];
-      const t=p2.cat==='proc'?(p2.pmodel||'—'):p2.cat==='audio'?'clip':(p2.cat||'misc');
-      return sp(T(i)+' '+K(i),ctrC(t,CELLW))+' ';
-    }, ()=>sp(S.mSel?'ks':'k',' '.repeat(CELLW))+' '],
-
-    ['Pan', i=>spH(T(i)+' '+K(i),
-              ctrC(panCh((S.presets[i].mix||{pan:0}).pan).trim(),CELLW),'pan',i)+' ',
-            ()=>sp((S.mSel?'a':'v')+' '+(S.mSel?'ks':'k'),ctrC('---',CELLW))+' '],
-
-    ['Loop',i=>{
+    ['__loop',i=>{
       const l=pat.lanes[i];
       /* `auto` reads as a DIM row rather than a '~' prefix, which buys back the
          character "0.25xbar" and "16x16th" need. Strictly ASCII here: '×' and
@@ -8065,7 +8618,7 @@ function renderPat(L,pos){
     /* transpose in the unit it actually means. An octave down is −12st, not
        "−1" of something you have to remember the size of; the channel's octave
        and semitone offsets are one number because they are one pitch. */
-    ['Tr',  i=>{
+    ['__tr',  i=>{
       const st=trSemis(S.presets[i]);
       return sp((st?T(i):'d')+' '+K(i),ctrC(st?(st>0?'+':'')+st+'st':'',CELLW))+' ';
     }, ()=>sp(S.mSel?'ks':'k',' '.repeat(CELLW))+' '],
@@ -8073,21 +8626,49 @@ function renderPat(L,pos){
   /* INNER is every channel column plus master, so the frame closes exactly on
      the last one. Text this dense reads as a spreadsheet the moment it has an
      edge; without one it is just words hanging in space. */
-  for(const [name,cell,mcell] of rows){
-    let row=sp('d',pad(name,GUTW))+' ';
+  /* THE VIEW IS UPSIDE DOWN ON PURPOSE. Notes at the top, then the lane's own
+     settings, then the mix, then the channel, then the rack at the very bottom.
+     Reading UP from the bottom follows the signal: this channel, what it is,
+     how loud, how long its loop, and finally what it plays. It also puts the
+     things your hands are on nearest the keys and the thing you watch highest. */
+  if(CFG.vgrid){
+    if(!CHWdone){measureChar(); CHWdone=true;}
+    const ro=noteReadout(pat,pos,anc);     // just this channel, quietly, above the notes
+    L.push(ro||' ');
+    gridAt=L.length;                       // one entry, emitted as raw markup
+    L.push(gridHTML(pat,pos,anc,CHANS()));
+    rawAt.add(L.length); L.push(meterRow(pat));           // how loud it came out
+  }
+  /* Loop length and transpose are things you set and then stop thinking about,
+     so they are not worth two permanent rows. They appear on the hold that
+     edits them — tab for the loop, n for the pitch — which is exactly when
+     you want to see them and never otherwise. */
+  const showLoop=HOLD.tab, showTr=HOLD.n;
+  for(const [name,cell,mcell] of rows.slice().reverse()){
+    if(name==='__loop'&&!showLoop)continue;
+    if(name==='__tr'&&!showTr)continue;
+    let row=sp('d',pad(name==='__loop'?'Loop':name==='__tr'?'Tr':name,GUTW))+' ';
     for(const i of CHANS())row+=cell(i);
     L.push(row+mcell());
   }
-  L.push('');
-  /* The rack opens BETWEEN the desk and the notes. Enter used to swap the whole
-     screen for it, which meant losing sight of the mix and the pattern exactly
-     when you were changing the sound they carry. The grid gets shorter to make
-     room rather than disappearing — you still see the loop you are editing into. */
-  if(S.layer>=2){
-    (S.layer===2?renderSnd:renderSlots)(L,pos);
-    L.push('');
+  /* while a channel is held, its shelf — so the letters you are about to
+     press are labelled rather than remembered */
+  if(HOLD.dig>=0){
+    const who=HOLD.dig, bank=who===0?(S.scenes||{}):((S.clips||{})[who]||{});
+    const at=who===0?(S.sceneAt??0):((S.clipAt||{})[who]??0);
+    let row='   '+sp('d',(who===0?'scene':'ch '+who)+'  ');
+    for(let k=0;k<CLIPKEYS.length;k++){
+      const has=!!bank[k]||k===at;
+      row+=sp(k===at?'i':has?'v k':'d','  '+CLIPKEYS[k]+'  ')+' ';
+    }
+    L.push(''); L.push(row);
+    L.push('   '+sp('d','a letter is a place this channel can be · ⌘C / ⌘V copies one into another'));
   }
-  if(CFG.vgrid){ vGrid(L,pat,pos,anc,CHANS(),S.layer>=2?Math.min(VROWS(),12):VROWS()); L.push(''); }
+  if(S.mSel&&S.layer>=2)masterRack(L);
+  else if(S.layer>=2){
+    L.push('');
+    (S.layer===2?renderSnd:renderSlots)(L,pos);
+  }
   const lanes=[];
   for(let i=0;i<10;i++)if(!CFG.vgrid&&(i===S.curPreset||pat.lanes[i].events.length))lanes.push(i);
   for(const li of lanes){
@@ -8129,23 +8710,9 @@ function renderSnd(L,pos){
   /* The chain reads left to right in the order it runs, each stage named over
      the slots it holds — the same label-over-value shape as a param row, so
      the whole screen is one idea repeated instead of three different ones. */
-  {const groups=sectionChips(pre);
-   const total=groups.reduce((a,g)=>a+Math.max(1,g.items.length+(g.plus?1:0)),0);
-   const SW=slotW(total), SLIT=SW-1;
-   let lab='   ', cells='   ';
-   for(const g of groups){
-     const all=g.items.concat(g.plus?[g.plus]:[]);
-     const n=Math.max(1,all.length);
-     lab+=sp('d',pad(' '+g.sec.n,n*SW));
-     for(const c of all){
-       const on=c.mi===S.curMod&&(c.si===S.curSlot||c.si===-1);
-       cells+=spH(on?'i':(c.isPlus?'d k':c.off?'d k':'v k'),
-                  ctrIn(c.label,SLIT),'mod',c.mi)+' ';
-     }
-     if(!all.length)cells+=' '.repeat(n*SW);
-   }
-   L.push(lab); L.push(cells);}
+  chainRow(L,pre,sectionChips(pre));
   L.push('');
+
   // this channel's pattern lane — only when the grid below isn't already showing it
   if(!CFG.vgrid){const pat=S.patterns[S.editPat], lane=pat.lanes[S.editSnd];
    const rec=pat.state==='rec'&&T.playing, cap=lane._cap;
@@ -8208,20 +8775,21 @@ function renderSnd(L,pos){
     L.push('   '+sp('d','tab = record from input (mic, or mstr = resample the master mix) · modes in settings'));
   }
   else if(M.prs){
-    const p=pre, defs=prsFieldDefs(), onLayer=!!edKit(p);
-    S.curParam=Math.min(S.curParam,defs.length-1);
+    /* preset fields THEN voice params, one row. Two systems share it: preset
+       fields are actions dispatched by name, voice ones are ordinary specs.
+       instFields() is the single list both the render and the arrows walk, so
+       they cannot disagree about which index means what. */
+    const flds=instFields();
+    S.curParam=clamp(S.curParam|0,0,Math.max(0,flds.length-1));
+    const w=clamp(Math.floor(88/Math.max(1,flds.length))-1,5,10);
     let lr='   ', vr='   ';
-    defs.forEach((fd,i)=>{
-      if(fd.br){L.push(lr);L.push(vr);L.push('');lr='   ';vr='   ';}   // start a new field row
-      const foc=i===S.curParam, v=fd.v();
-      lr+=(foc?spH('a','▸'+pad(fd.k,9),'cp',i):spH('d',' '+pad(fd.k,9),'cp',i))+' ';
-      vr+=(foc?spH('i',' '+pad(v,9),'cp',i):spH('v',' '+pad(v,9),'cp',i))+' ';
+    flds.forEach((fd,i)=>{
+      const foc=i===S.curParam;
+      const v=fd.spec?fmtVal(fd.spec,pre.vox[fd.spec.key]):fd.v();
+      lr+=(foc?spH('a',' '+pad(fd.k,w),'cp',i):spH('d',' '+pad(fd.k,w),'cp',i))+' ';
+      vr+=(foc?spH('i',' '+pad(v,w),'cp',i):spH('v k',' '+pad(v,w),'cp',i))+' ';
     });
     L.push(lr); L.push(vr);
-    stackStrip(L,p);
-    L.push('');
-    if(onLayer)L.push('   '+sp('d','←→ field · ↑↓ set · this pad is a full chain — every rack edits it · ⌫ resets the pad'));
-    else L.push('   '+sp('d','←→ field · ↑↓ act · stack = off/stack/split · layer = add & edit · enter → library'));
   }
   else if(M.flat){
     let lr='   ', vr='   ';
@@ -8364,6 +8932,52 @@ function renderExplore(L,pre){
     sp('a','esc = back to your '+S.libStash.name)+sp('d','  (browsing never loses your sound)'));
 }
 
+/* The master IS a channel — it has a chain of inserts and a set of params,
+   which is what every other channel has. It had its own page, its own key
+   handling and its own idea of what a slot looks like; now it draws with the
+   same chain row and the same param row, in the same place under the strip. */
+function masterRack(L){
+  if(!Array.isArray(S.master)){S.master=mkMaster(); dirtySave=true;}
+  L.push('');
+  const items=[];
+  S.master.forEach((sl,i)=>{
+    if(sl.typ)items.push({i,label:XTYPES[sl.typ]+(Math.round(sl.rt)===1?'ˢ':'')});
+  });
+  const free=S.master.findIndex(sl=>!sl.typ);
+  if(!items.length&&free>=0)items.push({i:free,label:'—',empty:true});
+  const RW=Math.max(10,Math.floor(92/2));
+  const n=Math.max(1,items.length), cw=Math.max(1,Math.floor(RW/n)), lit=cw>=3?cw-1:cw;
+  let lab='   '+sp('d',pad(' Master',RW)), cells='   ';
+  let used=0;
+  for(const c of items){
+    const on=c.i===(S.mSlot||0);
+    cells+=spH(on?'i':(c.empty?'d k':'v k'),ctrIn(c.label,lit),'msl',c.i)+' '.repeat(cw-lit);
+    used+=cw;
+  }
+  cells+=' '.repeat(Math.max(0,RW-used));
+  L.push(lab); L.push(cells);
+  L.push('');
+  /* same param row as a slot rack, down to the '+' at the end */
+  const sl=S.master[S.mSlot||0]||S.master[0];
+  const specs=FX_P(sl).concat([SP('route','rt','enum',{opts:['mstr','send']})]);
+  const extra=free>=0?1:0;
+  S.mParam=clamp(S.mParam|0,0,Math.max(0,specs.length-1+extra));
+  const w=clamp(Math.floor(88/Math.max(1,specs.length+extra))-1,5,10);
+  let lr='   ', vr='   ';
+  specs.forEach((sp2,i)=>{
+    const foc=i===S.mParam;
+    lr+=(foc?spH('a',' '+pad(sp2.lbl,w),'mpr',i):spH('d',' '+pad(sp2.lbl,w),'mpr',i))+' ';
+    vr+=(foc?spH('i',' '+pad(fmtVal(sp2,getSP(sl,sp2)),w),'mpr',i)
+           :spH('v k',' '+pad(fmtVal(sp2,getSP(sl,sp2)),w),'mpr',i))+' ';
+  });
+  if(extra){
+    const i=specs.length, foc=i===S.mParam;
+    lr+=sp('d',' '+pad('new',w))+' ';
+    vr+=spH(foc?'i':'d k',' '+pad('+',w),'mpr',i)+' ';
+  }
+  L.push(lr); L.push(vr);
+}
+const getSP=(o,spec)=>spec.get?spec.get(o):o[spec.key];
 function renderMaster(L){
   if(!Array.isArray(S.master)){S.master=mkMaster(); dirtySave=true;
     flash('master rack was malformed — rebuilt from defaults');}
@@ -8470,8 +9084,6 @@ function renderHelp(L){
     ['← →','move focus / edit cursor'],
     ['↑ ↓','adjust focused value · option=×0.1 · transpose in the pattern layer'],
     ['cmd+↑↓ (in a channel)','tweak the LAST-PLAYED NOTE only — • marks prepped params · ⌫ removes'],
-    ['- =','loop length ±1 unit — every layer, never parameter values'],
-    ['shift+- =','nudge the loop’s content ±1 unit (option = half unit)'],
     ['same digit again (pattern)','mute / unmute that channel’s lane'],
     ['shift+digit (pattern)','solo / unsolo that channel (solos win over mutes)'],
     ['z x','keyboard register — where your keys sit (per channel, playing only)'],
