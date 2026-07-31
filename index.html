@@ -4414,6 +4414,20 @@ const EXP={
    bottomed inside one frame (~0.25/ms). Starting too high pins soft playing on
    the floor; `auto` refines both ends as you play. */
 const HEDEF={rest:0.03,trig:0.15,look:1,gamma:0.5,soft:0.005,hard:0.250,floor:0.08,auto:1};
+/* Fastest slope a finger can actually produce, in travel/ms. Full key travel in
+   2ms is already superhuman; anything above this is a measurement artifact. */
+const HE_MAX_SLOPE=0.5;
+/* Bumped when a change invalidates a learned velocity range. The travel-count
+   fix rescaled every slope, so ranges learned before it are meaningless and
+   would otherwise sit there squashing real hits for thousands of keystrokes. */
+const HE_RANGE_VER=2;
+/* The hard end is a property of the BOARD, not of taste. A Keychron polls a
+   whole matrix every 4ms, so a slam shows up as one enormous step; the FUN60
+   reports each key as it moves and the same slam arrives spread over several
+   samples, topping out near half the slope. One default cannot serve both — on
+   the wrong one a full-force hit reads about two thirds, and the range creeps
+   inward at 0.05% a hit, which never closes the gap inside a session. */
+const HE_HARD={1:0.250,2:0.130};
 /* The Keychron full-matrix report is a fixed 6x16 row-major scan, so the slot a
    playing key lands in is known in advance and `hid keys` is not needed on these
    boards. Slot = row*16+col; this is the K2 HE / Q3 HE order (Q1 and Q5 are 15
@@ -4446,7 +4460,18 @@ const HE={
   map:null,                                         // keyId -> TEN key code
   fps:0, _fN:0, _fT:0, lastVel:0, lastId:null,
   learn:null, dump:0, dumped:[], probe:0, probeBest:null,
-  cfg(){return Object.assign({},HEDEF,CFG.he||{});},
+  cfg(){
+    /* Drop a velocity range learned before the travel-count fix. Those slopes
+       were measured against a wrong full-scale, so the saved ends are simply
+       the wrong units — keeping them makes every hard hit read about a third of
+       what it should. Runs once, then the stamp stops it. */
+    if(CFG.he&&CFG.he.rv!==HE_RANGE_VER){
+      const c=Object.assign({},CFG.he); delete c.soft; delete c.hard; c.rv=HE_RANGE_VER;
+      CFG.he=c; saveCfg();
+    }
+    const d=this.kind?Object.assign({},HEDEF,{hard:HE_HARD[this.kind]||HEDEF.hard}):HEDEF;
+    return Object.assign({},d,CFG.he||{});
+  },
   set(k,v){CFG.he=Object.assign({},CFG.he||{},{[k]:v}); saveCfg();},
 
   /* ---- transport ----
@@ -4507,6 +4532,15 @@ const HE={
       return false;
     }
     if(kind===2&&!cfgDev.opened){cfgDev=inDev;}   // fall back to enabling on the stream interface
+
+    /* Drop a learned range that cannot mean anything any more: one from before
+       the travel-count fix (wrong units), or one learned on a different family
+       of board — see HE_HARD. Both checks must run BEFORE the stamps are
+       written, or stamping is what makes the stale range look current. */
+    if(CFG.he&&(CFG.he.rv!==HE_RANGE_VER||(CFG.he.k!==undefined&&CFG.he.k!==kind))){
+      const c=Object.assign({},CFG.he); delete c.soft; delete c.hard; CFG.he=c;
+    }
+    CFG.he=Object.assign({},CFG.he||{},{k:kind,rv:HE_RANGE_VER}); saveCfg();
 
     this.dev=inDev; this.cfgDev=cfgDev; this.kind=kind;
     this.srcName=inDev.productName||'hid';
@@ -4700,7 +4734,15 @@ const HE={
          nothing reaches. So the ends chase fast toward a new extreme and creep
          slowly back in when nothing is beating them. */
       let s=C.soft,h=C.hard;
-      if(slope>0.0005){
+      /* Never learn the hard end from a physically impossible stroke. A finger
+         cannot cross the key in under a couple of milliseconds, so anything past
+         HE_MAX_SLOPE is a timing artifact — a burst of queued reports, a stalled
+         event loop, or a mis-scaled travel count. One of those pins `hard` at
+         ten times any real hit, and since the ends only creep back at 0.05% a
+         hit it never recovers: every genuine mash then reads about a third of
+         full velocity. Clamp what can be learned; the clamp below still maps a
+         freakishly fast reading to full velocity. */
+      if(slope>0.0005&&slope<=HE_MAX_SLOPE){
         if(slope<s)s=Math.max(0.0005,slope*0.7+s*0.3);   // new soft end: move most of the way
         else       s=s*0.9995+slope*0.0005;              // nothing softer lately: drift up
         if(slope>h)h=slope*0.7+h*0.3;
