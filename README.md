@@ -119,6 +119,16 @@ which matrix slot moved. Key IDs are matrix positions and differ per model. The
 Keychron 6x16 scan order (K2 HE, Q3 HE) ships built in; everything else needs
 the one pass, and the mapping is saved once you've done it.
 
+**macOS: the FUN60 needs Input Monitoring.** System Settings → Privacy &
+Security → Input Monitoring → enable your browser, then quit it fully (⌘Q, not
+just the window) and reopen. macOS gates any HID interface that declares a
+Keyboard or Mouse usage, because reading one means reading everything you type,
+and the gate is per interface and all-or-nothing. The FUN60 packs its analog
+stream onto the same interface as its keyboard reports, so it falls inside the
+gate; the Keychron puts its matrix on a private vendor interface with nothing
+else on it, so it never does. Without the permission the board connects and
+reports nothing — a firmware packaging difference, not a broken board.
+
 If the chooser is empty, another tab is probably still holding the keyboard —
 WebHID grants are per page, and the analog protocols are request/response, so
 two pages will fight over the same pipe. Close the other one first.

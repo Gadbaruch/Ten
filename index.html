@@ -4553,10 +4553,15 @@ const HE={
     if(this.kind===2){                               // [0x1B, lo, hi, keyId]
       if(d[0]!==0x1B)return;
       const raw=d[1]|(d[2]<<8), id=d[3];
-      /* seed a plausible full-travel count and let it grow. Seeding from the
-         first sample makes the first key press of a session read as bottomed
-         out whatever it actually was — every session starts on a fortissimo. */
-      if(!this.full)this.full=350;
+      /* Seed the full-travel count and let it grow. Measured, not guessed:
+         exported FUN60 traces peaked at ~75 raw counts on a full mash, so the
+         old 350 crushed every press into the bottom fifth of the range — deep
+         presses failed to reach the trigger and slopes read as near-silent.
+         Seeding LOW is the safe direction: too low merely clips hard hits at
+         full velocity, too high silently swallows the whole dynamic range.
+         Seeding from the first sample instead would make the first press of
+         every session read as bottomed out, whatever it actually was. */
+      if(!this.full)this.full=75;
       if(raw>this.full)this.full=raw;                // firmware scale differs per model
       this.sample(id,Math.min(raw/this.full,1),t);
       this.frame(t);
@@ -4592,7 +4597,7 @@ const HE={
   sample(id,v,t){
     const C=this.cfg();
     let k=this.keys[id];
-    if(!k)k=this.keys[id]={st:0,pv:0,pt:t,peak:0,top:0,code:null};
+    if(!k)k=this.keys[id]={st:0,pv:0,pt:t,peak:0,top:0,code:null,fireV:0,fireT:0};
     /* Clamp dt to a sane window around the measured frame period. Two reports
        delivered back to back after a stalled event loop would otherwise read as
        an enormous slope and fire a pianissimo note at 127. */
@@ -4614,23 +4619,42 @@ const HE={
       if(v<=C.rest){k.st=0;}                         // a nudge that never got there
       else if(v>=C.trig){
         // bottomed out, or learning (which only needs identity): no point waiting
-        if(k.wait>=C.look||v>0.97||this.learn){this.fire(id,k,v);}
+        if(k.wait>=C.look||v>0.97||this.learn){this.fire(id,k,v,t);}
         else k.wait++;
       }
     }else if(k.st===2){                              // sounding
       if(v<C.rest*0.8){this.release(id);}
-      else if(k.code){
-        const x=C.trig<0.99?clamp((v-C.trig)/(1-C.trig),0,1):v;
-        EXP.keyPress(k.code,x);                      // the rest of the stroke is expression
+      /* Re-attack. A key resting past the trigger — fingers parked, a high
+         zero, a press that stopped short — sits here, and from there a
+         full-force hit makes no sound at all. A light touch missing is fine;
+         mashing a key and hearing silence is not.
+
+         The key must have SETTLED first. Without that, an ordinary press that
+         keeps accelerating past the trigger on its way to bottoming out fires a
+         second note — which is the double-hit this was meant to avoid. A finger
+         that has come to rest and then drives down is unambiguous; a single
+         continuous downstroke never stops moving. */
+      else if(k.calm&&slope>=0.02&&v>k.fireV+0.08&&t-k.fireT>40){
+        this.release(id);
+        k.st=1; k.peak=Math.max(0,slope); k.top=v; k.wait=0;
+        this.fire(id,k,v,t);
+      }
+      else{
+        if(Math.abs(slope)<0.004)k.calm=1;            // has come to rest since it spoke
+        if(k.code){
+          const x=C.trig<0.99?clamp((v-C.trig)/(1-C.trig),0,1):v;
+          EXP.keyPress(k.code,x);                    // the rest of the stroke is expression
+        }
       }
     }
     k.pv=v; k.pt=t;
   },
-  fire(id,k,v){
+  fire(id,k,v,t){
     const C=this.cfg();
     if(this.learn){this.learnHit(id); k.st=2; k.code=null; return;}
     const code=this.map&&this.map[id];
     k.st=2; k.code=null;
+    k.fireV=v; k.fireT=t||k.pt; k.calm=0;      // baseline for the re-attack test
     this.lastId=id;
     if(!code)return;
     const vel=this.vel(k.peak,C);
