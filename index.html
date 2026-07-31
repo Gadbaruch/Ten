@@ -4433,7 +4433,13 @@ const HE_RANGE_VER=2;
    samples, topping out near half the slope. 0.130 is the FUN60 figure, measured
    on hardware; the Keychron entry is separate so tuning one cannot move the
    other. */
-const HE_HARD={1:0.250,2:0.130};
+const HE_HARD={1:0.250,2:0.104};
+/* The soft end matters as much: set it at 0 and the quietest real taps still
+   land near a third of full velocity, because the curve has nowhere to put
+   them. Both ends below are fitted from 37 labelled hits on a FUN60 — 19 soft,
+   18 hard — using the same 12th/88th percentile rule the MIDI tool's wizard
+   applies, so they are measurements rather than taste. */
+const HE_SOFT={1:0.005,2:0.012};
 /* A saved end outside these bounds cannot have come from playing — it is the
    residue of a bug, and version stamps are not enough to catch it: a stamp
    written by a build that failed to clear the value marks the bad value as
@@ -4487,7 +4493,8 @@ const HE={
         CFG.he=c; saveCfg();
       }
     }
-    const d=this.kind?Object.assign({},HEDEF,{hard:HE_HARD[this.kind]||HEDEF.hard}):HEDEF;
+    const d=this.kind?Object.assign({},HEDEF,{hard:HE_HARD[this.kind]||HEDEF.hard,
+                                              soft:HE_SOFT[this.kind]||HEDEF.soft}):HEDEF;
     return Object.assign({},d,CFG.he||{});
   },
   set(k,v){CFG.he=Object.assign({},CFG.he||{},{[k]:v}); saveCfg();},
