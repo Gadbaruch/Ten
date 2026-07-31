@@ -306,8 +306,16 @@ const SETTINGS=[
  {n:'hid trig',v:()=>Math.round(HE.cfg().trig*100)+'%', a:d=>HE.set('trig',clamp(HE.cfg().trig+d*0.01,0.05,0.6))},
  {n:'hid curve',v:()=>HE.cfg().gamma.toFixed(2), a:d=>HE.set('gamma',clamp(HE.cfg().gamma+d*0.05,0.2,2))},
  {n:'hid floor',v:()=>Math.round(HE.cfg().floor*127)+'', a:d=>HE.set('floor',clamp(HE.cfg().floor+d*0.02,0,0.5))},
+ /* Switching to auto starts learning from wherever the fixed range currently
+    sits. Switching back to fixed leaves the fixed range alone — it used to
+    overwrite it with the generic HEDEF numbers, which planted the wrong ceiling
+    on whichever board was plugged in. */
  {n:'hid range',v:()=>HE.cfg().auto?'auto':'fixed',
-              a:()=>{const C=HE.cfg(); HE.set('auto',C.auto?0:1); if(!C.auto){HE.set('soft',HEDEF.soft);HE.set('hard',HEDEF.hard);}}},
+              a:()=>{const C=HE.cfg();
+                     if(!C.auto){HE.set('aSoft',C.soft); HE.set('aHard',C.hard);}
+                     HE.set('auto',C.auto?0:1);}},
+ {n:'hid hard',v:()=>HE.cfg().hard.toFixed(3), a:d=>HE.set('hard',clamp(HE.cfg().hard+d*0.005,0.02,HE_MAX_SLOPE))},
+ {n:'hid soft',v:()=>HE.cfg().soft.toFixed(3), a:d=>HE.set('soft',clamp(HE.cfg().soft+d*0.001,0.0005,0.08))},
 ];
 function basePreset(name){return{
   name, cat:'misc', tr:0, trs:0, prep:null,
@@ -4426,7 +4434,7 @@ const HE_MAX_SLOPE=0.5;
 /* Bumped when a change invalidates a learned velocity range. The travel-count
    fix rescaled every slope, so ranges learned before it are meaningless and
    would otherwise sit there squashing real hits for thousands of keystrokes. */
-const HE_RANGE_VER=2;
+const HE_RANGE_VER=3;
 /* The hard end is a property of the BOARD, not of taste. A Keychron polls a
    whole matrix every 4ms, so a slam shows up as one enormous step; the FUN60
    reports each key as it moves and the same slam arrives spread over several
@@ -4486,16 +4494,27 @@ const HE={
        on a version stamp — a build that stamped without clearing leaves a bad
        value looking current, and no later stamp can tell the difference. */
     if(CFG.he){
-      const bad=(k)=>{const v=CFG.he[k], b=HE_SANE[k];
+      const bad=(k,b)=>{const v=CFG.he[k];
         return v!==undefined&&(!(v>0)||v<b[0]||v>b[1]);};
-      if(bad('soft')||bad('hard')){
-        const c=Object.assign({},CFG.he); delete c.soft; delete c.hard; c.rv=HE_RANGE_VER;
-        CFG.he=c; saveCfg();
+      /* Two reasons to drop a saved range. Out of physical bounds is obvious.
+         The other is that until rv 3 the auto-range wrote what it learned into
+         `soft`/`hard` — the same keys the configured range uses — so any board
+         default was shadowed by whatever the last session happened to learn,
+         permanently and invisibly. Those values have to go once. */
+      if(bad('soft',HE_SANE.soft)||bad('hard',HE_SANE.hard)||
+         bad('aSoft',HE_SANE.soft)||bad('aHard',HE_SANE.hard)||
+         CFG.he.rv!==HE_RANGE_VER){
+        const c=Object.assign({},CFG.he);
+        delete c.soft; delete c.hard; delete c.aSoft; delete c.aHard;
+        c.rv=HE_RANGE_VER; CFG.he=c; saveCfg();
       }
     }
     const d=this.kind?Object.assign({},HEDEF,{hard:HE_HARD[this.kind]||HEDEF.hard,
                                               soft:HE_SOFT[this.kind]||HEDEF.soft}):HEDEF;
-    return Object.assign({},d,CFG.he||{});
+    const c=Object.assign({},d,CFG.he||{});
+    if(!(c.aSoft>0))c.aSoft=c.soft;      // learning starts from the fixed range
+    if(!(c.aHard>0))c.aHard=c.hard;
+    return c;
   },
   set(k,v){CFG.he=Object.assign({},CFG.he||{},{[k]:v}); saveCfg();},
 
@@ -4563,7 +4582,8 @@ const HE={
        of board — see HE_HARD. Both checks must run BEFORE the stamps are
        written, or stamping is what makes the stale range look current. */
     if(CFG.he&&(CFG.he.rv!==HE_RANGE_VER||(CFG.he.k!==undefined&&CFG.he.k!==kind))){
-      const c=Object.assign({},CFG.he); delete c.soft; delete c.hard; CFG.he=c;
+      const c=Object.assign({},CFG.he);
+      delete c.soft; delete c.hard; delete c.aSoft; delete c.aHard; CFG.he=c;
     }
     CFG.he=Object.assign({},CFG.he||{},{k:kind,rv:HE_RANGE_VER}); saveCfg();
 
@@ -4783,7 +4803,13 @@ const HE={
          from then on everything real is squashed into the middle of a range
          nothing reaches. So the ends chase fast toward a new extreme and creep
          slowly back in when nothing is beating them. */
-      let s=C.soft,h=C.hard;
+      /* Learned ends live in their OWN keys. Sharing storage with the
+         configured range meant a value the auto-range happened to learn was
+         written straight over the board default and then shadowed it forever —
+         `cfg()` merges saved config on top of the defaults, so a learned 0.25
+         silently outranked the 0.090 this board needs, whatever the default
+         said and long after auto had been switched off. */
+      let s=C.aSoft,h=C.aHard;
       /* Never learn the hard end from a physically impossible stroke. A finger
          cannot cross the key in under a couple of milliseconds, so anything past
          HE_MAX_SLOPE is a timing artifact — a burst of queued reports, a stalled
@@ -4799,12 +4825,13 @@ const HE={
         else       h=Math.max(s*3,h*0.9995+slope*0.0005);
         /* keep them in RAM and only persist occasionally — `set` writes
            localStorage, and one write per keystroke is a lot of writes */
-        C.soft=s; C.hard=h;
-        CFG.he=Object.assign({},CFG.he||{},{soft:s,hard:h});
+        C.aSoft=s; C.aHard=h;
+        CFG.he=Object.assign({},CFG.he||{},{aSoft:s,aHard:h});
         if(((this._save=(this._save|0)+1)&31)===0)saveCfg();
       }
     }
-    const lo=Math.min(C.soft,C.hard*0.5), hi=Math.max(C.hard,lo*1.5);
+    const S=C.auto?C.aSoft:C.soft, H=C.auto?C.aHard:C.hard;
+    const lo=Math.min(S,H*0.5), hi=Math.max(H,lo*1.5);
     const n=clamp((slope-lo)/(hi-lo),0,1);
     return clamp(C.floor+(1-C.floor)*Math.pow(n,C.gamma),1/127,1);
   },
