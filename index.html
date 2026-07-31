@@ -4469,7 +4469,7 @@ const HE={
      auto-repeat) stays suppressed, and released 200ms after it comes back up. */
   owns(code){return this.on&&(performance.now()-(this.recent[code]||-1e9))<200;},
   map:null,                                         // keyId -> TEN key code
-  fps:0, _fN:0, _fT:0, lastVel:0, lastId:null,
+  fps:0, period:0, _fN:0, _fT:0, _fL:0, _fD:[], lastVel:0, lastId:null,
   learn:null, dump:0, dumped:[], probe:0, probeBest:null,
   cfg(){
     /* Drop a velocity range learned before the travel-count fix. Those slopes
@@ -4654,9 +4654,29 @@ const HE={
     this.chunk=c+1;
     if(this.chunk>=4){this.frame(t); this.kcRequest();}
   },
+  /* The sampling period has to be the MEDIAN GAP BETWEEN REPORTS, not a count
+     over wall-clock time. On an event-driven board reports only arrive while a
+     key is moving, so counting them over half a second averages in all the
+     silence and under-reports the rate several times over. That matters because
+     the period sets the floor `dt` is clamped to: under-report it and the
+     sub-millisecond bursts a hard hit arrives in get widened, dividing the slope
+     down. Soft hits never noticed — their gaps are already wider than the floor
+     — so the symptom was hard hits alone stuck around half velocity. */
   frame(t){
     this._fN++;
-    if(t-this._fT>=500){this.fps=Math.round(this._fN*1000/(t-this._fT)); this._fN=0; this._fT=t; dirty=true;}
+    if(this._fL){
+      const d=t-this._fL;
+      if(d>0.05&&d<200){ this._fD.push(d); if(this._fD.length>240)this._fD.shift(); }
+    }
+    this._fL=t;
+    if(!this.period||(this._fN&31)===0){
+      const a=this._fD.slice().sort((x,y)=>x-y);
+      if(a.length)this.period=a[a.length>>1];
+    }
+    if(t-this._fT>=500){
+      this.fps=this.period?Math.round(1000/this.period):0;
+      this._fN=0; this._fT=t; dirty=true;
+    }
   },
 
   /* ---- stroke tracking + velocity ---- */
@@ -4667,8 +4687,13 @@ const HE={
     /* Clamp dt to a sane window around the measured frame period. Two reports
        delivered back to back after a stalled event loop would otherwise read as
        an enormous slope and fire a pianissimo note at 127. */
-    const P=this.fps>0?1000/this.fps:4;
-    const dt=clamp(t-k.pt,P*0.4,P*3.5), slope=(v-k.pv)/dt;
+    /* Absolute 0.5ms floor as well as the period-relative one: no finger crosses
+       meaningful travel inside half a millisecond, and on a push-based board the
+       median gap tracks how many keys are moving rather than how fast one is
+       sampled. Ceiling never below 12ms so a long gap before a stroke is not
+       treated as part of it. Same guards as the MIDI tool. */
+    const P=this.period>0?this.period:4;
+    const dt=clamp(t-k.pt,Math.max(0.5,P*0.4),Math.max(P*3.5,12)), slope=(v-k.pv)/dt;
     /* claim the key while it is off rest, so its typed keystroke is ignored and
        the laptop keyboard's identical keystroke is not */
     if(v>C.rest&&this.map){const mc=this.map[id]; if(mc)this.recent[mc]=t;}
