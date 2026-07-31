@@ -4413,7 +4413,13 @@ const EXP={
    tap moves 0.03-0.06 of travel per frame (0.0075-0.015/ms), a slam goes rest to
    bottomed inside one frame (~0.25/ms). Starting too high pins soft playing on
    the floor; `auto` refines both ends as you play. */
-const HEDEF={rest:0.03,trig:0.15,look:1,gamma:0.5,soft:0.005,hard:0.250,floor:0.08,auto:1};
+/* These are the numbers the sibling MIDI tool has been running on a FUN60, and
+   they are fixed there — no learning of any kind. Auto-range is off by default
+   here for the same reason: it is a second mechanism that can only make the map
+   worse until it converges, and every velocity complaint so far has traced back
+   to a learned end rather than to the slope maths. `hid range` turns it on.
+   floor is 1/127 so the quietest hit is velocity 1, matching the tool exactly. */
+const HEDEF={rest:0.03,trig:0.15,look:1,gamma:0.5,soft:0.005,hard:0.130,floor:1/127,auto:0};
 /* Fastest slope a finger can actually produce, in travel/ms. Full key travel in
    2ms is already superhuman; anything above this is a measurement artifact. */
 const HE_MAX_SLOPE=0.5;
@@ -4424,10 +4430,15 @@ const HE_RANGE_VER=2;
 /* The hard end is a property of the BOARD, not of taste. A Keychron polls a
    whole matrix every 4ms, so a slam shows up as one enormous step; the FUN60
    reports each key as it moves and the same slam arrives spread over several
-   samples, topping out near half the slope. One default cannot serve both — on
-   the wrong one a full-force hit reads about two thirds, and the range creeps
-   inward at 0.05% a hit, which never closes the gap inside a session. */
+   samples, topping out near half the slope. 0.130 is the FUN60 figure, measured
+   on hardware; the Keychron entry is separate so tuning one cannot move the
+   other. */
 const HE_HARD={1:0.250,2:0.130};
+/* A saved end outside these bounds cannot have come from playing — it is the
+   residue of a bug, and version stamps are not enough to catch it: a stamp
+   written by a build that failed to clear the value marks the bad value as
+   current, which is exactly what happened here. Judge the value itself. */
+const HE_SANE={soft:[0.0002,0.08], hard:[0.01,HE_MAX_SLOPE]};
 /* The Keychron full-matrix report is a fixed 6x16 row-major scan, so the slot a
    playing key lands in is known in advance and `hid keys` is not needed on these
    boards. Slot = row*16+col; this is the K2 HE / Q3 HE order (Q1 and Q5 are 15
@@ -4465,9 +4476,16 @@ const HE={
        were measured against a wrong full-scale, so the saved ends are simply
        the wrong units — keeping them makes every hard hit read about a third of
        what it should. Runs once, then the stamp stops it. */
-    if(CFG.he&&CFG.he.rv!==HE_RANGE_VER){
-      const c=Object.assign({},CFG.he); delete c.soft; delete c.hard; c.rv=HE_RANGE_VER;
-      CFG.he=c; saveCfg();
+    /* Throw away a saved range that cannot be right. Judged on the value, not
+       on a version stamp — a build that stamped without clearing leaves a bad
+       value looking current, and no later stamp can tell the difference. */
+    if(CFG.he){
+      const bad=(k)=>{const v=CFG.he[k], b=HE_SANE[k];
+        return v!==undefined&&(!(v>0)||v<b[0]||v>b[1]);};
+      if(bad('soft')||bad('hard')){
+        const c=Object.assign({},CFG.he); delete c.soft; delete c.hard; c.rv=HE_RANGE_VER;
+        CFG.he=c; saveCfg();
+      }
     }
     const d=this.kind?Object.assign({},HEDEF,{hard:HE_HARD[this.kind]||HEDEF.hard}):HEDEF;
     return Object.assign({},d,CFG.he||{});
@@ -4756,7 +4774,7 @@ const HE={
     }
     const lo=Math.min(C.soft,C.hard*0.5), hi=Math.max(C.hard,lo*1.5);
     const n=clamp((slope-lo)/(hi-lo),0,1);
-    return clamp(C.floor+(1-C.floor)*Math.pow(n,C.gamma),0.02,1);
+    return clamp(C.floor+(1-C.floor)*Math.pow(n,C.gamma),1/127,1);
   },
 
   /* ---- key learn: press each playing key in turn, we record which slot moved ---- */
