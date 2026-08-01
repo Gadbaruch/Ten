@@ -1,54 +1,92 @@
 # TEN — keyboard-only groovebox
 
 An OP-1-inspired music instrument that lives entirely on a computer keyboard.
-Ten of everything: patterns, channels, racks, slots — all on the
-`0-9` keys, with meaning depending on which **layer** you're in.
+Nine channels and a master on the `0-9` keys, twenty-six clips per channel on
+the letters, and one desk you never leave.
 
 **Play it:** https://gadbaruch.github.io/Ten/ — or just open `index.html`
 (double-click works; no server, no build, no dependencies, one file).
 
-Sessions autosave to the browser. `cmd+E` exports a session JSON; drop a JSON
-onto the page to load it. `cmd+Z` / `cmd+shift+Z` undo/redo almost everything.
+Sets autosave to the browser. `cmd+S` / `cmd+L` save and load ten set slots;
+`cmd+E` exports a set as JSON and dropping a JSON on the page loads it.
+`cmd+Z` / `cmd+shift+Z` undo/redo almost everything.
 
-## Layers
+## One page
+
+There is no navigation tree. Everything opens *around* a permanent desk —
+the grid, the mix picture, and the channel strip — and closes again without
+the screen ever being swapped for another screen.
 
 ```
-SESSION       esc from arrange — 10 song slots (select + enter loads) + defaults
-ARRANGE       digits select parts · slots ARE song sections (0 intro … 9 outro)
-  │           the home row a s d f g h j k l ; = DJ pads (hold / shift-latch)
-  │           0,0 selects MASTER — the unique channel on the far right
-  ├─ MASTER 0   fx rack (sends + mix inserts, limiter stock) + dj pad editor
-  └─ PATTERN  digits pick channel (again=mute, shift=solo) · letters play notes
-      └─ CHANNEL  digits pick a rack — 1 PRST 2 OSC 3 FILT 4 MOD
-          │                            5 FX 6 VOICE 7 MIX 0 PLAY
-          │         every rack holds 10 slots; shift+←→ picks the slot and
-          │         its params are editable right here
-          └─ RACK     the same rack, roomier — digits pick a slot,
-                      the same digit again BYPASSES it
+              SETTINGS       esc from the desk, above the grid
+                  ↑
+  ┌─────────────────────────────────────────────────────────────────┐
+  │  grid          one column per channel, each at its own length    │
+  │  mix           volume, level and pan as one picture per channel  │
+  │  strip         Inst · Ch — the channel you are on is the lit box │
+  └─────────────────────────────────────────────────────────────────┘
+                  ↓  enter
+              CHANNEL        1 PRST · 2 OSC · 3 FILT · 4 MOD
+                  ↓  enter     5 FX · 6 VOICE · 0 PLAY
+              LIBRARY        (from PRST only) browse — enter keeps, esc restores
 ```
 
-The full ladder is always visible up top — you are the lit rung; `enter`
-goes deeper, `esc` goes up. Since slot params are editable from CHANNEL,
-`enter` into a RACK is optional — it is the same rack with more room.
-`←→` walk params and spill into the next rack at either end; **`shift+←→`
-picks the SLOT** (digits already pick the rack). `↑↓` adjust values
-(shift ×10, option ×0.1);
-`cmd+↑↓` tweaks the **last-played note only** (prepared-piano on any
-channel — `•` marks prepped params, `⌫` removes). `-`/`=` resize loops,
-`shift+-/=` nudge a loop's content. `q` toggles live quantize anywhere
-(`shift+Q` snaps a lane after the fact). `t` toggles the arrangement
-timeline (focus mode). `⌫` clears in context; **holding shift+⌫**
-re-initializes the whole layer you're on. `cmd+C/X/V` copy/cut/paste
-parts, channels, and rack slots. `b` taps tempo. `F1` shows the full
-keymap — that is the authoritative reference.
+`1-9` pick a channel, `0` is the master — which is a channel like any other,
+with its own looper and its own rack. **Hold a channel digit and press a
+letter** and you are in that clip; hold `0` and press a letter for the scene.
+You do not save to a clip and you do not recall one: while you are there the
+clip *is* the channel, so whatever you change is what it now is.
+
+`←→` picks the channel; in a channel it walks params, spilling into the next
+rack at either end, and **`shift+←→` picks the slot** (one list across the
+whole chain, in the order it runs). `↑↓` walks the step cursor on the desk and
+changes the focused value inside a channel (shift ×10, option ×0.1). `+`/`-`
+add and remove rack slots. `cmd+↑↓` tweaks the **last-played note only**
+(prepared-piano on any channel — `•` marks a prepped param, `⌫` removes it).
+`cmd+C/X/V` copy, cut and paste a **whole channel** — sound, racks, loop and
+clip together — including out of a set you are only previewing.
+
+Half the keyboard is a scope you hold: `tab` loop, `m` tempo, `c` channel,
+`v` velocity, `n` notes, `i` instrument, `` ` `` roll. Hold one and the arrows
+mean that one thing; tap and release without moving and you get the tap action
+instead. `?` shows the full keymap — that is the authoritative reference.
 
 ## Core ideas
 
-**One generic Looper everywhere.** Arrangement, every pattern lane, and every
-sound's mod loop are the same primitive: `unit × count` (fractional counts cut
-early), a flat event list, REC (`tab`, momentary by default — hold to record)
-and EDIT (`/`, tracker-style step cursor). Pattern lanes are polymetric —
-each lane has its own independent length.
+**Clips, not an arrangement.** Every channel has twenty-six clips on the
+letter keys and the master has twenty-six scenes. Hold `3`, press `b`, and
+channel 3 is now playing clip B — the edits you make land there because
+that clip is the channel while you are in it. Leaving writes nothing down as
+a separate act; it simply stops being where your edits go. There is no save
+key for a clip, because a save key means there is a version of this you could
+lose, and there isn't one.
+
+**One generic Looper everywhere.** Every channel lane and every sound's mod
+loop are the same primitive: `unit × count` (fractional counts cut early), a
+flat event list, REC (`tab`, momentary by default — hold to record) and EDIT
+(caps lock, tracker-style step cursor). Lanes are polymetric — each has its
+own independent length, and the grid gives all of them the same height,
+divided by their own step count, so nine different lengths end level.
+
+**The mix is a picture, not three numbers.** One widget per channel, four
+levels of brightness on the same strip of pixels: the cell is the darkest,
+the **volume** is a band opening symmetrically from the centre line — the
+whole cell at full, a single pixel at nothing — the **level** pumps inside
+that band, and the brightest thing is the **centre line**, whose position
+along the cell is the **pan**. The level is divided back out by the volume
+setting, so the fill reads as how hard the channel is being driven inside
+its own ceiling rather than repeating the width underneath it. The goal
+throughout is to see state rather than read it.
+
+**Sets.** Ten slots, saved and loaded the way every other program does it:
+`cmd+S` asks where the first time and goes back to that slot after,
+`cmd+shift/alt+S` always asks, `cmd+L` loads, `cmd+alt+N` starts a new one.
+In the load picker, **hold shift and the whole desk shows that set instead
+of yours** — grid, mix and strip — with nothing loaded. Arrows and digits
+point at a channel inside it, digit+letter at one of its clips, and `cmd+C`
+copies it out. Which means the same copy/paste moves a channel between two
+loaded sets: copy in set 1, load set 2, paste on whichever channel you want
+it on. `shift+backspace` deletes a slot, asking once.
 
 **Recording feels like tape.** What you hear is exactly what gets stored
 and played back (live quantize pushes notes to the next 16th — toggle it
@@ -169,7 +207,7 @@ the model's params *plus* a filter, amp envelope, voice settings and an fx
 chain, so it's a whole voice rather than a timbre tweak. PRST picks `model`
 then `preset`.
 
-The rest of the rack applies on top: FX, MIX and PLAY come free (the worklet
+The rest of the rack applies on top: FX and PLAY come free (the worklet
 feeds the channel bus above them), and FILT, MOD and VOICE — unison, stereo
 spread, mono steal, glide — are applied per voice. Every model is level-matched
 to a plain saw on the normal engine, and RELEASE in the MOD rack governs all of
@@ -198,33 +236,37 @@ PRST shows that pad's engine/pad/sound/prst/level/pan, and every rack (OSC, FILT
 MOD, VOICE, FX) edits *that pad*. `rnd` on PRST rerolls the whole kit;
 `⌫` resets the focused pad.
 
-**The `/` button makes music.** One key, three intensities, everywhere:
-`/` = musical variations of what's there · `shift+/` = a genuinely
+**The `` ` `` button makes music.** One key, three intensities, everywhere:
+`` ` `` = musical variations of what's there · ``shift+` `` = a genuinely
 different style (own key, scale flavor, chord progression, groove
 language, bass/lead styles, fresh presets, role-based mixing and sends) ·
-`shift+option+/` = wild card. In ARRANGE it writes the section the slot
-stands for; in SESSION it generates a **whole song** — intro/build/drop/
-break patterns plus a dj-automated arrangement with the classic
-pre-drop buildup.
+``shift+option+` `` = wild card. It fires on *release*, so holding it to
+reach the wildness arrows doesn't spray randomizations on the way, and
+overlapping LATCH arms auto-roll: a new one every time the loop comes
+round. Hold a scope with it and the dice are aimed — ``n+` `` rolls only
+the notes, ``i+` `` only the sound, ``v+` `` only the velocities. From
+SETTINGS it generates a **whole song** — intro/build/drop/break plus a
+dj-automated arrangement with the classic pre-drop buildup.
 
-**DJ pads & automation.** The home row in arrange fires ten editable fx
-pads (hipass, buildup macro, lopass, synced ping-pong delay throw, verb
-wash, rolls, crush, tape, gate) — hold for momentary, shift to latch,
-tap a latched pad to unlatch. With arrangement REC on, held pads record
-as timed automation windows (`≈` on the timeline); in EDIT they toggle at
-the cursor. Edit the pads inside MASTER 0 with the same letters.
+**DJ pads & automation.** Ten editable fx pads (hipass, buildup macro,
+lopass, synced ping-pong delay throw, verb wash, rolls, crush, tape,
+gate), edited inside the master channel's rack, and written into the
+arrangement by song generation. **They currently have no key to fire them
+live:** they used to sit on the home row of the ARRANGE layer, and that
+layer is gone — on the desk those letters play notes. The pads and their
+automation still work when a generated song drives them; what's missing
+is a live gesture, which needs a home that isn't the note keys.
 
-**Smart mix.** On by default (`smix` in SESSION): per-channel + master
+**Smart mix.** On by default (`smix` in SETTINGS): per-channel + master
 spectrum analysers make slow, dead-banded trim decisions — harsh/bright
 channels come down, buried bass gets a nudge, loud outliers move toward
 the pack. It decides like a mix engineer, it never pumps like a
 compressor. There's also a `duck` sidechain fx (any channel following any
 other) — generated basslines ship with one following the kick.
 
-**Global groove & scale.** Groove type/amount/humanize/switch-mode live
-on the arrange arrows as params. Settings: global scale snaps all
-non-drum channels; a chord-master channel overrides the scale with
-whatever chord is held.
+**Global groove & scale.** Groove type/amount/humanize/switch-mode are
+settings. Global scale snaps all non-drum channels; a chord-master channel
+overrides the scale with whatever chord is held.
 
 ## For collaborators (and their LLMs)
 
@@ -256,7 +298,11 @@ top to bottom; each section is banner-commented in this order:
    decides meaning. All state lives in `S` (session) / `CFG` (defaults) /
    `T` (transport).
 8. **Persistence** — `serialize()`/`load()` with versioned migrations
-   (currently v17). Undo = snapshot stack of `serialize()`.
+   (currently **v18** — `SAVEV` is one constant, read by both the writer and
+   the reader; bumping one without the other rejects every save the app
+   makes). Undo = snapshot stack of `serialize()`. Note that `load()`
+   rebuilds a preset by walking `MODULES`, so anything retired from that
+   table (`mix`, and `vof`) has to be copied across by hand.
 9. **Render** — full-screen `<pre>`, rebuilt at ~30fps from state. No DOM
    beyond one element.
 
