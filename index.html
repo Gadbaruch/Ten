@@ -5404,6 +5404,17 @@ function pickKey(e){
     else{PICK.was=PICK.mode; PICK.mode='bak'; PICK.sel=0;}
     PICK.confirm=false; dirty=true; return;
   }
+  if(PICK.mode==='export'){
+    const N=3;
+    if(c==='ArrowLeft'||c==='ArrowRight'){
+      PICK.sel=fmod(PICK.sel+(c==='ArrowRight'?1:-1),N); dirty=true; return;}
+    if(/^Digit[123]$/.test(c)&&!e.repeat){PICK.sel=+c.slice(5)-1; dirty=true; return;}
+    if(c==='Enter'&&!e.repeat){
+      const k=PICK.sel; close();
+      if(k===0)exportSet(); else exportAudio(k===2);
+      return;}
+    return;
+  }
   if(PICK.mode==='bak'){
     const B=bakAll();
     if(c==='ArrowLeft'||c==='ArrowRight'){
@@ -9949,7 +9960,10 @@ const onKeyDown=e=>{
   }
 
   if(e.metaKey||e.ctrlKey){
-    if(e.code==='KeyE'){e.preventDefault(); if(e.shiftKey)linkFile(); else exportJSON();}
+    if(e.code==='KeyE'){e.preventDefault();
+      if(e.shiftKey)linkFile();
+      else if(!e.repeat){PICK={mode:'export',sel:0}; dirty=true;}}
+    if(e.code==='KeyI'&&!e.repeat){e.preventDefault(); importSet();}
     if(e.code==='KeyZ'){e.preventDefault();if(!e.repeat)(e.shiftKey?doRedo:doUndo)();}
     if(e.code==='ArrowUp'||e.code==='ArrowDown'){e.preventDefault();   // cmd+↑↓ = per-note prep tweak
       if(S.layer>=2&&!MODULES[S.curMod].prs)prepTweak(e.code==='ArrowUp'?1:-1,e.altKey?0.1:e.shiftKey?10:1);}
@@ -11266,6 +11280,102 @@ function filePerm(){
   else setTimeout(()=>flash('◆ '+h.name+' is linked — press any key to let it write'),600);
   dirty=true;
 })();
+/* ---------------- AUDIO EXPORT ----------------------------------------
+   Rendered by PLAYING it. The engine is bound to one AudioContext — every
+   voice, every worklet, every send — so there is no offline context to render
+   into without building a second engine that would drift from this one. It
+   costs one pass in real time and what comes out is exactly what you heard.
+   A tap per channel, all recording at once, so the stems and the mixdown line
+   up sample for sample. */
+function wavOf(chans,rate){
+  const n=chans[0].length, nc=chans.length, bytes=44+n*nc*2;
+  const b=new ArrayBuffer(bytes), v=new DataView(b);
+  const str=(o,s2)=>{for(let i=0;i<s2.length;i++)v.setUint8(o+i,s2.charCodeAt(i));};
+  str(0,'RIFF'); v.setUint32(4,bytes-8,true); str(8,'WAVE');
+  str(12,'fmt '); v.setUint32(16,16,true); v.setUint16(20,1,true);
+  v.setUint16(22,nc,true); v.setUint32(24,rate,true);
+  v.setUint32(28,rate*nc*2,true); v.setUint16(32,nc*2,true); v.setUint16(34,16,true);
+  str(36,'data'); v.setUint32(40,n*nc*2,true);
+  let o=44;
+  for(let i=0;i<n;i++)for(let c=0;c<nc;c++){
+    const x=Math.max(-1,Math.min(1,chans[c][i]));
+    v.setInt16(o,x<0?x*0x8000:x*0x7fff,true); o+=2;
+  }
+  return new Blob([b],{type:'audio/wav'});
+}
+function dl(blob,name){
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob); a.download=name; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+}
+function tapOf(node){                      // a stereo recorder hanging off a node
+  const sp=AC.createScriptProcessor(4096,2,2);
+  const L=[],R=[]; let on=true;
+  sp.onaudioprocess=e=>{ if(!on)return;
+    L.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+    R.push(new Float32Array(e.inputBuffer.getChannelData(1)));};
+  const sink=AC.createGain(); sink.gain.value=0;    // keep it pulled, hear nothing
+  node.connect(sp); sp.connect(sink); sink.connect(AC.destination);
+  return {stop(){on=false; try{node.disconnect(sp);}catch(_){} try{sp.disconnect();sink.disconnect();}catch(_){}
+      const flat=a=>{const n=a.reduce((s2,x)=>s2+x.length,0), o=new Float32Array(n);
+        let k=0; for(const x of a){o.set(x,k);k+=x.length;} return o;};
+      return [flat(L),flat(R)];}};
+}
+async function exportAudio(stems){
+  if(EXPORTING)return; EXPORTING=true;
+  const wasPlaying=T.playing;
+  try{
+    await AC.resume();
+    const pat=S.patterns[S.curPat];
+    const bars=Math.max(...pat.lanes.map(l=>l.len||0),4);      // the longest lane decides
+    const secs=bars*spb()+2.5;                                  // + a tail for the reverbs
+    const taps=[{name:'master',t:tapOf(engine.master)}];
+    if(stems)for(const i of CHANS())
+      taps.push({name:'ch'+i+'-'+(S.presets[i].name||'').replace(/[^A-Za-z0-9]/g,''),t:tapOf(engine.buses[i].pan)});
+    flash('● rendering '+Math.round(secs)+'s in real time — let it run');
+    if(T.playing)stop();
+    play();
+    await new Promise(r=>setTimeout(r,secs*1000));
+    stop();
+    /* STOP THEM ALL FIRST. Stopping each one inside the download loop let the
+       others keep recording through the gaps between saves, so the stems came
+       out progressively longer — 768KB for the master and 1328KB for the last
+       channel — and none of them lined up. They are cut at one instant now. */
+    const cut=taps.map(x=>({name:x.name,data:x.t.stop()}));
+    const stamp=new Date().toISOString().slice(0,16).replace(/[:T]/g,'-');
+    let n=0;
+    for(const x of cut){
+      const [L,R]=x.data;
+      if(!L.length)continue;
+      dl(wavOf([L,R],AC.sampleRate),'ten-'+stamp+'-'+x.name+'.wav');
+      n++; await new Promise(r=>setTimeout(r,350));            // browsers throttle bursts
+    }
+    flash('▼ '+n+' file'+(n===1?'':'s')+' — '+Math.round(secs)+'s at '+AC.sampleRate+'Hz');
+  }catch(e){flash('render failed: '+e);}
+  finally{EXPORTING=false; if(wasPlaying&&!T.playing)play();}
+}
+let EXPORTING=false;
+/* ---------------- set files ------------------------------------------ */
+function exportSet(){
+  const stamp=new Date().toISOString().slice(0,16).replace(/[:T]/g,'-');
+  dl(new Blob([serialize()],{type:'application/json'}),'ten-set-'+stamp+'.json');
+  flash('▼ ten-set-'+stamp+'.json');
+}
+async function importSet(){
+  const take=t=>{ if(load(t)){flash('▲ set loaded'); dirty=true; dirtySave=true; bakPush('after importing a set',true);}
+                  else flash('that file is not a TEN set'); };
+  bakPush('before importing a set',true);
+  if(window.showOpenFilePicker){
+    try{
+      const [h]=await showOpenFilePicker({types:[{description:'TEN set',accept:{'application/json':['.json']}}]});
+      take(await (await h.getFile()).text());
+    }catch(_){}
+    return;
+  }
+  const inp=document.createElement('input'); inp.type='file'; inp.accept='.json,application/json';
+  inp.onchange=()=>{const f=inp.files[0]; if(f)f.text().then(take);};
+  inp.click();
+}
 function exportJSON(){
   const a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob([serialize()],{type:'application/json'}));
@@ -12771,6 +12881,18 @@ function renderMaster(L){
 function pickerRack(L){
   const slots=sessAll();
   const n=(PICK.sel+1)%10;
+  if(PICK.mode==='export'){
+    const opts=[['set','the whole instrument as a .json — reload it anywhere'],
+                ['mixdown','one stereo wav of the master, rendered by playing it'],
+                ['channels','the master plus a wav per channel, all in one pass']];
+    L.push('   '+sp('a','EXPORT')+sp('d','   ←→ or 1-3 · enter · esc'+
+      (PICK.sel?'   ·   '+Math.round(Math.max(...S.patterns[S.curPat].lanes.map(l=>l.len||0),4)*spb()+2.5)+'s in real time':'')));
+    let row='   ';
+    opts.forEach((o,i)=>{row+=spH(i===PICK.sel?'i':'d k',' '+(i+1)+' '+o[0]+' ','exp',i)+' ';});
+    L.push(row);
+    L.push('   '+sp('d',opts[PICK.sel][1]));
+    return;
+  }
   if(PICK.mode==='bak'){
     const B=bakAll();
     L.push('   '+sp('a','GO BACK')+(PICK.confirm
@@ -12906,6 +13028,8 @@ function renderHelp(L){
     ['hold tab (in a channel)','also arms AUTOMATION: knobs you move while it is held are written to the channel’s mod loop. The Auto block under the rack shows what is recorded and says ● while it is arming'],
     ['hold q','QUANTIZE: 1-8 set THIS channel\u2019s grid — 1 beats · 2 8ths · 3 8th triplets · 4 16ths · 5 dotted 8ths · 6 16th triplets · 7 sevenths · 8 32nds'],
     ['hold q + 0','quantize OFF — notes land exactly where you played them. Picking a grid turns it back on, because asking for a grid is asking to be on it'],
+    ['⌘E','EXPORT: set · mixdown · channels. The set is a .json you can reload anywhere — develop here, export, drop it into the live one. Mixdown and channels are rendered by PLAYING the pattern once in real time, because the engine lives in one audio context and what comes out is exactly what you heard; channels gives you the master plus one wav per channel, all captured in the same pass so they line up'],
+    ['⌘I','IMPORT a set file. Dragging a .json onto the window does the same thing'],
     ['⌘⇧E','KEEP THE SET IN A FILE. Pick one once and every change is written into it as you work — the ordinary autosave only ever reaches localStorage, which belongs to the browser profile and goes when the profile does. The header shows ◆ file while it is writing. ⌘E still exports a one-off copy, and dragging a .json back in loads it'],
     ['hold q + m','MONITOR: grid or live. On grid you hear yourself snapped to the beat — the feel of the thing, but a roll faster than the grid puts two hits on one step and a mono channel can only sound one, so notes thin out. On live you hear every hit as you played it and the grid still owns what records. Play rolls on live, or give the channel a finer grid'],
     ['tap q','toggle quantize. Only the TAP toggles: choosing a grid leaves the switch alone'],
