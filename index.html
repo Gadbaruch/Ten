@@ -1209,6 +1209,13 @@ const destRate=(rack,key)=>
      actually means — both reach the running LFO nodes, so they are heard on
      the note already sounding rather than the next one */
   :(rack==='mod'&&(key==='rate'||key==='amt'))?'ctrl'
+  /* A THIRD KIND. These have no node to write and no value to ramp — they are
+     read once, when a note starts. So the modulator parks its value and the
+     voice builder reads that instead of the slot; the change lands on the next
+     note you play, which is the only moment it could ever mean anything. */
+  :(rack==='mod'&&/^(a|d|s|r|crv)$/.test(key))?'next'
+  :(rack==='vox')?'next'
+  :(rack==='ply')?'next'
   :null;
 const slotNo=sl=>sl==='*'?'*':String((sl+1)%10);
 function destLabel(a){
@@ -2412,7 +2419,7 @@ class Voice{
     if(this.killed)return;
     const ops=this.p.osc, t=Math.max(AC.currentTime,at||0), GL=gl>0?gl:0.02;
     const bt=this.rootFreq*ops[0].rat*Math.pow(2,(ops[0].fine||0)/1200);
-    const sprd=this.p.vox.sprd||0;
+    const sprd=(this.vx||this.p.vox).sprd||0;
     for(let i=0;i<10;i++){
       const op=ops[i]; if(!op)continue;
       if(key==='amt'||key==='off')for(const a of (this.opAmt[i]||[]))
@@ -2561,15 +2568,20 @@ class Voice{
     /* unified MOD rack → the engine's existing env / lfo scheduling, re-sourced */
     const md=p.mod||[];
     const envs=[], lfoList=[];       // one source fans out to all its routes
-    for(const m of md){
-      if(m.off||!m.routes)continue;
+    for(let mi2=0;mi2<md.length;mi2++){
+      const m=md[mi2];
+      if(!m||m.off||!m.routes)continue;
+      /* the mod slot AS MODULATED — an envelope whose decay is being swept
+         hands this note the swept value, not the one in the slot */
+      const me=E.ovObj(pi,'mod',mi2,m);
       for(const rt of effRoutes(m)){
         if(rt.tgt)continue;                      // learned addresses handled separately below
         if(m.src===1&&MD2ENV[rt.dst]&&Math.abs(rt.amt)>0.5)
-          envs.push({dst:MD2ENV[rt.dst],idx:rt.idx,amt:rt.amt,a:m.a,d:m.d,s:m.s,r:m.r,crv:m.crv});
+          envs.push({dst:MD2ENV[rt.dst],idx:rt.idx,amt:rt.amt,
+                     a:me.a,d:me.d,s:me.s,r:me.r,crv:me.crv});
         else if(m.src===2&&MD2LFO[rt.dst]&&Math.abs(rt.amt)>0.5)
-          lfoList.push({dst:MD2LFO[rt.dst],idx:rt.idx,wav:m.wav,rate:lfoHz(m),
-                        amt:rt.amt,ph:m.ph,free:Math.round(m.ltr||0)===1,mi:md.indexOf(m)});
+          lfoList.push({dst:MD2LFO[rt.dst],idx:rt.idx,wav:m.wav,rate:lfoHz(me),
+                        amt:rt.amt,ph:m.ph,free:Math.round(m.ltr||0)===1,mi:mi2});
       }
     }
     /* amp-target mods (vel/key/rnd/center) scale the envelope PEAK — never a DC
@@ -2699,7 +2711,10 @@ class Voice{
     const opEnvs=envs.filter(e2=>e2.dst===4||(e2.dst===1&&Math.round(e2.idx||0)>=1));
 
     /* unison × operator stacks */
-    const uniN=clamp(Math.round(p.vox.uni||1),1,7);
+    /* one merged copy, read everywhere below instead of p.vox — unison count,
+       spread, width and slop are all decided here and never again */
+    const VX=E.ovObj(pi,'vox',0,p.vox); this.vx=VX;
+    const uniN=clamp(Math.round(VX.uni||1),1,7);
     /* OPERATORS SUMMED WITHOUT COMPENSATION, which is most of why a chord
        preset buried a kick even with its fader at 10%. A drum is one operator;
        a pad is five or six, each contributing its own `amt` straight into the
@@ -2716,7 +2731,7 @@ class Voice{
     const merge=ac.createGain(); merge.gain.value=1/(Math.sqrt(uniN)*opNorm);
     const rootMods=[]; let firstSrc=null;
     /* portamento ratio shared by EVERY operator (not just op 0) */
-    const glideOn=p.vox.mode>=1&&p.vox.glide>0.001&&E.lastPitch[pi]&&!pitchEnv&&this.legato;
+    const glideOn=VX.mode>=1&&VX.glide>0.001&&E.lastPitch[pi]&&!pitchEnv&&this.legato;
     const glR=glideOn?E.lastPitch[pi]/baseTarget:1;
     const setF=(param,val)=>{                       // glide-or-set any frequency param
       /* …and in tune from the moment it exists, for the same reason: an
@@ -2725,7 +2740,7 @@ class Voice{
          a concert A that had nothing to do with the note. */
       if(glideOn){const f0=Math.max(val*glR,0.01);
         param.value=f0; param.setValueAtTime(f0,at);
-        param.exponentialRampToValueAtTime(Math.max(val,0.01),at+p.vox.glide);}
+        param.exponentialRampToValueAtTime(Math.max(val,0.01),at+VX.glide);}
       else{param.value=val; param.setValueAtTime(val,at);}
     };
     this.opGains={};  // slot -> [gain nodes across uni] for op env/lfo
@@ -2736,7 +2751,7 @@ class Voice{
     for(let u=0;u<uniN;u++){
       const off=uniN===1?0:(u/(uniN-1))*2-1;
       this.uniOff.push(off);
-      const target=baseTarget*Math.pow(2,(p.vox.sprd||0)*off/1200);
+      const target=baseTarget*Math.pow(2,(VX.sprd||0)*off/1200);
       let src,pitchParam;
       if(isN){src=ac.createBufferSource();
         src.buffer=isS?(E.opSamples.get(pi+':0')||E.noiseBuf):E.nbuf(rootW,ops[0].pw);
@@ -2844,9 +2859,9 @@ class Voice{
       let node=sum;
       for(const k2 in outN)outN[k2].connect(sum);
       if(uniN>1){
-        const pn=ac.createStereoPanner(); pn.pan.value=off*(p.vox.wide||0);
+        const pn=ac.createStereoPanner(); pn.pan.value=off*(VX.wide||0);
         sum.connect(pn); node=pn;
-        const dsec=(p.vox.slop||0)*Math.abs(off);
+        const dsec=(VX.slop||0)*Math.abs(off);
         if(dsec>0.0005){const dl=ac.createDelay(0.06); dl.delayTime.value=dsec; node.connect(dl); node=dl;}
       }
       node.connect(merge);
@@ -3949,7 +3964,8 @@ class Engine{
         if(!m||m.off||!m.src||!m.routes)continue;
         for(const rt of m.routes){
           const a=rt.addr; if(!a||rt.dst)continue;
-          if(destRate(a.rack,a.key)!=='ctrl')continue;
+          const rate=destRate(a.rack,a.key);
+          if(rate!=='ctrl'&&rate!=='next')continue;   // 'audio' is wired at note-on
           const hits=resolveDest(p,a); if(!hits.length)continue;   // unresolved: nothing happens
           const src=this._modSrc(m,pi,now); if(src===null)continue;
           const amt=(rt.amt||0)/100, ctr=(rt.ctr||0)/100;
@@ -3974,8 +3990,46 @@ class Engine{
   }
   _ctrlPut(rack,pi,si,key,v){
     if(rack==='fx')return this.fxLive(pi,si,key,v);
-    if(rack==='mod')return this.modLive(pi,si,key,v);
-    return false;
+    if(rack==='mod'&&(key==='rate'||key==='amt'))return this.modLive(pi,si,key,v);
+    return this.ovPut(pi,rack,si,key,v);
+  }
+  /* VALUES A NOTE READS ON ITS WAY OUT OF THE GATE. Nothing here can be
+     written to a running node, because there is no node — an envelope's decay
+     and a unison count and an arp's rate are all decided once and then baked
+     into the voice. Park them here and let the builder read them. The slot is
+     never touched, so what you dialled is still what the knob says and what
+     the save keeps. */
+  ovPut(pi,rack,si,key,v){
+    this.ov=this.ov||{};
+    const k=pi+'|'+rack+'|'+si+'|'+key;
+    if(v===undefined)delete this.ov[k]; else this.ov[k]=v;
+    this._ovAny=Object.keys(this.ov).length>0;
+    return true;
+  }
+  ovGet(pi,rack,si,key,base){
+    if(!this._ovAny)return base;
+    const v=this.ov[pi+'|'+rack+'|'+si+'|'+key];
+    return v===undefined?base:v;
+  }
+  /* the same, for a whole object or rack, so the read sites stay readable —
+     returns the original untouched when nothing is being modulated, which is
+     almost always and costs one boolean */
+  ovObj(pi,rack,si,base){
+    if(!this._ovAny||!base)return base;
+    let o=null;
+    for(const k in this.ov){const q=k.split('|');
+      if(+q[0]!==pi||q[1]!==rack||+q[2]!==si)continue;
+      o=o||Object.assign({},base); o[q[3]]=this.ov[k];}
+    return o||base;
+  }
+  ovRack(pi,rack,arr){
+    if(!this._ovAny||!arr)return arr;
+    let out=null;
+    for(let i=0;i<arr.length;i++){
+      const o=this.ovObj(pi,rack,i,arr[i]);
+      if(o!==arr[i]){out=out||arr.slice(); out[i]=o;}
+    }
+    return out||arr;
   }
   /* a modulated MOD slot. Only the two that reach a running node: an LFO's
      frequency and its depth, so a slow envelope on an LFO's rate is heard on
@@ -4803,7 +4857,11 @@ class Engine{
     if(chan.vof)vel=clamp(vel+chan.vof,0.02,1);   // the channel's own velocity offset
     /* kit pads carry their own PLAY rack (chord/arp/flam/humanize per pad) */
     const kp=isKit(chan)?kitSlot(chan,midi):null;
-    const p=kp?{...chan,ply:kp.ply}:chan;
+    /* the PLAY rack as modulated: an arp's rate or a flam's spread swept by an
+       envelope has to be the value THIS note is built with */
+    const p0=kp?{...chan,ply:kp.ply}:chan;
+    const plyE=this.ovRack(pi,'ply',p0.ply);
+    const p=plyE===p0.ply?p0:{...p0,ply:plyE};
     const isMaster=p.ply.some(sl=>sl.typ===1&&!sl.off&&Math.round(sl.p3===undefined?1:sl.p3)===1);
     /* global scaling: snap non-drum channels to the held chord (from a chord-
        master channel) or to the global scale. masters define, they don't follow */
@@ -12246,7 +12304,9 @@ function renderDestPick(L,pre){
     const d=items[i], sel=i===DPICK.si;
     const here=rt&&rt.addr&&rt.addr.rack===d.rack&&String(rt.addr.slot)===String(d.slot)&&rt.addr.key===d.key;
     const line=' '+pad(d.rack+slotNo(d.slot)+(d.typ&&d.typ!=='all'?' '+d.typ:''),14)
-      +pad(d.lbl,10)+pad(d.rate==='audio'?'audio':'ctrl',6)+(here?'● here':'');
+      +pad(d.lbl,10)
+      +pad(d.rate==='audio'?'audio':d.rate==='ctrl'?'live':'next note',10)
+      +(here?'● here':'');
     L.push('   '+(sel?sp('i',line):sp(here?'a':'d',line)));
   }
   if(items.length>N)L.push('   '+sp('d','   '+(page*N+1)+'-'+Math.min(items.length,page*N+N)+' of '+items.length));
