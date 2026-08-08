@@ -5178,6 +5178,7 @@ function saveToSlot(i){
   dirty=true; dirtySave=true;
 }
 function loadSlot(i){
+  bakPush('before loading a slot',true);
   const s2=sessAll()[i];
   if(!s2){flash('slot '+((i+1)%10)+' is empty');return false;}
   pushUndo('load set');
@@ -5220,7 +5221,44 @@ function copyFromPeek(){
 /* A NEW SET. Every channel back to the kind of part it is for and every lane
    empty — the same thing a fresh clip does, nine times. Deliberately not a
    reload: tempo, key and your settings are yours and survive. */
+/* ---------------- THE SAFETY NET --------------------------------------
+   A whole set lives in ONE localStorage key, so anything that writes that key
+   destroys what was there. A failed load used to do it — that one has a
+   recovery copy. ⌘N does it. Clearing does it. Undo is in memory and dies with
+   the tab, and the slots only help if you remembered to use them.
+   So: a ring of the last few states, in a key nothing else ever writes,
+   pushed on a timer AND unconditionally before anything destructive. It costs
+   a few hundred kilobytes and it is the difference between a bad minute and
+   losing an evening's work. */
+const BAKKEY='ten-bak-v1', BAKN=10, BAKGAP=25000;
+let _bakSig='', _bakAt=0;
+const bakAll=()=>{try{const a=JSON.parse(localStorage.getItem(BAKKEY));return Array.isArray(a)?a:[];}catch(_){return [];}};
+const noteCount=()=>{try{return S.patterns.reduce((n,p2)=>n+p2.lanes.reduce((m,l)=>m+l.events.length,0),0);}
+  catch(_){return -1;}};
+function bakPush(why,force){
+  let str; try{str=serialize();}catch(_){return;}
+  if(!str||str.length<200)return;
+  const now=Date.now();
+  if(!force){
+    if(str===_bakSig)return;                     // nothing changed
+    if(now-_bakAt<BAKGAP)return;                 // …and not more often than this
+  }
+  /* an empty set must never push the last full one out of the ring */
+  const n=noteCount();
+  const a=bakAll();
+  if(!force&&n<=0&&a.length&&a[0].n>0)return;
+  _bakSig=str; _bakAt=now;
+  a.unshift({t:now,why:why||'auto',n,s:str});
+  while(a.length>BAKN)a.pop();
+  for(;;){                                       // quota: keep the newest that fit
+    try{localStorage.setItem(BAKKEY,JSON.stringify(a));return;}
+    catch(_){ if(a.length<=1)return; a.pop(); }
+  }
+}
+const bakAge=t=>{const s2=Math.max(0,Math.round((Date.now()-t)/1000));
+  return s2<60?s2+'s':s2<3600?Math.round(s2/60)+'m':Math.round(s2/3600)+'h';};
 function newSet(){
+  bakPush('before new set',true);          // the state you are about to lose
   pushUndo('new set');
   CHANS().forEach(i=>freshClip(i));
   S.patterns.forEach(p2=>p2.lanes.forEach(l=>{l.clear();delete l._cap;delete l._rec;}));
@@ -5236,6 +5274,30 @@ function pickKey(e){
   const c=e.code, slots=sessAll();
   const close=()=>{PICK=null;dirty=true;};
   if(c==='Escape'){close(); flash('cancelled'); return;}
+  /* THE WAY BACK. Reachable from the same place you would be standing when you
+     realise — the picker — because that is where the destructive keys live. */
+  if(c==='KeyB'&&!e.repeat&&!e.metaKey&&!e.ctrlKey){
+    if(PICK.mode==='bak'){PICK.mode=PICK.was||'load'; PICK.sel=0;}
+    else{PICK.was=PICK.mode; PICK.mode='bak'; PICK.sel=0;}
+    PICK.confirm=false; dirty=true; return;
+  }
+  if(PICK.mode==='bak'){
+    const B=bakAll();
+    if(c==='ArrowLeft'||c==='ArrowRight'){
+      if(B.length)PICK.sel=fmod(PICK.sel+(c==='ArrowRight'?1:-1),B.length);
+      PICK.confirm=false; dirty=true; return;}
+    if(/^Digit\d$/.test(c)&&!e.repeat){
+      const k=(+c.slice(5)+9)%10; if(k<B.length){PICK.sel=k;PICK.confirm=false;dirty=true;} return;}
+    if(c==='Enter'&&!e.repeat){
+      const b=B[PICK.sel]; if(!b){flash('no backups yet');return;}
+      if(!PICK.confirm){PICK.confirm=true; dirty=true;
+        flash('enter again to go back to '+bakAge(b.t)+' ago — '+b.n+' notes'); return;}
+      bakPush('before going back',true);        // even this is undoable
+      if(load(b.s)){flash('◄ back to '+bakAge(b.t)+' ago · '+b.n+' notes'); dirty=true; dirtySave=true; close();}
+      else flash('that backup would not load');
+      return;}
+    return;                                     // the lane owns its keys
+  }
   if(c==='ShiftLeft'||c==='ShiftRight'){PICK.peek=true; dirty=true; return;}
   /* THE DICE, FROM THE PICKER. Choosing where a set lives and asking for a set
      to live there are the same moment — and a whole song is exactly what an
@@ -5296,7 +5358,13 @@ function pickKey(e){
     dirty=true; return;
   }
   if(c==='Enter'&&!e.repeat){
-    if(PICK.mode==='new'){ newSet(); close(); return; }
+    if(PICK.mode==='new'){
+      /* IT ASKS NOW. One key emptied every lane in the set with nothing in the
+         way, and the only copy of what you had was the one it overwrote. */
+      if(noteCount()>0&&!PICK.confirm){PICK.confirm=true; dirty=true;
+        flash('this empties all '+noteCount()+' notes — enter again, or b to see snapshots');
+        return;}
+      newSet(); close(); return; }
     if(PICK.mode==='load'){
       /* choosing an empty slot means "start fresh here" — it is the same
          gesture, and refusing it made you go and find another key */
@@ -10986,7 +11054,9 @@ function load(json){
     return true;
   }catch(err){console.warn('load failed',err);return false;}
 }
-setInterval(()=>{if(dirtySave){dirtySave=false;try{localStorage.setItem(LS,serialize());}catch(_){}}},1500);
+setInterval(()=>{if(dirtySave){dirtySave=false;
+  try{localStorage.setItem(LS,serialize());}catch(_){}
+  bakPush('auto');}},1500);
 function exportJSON(){
   const a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob([serialize()],{type:'application/json'}));
@@ -11022,10 +11092,11 @@ document.addEventListener('drop',e=>{
  if(!load(raw)){
    if(raw&&raw.length>200){
      try{localStorage.setItem(LS+'-recover',raw);}catch(_){}
-     setTimeout(()=>flash('previous session could not be loaded — a copy is in '+LS+'-recover'),300);
+     setTimeout(()=>flash('previous session could not be loaded — esc, then b, to get it back'),300);
    }
    demoContent();
- }}
+ }else setTimeout(()=>bakPush('opened',true),400);   // the ring starts full, not empty
+}
 libInit();
 if(CFG.midiIn|0)EXP.connect(true);   // reconnect silently if midi in was left on
 
@@ -12488,8 +12559,23 @@ function renderMaster(L){
 function pickerRack(L){
   const slots=sessAll();
   const n=(PICK.sel+1)%10;
+  if(PICK.mode==='bak'){
+    const B=bakAll();
+    L.push('   '+sp('a','GO BACK')+(PICK.confirm
+      ?sp('r','   enter again — this replaces what is on the desk')
+      :sp('d','   automatic snapshots · ←→ or digits · enter · b returns · esc')));
+    if(!B.length){L.push('   '+sp('d','(nothing yet — the ring fills as you work)')); return;}
+    let row='   ';
+    B.forEach((b,i)=>{const on=i===PICK.sel;
+      row+=spH(on?(PICK.confirm?'ri':'i'):(b.n>0?'v k':'d k'),
+        ' '+((i+1)%10)+' '+bakAge(b.t)+'·'+b.n+'n ','bak',i)+' ';});
+    L.push(row);
+    L.push('   '+sp('d',(B[PICK.sel]?B[PICK.sel].why:'')));
+    return;
+  }
   if(PICK.mode==='new'){
-    L.push('   '+sp('r','NEW SET')+sp('d','   every lane empty · tempo, key and settings stay · enter · esc'));
+    L.push('   '+sp('r','NEW SET')+sp('d','   every lane empty · tempo, key and settings stay · enter · esc'
+      +(noteCount()>0?'   ·  b = go back to a snapshot':'')));
     L.push(''); return;
   }
   let head='   '+sp('a',PICK.mode==='save'?'SAVE SET':'LOAD SET');
