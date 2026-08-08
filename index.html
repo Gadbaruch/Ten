@@ -915,6 +915,12 @@ const FX_P=sl=>{
     dly:[SP('time','p1','lin',{min:0,max:1,step:0.05,fmt:v=>Math.round(20+v*1300)+'ms'}),
          SP('fdbk','p2','lin',{min:0,max:0.9,step:0.05}),
          SP('mode','p3','enum',{opts:['free','sync','pong','s+pong']}),
+         /* COLOUR SITS IN THE LOOP, so it compounds: each repeat is one more
+            pass through it and the tail walks off into the dark or thins out
+            to a whisper. Signed, because there is no natural zero at one end
+            of a range — flat is the middle and you go either way from it. */
+         SP('color','p5','lin',{min:-1,max:1,step:0.1,
+            fmt:v=>Math.abs(v)<0.05?'flat':(v<0?'dark ':'bright ')+Math.round(Math.abs(v)*100)}),
          SP('mix','mix','lin',{min:0,max:1,step:0.05})],
     cho:[SP('rate','p1','lin',{min:0,max:1,step:0.05,fmt:v=>(0.1+v*4).toFixed(1)+'Hz'}),
          SP('depth','p2','lin',{min:0,max:1,step:0.05}),
@@ -934,6 +940,11 @@ const FX_P=sl=>{
     verb:[SP('size','p1','lin',{min:0,max:1,step:0.05,fmt:v=>fT(vrbSec(v))}),
          SP('color','p2','lin',{min:0,max:1,step:0.05}),
          SP('width','p3','lin',{min:0,max:1,step:0.05}),
+         /* PRE-DELAY: the gap before the room answers. It is the one control
+            that lets a big reverb sit behind a sound instead of swallowing it
+            — the dry hit lands alone, then the tail arrives. 0 is off. */
+         SP('pre','p5','lin',{min:0,max:1,step:0.05,
+            fmt:v=>v<0.005?'off':Math.round(v*200)+'ms'}),
          SP('mix','mix','lin',{min:0,max:1,step:0.05})],
     limit:[SP('ceil','p1','lin',{min:0,max:1,step:0.05,fmt:v=>Math.round(-30+v*30)+'dB'}),
          SP('rel','p2','lin',{min:0,max:1,step:0.05}),
@@ -3029,7 +3040,7 @@ class Engine{
     return ir;
   }
   /* one FX unit; shared by channel racks, send slots and master inserts */
-  fxUnit(fx,cur,keep,owner,sendMode){
+  fxUnit(fx,cur,keep,owner,sendMode,liveMap,slotI){
     const ac=AC, t=XTYPES[fx.typ];
     if(t==='send')return cur;                      // routing handled by the caller
     const out=keep(ac.createGain());
@@ -3037,6 +3048,7 @@ class Engine{
     const dry=keep(ac.createGain()); dry.gain.value=sendMode||full?0:1-fx.mix;
     const wet=keep(ac.createGain()); wet.gain.value=full?1:fx.mix;
     cur.connect(dry); dry.connect(out); wet.connect(out);
+    const LIVE=liveMap&&slotI!=null?(liveMap[slotI]={t,dry,wet,full:full||!!sendMode}):null;
     if(t==='dly'){
       let sec=0.02+fx.p1*1.3;
       const mode=clamp(Math.round(fx.p3??1),0,3);        // free · sync · pong · sync+pong
@@ -3047,16 +3059,31 @@ class Engine{
         sec=best;
       }
       const fb=keep(ac.createGain()); fb.gain.value=fx.p2;
+      /* one tone node per tap, sitting between the delay and everything it
+         feeds — so the first repeat is already coloured and each one after it
+         goes through again. Flat is a lowpass parked above the audio band
+         rather than a branch, so the graph is the same shape either way. */
+      const col=clamp(fx.p5??0,-1,1);
+      const mkCol=()=>{const f=keep(ac.createBiquadFilter()); f.Q.value=0.707;
+        if(col<-0.02){f.type='lowpass';  f.frequency.value=20000*Math.pow(0.04,-col);}
+        else if(col>0.02){f.type='highpass'; f.frequency.value=20*Math.pow(100,col);}
+        else{f.type='lowpass'; f.frequency.value=20000;}
+        return f;};
       if(mode>=2){                                       // stereo ping-pong
         const dl=keep(ac.createDelay(2)), dr=keep(ac.createDelay(2));
         dl.delayTime.value=sec; dr.delayTime.value=sec;
+        const cl=mkCol(), cr=mkCol();
         const mg=keep(ac.createChannelMerger(2));
-        cur.connect(dl); dl.connect(dr); dr.connect(fb); fb.connect(dl);
-        dl.connect(mg,0,0); dr.connect(mg,0,1);
+        cur.connect(dl); dl.connect(cl); cl.connect(dr); dr.connect(cr);
+        cr.connect(fb); fb.connect(dl);
+        cl.connect(mg,0,0); cr.connect(mg,0,1);
         mg.connect(wet);
+        if(LIVE)Object.assign(LIVE,{dls:[dl,dr],fb,cols:[cl,cr],mode});
       }else{
         const dl=keep(ac.createDelay(2)); dl.delayTime.value=sec;
-        cur.connect(dl); dl.connect(fb); fb.connect(dl); dl.connect(wet);
+        const cf=mkCol();
+        cur.connect(dl); dl.connect(cf); cf.connect(fb); fb.connect(dl); cf.connect(wet);
+        if(LIVE)Object.assign(LIVE,{dls:[dl],fb,cols:[cf],mode});
       }
     }else if(t==='cho'||t==='fla'){
       const rate=t==='cho'?0.1+fx.p1*4:0.05+fx.p1*2;
@@ -3235,7 +3262,13 @@ class Engine{
       const cv=keep(ac.createConvolver()); cv.buffer=this.getIR(vrbSec(fx.p1));
       const tone=keep(ac.createBiquadFilter()); tone.type='lowpass';
       tone.frequency.value=800*Math.pow(20,fx.p2??0.5);          // color: dark..bright
-      cur.connect(cv); cv.connect(tone);
+      /* built only when asked for, so a preset saved before this existed goes
+         through the identical graph it always did */
+      const pre=fx.p5??0;
+      let vIn=cur;
+      if(pre>0.005){const pd=keep(ac.createDelay(0.5));
+        pd.delayTime.value=pre*0.2; cur.connect(pd); vIn=pd;}
+      vIn.connect(cv); cv.connect(tone);
       const w=fx.p3??0.5, a2=w+(1-w)/2, b2=(1-w)/2;              // width: mono..full stereo
       const sp2=keep(ac.createChannelSplitter(2)), mg=keep(ac.createChannelMerger(2));
       const ll=keep(ac.createGain()), lr=keep(ac.createGain()), rl=keep(ac.createGain()), rr=keep(ac.createGain());
@@ -3555,20 +3588,26 @@ class Engine{
     b.rack=[];
     const keep=n=>{b.rack.push(n);return n;};
     const ig=keep(ac.createGain()); b.rackIn=ig; b.vIn.connect(ig);
+    /* the handles a param edit can write to WITHOUT building the chain again.
+       Rebuilding crossfades, so it never clicked — but a delay line's memory is
+       the effect, and a new one starts empty: every nudge of the feedback knob
+       swallowed the repeats and started them over. */
+    b.fxLive={};
     let cur=ig;
     // FX chain (per channel): real units inline; 'send' taps to a master send slot
     // (distortion is now the 'dist' fx type — the AMP module is gone)
     this.followers=this.followers.filter(f=>f.owner!==pi);
     this.grossList=this.grossList.filter(f=>f.owner!==pi);
     this.duckList=this.duckList.filter(f=>f.owner!==pi);
-    for(const fx of p.fx){
+    for(let fi=0;fi<p.fx.length;fi++){
+      const fx=p.fx[fi];
       if(!fx.typ||fx.off)continue;
       if(XTYPES[fx.typ]==='send'){
         const sg=keep(ac.createGain()); sg.gain.value=fx.p2;
         cur.connect(sg); sg.connect(this.sendIns[clamp(Math.round(fx.p1),1,10)-1]);
         continue;
       }
-      cur=this.fxUnit(fx,cur,keep,pi,false);
+      cur=this.fxUnit(fx,cur,keep,pi,false,b.fxLive,fi);
     }
     const og=keep(ac.createGain()); og.gain.value=oldOut?0.0001:1;
     cur.connect(og); og.connect(b.busG); b.rackOut=og;
@@ -3601,6 +3640,55 @@ class Engine{
       try{b.panLfo.lo.stop();b.panLfo.lg.disconnect();}catch(_){}
       b.panLfo=null;
     }
+  }
+  /* WRITE THE EDIT INTO THE RUNNING CHAIN, or say you cannot and let the caller
+     build it again. Returns true when it was handled here.
+     Only the values that are genuinely just numbers on a node — anything that
+     changes the SHAPE of the graph (the type, the delay's mode) still needs a
+     rebuild, and that is the one time losing the tail is honest, because it is
+     a different effect. */
+  fxLive(pi,si,key){
+    const b=this.buses[pi], L=b&&b.fxLive&&b.fxLive[si];
+    if(!L)return false;
+    const fx=S.presets[pi].fx[si], n=AC.currentTime;
+    if(XTYPES[fx.typ]!==L.t)return false;                    // type changed under us
+    if(key==='mix'){
+      if(L.full)return false;                                // comp/clip: mix is makeup gain
+      L.dry.gain.setTargetAtTime(1-fx.mix,n,0.02);
+      L.wet.gain.setTargetAtTime(fx.mix,n,0.02);
+      return true;
+    }
+    if(L.t==='dly'&&L.dls){
+      if(key==='p1'){
+        let sec=0.02+fx.p1*1.3;
+        if(L.mode===1||L.mode===3){                          // the same snap the builder does
+          let best=spb()*0.25;
+          for(const dv of [0.125,0.25,1/3,0.375,0.5,0.75,1,1.5].map(x=>x*spb()))
+            if(Math.abs(dv-sec)<Math.abs(best-sec))best=dv;
+          sec=best;
+        }
+        /* glided, not jumped — a delay line whose length moves IS a tape
+           slowing down, and that is the sound you want when you reach for it */
+        for(const d of L.dls)d.delayTime.setTargetAtTime(sec,n,0.06);
+        return true;
+      }
+      if(key==='p2'){L.fb.gain.setTargetAtTime(clamp(fx.p2,0,0.95),n,0.02); return true;}
+      if(key==='p5'){
+        const c=clamp(fx.p5??0,-1,1);
+        const ty=c<-0.02?'lowpass':c>0.02?'highpass':'lowpass';
+        const f2=c<-0.02?20000*Math.pow(0.04,-c):c>0.02?20*Math.pow(100,c):20000;
+        for(const f of L.cols){
+          /* crossing between lowpass and highpass cannot be ramped — a highpass
+             sweeping down from 20k mutes everything on the way. Jump on a type
+             change, glide when it is the same filter moving. */
+          if(f.type!==ty){f.type=ty; f.frequency.value=f2;}
+          else f.frequency.setTargetAtTime(f2,n,0.04);
+        }
+        return true;
+      }
+      return false;                                          // p3 = mode: topology
+    }
+    return false;
   }
   cutLive(pi,slot){
     const f=S.presets[pi].flt[slot], n=AC.currentTime;
@@ -4624,7 +4712,7 @@ function applyParam(pi,mi,si,px,v){
      after, rather than on whatever the generic slot defaults happened to be */
   if(M.id==='fx'&&spec.key==='typ'&&FXDEF[Math.round(v)])
     Object.assign(S.presets[pi].fx[si],FXDEF[Math.round(v)]);
-  if(M.id==='fx')engine.rebuildRack(pi);
+  if(M.id==='fx'){ if(!engine.fxLive(pi,si,spec.key))engine.rebuildRack(pi); }
   else if(M.id==='mix'||M.id==='mod'){engine.refresh(pi); if(M.id==='mod')engine.lfoLive(pi);}
   if(isCodeCh(pi)&&(M.id==='flt'||M.id==='mod'||M.id==='vox'))engine.codeCfg(pi);
   else if(M.id==='flt'&&spec.key==='frq')engine.cutLive(pi,si);
