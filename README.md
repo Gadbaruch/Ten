@@ -47,9 +47,19 @@ add and remove rack slots. `cmd+↑↓` tweaks the **last-played note only**
 clip together — including out of a set you are only previewing.
 
 Half the keyboard is a scope you hold: `tab` loop, `m` tempo, `c` channel,
-`v` velocity, `n` notes, `i` instrument, `` ` `` roll. Hold one and the arrows
-mean that one thing; tap and release without moving and you get the tap action
-instead. `?` shows the full keymap — that is the authoritative reference.
+`v` velocity, `n` notes, `` ` `` instrument, `q` quantize grid, `/` roll. Hold
+one and the arrows mean that one thing; tap and release without moving and you
+get the tap action instead.
+
+**Left option and a letter** reaches a rack directly: `⌥a` puts an arpeggiator
+on the channel, and while you hold it the digits and arrows are its rate, mode
+and octaves. The arp is an *edit*, so it stays until `⌥a+⌫` takes it off —
+letting go only ends the editing. **Latch across the hold and the keyboard
+stays pointed at the arp**, which is the part that matters: both hands go back
+to playing while the digits keep changing its rate underneath, and with REC
+armed those changes record into the channel's mod loop. You are performing the
+arp, not configuring it. `F1` shows the full keymap — that is the authoritative
+reference.
 
 ## Core ideas
 
@@ -60,6 +70,13 @@ that clip is the channel while you are in it. Leaving writes nothing down as
 a separate act; it simply stops being where your edits go. There is no save
 key for a clip, because a save key means there is a version of this you could
 lose, and there isn't one.
+
+**A clip is the notes.** Volume, pan, mute and solo belong to the *channel* —
+they are decisions about the whole mix, not about one bar of it — so reaching
+for a different clip never takes your mix apart. The sound is the interesting
+case: a clip carries one, but only if you actually changed it while you were
+in there. Otherwise switching clips is about the part, not the patch, and an
+empty letter is an empty bar on the instrument you already have.
 
 **One generic Looper everywhere.** Every channel lane and every sound's mod
 loop are the same primitive: `unit × count` (fractional counts cut early), a
@@ -88,26 +105,43 @@ copies it out. Which means the same copy/paste moves a channel between two
 loaded sets: copy in set 1, load set 2, paste on whichever channel you want
 it on. `shift+backspace` deletes a slot, asking once.
 
-**Recording feels like tape.** What you hear is exactly what gets stored
-and played back (live quantize pushes notes to the next 16th — toggle it
-with `q`, snap a loose take later with `shift+Q`). Held notes
-replace what's under them audibly and immediately; while recording, hold
-`⌫` to record silence. The default looper mode is **retro capture**: TEN
-is always listening, so just play — then hit `tab` once and it grabs what
-you just played (forgetting anything before a long pause) and loops it at
-a sensible power-of-two length, wrapped from your entry point. Classic
-momentary/latch REC modes are in settings. An empty pattern's first hit
-**sets the One** (transport retriggers on it).
+**Recording feels like tape.** Overwrite deletes only what the playhead has
+actually passed. The sweep runs ahead to the scheduler's lookahead so that what
+you are covering never gets queued, but everything in that ~150ms of future is
+only *marked* — silenced, not destroyed — and committed once the playhead
+reaches it. Let go a moment early and the marks lift, so releasing a note just
+as the next one begins no longer takes that next one with it.
+
+What you hear is exactly what gets stored and played back. Live quantize pushes notes to the next point on **that
+channel's own grid** — hold `q` and press 1-8 to choose it, from beats to
+32nds by way of triplets, dotted 8ths and sevenths, because a hat and a
+swung rhodes should not have to agree. Toggle quantize with a tap of `q`;
+snap a loose take later with `shift+Q`. Held notes replace what's under
+them audibly and immediately; while recording, hold `⌫` to record silence.
+
+`tab` is one key and your hand decides which part of it you meant: **tap**
+takes what you just played (TEN is always listening — it forgets anything
+before a long pause and loops the take at a sensible power-of-two length,
+wrapped from your entry point), **hold** records while held, and **latch
+across the hold** leaves it on. Those used to be three settings, which
+meant two of the three gestures were dead at any moment. An empty
+pattern's first hit **sets the One** (transport retriggers on it).
 
 **A channel is racks.** Every rack is 10 slots: operators (add/fm/ring/**sync**
 with free dest routing, phase + rtrg/free trig, incl. an `smp` sampler wave —
 drop an audio file on an op), filters incl. EQ bands, a **MOD** rack, an
 **FX** chain, and **PLAY**. The MOD rack unifies modulation — each slot
 picks a *source* (env / lfo / velocity / key-track / random-S&H /
-**pressure**) and fans
-it out to one or more *routes*, each with its own *target* (amp / pitch /
-filter / pan / op level; slot# targets one, 0 = all), *amount* and
-*range*. So a single LFO can sweep the filter, wobble pan and bend pitch
+**pressure**) and fans it out to one or more *routes*. A route is a
+*destination* plus a *slot number*: the destination says **what**, the slot
+says **whose** — `amp`+`all` is the voice, `amp`+`3` is operator 3's level,
+`filt`+`2` is the second filter. Slot number defaults to `all`. (There used to
+be a separate `op` destination doing the same job as `amp`+slot, and `amp`+`1`
+meant the voice rather than operator 1, so operator 1 could not be reached at
+all — one destination now, one meaning.) Each route also carries an *amount*
+and a *range*. An LFO source adds **sync** (free-running Hz, or divisions of
+the bar that follow the tempo) and **trig** (retrig at every note, or free so
+every voice agrees on where the wave is). So a single LFO can sweep the filter, wobble pan and bend pitch
 at once, each at its own depth. Add routes with the `route` field or the
 **learn** gesture: `cmd+C` on a MOD slot arms it, then `cmd+V` on any
 filter/osc/mix param maps a route to that target. The amp envelope is
@@ -225,8 +259,50 @@ live in memory only — they don't survive a reload yet.)
 the library within the channel's type (17 types — drums are split into
 kik/snr/hh/cymb/perc/tom/wood/zap, plus `kit` — see below), change type,
 save, randomize with a `wild%` dial.
-`enter` opens the library explorer (170 factory presets + your saves) —
+`enter` opens the library explorer (180 factory presets + your saves) —
 browsing auditions safely: `enter` keeps, `esc` restores your sound.
+
+The drums include hand-built machine references — `K808 K909 K606`,
+`S808 S909 S606`, `RIM`, `H808 H909` — because everything generated gets
+heard against something. Each is the same three decisions in different
+proportions: how far the pitch falls and how fast, how long the body rings,
+and how much of it is shell versus snare wire. Generated snares now always
+carry two tuned shells under the noise (a snare with no pitch in it is
+static), generated basses are lowpass-only (a bandpassed bass is a mid-range
+buzz with the part it was written for missing), and reverb on a channel is an
+insert with a dry signal rather than 100% wet.
+
+**Filters that have a shape, not just a corner.** Past the shelves the filter
+types are **banks** — several resonators in parallel with a `spread` control
+for how far apart they sit: `fmnt` a throat, `vowl` a-e-i-o-u swept by spread,
+`twin` two peaks an interval apart, `trip` root/fifth/octave, `comb` a harmonic
+series that bends inharmonic, `rake` peaks fanning up and away. They move as a
+shape — dragging the frequency takes every peak with it, and one mod route on
+the cutoff modulates all of them together. Each slot also has a **slope**:
+12dB is one biquad, 24dB is two with the Q split between them.
+
+**Five noises.** `nse` is flat white; `pink` is air and cymbals, `brwn` is
+wind and floor toms, `blue` is all top end, `dust` is sparse impulses —
+crackle, rain, the noise floor of something old. Each is a 4-second buffer,
+level-matched to white so swapping one for another changes the timbre and not
+the balance. A noise operator's `rat` is a **timbre** control near 1, not a
+pitch: the note is tracked by the filters, the way hardware drum machines
+transpose noise.
+
+**A selection makes everything bulk.** `shift`+digits picks several channels
+out (`shift+←→` drags the selection along, `esc` clears it) and then *every*
+channel gesture points at all of them: `opt+s`/`opt+m`, hold-`c` volume and pan,
+hold-`v` velocity, hold-`n` pitch, hold-`` ` `` instrument, hold-`q` grid,
+hold-`tab` loop, `/` to roll them, `cmd+C/X/V` as a block, `cmd+D`, and every
+clear. There is no second vocabulary — the same keys, more than one subject. A
+copied block pastes from wherever the cursor is rather than going home, so four
+drums lifted off 2-5 land on 6-9 if that is where you are.
+
+**Making a kit out of a bus.** With a selection, `cmd+opt+shift+K`
+folds them into one kit channel — each channel's whole preset becomes a pad on
+its own key, and its part moves with it onto the same beats. The channels it
+absorbs keep their sound and lose only their notes, and one `cmd+Z` puts it all
+back.
 
 **Kits.** Set a channel's type to `kit` and each of the 12 notes becomes a
 **complete independent instrument** — its own oscillators, filters, mod
@@ -236,26 +312,37 @@ PRST shows that pad's engine/pad/sound/prst/level/pan, and every rack (OSC, FILT
 MOD, VOICE, FX) edits *that pad*. `rnd` on PRST rerolls the whole kit;
 `⌫` resets the focused pad.
 
-**The `` ` `` button makes music.** One key, three intensities, everywhere:
-`` ` `` = musical variations of what's there · ``shift+` `` = a genuinely
+**The `/` button makes music.** One key, three intensities, everywhere:
+`/` = musical variations of what's there · `?` (shift+`/`) = a genuinely
 different style (own key, scale flavor, chord progression, groove
 language, bass/lead styles, fresh presets, role-based mixing and sends) ·
-``shift+option+` `` = wild card. It fires on *release*, so holding it to
+`shift+option+/` = wild card. It fires on *release*, so holding it to
 reach the wildness arrows doesn't spray randomizations on the way, and
 overlapping LATCH arms auto-roll: a new one every time the loop comes
-round. Hold a scope with it and the dice are aimed — ``n+` `` rolls only
-the notes, ``i+` `` only the sound, ``v+` `` only the velocities. From
+round. Hold a scope with it and the dice are aimed — `n+/` rolls only
+the notes, ``` `+/ ``` only the sound, `v+/` only the velocities. From
 SETTINGS it generates a **whole song** — intro/build/drop/break plus a
 dj-automated arrangement with the classic pre-drop buildup.
 
-**DJ pads & automation.** Ten editable fx pads (hipass, buildup macro,
+**DJ pads & automation.** Select the master (`0`) and the home row
+`a s d f g h j k l ;` fires ten editable fx pads (hipass, buildup macro,
 lopass, synced ping-pong delay throw, verb wash, rolls, crush, tape,
-gate), edited inside the master channel's rack, and written into the
-arrangement by song generation. **They currently have no key to fire them
-live:** they used to sit on the home row of the ARRANGE layer, and that
-layer is gone — on the desk those letters play notes. The pads and their
-automation still work when a generated song drives them; what's missing
-is a live gesture, which needs a home that isn't the note keys.
+gate) — hold for momentary, latch to keep one on, tap a latched pad to
+unlatch. That's the one place the letters aren't notes, which is what
+makes the row free. Song generation writes them into the arrangement as
+timed automation windows, and the pads themselves are edited in the
+master's own rack.
+
+**Levels.** A kit pad's level is the fader for that pad and multiplies with the
+kit channel's own, so pads carry the same template level their kind gets on a
+channel of its own. Every voice is normalized where the signal is made rather than
+patched up at the fader. Unison divides by `1/sqrt(n)`, and the operator stack
+now does too — without it a six-op pad put six times the signal into the sum
+that a one-op kick did, then played three of them at once because it was a
+chord, which is why melodic patches used to bury a drum kit even at 10% on the
+fader. With that fixed the mix templates could move to where a supporting part
+actually belongs. Measured, single note, at template level: kick 0.45–0.65,
+snare 0.4–0.6, hats 0.37, bass 0.26, keys/lead 0.25, a chord triad 0.5.
 
 **Smart mix.** On by default (`smix` in SETTINGS): per-channel + master
 spectrum analysers make slow, dead-banded trim decisions — harsh/bright
