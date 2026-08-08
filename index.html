@@ -209,7 +209,7 @@ const cycleState=h=>{h.state=h.state==='on'?'rec':h.state==='rec'?'edit':'on';};
 const WAVES=['sin','tri','saw','sqr','nse','org','bel','vox','mtl','smp','pink','brwn','blue','dust'];
 const NOISEW={4:'white',10:'pink',11:'brown',12:'blue',13:'dust'};
 const isNoiseW=w=>NOISEW[w]!==undefined;
-const OPMODE=['add','fm','ring','sync'];
+const OPMODE=['add','fm','ring','sync','pm'];
 const DEST=['prev','op1','op2','op3','op4','op5','op6','op7','op8','op9','op10'];
 const DTYPES=['off','soft','hard','fold','tube','fuzz','crush','sat','asym','rect'];
 const DROUTE=['ser','par'];
@@ -1236,6 +1236,9 @@ const destRate=(rack,key)=>
      actually means — both reach the running LFO nodes, so they are heard on
      the note already sounding rather than the next one */
   :(rack==='mod'&&(key==='rate'||key==='amt'))?'ctrl'
+  /* the closest thing these oscillators have to a phase sweep: the wave is
+     rebuilt as the width moves, on the note that is already sounding */
+  :(rack==='osc'&&(key==='pw'))?'ctrl'
   /* A THIRD KIND. These have no node to write and no value to ramp — they are
      read once, when a note starts. So the modulator parks its value and the
      voice builder reads that instead of the slot; the change lands on the next
@@ -2956,11 +2959,23 @@ class Voice{
       for(const b of built){
         if(b.i===0||b.op.mode===0)continue;
         const j=tgtOf(b), tb=built.find(x=>x.i===j);
-        if(b.op.mode===1&&tb.osc){
-          const fg=ac.createGain(); fg.gain.value=b.op.amt*tb.f*6;
+        if((b.op.mode===1||b.op.mode===4)&&tb.osc){
+          /* FM AND PM DIFFER BY WHOSE FREQUENCY SETS THE DEPTH, and that is
+             the whole of it. An OscillatorNode has no phase input, but phase
+             modulation by sin is frequency modulation by its derivative — and
+             the derivative of sin(ωt) carries a factor of ω. So scaling the
+             depth by the MODULATOR's frequency instead of the carrier's gives
+             true PM through the same one gain node.
+             What you hear: with fm, the index is amt·6/ratio, so winding the
+             ratio up thins the effect and you chase it with amt. With pm the
+             index is amt, full stop — the ratio picks WHICH harmonics and the
+             amount picks HOW MANY, independently. That separation is why every
+             DX-shaped patch is built on phase modulation. */
+          const dep=b.op.mode===4?b.f:tb.f;
+          const fg=ac.createGain(); fg.gain.value=b.op.amt*dep*6;
           b.s.connect(fg); fg.connect(tb.s.frequency);
           (this.opGains[b.i]=this.opGains[b.i]||[]).push(fg);
-          (this.opAmt[b.i]=this.opAmt[b.i]||[]).push({g:fg,sc:tb.f*6});
+          (this.opAmt[b.i]=this.opAmt[b.i]||[]).push({g:fg,sc:dep*6});
         }else if(b.op.mode===2){
           const rj=outN[j]!==undefined?j:0;
           const rg=ac.createGain(); rg.gain.value=0;
@@ -3911,13 +3926,19 @@ class Engine{
   /* PULSE WIDTH ON A SOUNDING NOTE. setPeriodicWave can be called on a running
      oscillator, so the shape changes under your fingers instead of waiting for
      the next note — which is the only way a width control is any use. */
-  pwLive(pi,slot){
+  /* `val` given = a modulator asking for a width; the slot keeps what you
+     dialled. setPeriodicWave on a RUNNING oscillator keeps its phase, so the
+     shape moves under the note instead of restarting it — which is the whole
+     reason this can be swept at all. */
+  pwLive(pi,slot,val){
     const p=S.presets[pi], op=(modHolder(p,'osc').osc||[])[slot];
-    if(!op||isNoiseW(op.wav)||op.wav===9)return;
+    if(!op||isNoiseW(op.wav)||op.wav===9)return false;
+    const w=val===undefined?op.pw:val;
     for(const v of this.act[pi]){
       for(const n of (v.opNodes&&v.opNodes[slot])||[])
-        if(n.setPeriodicWave)this.setWave(n,op.wav,op.phm===1?0:op.ph,op.pw);
+        if(n.setPeriodicWave)this.setWave(n,op.wav,op.phm===1?0:op.ph,w);
     }
+    return true;
   }
   oscLive(pi,key){
     const ops=(modHolder(S.presets[pi],'osc')||S.presets[pi]).osc||[];
@@ -4161,6 +4182,7 @@ class Engine{
   _ctrlPut(rack,pi,si,key,v){
     if(rack==='fx')return this.fxLive(pi,si,key,v);
     if(rack==='mod'&&(key==='rate'||key==='amt'))return this.modLive(pi,si,key,v);
+    if(rack==='osc'&&key==='pw')return this.pwLive(pi,si,v);
     return this.ovPut(pi,rack,si,key,v);
   }
   /* VALUES A NOTE READS ON ITS WAY OUT OF THE GATE. Nothing here can be
