@@ -9326,6 +9326,13 @@ function diveIn(){
       dirty=true; return;
     }
     const M=MODULES[S.curMod];
+    /* the destination field is the one param whose value is a place, so enter
+       on it opens the place rather than doing nothing */
+    if(M.id==='mod'&&!S.mSel){
+      const rk=modHolder(S.presets[S.editSnd],'mod').mod, sl2=rk&&rk[S.curSlot];
+      const spD=sl2?paramsFor(S.curMod,sl2)[S.slotParam]:null;
+      if(spD&&spD.key==='_dest'){openDestPick(); return;}
+    }
     if(M.slot&&!M.prs){
       const pre2=S.presets[S.editSnd];
       const specs=paramsFor(S.curMod,modHolder(pre2,M.id)[M.id][S.curSlot]);
@@ -9395,6 +9402,35 @@ function syncCaps(e){
 let capsWas=false;
 const onKeyDown=e=>{
   syncCaps(e);
+  /* THE BROWSER OWNS ITS OWN KEYS while it is open — but only the ones it
+     uses. Letters still play, because hearing the channel is the whole reason
+     you are choosing where to send a modulator. */
+  if(DPICK&&!e.metaKey&&!e.ctrlKey){
+    const c0=e.code, pre=S.presets[S.editSnd], G=destGroups(pre);
+    if(!G.length){DPICK=null;}
+    else if(c0==='Escape'){DPICK=null; dirty=true; e.preventDefault(); return;}
+    else if(c0==='ArrowLeft'||c0==='ArrowRight'){
+      DPICK.gi=fmod((DPICK.gi|0)+(c0==='ArrowRight'?1:-1),G.length); DPICK.si=0;
+      dirty=true; e.preventDefault(); return;}
+    else if(c0==='ArrowUp'||c0==='ArrowDown'){
+      const n=G[clamp(DPICK.gi|0,0,G.length-1)].items.length;
+      DPICK.si=fmod((DPICK.si|0)+(c0==='ArrowDown'?1:-1),n);
+      dirty=true; e.preventDefault(); return;}
+    else if(c0==='Backspace'){
+      const rt=dpickRoute();
+      if(rt){pushUndo('mod destination'); rt.addr=null; rt.dst=0; rt.tgt=null;
+        flash('destination cleared'); dirtySave=true;}
+      DPICK=null; dirty=true; e.preventDefault(); return;}
+    else if(c0==='Enter'){
+      const g=G[clamp(DPICK.gi|0,0,G.length-1)];
+      const d=g.items[clamp(DPICK.si|0,0,g.items.length-1)];
+      const rt=dpickRoute();
+      if(rt&&d){pushUndo('mod destination');
+        rt.addr={rack:d.rack,slot:d.slot,key:d.key,lbl:d.lbl}; rt.dst=0; rt.tgt=null;
+        flash('→ '+destLabel(rt.addr)+'  ('+(d.rate==='audio'?'audio rate':'per frame')+')');
+        dirtySave=true;}
+      DPICK=null; dirty=true; e.preventDefault(); return;}
+  }
   if(e.code==='ShiftLeft'){const fresh=!KM.sl; KM.sl=true;
     if(PICK){PICK.peek=true; dirty=true;}
     if(!e.repeat&&fresh){LATCH.used=false; latchArmHeld();} return;}
@@ -11946,6 +11982,9 @@ function renderSnd(L,pos){
        set of values while every edit went to another. */
     const rackA=modHolder(pre,M.id)[M.id];
     rackParams(L,pre,paramsFor(S.curMod,rackA[S.curSlot]));
+    /* right under the row it belongs to — this is the view the sound layer
+       actually draws through, and the browser has to open where you are */
+    if(DPICK){ if(M.id==='mod')renderDestPick(L,pre); else DPICK=null; }
   }
   autoRows(L,pre);          // the channel layer is where you actually record them
 }
@@ -12044,6 +12083,7 @@ function renderSlots(L){
   L.push('');
   const sl=rackA[S.curSlot];
   rackParams(L,pre,paramsFor(S.curMod,sl));
+  if(DPICK){ if(M.id==='mod')renderDestPick(L,pre); else DPICK=null; }
   autoRows(L,pre);
   L.push('');
   // per-module summary line
@@ -12102,6 +12142,59 @@ function renderSlots(L){
   L.push('   '+sp('d',hints[M.id]||''));
 }
 
+/* THE DESTINATION BROWSER. Seventy-odd entries is not a list you arrow
+   through — it is a place you look something up. Racks across the top, what is
+   in the one you are standing in below it, and the thing you pick is an
+   address. It is built from the same live table the picker uses, so what you
+   see here is exactly what exists right now. */
+let DPICK=null;                                   // {gi, si} while it is open
+const DPICK_ORDER=['osc','flt','mod','fx','ply','vox','voice','mix'];
+function destGroups(pre){
+  const g=new Map();
+  for(const d of destList(pre)){ if(!g.has(d.rack))g.set(d.rack,[]); g.get(d.rack).push(d); }
+  return DPICK_ORDER.filter(k=>g.has(k)).map(k=>({rack:k,items:g.get(k)}));
+}
+function dpickRoute(){
+  const pre=S.presets[S.editSnd], rk=modHolder(pre,'mod').mod;
+  const m=rk&&rk[S.curSlot];
+  return m?modRt(m):null;
+}
+function openDestPick(){
+  const pre=S.presets[S.editSnd], G=destGroups(pre);
+  if(!G.length){flash('nothing to modulate yet — add a slot to a rack first');return;}
+  DPICK={gi:0,si:0};
+  const rt=dpickRoute();
+  if(rt&&rt.addr){                                // open standing on where it already points
+    const k=G.findIndex(x=>x.rack===rt.addr.rack);
+    if(k>=0){DPICK.gi=k;
+      const j=G[k].items.findIndex(d=>String(d.slot)===String(rt.addr.slot)&&d.key===rt.addr.key);
+      if(j>=0)DPICK.si=j;}
+  }
+  dirty=true;
+}
+function renderDestPick(L,pre){
+  const G=destGroups(pre); if(!G.length){DPICK=null;return;}
+  DPICK.gi=clamp(DPICK.gi|0,0,G.length-1);
+  const items=G[DPICK.gi].items;
+  DPICK.si=clamp(DPICK.si|0,0,items.length-1);
+  const rt=dpickRoute();
+  L.push('');
+  L.push('  '+sp('d','destination → ')+
+    G.map((g,i)=>(i===DPICK.gi?sp('i',' '+g.rack+' '):sp('d',' '+g.rack+' '))).join(''));
+  L.push('');
+  const N=8, page=Math.floor(DPICK.si/N);
+  for(let i=page*N;i<Math.min(items.length,page*N+N);i++){
+    const d=items[i], sel=i===DPICK.si;
+    const here=rt&&rt.addr&&rt.addr.rack===d.rack&&String(rt.addr.slot)===String(d.slot)&&rt.addr.key===d.key;
+    const line=' '+pad(d.rack+slotNo(d.slot)+(d.typ&&d.typ!=='all'?' '+d.typ:''),14)
+      +pad(d.lbl,10)+pad(d.rate==='audio'?'audio':'ctrl',6)+(here?'● here':'');
+    L.push('   '+(sel?sp('i',line):sp(here?'a':'d',line)));
+  }
+  if(items.length>N)L.push('   '+sp('d','   '+(page*N+1)+'-'+Math.min(items.length,page*N+N)+' of '+items.length));
+  L.push('');
+  L.push('   '+sp('d','←→ rack · ↑↓ param · enter picks · ⌫ clears it · esc closes')+
+    sp('d','    '+destList(pre).length+' destinations live'));
+}
 function renderExplore(L,pre){
   const cat=pre.cat||'misc', pool=libAll().filter(en=>en.cat===cat);
   S.libSel=clamp(S.libSel||0,0,Math.max(0,pool.length-1));
