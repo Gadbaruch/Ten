@@ -413,8 +413,58 @@ function modToRoutes(p){
   fixAmp(p); layers.forEach(fixAmp);
   return p;
 }
+/* dst:3, idx:2 only means something beside the enum that was current when it
+   was written. Once, on load, every legacy pair becomes an address. */
+function routeAddr(dst,idx){
+  const d=Math.round(dst||0), i=Math.round(idx||0);
+  const slot=i>=1?clamp(i,1,10)-1:'*';
+  if(d===1)return i>=1?{rack:'osc',slot,key:'amt',lbl:'level'}
+                     :{rack:'voice',slot:0,key:'amp',lbl:'amp'};
+  if(d===2)return i>=1?{rack:'osc',slot,key:'rat',lbl:'ratio'}
+                     :{rack:'voice',slot:0,key:'pitch',lbl:'pitch'};
+  if(d===3)return {rack:'flt',slot,key:'frq',lbl:'freq'};
+  if(d===4)return {rack:'mix',slot:0,key:'pan',lbl:'pan'};
+  if(d===5)return {rack:'osc',slot,key:'amt',lbl:'level'};
+  return null;
+}
+function addrMod(p){
+  if(!p||p._addr)return p;
+  for(const m of (p.mod||[]))if(m&&m.routes)for(const rt of m.routes){
+    if(rt.addr||!rt.dst)continue;
+    const a=routeAddr(rt.dst,rt.idx);
+    if(a)rt.addr=a;
+  }
+  p._addr=true;
+  return p;
+}
+/* THE ENGINE STILL SPEAKS (dst, idx). An address that names one of the
+   destinations it already knows how to wire is translated here, so every
+   audio-rate path stays exactly as it was and nothing about the sound moves.
+   An address it cannot express — a filter's resonance, an fx mix, an LFO's
+   own rate — comes back with dst 0 and is picked up further down instead. */
+function effRoute(rt){
+  /* A ROUTE THAT STILL CARRIES A LEGACY PAIR KEEPS USING IT. The address is
+     derived from that pair on load, so the two agree — but "agree" is a claim
+     about my translation table, and a wrong entry there would silently re-aim
+     every preset in the library at once. Let the old pair win until you pick a
+     destination yourself, at which point dst goes to 0 and the address is the
+     only thing left. Migration cannot move a sound this way. */
+  if(!rt||!rt.addr||rt.dst)return rt;
+  const a=rt.addr, s=a.slot==='*'?0:clamp(a.slot,0,9)+1;
+  let d=0,i=0;
+  if(a.rack==='voice')d=a.key==='amp'?1:a.key==='pitch'?2:0;
+  else if(a.rack==='mix')d=a.key==='pan'?4:0;
+  else if(a.rack==='flt'&&a.key==='frq'){d=3;i=s;}
+  else if(a.rack==='osc'&&a.key==='amt'){d=5;i=s;}
+  else if(a.rack==='osc'&&(a.key==='rat'||a.key==='fine')){d=2;i=s;}
+  return Object.assign({},rt,{dst:d,idx:i});
+}
+const effRoutes=m=>((m&&m.routes)||[]).map(effRoute);
 function foldMod(p){
-  if(!p||p._folded)return p;
+  /* addrMod, not `return p` — a preset folded in an earlier session already
+     carries _folded, so the addresses would never be derived for exactly the
+     sounds that have been around longest. */
+  if(!p||p._folded)return addrMod(p);
   const out=[];
   const R=(dst,idx,amt)=>({dst,idx:idx??1,amt,ctr:0,tgt:null});
   /* In the legacy env/lfo format `idx` only ever meant a slot for FILTER and
@@ -441,7 +491,7 @@ function foldMod(p){
     out.slice(0,10).forEach((m,i)=>{p.mod[i]=Object.assign(mkMod(i),m);});
   }
   p._folded=true;
-  return p;
+  return addrMod(p);
 }
 /* PLAY 'rpit': a fresh pitch offset per note. Returns the SOUNDING midi —
    callers keep the original note for kit-pad selection, so a kit repitches the
@@ -866,7 +916,22 @@ const LFO_P=()=>[
 const MOD_P=sl=>{                    // unified: source picks which extra fields show
   const s=Math.round(sl.src||0);
   const nR=(sl.routes||[]).length||1;
-  const tgtFmt=(v,m)=>{const rt=modRt(m||sl);return rt.tgt?tgtLabel(rt.tgt):MDST[clamp(Math.round(rt.dst),0,MDST.length-1)];};
+  const pre=S.presets[S.editSnd];
+  const DL=destList(pre);
+  /* '—' first: a route with nowhere to go is a legal, visible state, and it is
+     what a fresh mod slot and an unresolved one both read as. */
+  const dOpts=['—'].concat(DL.map(d=>d.rack+slotNo(d.slot)+(d.typ&&d.typ!=='all'?'·'+d.typ:'')+'·'+d.lbl));
+  const dGet=m=>{const rt=modRt(m||sl); if(!rt.addr)return 0;
+    const i=DL.findIndex(d=>d.rack===rt.addr.rack&&String(d.slot)===String(rt.addr.slot)
+      &&d.key===rt.addr.key&&d.lbl===rt.addr.lbl);
+    return i<0?0:i+1;};
+  const tgtFmt=(v,m)=>{const rt=modRt(m||sl);
+    if(rt.addr){
+      /* an address that no longer names anything says so, rather than quietly
+         landing somewhere plausible */
+      return (resolveDest(pre,rt.addr).length?'':'?')+destLabel(rt.addr);
+    }
+    return rt.tgt?tgtLabel(rt.tgt):MDST[clamp(Math.round(rt.dst),0,MDST.length-1)];};
   const base=[SP('src','src','enum',{opts:MSRC}),
     SP('route','_rt','lin',{min:0,max:9,step:1,fmt:v=>'R'+(Math.round(v)+1)+'/'+nR,
       get:m=>m.rsel||0, set:(m,v)=>{const n=(m.routes||[mkRoute()]).length;
@@ -874,9 +939,12 @@ const MOD_P=sl=>{                    // unified: source picks which extra fields
     /* 'op' is skipped in the picker: amp with a slot number says the same
        thing, and two names for one destination is what made this confusing.
        Kept in the list so presets that already use it still resolve. */
-    SP('dest','dst','enum',{opts:MDST,fmt:tgtFmt,skip:new Set([5]),
-       get:m=>modRt(m).dst, set:(m,v)=>{modRt(m).dst=v;modRt(m).tgt=null;}}),
-    SP('slot#','idx','lin',{min:0,max:10,step:1,fmt:v=>v?String(v):'all', get:m=>modRt(m).idx, set:(m,v)=>modRt(m).idx=v}),
+    SP('dest','_dest','enum',{opts:dOpts,fmt:tgtFmt,
+       get:dGet,
+       set:(m,v)=>{const rt=modRt(m), d=DL[Math.round(v)-1];
+         if(!d){rt.addr=null;}
+         else rt.addr={rack:d.rack,slot:d.slot,key:d.key,lbl:d.lbl};
+         rt.dst=0; rt.tgt=null;}}),
     /* negative for EVERY source, not just env and lfo. Velocity that opens
        the filter is one idea; velocity that closes it is another, and there
        was no way to ask for the second. */
@@ -1093,6 +1161,147 @@ const MODULES=[
  {k:'0',id:'ply',name:'PLAY',slot:true,params:PLY_P,abbr:s=>s.typ?PTYPES[s.typ]:'···'},
 ];
 const paramsFor=(mi,slot)=>{const M=MODULES[mi];return M.flat?M.flat:M.params(slot);};
+
+/* ---------------- mod destinations ------------------------------------
+   A DESTINATION IS AN ADDRESS, not a place in an enum. `dst:3, idx:2` only
+   means anything next to the enum that happened to be current when it was
+   written, which is why a preset from an older build could quietly land on
+   the wrong filter — and why "all" and "slot 1" were indistinguishable.
+
+   An address is {rack, slot, key, lbl}:
+     rack  which rack — osc · flt · mod · fx · ply · vox · mix
+     slot  0-9, or '*' for every live slot in that rack
+     key   the param spec's key
+     lbl   the label it was bound against, as a GUARD
+
+   The label is the guard because fx params are positional: `fx/2/p2` is
+   `fdbk` on a delay and `color` on a reverb, so the key alone still resolves
+   — to something else entirely. Requiring the label to match turns that into
+   an unresolved route instead of a silent re-aim.
+
+   The TYPE is deliberately not in the address. A filter's `freq` is `freq` on
+   every filter type, so changing lp→hp keeps the route: you addressed that
+   slot's cutoff, not a lowpass's cutoff. */
+const MIX_P=[SP('level','lvl','lin',{min:0,max:1,step:0.05}),
+             SP('pan','pan','lin',{min:-1,max:1,step:0.05})];
+/* AMP AND PITCH BELONG TO THE VOICE, not to a rack. The amp envelope is the
+   VCA every operator runs through and `pitch` is all of them at once, so they
+   have no slot to live in — but they are the two destinations everything uses,
+   so they get a rack of their own with one slot. */
+const VOICE_P=[SP('amp','amp','lin',{min:0,max:1,step:0.05}),
+               SP('pitch','pitch','lin',{min:-1,max:1,step:0.05})];
+/* the ones that reach a live AudioParam and can therefore be driven at audio
+   rate; everything else is written on the render tick */
+const DEST_AUDIO=new Set(['flt.frq','flt.q','flt.gn','osc.amt','osc.rat','osc.fine',
+  'voice.amp','voice.pitch','mix.pan']);
+/* Two lanes. AUDIO is a live AudioParam and stays sample-accurate. CTRL is
+   written on the render tick, which is right for everything it covers — an fx
+   mix or a delay time does not need sample accuracy and has no AudioParam to
+   give it one.
+   Anything with NEITHER is left out of the table entirely. A destination you
+   can pick and that then does nothing is worse than one that is not offered:
+   the whole point of the table is that what is in it works. */
+const destRate=(rack,key)=>
+  DEST_AUDIO.has(rack+'.'+key)?'audio'
+  :(rack==='fx'&&(key==='mix'||/^p[1-8]$/.test(key)))?'ctrl'
+  :null;
+const slotNo=sl=>sl==='*'?'*':String((sl+1)%10);
+function destLabel(a){
+  if(!a||!a.rack)return '—';
+  return a.rack+slotNo(a.slot)+'·'+(a.lbl||a.key);
+}
+/* EVERY numeric parameter that exists right now, rebuilt from the live racks
+   each time it is asked for — add a slot and it is in the list, empty one and
+   it is gone. Menus are left out for now; a destination has to be a range. */
+/* THE MOD RACK IS IN ITS OWN TABLE. Building the list asks every rack for its
+   params, the mod rack's params include this picker, and the picker asks for
+   the list — straight back round. While the table is being built the picker
+   collapses to '—'; every other param of a mod slot is still there, which is
+   what makes `mod/3/rate` addressable in the first place. */
+let _inDests=false;
+function modDests(pre){
+  if(_inDests)return [];
+  _inDests=true;
+  try{ return modDests_(pre); } finally{ _inDests=false; }
+}
+function modDests_(pre){
+  const out=[];
+  const add=(rack,slot,spec,typ)=>{
+    if(!spec||spec.type==='enum')return;
+    if(spec.key&&spec.key[0]==='_')return;      // '_rt', '_dest': UI, not parameters
+    if(!destRate(rack,spec.key))return;         // nothing can drive it yet
+    out.push({rack,slot,key:spec.key,lbl:spec.lbl,typ:typ||'',
+      rate:destRate(rack,spec.key),spec});
+  };
+  for(let mi=0;mi<MODULES.length;mi++){
+    const M=MODULES[mi]; if(!M||!M.id||M.prs)continue;
+    if(M.flat){for(const sp of M.flat)add(M.id,0,sp,''); continue;}
+    if(!M.slot)continue;
+    const rk=modHolder(pre,M.id)[M.id]||[];
+    const seen=new Map();
+    rk.forEach((sl,i)=>{
+      if(M.abbr(sl)==='···')return;
+      const ty=M.abbr(sl);
+      for(const sp of paramsFor(mi,sl)){
+        add(M.id,i,sp,ty);
+        const k=sp.key+'|'+sp.lbl; if(!seen.has(k))seen.set(k,sp);
+      }
+    });
+    for(const sp of seen.values())add(M.id,'*',sp,'all');   // one entry per param, every slot
+  }
+  for(const sp of VOICE_P)add('voice',0,sp,'');
+  for(const sp of MIX_P)add('mix',0,sp,'');
+  return out;
+}
+/* Walking five racks and building every spec object is not something to do at
+   thirty frames a second — the signature is what each slot IS, so the table is
+   rebuilt exactly when you add, remove or retype one, and reused otherwise. */
+let _destCache={sig:null,list:null};
+function destList(pre){
+  if(!pre)return [];
+  let sig=String(S.editSnd);
+  for(const id of ['osc','flt','mod','fx','ply']){
+    const M=MODULES.find(m=>m&&m.id===id); if(!M)continue;
+    const rk=(modHolder(pre,id)||{})[id]||[];
+    sig+='|'+rk.map(sl=>M.abbr(sl)).join(',');
+  }
+  if(_destCache.sig===sig)return _destCache.list;
+  _destCache={sig,list:modDests(pre)};
+  return _destCache.list;
+}
+/* → the live slots this address names, or [] when it no longer resolves.
+   Nothing is ever silently re-aimed: a missing slot, a missing key or a key
+   whose LABEL has changed all come back empty, and the route reads unresolved. */
+function resolveDest(pre,a){
+  if(!a||!a.rack)return [];
+  if(a.rack==='voice')return VOICE_P.some(x=>x.key===a.key&&x.lbl===a.lbl)?[{voice:true,key:a.key}]:[];
+  if(a.rack==='mix')return MIX_P.some(x=>x.key===a.key&&x.lbl===a.lbl)?[{mix:true,key:a.key}]:[];
+  const mi=MODULES.findIndex(M=>M&&M.id===a.rack); if(mi<0)return [];
+  const M=MODULES[mi];
+  if(M.flat){const sp=M.flat.find(x=>x.key===a.key&&x.lbl===a.lbl);
+    return sp?[{mi,si:0,spec:sp,slot:modHolder(pre,M.id)[M.id]}]:[];}
+  const rk=modHolder(pre,M.id)[M.id]||[], out=[];
+  for(const i of (a.slot==='*'?rk.map((_,k)=>k):[a.slot])){
+    const sl=rk[i]; if(!sl||M.abbr(sl)==='···')continue;
+    const sp=paramsFor(mi,sl).find(x=>x.key===a.key&&x.lbl===a.lbl);
+    if(sp)out.push({mi,si:i,spec:sp,slot:sl});
+  }
+  return out;
+}
+/* MOVING A SLOT IS NORMAL, so one narrow rescue: a route that no longer
+   resolves, and exactly ONE live slot in that rack now offering that param
+   under that label, and no other route already pointing at it. One candidate,
+   no ambiguity — anything else stays empty rather than being guessed at. */
+function rebindDest(pre,a){
+  if(!a||!a.rack||a.slot==='*')return null;
+  if(resolveDest(pre,a).length)return null;
+  const cands=modDests(pre).filter(d=>d.rack===a.rack&&d.key===a.key&&d.lbl===a.lbl&&d.slot!=='*');
+  if(cands.length!==1)return null;
+  const taken=(pre.mod||[]).some(m=>m&&m.routes&&m.routes.some(rt=>rt.addr&&rt.addr!==a&&
+    rt.addr.rack===cands[0].rack&&rt.addr.slot===cands[0].slot&&rt.addr.key===cands[0].key));
+  if(taken)return null;
+  return {rack:cands[0].rack,slot:cands[0].slot,key:cands[0].key,lbl:cands[0].lbl};
+}
 const slotOf=(pre,mi,si)=>pre[MODULES[mi].id][si];
 /* specs may carry get/set accessors (used for route-nested MOD params) */
 const getV=(pre,mi,si,spec)=>{const o=MODULES[mi].flat?pre[MODULES[mi].id]:slotOf(pre,mi,si);
@@ -2345,7 +2554,7 @@ class Voice{
     const envs=[], lfoList=[];       // one source fans out to all its routes
     for(const m of md){
       if(m.off||!m.routes)continue;
-      for(const rt of m.routes){
+      for(const rt of effRoutes(m)){
         if(rt.tgt)continue;                      // learned addresses handled separately below
         if(m.src===1&&MD2ENV[rt.dst]&&Math.abs(rt.amt)>0.5)
           envs.push({dst:MD2ENV[rt.dst],idx:rt.idx,amt:rt.amt,a:m.a,d:m.d,s:m.s,r:m.r,crv:m.crv});
@@ -2359,7 +2568,7 @@ class Voice{
     let ampBias=0;
     this.opBias={};                      // amp+slot n: scales operator n instead
     for(const m of md){ if(m.off||!m.src||!m.routes)continue;
-      for(const rt of m.routes){ if(rt.dst!==1)continue;
+      for(const rt of effRoutes(m)){ if(rt.dst!==1)continue;
         if(Math.round(rt.idx||0)>=1){    // one operator, not the whole voice
           const si4=clamp(Math.round(rt.idx),1,10)-1, A2=(rt.amt||0)/100;
           let b2=(rt.ctr||0)/100;
@@ -2710,7 +2919,7 @@ class Voice{
     for(const m of md){
       if(m.off||m.src<3||m.src>5||!m.routes)continue;
       const v=m.src===3?clamp(vel,0,1):m.src===4?clamp((midi-60)/24,-2,2):(Math.random()*2-1);
-      for(const rt of m.routes){
+      for(const rt of effRoutes(m)){
         if(!rt.dst)continue;
         const k=v*(rt.amt||0)/100;
         if(rt.dst===3){                          // filter cutoff (cents)
@@ -2733,7 +2942,7 @@ class Voice{
     for(const m of md){
       if(m.off||m.src!==6||!m.routes)continue;
       this.pressGlide=Math.max(0.005,m.pg??0.03);
-      for(const rt of m.routes){
+      for(const rt of effRoutes(m)){
         if(!rt.dst)continue;
         const A=(rt.amt||0)/100;
         if(rt.dst===3){                          // filter cutoff (cents)
@@ -2763,7 +2972,7 @@ class Voice{
     /* center: a per-route DC bias on the target (independent of the source) */
     for(const m of md){
       if(m.off||!m.src||!m.routes)continue;
-      for(const rt of m.routes){
+      for(const rt of effRoutes(m)){
         const c=(rt.ctr||0)/100; if(!c||!rt.dst)continue;
         if(rt.dst===3){const ps=this._fltP(rt.idx,'detune');
           if(ps.length){const cs=ac.createConstantSource();cs.offset.value=clamp(c*2400,-4800,4800);
@@ -2778,8 +2987,11 @@ class Voice{
     for(const m of md){
       if(m.off||!m.src||!m.routes)continue;
       for(const rt of m.routes){
-        if(!rt.tgt)continue;
-        const rp=this._modParam(rt.tgt); if(!rp||!rp.params.length)continue;
+        /* the learned form, plus any ADDRESS the (dst,idx) enum cannot express
+           — a filter's resonance or gain, an operator's level on "all" */
+        const t=rt.tgt||(rt.addr&&!effRoute(rt).dst?rt.addr:null);
+        if(!t)continue;
+        const rp=this._modParam(t); if(!rp||!rp.params.length)continue;
         const A=(rt.amt||0)/100, dep=rp.cents?A*4800:A*(rp.range||1), cbias=(rt.ctr||0)/100;
         const cAmt=rp.cents?cbias*2400:cbias*(rp.range||1);
         for(const param of rp.params){
@@ -2870,17 +3082,32 @@ class Voice{
     const b=this.fNode2&&this.fNode2[i];
     return b?[a[which],b[which]]:[a[which]];
   }
-  _modParam(tgt){              // learned target → the live AudioParam(s) to modulate
-    if(!tgt)return null;
-    if(tgt.mod==='flt'){
-      const bq=this.fNodes[tgt.s]; if(!bq)return null;
-      if(tgt.key==='q') return {params:this.fParams(tgt.s,'Q'),    range:14};
-      if(tgt.key==='gn')return {params:this.fParams(tgt.s,'gain'), range:18};
-      if(tgt.key==='frq')return {params:this.fParams(tgt.s,'detune'), cents:true};
+  /* an address → the live AudioParam(s) it names. Takes both the old learned
+     shape {mod,s,key} and a table address {rack,slot,key}; the only difference
+     is how the slot is written, so it is normalised once and read once. */
+  _modParam(t){
+    if(!t)return null;
+    const rack=t.rack||t.mod, key=t.key;
+    const sel=t.rack!==undefined?(t.slot==='*'?0:clamp(t.slot,0,9)+1):((t.s|0)+1);
+    if(rack==='flt'){
+      if(key==='q')  return {params:this._fltP(sel,'Q'),     range:14};
+      if(key==='gn') return {params:this._fltP(sel,'gain'),  range:18};
+      if(key==='frq')return {params:this._fltP(sel,'detune'),cents:true};
     }
-    if(tgt.mod==='osc'){
-      if(tgt.key==='pitch'){const pd=this.opDet[tgt.s]; if(pd&&pd.length)return {params:pd.filter(x=>x.sc>=1).map(x=>x.pm), cents:true};}
-      if(tgt.key==='amt'||tgt.key==='level'){const gl=this.opGains[tgt.s]; if(gl&&gl.length)return {params:gl.map(g=>g.gain), range:1};}
+    if(rack==='osc'){
+      if(key==='pitch'||key==='rat'||key==='fine'){
+        const pd=(sel>=1?[this.opDet[sel-1]]:Object.values(this.opDet||{})).filter(Boolean).flat();
+        const ps=pd.filter(x=>x.sc>=1).map(x=>x.pm);
+        if(ps.length)return {params:ps,cents:true};
+      }
+      if(key==='amt'||key==='level'){
+        const gl=this._opG(sel).flat().map(g=>g.gain);
+        if(gl.length)return {params:gl,range:1};
+      }
+    }
+    if(rack==='voice'&&key==='pitch'){
+      const ps=Object.values(this.opDet||{}).flat().filter(x=>x.sc>=1).map(x=>x.pm);
+      if(ps.length)return {params:ps,cents:true};
     }
     return null;
   }
@@ -3647,11 +3874,16 @@ class Engine{
      changes the SHAPE of the graph (the type, the delay's mode) still needs a
      rebuild, and that is the one time losing the tail is honest, because it is
      a different effect. */
-  fxLive(pi,si,key){
+  fxLive(pi,si,key,val){
     const b=this.buses[pi], L=b&&b.fxLive&&b.fxLive[si];
     if(!L)return false;
-    const fx=S.presets[pi].fx[si], n=AC.currentTime;
+    /* `val` given = a modulator asking for a value; the slot itself is left
+       exactly as you set it, so the knob still reads what you dialled and the
+       save still holds it. Without it this is an edit and reads the slot. */
+    const fx0=S.presets[pi].fx[si], n=AC.currentTime;
+    const fx=val===undefined?fx0:Object.assign({},fx0,{[key]:val});
     if(XTYPES[fx.typ]!==L.t)return false;                    // type changed under us
+    if(val!==undefined&&!(key==='mix'||L.t==='dly'))return false;   // no applier yet
     if(key==='mix'){
       if(L.full)return false;                                // comp/clip: mix is makeup gain
       L.dry.gain.setTargetAtTime(1-fx.mix,n,0.02);
@@ -3689,6 +3921,73 @@ class Engine{
       return false;                                          // p3 = mode: topology
     }
     return false;
+  }
+  /* ---- CONTROL-RATE MODULATION ------------------------------------------
+     The other lane. Everything the mod rack can point at that has no live
+     AudioParam gets written here instead, once per rendered frame, from the
+     same sources the audio-rate routes use. The value is handed to the applier
+     — it is never written back into the slot, so the knob still reads what you
+     dialled and the save still holds it.
+     `base` is restored once when a route stops modulating, otherwise the last
+     value would stick and quietly become the patch. */
+  modTick(){
+    const now=AC.currentTime;
+    this._ctrlHeld=this._ctrlHeld||{};
+    const touched={};
+    for(let pi=0;pi<10;pi++){
+      const p=S.presets[pi]; if(!p||!p.mod)continue;
+      for(const m of p.mod){
+        if(!m||m.off||!m.src||!m.routes)continue;
+        for(const rt of m.routes){
+          const a=rt.addr; if(!a||rt.dst)continue;
+          if(destRate(a.rack,a.key)!=='ctrl')continue;
+          const hits=resolveDest(p,a); if(!hits.length)continue;   // unresolved: nothing happens
+          const src=this._modSrc(m,pi,now); if(src===null)continue;
+          const amt=(rt.amt||0)/100, ctr=(rt.ctr||0)/100;
+          for(const h of hits){
+            const sp=h.spec, lo=sp.min??0, hi=sp.max??1;
+            const base=h.slot[sp.key]??lo;
+            const span=(hi-lo);
+            const v=clamp(base+ctr*span+src*amt*span,lo,hi);
+            const id=pi+'.'+a.rack+'.'+h.si+'.'+sp.key;
+            touched[id]=1;
+            this._ctrlHeld[id]={pi,si:h.si,key:sp.key,base};
+            if(a.rack==='fx')this.fxLive(pi,h.si,sp.key,v);
+          }
+        }
+      }
+    }
+    for(const id in this._ctrlHeld){                    // a route that stopped: put it back once
+      if(touched[id])continue;
+      const h=this._ctrlHeld[id]; delete this._ctrlHeld[id];
+      try{this.fxLive(h.pi,h.si,h.key,undefined);}catch(_){}
+    }
+  }
+  /* a mod slot's output right now, in −1..1. The audio-rate lane builds an
+     oscillator for this; here it is arithmetic on the clock. */
+  _modSrc(m,pi,now){
+    const s=Math.round(m.src||0);
+    if(s===2){                                          // lfo, free-running
+      const ph=fmod((now*lfoHz(m))+((m.ph||0)/360),1);
+      const w=Math.round(m.wav||0);
+      return w===1?(1-4*Math.abs(ph-0.5))            // tri
+            :w===2?(ph<0.5?1:-1)                     // sqr
+            :w===3?(2*ph-1)                          // saw
+            :Math.sin(2*Math.PI*ph);                 // sin
+    }
+    const L=(this.lastOn||{})[pi];
+    if(s===1){                                          // env, from the last note struck
+      if(!L)return 0;
+      const t=now-L.t; if(t<0)return 0;
+      const a=Math.max(0.001,m.a), d=Math.max(0.001,m.d), sus=clamp(m.s??0,0,1);
+      if(t<a)return t/a;
+      const k=Math.pow(2,-(m.crv||0)/55);
+      return sus+(1-sus)*Math.exp(-3*Math.pow(Math.min(1,(t-a)/d),k));
+    }
+    if(s===3)return L?L.vel:0;                          // velocity of that note
+    if(s===4)return L?clamp((L.midi-60)/24,-2,2):0;     // key follow
+    if(s===5)return this._rndHold=(this._rndHold===undefined?Math.random()*2-1:this._rndHold);
+    return null;
   }
   cutLive(pi,slot){
     const f=S.presets[pi].flt[slot], n=AC.currentTime;
@@ -4160,7 +4459,7 @@ class Engine{
     const mod=[];
     for(const m of (p.mod||[])){
       if(!m||m.off||!m.src||!m.routes)continue;
-      for(const rt of m.routes){
+      for(const rt of effRoutes(m)){
         if(!rt.dst)continue;
         mod.push({src:m.src,dst:rt.dst,idx:rt.idx,amt:rt.amt,
                   a:m.a,d:m.d,s:m.s,r:m.r,rate:m.rate,ph:m.ph});
@@ -4462,6 +4761,10 @@ class Engine{
   /* PLAY rack: chord fanout + arp pool. Sequencer & live both come through here. */
   trigger(at,pi,midi,vel,durSec){
     const chan=S.presets[pi];
+    /* control-rate envelopes need a note to start from — the audio-rate ones
+       get theirs from the voice, but an fx mix is a channel-level thing and
+       belongs to whatever was played last */
+    (this.lastOn=this.lastOn||{})[pi]={t:at,vel:clamp(vel,0,1),midi};
     midi+=(chan.tr||0)*12+(chan.trs||0);   // octave + semitone transpose, pre-scale
     if(chan.vof)vel=clamp(vel+chan.vof,0.02,1);   // the channel's own velocity offset
     /* kit pads carry their own PLAY rack (chord/arp/flam/humanize per pad) */
@@ -10459,6 +10762,11 @@ function load(json){
         if(o.v<19){fixAmpIdx(p); (p.kit||[]).forEach(k=>k&&fixAmpIdx(k));}
         if(o.v<16&&p.cat==='kit'){p.kit=null;p.prep=null;}   // v16: kits are 12 full pad chains now
         if(o.v<17)fx17p(p);                                 // v17: drv/crush → dist · verb size curve
+        /* LAST, after every migration that rewrites dst or idx — an address
+           derived before fixAmpIdx would point at operator 1 instead of the
+           voice. A v13+ save never goes through foldMod at all, so this is the
+           only place those routes get addressed. */
+        addrMod(p); (p.kit||[]).forEach(k=>k&&addrMod(k));
         p.modLoop=Looper.from(sp.modLoop||{unit:'b',count:8}); p.modLoop.auto=false;
         if(o.v<13)p.modLoop.events=[]; // module indices changed — drop stale automation
         if(o.v===4){  // module order changed in v5: ply 6->9, vox 8->7, mix 9->8
@@ -12154,6 +12462,7 @@ function renderHelp(L){
 let lastR=0, lastF=0, cpuLoad=0;
 (function raf(t){
   requestAnimationFrame(raf);
+  try{engine.modTick();}catch(_){}
   if(lastF){                       // main-thread load: how far frames stretch past 60fps
     const gap=t-lastF;
     if(gap<500)cpuLoad=cpuLoad*0.95+clamp((gap-17)/17,0,1)*100*0.05;
