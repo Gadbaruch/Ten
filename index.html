@@ -9737,6 +9737,7 @@ function syncCaps(e){
 let capsWas=false;
 const onKeyDown=e=>{
   syncCaps(e);
+  filePerm();          // a keypress is the gesture the file handle needs
   /* THE BROWSER OWNS ITS OWN KEYS while it is open — but only the ones it
      uses. Letters still play, because hearing the channel is the whole reason
      you are choosing where to send a modulator. */
@@ -9948,7 +9949,7 @@ const onKeyDown=e=>{
   }
 
   if(e.metaKey||e.ctrlKey){
-    if(e.code==='KeyE'){e.preventDefault();exportJSON();}
+    if(e.code==='KeyE'){e.preventDefault(); if(e.shiftKey)linkFile(); else exportJSON();}
     if(e.code==='KeyZ'){e.preventDefault();if(!e.repeat)(e.shiftKey?doRedo:doUndo)();}
     if(e.code==='ArrowUp'||e.code==='ArrowDown'){e.preventDefault();   // cmd+↑↓ = per-note prep tweak
       if(S.layer>=2&&!MODULES[S.curMod].prs)prepTweak(e.code==='ArrowUp'?1:-1,e.altKey?0.1:e.shiftKey?10:1);}
@@ -11204,7 +11205,67 @@ function load(json){
 }
 setInterval(()=>{if(dirtySave){dirtySave=false;
   try{localStorage.setItem(LS,serialize());}catch(_){}
-  bakPush('auto');}},1500);
+  bakPush('auto');
+  fileWrite();}},1500);
+/* ---------------- AUTOSAVE INTO A REAL FILE ---------------------------
+   THERE HAS ALWAYS BEEN AN AUTOSAVE. It writes every 1.5 seconds and it has
+   never missed. The trouble is WHERE: localStorage belongs to the browser
+   profile, so a fresh preview pane, a cleared site or a different browser
+   takes the set, the library and the backup ring with it in one go. An
+   autosave cannot survive its own disk being swapped out.
+   A file can. Link one once — ⌘⇧E — and every change is written into it from
+   then on, and it is still there when the browser is not. */
+let FILEH=null, FILEOK=false, _fileSig='', _fileAt=0, _permAsked=false;
+const fhDB=fn=>new Promise(res=>{
+  let r; try{r=indexedDB.open('ten-fs',1);}catch(_){return res(null);}
+  r.onupgradeneeded=()=>{try{r.result.createObjectStore('h');}catch(_){}};
+  r.onsuccess=()=>{try{fn(r.result,res);}catch(_){res(null);}};
+  r.onerror=()=>res(null);
+});
+const fhStore=h=>fhDB((db,res)=>{const t=db.transaction('h','readwrite');
+  t.objectStore('h').put(h,'set'); t.oncomplete=()=>{db.close();res(true);};});
+const fhLoad=()=>fhDB((db,res)=>{const t=db.transaction('h','readonly');
+  const q=t.objectStore('h').get('set');
+  q.onsuccess=()=>{db.close();res(q.result||null);};
+  q.onerror=()=>{db.close();res(null);};});
+async function fileWrite(force){
+  if(!FILEH||!FILEOK)return;
+  let str; try{str=serialize();}catch(_){return;}
+  if(!force&&(str===_fileSig||Date.now()-_fileAt<5000))return;
+  try{
+    const w=await FILEH.createWritable();
+    await w.write(str); await w.close();
+    _fileSig=str; _fileAt=Date.now();
+  }catch(_){FILEOK=false; flash('lost the set file — ⌘⇧E to link it again');}
+}
+async function linkFile(){
+  if(!window.showSaveFilePicker){
+    flash('this browser cannot hold a file open — ⌘E exports one instead');return;}
+  try{
+    const h=await showSaveFilePicker({suggestedName:'ten-set.json',
+      types:[{description:'TEN set',accept:{'application/json':['.json']}}]});
+    FILEH=h; FILEOK=true; _fileSig=''; await fhStore(h); await fileWrite(true);
+    flash('◆ '+h.name+' — every change goes here from now on');
+    dirty=true;
+  }catch(_){}                                   // cancelled: nothing to say
+}
+/* re-linking needs a gesture, so it happens on the first key you press */
+function filePerm(){
+  if(!FILEH||FILEOK||_permAsked)return;
+  _permAsked=true;
+  try{FILEH.requestPermission({mode:'readwrite'}).then(st=>{
+    FILEOK=(st==='granted');
+    if(FILEOK){_fileSig=''; fileWrite(true); flash('◆ '+FILEH.name+' relinked');}
+    dirty=true;});}catch(_){}
+}
+(async()=>{
+  const h=await fhLoad(); if(!h)return;
+  FILEH=h;
+  try{FILEOK=(await h.queryPermission({mode:'readwrite'}))==='granted';}catch(_){FILEOK=false;}
+  if(FILEOK)setTimeout(()=>flash('◆ set file linked — '+h.name),600);
+  else setTimeout(()=>flash('◆ '+h.name+' is linked — press any key to let it write'),600);
+  dirty=true;
+})();
 function exportJSON(){
   const a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob([serialize()],{type:'application/json'}));
@@ -11674,6 +11735,9 @@ function render(){
     dot+sp('d','kb ')+sp(S.oct?'a':'d',S.oct>0?'+'+S.oct:String(S.oct))+
     dot+sp('d','q ')+(CFG.qOn?sp('a',Math.round((qv&&qv.qlive!=null?qv.qlive:1)*100)+'%')+(CFG.qMon===0?sp('d','·live'):''):sp('r','off'))+
     (HOLD.optLatched&&HOLD.opt?dot+sp('ri',' ⟳ '+OPTRACK[HOLD.opt.c].name+' ch '+HOLD.opt.ch+' '):'')+
+    /* WHETHER THE SET IS ON A DISK, at a glance. Not knowing was the whole
+       problem: an autosave you cannot see is one you find out about afterwards. */
+    dot+(FILEH?(FILEOK?sp('a','◆ file'):sp('r','◆ file?')):sp('d','⌘⇧E file'))+
     dot+(recOn?sp('r',LATCH.on?'● REC':'● rec'):sp('d','rec'))+
     dot+sp('d',(dspOn?'dsp ':'cpu '))+sp(dsp>70?'r':dsp>45?'a':'d',cpuS)+sp('d','·'+nvS));}
   L.push(sp('d','─'.repeat(W)));
@@ -12842,6 +12906,7 @@ function renderHelp(L){
     ['hold tab (in a channel)','also arms AUTOMATION: knobs you move while it is held are written to the channel’s mod loop. The Auto block under the rack shows what is recorded and says ● while it is arming'],
     ['hold q','QUANTIZE: 1-8 set THIS channel\u2019s grid — 1 beats · 2 8ths · 3 8th triplets · 4 16ths · 5 dotted 8ths · 6 16th triplets · 7 sevenths · 8 32nds'],
     ['hold q + 0','quantize OFF — notes land exactly where you played them. Picking a grid turns it back on, because asking for a grid is asking to be on it'],
+    ['⌘⇧E','KEEP THE SET IN A FILE. Pick one once and every change is written into it as you work — the ordinary autosave only ever reaches localStorage, which belongs to the browser profile and goes when the profile does. The header shows ◆ file while it is writing. ⌘E still exports a one-off copy, and dragging a .json back in loads it'],
     ['hold q + m','MONITOR: grid or live. On grid you hear yourself snapped to the beat — the feel of the thing, but a roll faster than the grid puts two hits on one step and a mono channel can only sound one, so notes thin out. On live you hear every hit as you played it and the grid still owns what records. Play rolls on live, or give the channel a finer grid'],
     ['tap q','toggle quantize. Only the TAP toggles: choosing a grid leaves the switch alone'],
     ['hold m','TEMPO: ↑↓ bpm (⇧ ×10 · ⌥ ×0.1) · tap m = click on/off · ⇧m tap = tap tempo'],
