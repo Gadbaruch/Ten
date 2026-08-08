@@ -4116,7 +4116,14 @@ class Engine{
      release, so a fast attack catches the transient and a slow release rides
      the body. */
   flwTick(){
-    const dt=1/60;
+    /* REAL ELAPSED TIME, not an assumed frame. This was hardcoded to 1/60, so
+       a follower's attack and release depended on how fast the UI happened to
+       be drawing — the same settings behaved differently under load, which is
+       exactly the kind of inaccuracy that makes a groove feel loose without
+       ever showing up as a wrong note. */
+    const now0=AC.currentTime;
+    const dt=clamp(now0-(this._flwAt||now0-1/60),1/1000,1/10);
+    this._flwAt=now0;
     this.flw=this.flw||{};
     const rms={};
     for(let pi=0;pi<10;pi++){
@@ -13200,9 +13207,16 @@ function renderHelp(L){
 }
 
 let lastR=0, lastF=0, cpuLoad=0;
+/* MODULATION DOES NOT BELONG TO THE RENDERER. This rode the animation frame,
+   so every control-rate route — an fx mix, a delay time, an LFO's rate, an
+   envelope shape — moved at whatever rate the screen happened to be drawing,
+   stalled when the UI was busy and stopped dead when the tab went to the
+   background. Its own clock, faster than a frame and independent of one.
+   It is still a main-thread clock; making it sample-accurate is what moving
+   the DSP onto the audio thread buys. */
+setInterval(()=>{try{engine.modTick();}catch(_){}},8);
 (function raf(t){
   requestAnimationFrame(raf);
-  try{engine.modTick();}catch(_){}
   if(lastF){                       // main-thread load: how far frames stretch past 60fps
     const gap=t-lastF;
     if(gap<500)cpuLoad=cpuLoad*0.95+clamp((gap-17)/17,0,1)*100*0.05;
