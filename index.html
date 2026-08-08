@@ -917,7 +917,8 @@ const MOD_P=sl=>{                    // unified: source picks which extra fields
   const s=Math.round(sl.src||0);
   const nR=(sl.routes||[]).length||1;
   const pre=S.presets[S.editSnd];
-  const DL=destList(pre);
+  const DL=destList(pre).filter(d=>!(d.rack==='mod'&&
+    (d.slot==='*'||d.slot===S.curSlot)));
   /* '—' first: a route with nowhere to go is a legal, visible state, and it is
      what a fresh mod slot and an unresolved one both read as. */
   const dOpts=['—'].concat(DL.map(d=>d.rack+slotNo(d.slot)+(d.typ&&d.typ!=='all'?'·'+d.typ:'')+'·'+d.lbl));
@@ -939,7 +940,7 @@ const MOD_P=sl=>{                    // unified: source picks which extra fields
     /* 'op' is skipped in the picker: amp with a slot number says the same
        thing, and two names for one destination is what made this confusing.
        Kept in the list so presets that already use it still resolve. */
-    SP('dest','_dest','enum',{opts:dOpts,fmt:tgtFmt,
+    SP('dest','_dest','enum',{opts:dOpts,fmt:tgtFmt,w:2,
        get:dGet,
        set:(m,v)=>{const rt=modRt(m), d=DL[Math.round(v)-1];
          if(!d){rt.addr=null;}
@@ -1204,6 +1205,10 @@ const DEST_AUDIO=new Set(['flt.frq','flt.q','flt.gn','osc.amt','osc.rat','osc.fi
 const destRate=(rack,key)=>
   DEST_AUDIO.has(rack+'.'+key)?'audio'
   :(rack==='fx'&&(key==='mix'||/^p[1-8]$/.test(key)))?'ctrl'
+  /* an LFO's speed and a route's depth, which is what "modulate a modulator"
+     actually means — both reach the running LFO nodes, so they are heard on
+     the note already sounding rather than the next one */
+  :(rack==='mod'&&(key==='rate'||key==='amt'))?'ctrl'
   :null;
 const slotNo=sl=>sl==='*'?'*':String((sl+1)%10);
 function destLabel(a){
@@ -1661,7 +1666,11 @@ function loopOps(e,c,lp){
 }
 const kmult=e=>altOf(e)?0.1:rs(e)?10:1;
 function fmtVal(spec,v){
-  if(spec.type==='enum')return spec.opts[clamp(Math.round(v),0,spec.opts.length-1)]??'?';
+  /* An enum with its own formatter meant it: the destination field is a list
+     to CHOOSE from and an address to READ, and they are not the same string.
+     This returned the raw option and the formatter was never called. */
+  if(spec.type==='enum')return spec.fmt?spec.fmt(v)
+    :(spec.opts[clamp(Math.round(v),0,spec.opts.length-1)]??'?');
   if(spec.fmt)return spec.fmt(v);
   if(spec.type==='freq')return fF(v);
   if(spec.type==='time')return fT(v);
@@ -3951,8 +3960,8 @@ class Engine{
             const v=clamp(base+ctr*span+src*amt*span,lo,hi);
             const id=pi+'.'+a.rack+'.'+h.si+'.'+sp.key;
             touched[id]=1;
-            this._ctrlHeld[id]={pi,si:h.si,key:sp.key,base};
-            if(a.rack==='fx')this.fxLive(pi,h.si,sp.key,v);
+            this._ctrlHeld[id]={pi,si:h.si,key:sp.key,base,rack:a.rack};
+            this._ctrlPut(a.rack,pi,h.si,sp.key,v);
           }
         }
       }
@@ -3960,8 +3969,33 @@ class Engine{
     for(const id in this._ctrlHeld){                    // a route that stopped: put it back once
       if(touched[id])continue;
       const h=this._ctrlHeld[id]; delete this._ctrlHeld[id];
-      try{this.fxLive(h.pi,h.si,h.key,undefined);}catch(_){}
+      try{this._ctrlPut(h.rack,h.pi,h.si,h.key,undefined);}catch(_){}
     }
+  }
+  _ctrlPut(rack,pi,si,key,v){
+    if(rack==='fx')return this.fxLive(pi,si,key,v);
+    if(rack==='mod')return this.modLive(pi,si,key,v);
+    return false;
+  }
+  /* a modulated MOD slot. Only the two that reach a running node: an LFO's
+     frequency and its depth, so a slow envelope on an LFO's rate is heard on
+     the note that is already ringing. `undefined` means put the slot's own
+     value back. */
+  modLive(pi,si,key,v){
+    const m=(S.presets[pi].mod||[])[si]; if(!m||m.src!==2)return false;
+    const n=AC.currentTime;
+    for(const vo of this.act[pi]||[]){
+      if(!vo.lfoN)continue;
+      for(const L of vo.lfoN){
+        if(L.mi!==si||!L.lo||!L.lg)continue;
+        if(L.g0===undefined)L.g0=L.lg.gain.value;
+        if(key==='rate')L.lo.frequency.setTargetAtTime(
+          clamp(v===undefined?lfoHz(m):v,0.02,80),n,0.02);
+        else if(key==='amt'&&L.base)L.lg.gain.setTargetAtTime(
+          L.g0*((v===undefined?L.base:v)/L.base),n,0.02);
+      }
+    }
+    return true;
   }
   /* a mod slot's output right now, in −1..1. The audio-rate lane builds an
      oscillator for this; here it is arithmetic on the clock. */
@@ -5265,7 +5299,7 @@ function libInit(){
     const rnd=mulberry32(cat.split('').reduce((a2,ch)=>a2*31+ch.charCodeAt(0),7));
     let i=arr.filter(en=>en.cat===cat).length, n=1;
     while(i<10){
-      const p=genPreset(cat,rnd);
+      const p=genPreset(cat,rnd); addrMod(p);
       p.name=cat.slice(0,2).toUpperCase()+String(n++).padStart(2,'0');
       if(arr.some(en=>en.name===p.name))continue;
       arr.push({name:p.name,cat,factory:true,data:presetData(p)}); i++;
@@ -5810,6 +5844,16 @@ function randomizeSound(pi,mode){
   }
   else if(isKit(p))randomizeKit(pi);
   else randomizeChannel(pi,w);
+  /* THE DICE STILL WRITE (dst, idx) — every generator predates the table — so
+     a rolled sound arrived with routes that had no address and read as the old
+     enum names in the browser. Derive them here, the same way a loaded preset
+     gets them. It does not change what is generated, only how it is written.
+     Re-read the channel: the generators build a fresh preset and put it in
+     place, so the one captured at the top of this function is the old one —
+     addressing that reached three routes out of six and left the rest bare. */
+  const q=S.presets[pi];
+  q._addr=false; addrMod(q);
+  (q.kit||[]).forEach(k=>{if(k){k._addr=false; addrMod(k);}});
   if(p.mix){p.mix.lvl=lvl; p.mix.pan=pan;}       // level and pan are yours, not the dice's
   engine.refresh(pi);
   flash((mode==='wild'?'⚡ wild':mode==='fresh'?'☆ new':'~ varied')+' sound · ch '+pi+
@@ -9406,7 +9450,7 @@ const onKeyDown=e=>{
      uses. Letters still play, because hearing the channel is the whole reason
      you are choosing where to send a modulator. */
   if(DPICK&&!e.metaKey&&!e.ctrlKey){
-    const c0=e.code, pre=S.presets[S.editSnd], G=destGroups(pre);
+    const c0=e.code, pre=S.presets[S.editSnd], G=dpickGroups();
     if(!G.length){DPICK=null;}
     else if(c0==='Escape'){DPICK=null; dirty=true; e.preventDefault(); return;}
     else if(c0==='ArrowLeft'||c0==='ArrowRight'){
@@ -11163,16 +11207,23 @@ function rackParams(L,pre,specs){
   const free=freeSlotHere(pre);
   const extra=free!=null?1:0;
   S.slotParam=clamp(S.slotParam|0,0,Math.max(0,specs.length-1+extra));
-  const n=Math.max(1,specs.length+extra);
-  const w=clamp(Math.floor(88/n)-1,5,10);
+  /* CELLS ARE NOT ALL THE SAME SIZE ANY MORE. Every column was one tenth of
+     the row, which is fine for '5.0Hz' and hopeless for an address — a
+     destination reading `fx1·color` had nowhere to be. A spec can ask for more
+     with `w`, and the rest share what is left. */
+  const wts=specs.map(sp=>sp.w||1); if(extra)wts.push(1);
+  const tot=wts.reduce((a,b)=>a+b,0)||1;
+  const unit=clamp(Math.floor(88/tot),6,11);
+  const wAt=i=>clamp(unit*(wts[i]||1)-1,5,26);
+  const w=wAt(wts.length-1);
   let lr='   ', vr='   ';
   specs.forEach((pspec,i)=>{
-    const foc=i===S.slotParam;
+    const foc=i===S.slotParam, cw=wAt(i);
     const pd=prepDisp(pre,S.curMod,S.curSlot,pspec);
     const v=(pd.dot?'•':'')+fmtVal(pspec,pd.v);
-    lr+=(foc?spH('a',' '+pad(pspec.lbl,w),'slot',i):spH('d',' '+pad(pspec.lbl,w),'slot',i))+' ';
-    vr+=(foc?spH('i',' '+pad(v,w),'slot',i)
-           :(pd.dot?spH('r k',' '+pad(v,w),'slot',i):spH('v k',' '+pad(v,w),'slot',i)))+' ';
+    lr+=(foc?spH('a',' '+pad(pspec.lbl,cw),'slot',i):spH('d',' '+pad(pspec.lbl,cw),'slot',i))+' ';
+    vr+=(foc?spH('i',' '+pad(v,cw),'slot',i)
+           :(pd.dot?spH('r k',' '+pad(v,cw),'slot',i):spH('v k',' '+pad(v,cw),'slot',i)))+' ';
   });
   if(extra){
     const i=specs.length, foc=i===S.slotParam;
@@ -12149,10 +12200,18 @@ function renderSlots(L){
    see here is exactly what exists right now. */
 let DPICK=null;                                   // {gi, si} while it is open
 const DPICK_ORDER=['osc','flt','mod','fx','ply','vox','voice','mix'];
-function destGroups(pre){
+const dpickGroups=()=>destGroups(S.presets[S.editSnd],
+  MODULES[S.curMod]&&MODULES[S.curMod].id==='mod'?S.curSlot:null);
+function destGroups(pre,selfSlot){
   const g=new Map();
-  for(const d of destList(pre)){ if(!g.has(d.rack))g.set(d.rack,[]); g.get(d.rack).push(d); }
-  return DPICK_ORDER.filter(k=>g.has(k)).map(k=>({rack:k,items:g.get(k)}));
+  for(const d of destList(pre)){
+    /* NOTHING MODULATES ITSELF. An LFO speeding up its own rate is not a
+       feature, it is a runaway — and `mod*` would sweep every slot including
+       this one, so the wildcard goes too. */
+    if(d.rack==='mod'&&selfSlot!=null&&(d.slot==='*'||d.slot===selfSlot))continue;
+    if(!g.has(d.rack))g.set(d.rack,[]); g.get(d.rack).push(d);
+  }
+  return DPICK_ORDER.filter(k=>g.has(k)&&g.get(k).length).map(k=>({rack:k,items:g.get(k)}));
 }
 function dpickRoute(){
   const pre=S.presets[S.editSnd], rk=modHolder(pre,'mod').mod;
@@ -12160,7 +12219,7 @@ function dpickRoute(){
   return m?modRt(m):null;
 }
 function openDestPick(){
-  const pre=S.presets[S.editSnd], G=destGroups(pre);
+  const pre=S.presets[S.editSnd], G=dpickGroups();
   if(!G.length){flash('nothing to modulate yet — add a slot to a rack first');return;}
   DPICK={gi:0,si:0};
   const rt=dpickRoute();
@@ -12173,7 +12232,7 @@ function openDestPick(){
   dirty=true;
 }
 function renderDestPick(L,pre){
-  const G=destGroups(pre); if(!G.length){DPICK=null;return;}
+  const G=dpickGroups(); if(!G.length){DPICK=null;return;}
   DPICK.gi=clamp(DPICK.gi|0,0,G.length-1);
   const items=G[DPICK.gi].items;
   DPICK.si=clamp(DPICK.si|0,0,items.length-1);
