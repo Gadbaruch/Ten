@@ -273,7 +273,7 @@ const FTYPE_W=[null,'lowpass','highpass','bandpass','notch','peaking','lowshelf'
 const EDST=['off','amp','pitch','filt','op'];
 const LDST=['off','pitch','filt','amp','pan','op'];
 /* unified MOD rack: one source per slot, one target enum */
-const MSRC=['off','env','lfo','vel','key','rnd','press'];   // press = live per-note pressure
+const MSRC=['off','env','lfo','vel','key','rnd','press','flw'];   // press = per-note pressure · flw = follow another channel
 const MDST=['off','amp','pitch','filt','pan','op'];   // + learned tgt address overrides this
 const MD2ENV={1:1,2:2,3:3,5:4};                        // MDST → the engine's env-dst numbering
 const MD2LFO={2:1,3:2,1:3,4:4,5:5};                    // MDST → the engine's lfo-dst numbering
@@ -294,7 +294,7 @@ const XDIST=XTYPES.indexOf('dist');
 const vrbSec=v=>0.05+4.45*Math.pow(clamp(v,0,1),2);
 const vrbInv=s=>clamp(Math.sqrt(Math.max(0,s-0.05)/4.45),0,1);
 const GPATS=[[1,1,1,1,0,0,0,0],[0,0,1,1,0,0,1,1],[1,0,1,0,1,0,1,0],[1,.7,.45,.3,.2,.12,.07,0],[1,0,0,1,0,0,1,0]];
-const PTYPES=['off','chord','arp','grv','prep','rev','rndp','vel','chc','euc','nudge','hmnz','flam','rpit'];
+const PTYPES=['off','chord','arp','grv','prep','rev','rndp','vel','chc','euc','nudge','hmnz','flam','rpit','len'];
 /* groove templates: f(16th-index) -> -1..1, scaled by amt% * half a 16th */
 const GROOVES=[
  {n:'sw16',f:i=>i%2===1?1:0},
@@ -371,7 +371,8 @@ const mkLfo =()=>({dst:0,idx:0,wav:0,rate:5,amt:30});
    made should affect the whole thing, and you narrow it if you want to. */
 const mkRoute=()=>({dst:0,idx:0,amt:100,ctr:0,tgt:null});
 const mkMod =i=>({src:0,rsel:0,routes:[mkRoute()],a:0.005,d:0.15,s:0.7,r:0.2,crv:0,
-                  wav:0,rate:5,ph:0,syn:0,rdiv:3,ltr:0});
+                  wav:0,rate:5,ph:0,syn:0,rdiv:3,ltr:0,
+                  fch:1,fa:0.01,fr:0.15,fg:4});
 /* tempo divisions for a synced LFO, in beats */
 const LFODIV=[['4 bar',16],['2 bar',8],['1 bar',4],['1/2',2],['1/4',1],['1/4T',2/3],
               ['1/8',0.5],['1/8T',1/3],['1/16',0.25],['1/16T',1/6],['1/32',0.125]];
@@ -973,6 +974,17 @@ const MOD_P=sl=>{                    // unified: source picks which extra fields
     SP('trig','ltr','enum',{opts:['retrig','free']}),
     SP('phase','ph','lin',{min:0,max:355,step:5,fmt:v=>v+'°'})]);
   if(s===5)return base.concat([SP('rate','rate','time',{min:0.05,max:40,fmt:fHz})]);  // rnd = S&H rate
+  /* ENVELOPE FOLLOWER. Not this note's envelope — another CHANNEL's level, as
+     it happens. The kick opening a filter on the bass, a vocal ducking a pad,
+     a hat riding the snare: things you can only do by listening to a neighbour.
+     Attack and release are how fast it hears and how slowly it forgets. */
+  if(s===7)return base.concat([
+    SP('follow','fch','lin',{min:1,max:9,step:1,fmt:v=>'ch'+Math.round(v),
+       get:m=>m.fch??1, set:(m,v)=>m.fch=Math.round(v)}),
+    SP('atk','fa','time',{min:0.001,max:0.5,get:m=>m.fa??0.01,set:(m,v)=>m.fa=v}),
+    SP('rel','fr','time',{min:0.01,max:2,get:m=>m.fr??0.15,set:(m,v)=>m.fr=v}),
+    SP('gain','fg','lin',{min:0.5,max:12,step:0.5,fmt:v=>'×'+v,
+       get:m=>m.fg??4, set:(m,v)=>m.fg=v})]);
   if(s===6)return base.concat([SP('glide','pg','time',{min:0.005,max:0.5,fmt:fT,
     get:m=>m.pg??0.03, set:(m,v)=>m.pg=v})]);   // pressure smoothing
   return base;                       // vel / key: target + amount + range
@@ -1115,6 +1127,16 @@ const PLY_P=sl=>{
     SP('strum','p2','lin',{min:-0.06,max:0.06,step:0.005,fmt:v=>Math.round(v*1000)+'ms'}),
     SP('role','p3','enum',{opts:['local','global'],
       get:o=>o.p3===undefined?1:o.p3, set:(o,v)=>{o.p3=v;}}));
+  /* LENGTH. Every other play effect changes WHICH notes happen or WHEN; this
+     one changes how long each one is held, which is the difference between a
+     stab and a pad on the same part. Scale first so it stays musical across
+     tempos, then a fixed amount on top for the cases where you want every note
+     the same length regardless of what was played. */
+  if(sl.typ===14)return T(
+    SP('length','p1','lin',{min:0.05,max:4,step:0.05,fmt:v=>'×'+(+v).toFixed(2)}),
+    SP('add','p2','lin',{min:-0.5,max:2,step:0.01,
+       fmt:v=>(v>0?'+':'')+Math.round(v*1000)+'ms'}),
+    SP('min','p3','time',{min:0.005,max:2,get:o=>o.p3??0.02,set:(o,v)=>{o.p3=v;}}));
   if(sl.typ===2)return T(
     SP('div','p1','enum',{opts:ARPDIV}),
     SP('mode','p2','enum',{opts:ARPMODE}),
@@ -2465,6 +2487,12 @@ class Voice{
     for(const n of this.pressN)
       try{n.p.setTargetAtTime((n.base||0)+this.press*n.sc,t,this.pressGlide);}catch(_){}
   }
+  setFollow(x){
+    if(this.killed||!this.flwN||!this.flwN.length)return;
+    const v=clamp(x,0,1), t=AC.currentTime;
+    for(const n of this.flwN)
+      try{n.p.setTargetAtTime((n.base||0)+v*n.sc,t,0.02);}catch(_){}
+  }
   /* live OSC edits: retune / relevel / reshape the running oscillators instead of
      waiting for the next note. mode/dest/trig/phase are structural — those still
      land on the next note, since they change the graph itself. */
@@ -3017,8 +3045,15 @@ class Voice{
        DC offset on the vca itself, or the envelope could not close the note. */
     this.pressN=[]; this.press=0; this.pressGlide=0.03;
     for(const m of md){
-      if(m.off||m.src!==6||!m.routes)continue;
-      this.pressGlide=Math.max(0.005,m.pg??0.03);
+      if(m.off||(m.src!==6&&m.src!==7)||!m.routes)continue;
+      /* A FOLLOWER IS A PRESSURE THAT COMES FROM SOMEWHERE ELSE. Identical
+         plumbing — a constant source per route, offset written from outside —
+         so it reaches the same destinations pressure does, at audio rate,
+         instead of being stuck in the per-frame lane. */
+      const FL=m.src===7;
+      const bag=FL?(this.flwN=this.flwN||[]):this.pressN;
+      if(FL)this.flwMi=(this.flwMi===undefined?md.indexOf(m):this.flwMi);
+      else this.pressGlide=Math.max(0.005,m.pg??0.03);
       for(const rt of effRoutes(m)){
         if(!rt.dst)continue;
         const A=(rt.amt||0)/100;
@@ -3028,13 +3063,13 @@ class Voice{
           const cs=ac.createConstantSource(); cs.offset.value=0;
           for(const pm of ps)cs.connect(pm);
           cs.start(at); this.nodes.push(cs);
-          this.pressN.push({p:cs.offset,sc:clamp(A*4800,-9600,9600),base:0});
+          bag.push({p:cs.offset,sc:clamp(A*4800,-9600,9600),base:0});
         }else if(rt.dst===2){                    // pitch
           const cs=ac.createConstantSource(); cs.offset.value=0;
           for(const tg of Object.values(this.opDet).flat()){if(tg.sc<1)continue;
             const g2=ac.createGain(); g2.gain.value=tg.sc*6; cs.connect(g2); g2.connect(tg.pm);}
           cs.start(at); this.nodes.push(cs);
-          this.pressN.push({p:cs.offset,sc:A,base:0});
+          bag.push({p:cs.offset,sc:A,base:0});
         }else if(rt.dst===1){                    // amp: a post-vca gain, base + press×amt
           /* center sets where an unpressed note sits: 0 leaves it at full and
              pressure adds on top, −100% starts it at SILENCE so the note has to
@@ -3042,7 +3077,7 @@ class Voice{
           const b0=clamp(1+(rt.ctr||0)/100,0,2);
           if(!this.pGain){this.pGain=ac.createGain(); this.pGain.gain.value=b0;}
           else this.pGain.gain.value=b0;
-          this.pressN.push({p:this.pGain.gain,sc:A,base:b0});
+          bag.push({p:this.pGain.gain,sc:A,base:b0});
         }
       }
     }
@@ -4007,8 +4042,47 @@ class Engine{
      dialled and the save still holds it.
      `base` is restored once when a route stops modulating, otherwise the last
      value would stick and quietly become the patch. */
+  /* what each channel's followers are hearing, right now. One reading per
+     SOURCE channel per frame, smoothed by that mod slot's own attack and
+     release, so a fast attack catches the transient and a slow release rides
+     the body. */
+  flwTick(){
+    const dt=1/60;
+    this.flw=this.flw||{};
+    const rms={};
+    for(let pi=0;pi<10;pi++){
+      const p=S.presets[pi]; if(!p||!p.mod)continue;
+      for(let si=0;si<p.mod.length;si++){
+        const m=p.mod[si];
+        if(!m||m.off||m.src!==7)continue;
+        const src=clamp(Math.round(m.fch??1)||1,1,9);
+        if(rms[src]===undefined){
+          const b=this.buses[src];
+          if(!b||!b.an){rms[src]=0;}
+          else{b.an.getFloatTimeDomainData(this.anBuf);
+            let s2=0; for(let i=0;i<this.anBuf.length;i++)s2+=this.anBuf[i]*this.anBuf[i];
+            rms[src]=Math.sqrt(s2/this.anBuf.length);}
+        }
+        const tgt=clamp(rms[src]*(m.fg??4),0,1);
+        const k=pi+'|'+si, cur=this.flw[k]||0;
+        const tc=Math.max(0.001,tgt>cur?(m.fa??0.01):(m.fr??0.15));
+        const a=1-Math.exp(-dt/tc);
+        this.flw[k]=cur+(tgt-cur)*a;
+      }
+    }
+    /* …and into the notes that are sounding */
+    for(let pi=0;pi<10;pi++){
+      const p=S.presets[pi]; if(!p||!p.mod)continue;
+      for(const v of this.act[pi]||[]){
+        if(!v.flwN||!v.flwN.length||v.flwMi===undefined)continue;
+        const x=this.flw[pi+'|'+v.flwMi]; if(x===undefined)continue;
+        try{v.setFollow(x);}catch(_){}
+      }
+    }
+  }
   modTick(){
     const now=AC.currentTime;
+    try{this.flwTick();}catch(_){}
     this._ctrlHeld=this._ctrlHeld||{};
     const touched={};
     for(let pi=0;pi<10;pi++){
@@ -4130,6 +4204,10 @@ class Engine{
     }
     if(s===3)return L?L.vel:0;                          // velocity of that note
     if(s===4)return L?clamp((L.midi-60)/24,-2,2):0;     // key follow
+    if(s===7){                                          // envelope follower
+      const x=(this.flw||{})[pi+'|'+si];
+      return x===undefined?0:x;
+    }
     if(s===5){
       /* THE RATE FIELD ON `rnd` HAS ALWAYS BEEN THERE, labelled S&H, and
          nothing read it: this returned one number and then returned it
@@ -4923,6 +5001,16 @@ class Engine{
     if(chan.vof)vel=clamp(vel+chan.vof,0.02,1);   // the channel's own velocity offset
     /* kit pads carry their own PLAY rack (chord/arp/flam/humanize per pad) */
     const kp=isKit(chan)?kitSlot(chan,midi):null;
+    /* LENGTH acts on a note that HAS one — a sequenced note, or a live one the
+       recorder gave a duration to. A held key has no length yet; it ends when
+       you let go, and stretching that would mean holding the key for you. */
+    if(durSec!=null){
+      const rk=(kp?kp.ply:chan.ply)||[];
+      for(const sl of rk){
+        if(!sl||sl.typ!==14||sl.off)continue;
+        durSec=Math.max(sl.p3??0.02,durSec*(sl.p1??1)+(sl.p2||0));
+      }
+    }
     /* the PLAY rack as modulated: an arp's rate or a flam's spread swept by an
        envelope has to be the value THIS note is built with */
     const p0=kp?{...chan,ply:kp.ply}:chan;
@@ -5171,6 +5259,10 @@ function applyParam(pi,mi,si,px,v){
   if(M.id==='fx'&&spec.key==='typ'&&XTYPES[v]==='dist'){const s2=S.presets[pi].fx[si];s2.p1=0.35;s2.p3=0;s2.mix=0.6;}
   /* choosing a type lands on a setting that sounds like the thing it is named
      after, rather than on whatever the generic slot defaults happened to be */
+  if(M.id==='ply'&&spec.key==='typ'&&Math.round(v)===14){    // len: neutral to start
+    const s3=modHolder(S.presets[pi],'ply').ply[si];
+    if(!(s3.p1>0.04))s3.p1=1; if(s3.p2===undefined)s3.p2=0; if(!(s3.p3>0))s3.p3=0.02;
+  }
   if(M.id==='fx'&&spec.key==='typ'&&FXDEF[Math.round(v)])
     Object.assign(S.presets[pi].fx[si],FXDEF[Math.round(v)]);
   if(M.id==='fx'){ if(!engine.fxLive(pi,si,spec.key))engine.rebuildRack(pi); }
@@ -10033,15 +10125,34 @@ const onKeyDown=e=>{
     S.arrOn=S.arrOn===false?true:false;
     flash(S.arrOn?'timeline ON — arrangement drives the song':'timeline OFF — looping the current pattern');
     dirty=true; dirtySave=true; return;}
-  if(c==='KeyQ'&&!e.repeat&&!rs(e)&&S.layer>=1){
+  if(c==='KeyQ'&&!e.repeat&&!e.shiftKey&&S.layer>=1){
     e.preventDefault(); HOLD.q=true; HOLD.qUsed=false; return;}
   if(c==='KeyQ'&&!e.repeat){                     // q = live-quantize toggle, everywhere
-    if(rs(e)&&S.layer===1){                 // shift+Q = snap the selected lane NOW
+    /* ⇧Q SNAPS WHAT IS ALREADY RECORDED, and it took three things to reach:
+       the RIGHT shift, layer 1, and a lane with notes — and missing any of
+       them it did nothing and said nothing, which is indistinguishable from
+       a key that does not exist. Either shift now, on any layer that has a
+       channel, and it always reports what it did. */
+    if(e.shiftKey&&S.layer>=1){                 // shift+Q = snap this channel's notes NOW
+      /* AND THE KEY-UP MUST NOT ALSO TOGGLE. The snap ran, then releasing q
+         counted as a tap and flipped live quantize — whose message landed on
+         top of the snap's a moment later. It looked like ⇧Q only toggled Q. */
+      HOLD.q=false; HOLD.qUsed=true;
+      const ch=S.layer>=2?S.editSnd:S.curPreset;
+      const tg=(S.layer<2&&CHSEL.size)?[...CHSEL].sort((a,b)=>a-b):[ch];
+      let moved=0, total=0;
       pushUndo('quantize');
-      const lane=S.patterns[S.editPat].lanes[S.curPreset];
-      const st=lane.qlive??1, g=gridOf(lane);
-      lane.events.forEach(ev=>{ev.t=fmod(ev.t+(qz(ev.t,g)-ev.t)*st,lane.len);});
-      flash('lane '+S.curPreset+' snapped to '+gridName(g));
+      for(const i of tg){
+        const lane=S.patterns[S.editPat].lanes[i]; if(!lane)continue;
+        const st=lane.qlive??1, g=gridOf(lane);
+        lane.events.forEach(ev=>{const was=ev.t;
+          ev.t=fmod(ev.t+(qz(ev.t,g)-ev.t)*st,lane.len);
+          total++; if(Math.abs(ev.t-was)>1e-6)moved++;});
+      }
+      const g0=gridOf(S.patterns[S.editPat].lanes[tg[0]]||{});
+      flash(!total?'ch '+tg.join(' ')+' has no notes to snap'
+        :moved?'snapped '+moved+' of '+total+' notes to '+gridName(g0)+' · ch '+tg.join(' ')
+              :'already on the '+gridName(g0)+' grid · ch '+tg.join(' '));
       dirty=true; dirtySave=true; return;
     }
     CFG.qOn=CFG.qOn?0:1; saveCfg();
@@ -10401,11 +10512,10 @@ const onKeyDown=e=>{
     else if(S.layer===1){
       if(S.mSel)S.mSel=false;      // stepping off the master lands on a channel
       else S.curPreset=CH_LOW+fmod(S.curPreset-CH_LOW+d,10-CH_LOW);
-      /* ⇧←→ drags the channel selection along with the cursor */
-      if(rs(e)&&!S.mSel){
-        CHSEL.add(S.curPreset);
-        flash([...CHSEL].sort().join(' ')+'  ·  ⌘⌥⇧K makes them one kit · esc clears');
-      }
+      /* ⇧←→ USED TO DRAG A SELECTION and it was in the way: the arrows are how
+         you walk the desk, and doing that with a thumb on shift quietly built a
+         multi-channel selection you did not ask for. ⇧+digits is the one way
+         to select channels now — you name them rather than sweep them. */
       SELALL=null;                 // a note selection belongs to the channel you made it on
       stepWalked=false;}
     else if(S.layer===2){
