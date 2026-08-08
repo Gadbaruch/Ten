@@ -8082,6 +8082,33 @@ function _blep(t,dt){                    // band-limits a naive saw's step
   if(t>1-dt){t=(t-1)/dt; return t*t+t+t+1}
   return 0;
 }
+/* ---- THE LADDER ------------------------------------------------------
+   A four-pole zero-delay-feedback lowpass with the saturation INSIDE the
+   loop, which is the part a BiquadFilterNode cannot have and the reason a
+   biquad sounds correct and lifeless. Each stage is a TPT one-pole — solve
+   for the output, then update the state — so it stays stable when the cutoff
+   is swept fast, where a naive digital ladder falls apart.
+   The cubic is a cheap tanh: it compresses the feedback as resonance rises,
+   so self-oscillation is a fat sine rather than a blow-up, and hard drive
+   thickens instead of clipping. Written as plain arithmetic over scalars
+   because this is the shape it has to be in C. */
+function _ladder(v,x,fc,res){
+  var fl = fc<20?20:(fc>18000?18000:fc);
+  var g = Math.tan(3.141592653589793*fl*srI);
+  if(g>10) g=10;
+  var G = g/(1+g);
+  var u = x - (res*4.3)*v._k4;
+  if(u<-2) u=-2; else if(u>2) u=2;
+  u = u - 0.16666667*u*u*u;              // saturate the feedback path
+  var t, y;
+  t=(u -v._k1s)*G; y=t+v._k1s; v._k1s=y+t;
+  t=(y -v._k2s)*G; y=t+v._k2s; v._k2s=y+t;
+  t=(y -v._k3s)*G; y=t+v._k3s; v._k3s=y+t;
+  t=(y -v._k4s)*G; y=t+v._k4s; v._k4s=y+t;
+  v._k4=y;
+  return y;
+}
+function _ladderInit(v){v._k1s=0;v._k2s=0;v._k3s=0;v._k4s=0;v._k4=0;}
 `;
 
 /* ============ MODAL: struck bars, tines, pans ========================== */
@@ -8968,6 +8995,74 @@ function render(v,p){
   v.t+=srI;
   return y*v.env*0.5;
 }`);
+
+/* ---- ANALOG: the first piece of the portable core ---------------------
+   Everything here is scalar arithmetic over samples — no Web Audio nodes, no
+   objects, nothing that does not exist in C. It runs on the audio thread at
+   sample rate, which is the whole point: the node-graph voice cannot do
+   either of the two things this does.
+
+   TRUE PHASE MODULATION. An OscillatorNode has no phase input, so the synth
+   channels fake PM by frequency-modulating a band-limited table — and the
+   table is built for the nominal frequency, so at high index the band-limiting
+   stops matching the instantaneous frequency and it folds. Here the modulator
+   simply MOVES THE READ POINT of a sine. A sine has no discontinuity, so there
+   is nothing to alias no matter how hard it is driven: index 20 is clean.
+
+   AND A REAL LADDER, saturating inside the feedback loop.
+
+   Saw and square go through PolyBLEP instead, which is exact for an unmodulated
+   ramp — so the wave knob crosses from "clean analog" to "clean FM" without
+   either side being a compromise. */
+_mk('analog','virtual',`
+PARAMS = ['wave','detune','pm index','pm ratio','cutoff','reso','env>cut','drive']
+function noteOn(v,f,vel,p){
+  v.f=f; v.vel=vel; v.t=0; v.rel=false; v.env=0;
+  v.a=Math.random(); v.b=Math.random(); v.c=Math.random();   // free-running phases
+  v.m=Math.random();
+  _ladderInit(v);
+}
+function noteOff(v){ v.rel=true }
+function render(v,p){
+  var f=v.f, dt=f*srI;
+  if(dt>0.45) dt=0.45;
+  /* the modulator: its ratio picks WHICH harmonics, the index how many —
+     the same separation the pm osc mode buys on the node side */
+  var mr = 0.5 + p[3]*p[3]*15.5;
+  v.m += dt*mr; if(v.m>=1) v.m-=1;
+  var pm = Math.sin(6.283185307*v.m) * p[2]*p[2]*20;
+
+  var det = p[1]*p[1]*0.035;
+  var x=0, w=p[0];
+  /* three voices: centre, and one either side, so detune is audible without
+     needing the unison machinery the node graph uses */
+  var ph=[v.a,v.b,v.c], dd=[1, 1+det, 1-det];
+  for(var i=0;i<3;i++){
+    var d2 = dt*dd[i];
+    ph[i] += d2; if(ph[i]>=1) ph[i]-=1;
+    var y;
+    if(w<0.34){                                  // sine — takes the phase mod
+      y = Math.sin(6.283185307*(ph[i]+pm));
+    }else if(w<0.67){                            // saw, band-limited
+      y = 2*ph[i]-1 - _blep(ph[i],d2);
+    }else{                                       // square, band-limited both edges
+      var h = ph[i]+0.5; if(h>=1) h-=1;
+      y = (ph[i]<0.5?1:-1) - _blep(ph[i],d2) + _blep(h,d2);
+    }
+    x += y*(i===0?1:0.7);
+  }
+  v.a=ph[0]; v.b=ph[1]; v.c=ph[2];
+  x *= 0.42;
+
+  var e = _adsr(v,0.004,0.0009,0.85,0.0016);
+  /* cutoff tracks the note, opens with the envelope */
+  var fc = (60 + p[4]*p[4]*11000) * (1 + p[6]*p[6]*7*e);
+  x = _ladder(v, x*(1+p[7]*3), fc, p[5]);
+  x = x - 0.16666667*x*x*x;                      // output stage, same cheap tanh
+  v.t += srI;
+  return x * e * v.vel * 0.8;
+}
+`);
 
 /* CLAP — not one sound. A clap is three or four hands landing a few
    milliseconds apart, then the room. The gap between the slaps is the whole
