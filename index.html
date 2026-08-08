@@ -1975,6 +1975,46 @@ const PRESETS0=()=>[
    fx:{0:{typ:21,p1:0.35,p2:0.3,p3:0,p4:0.3,mix:0.35}},
    ply:{0:{typ:11,p1:5,p2:1,p3:0.6,p6:1,off:false}},
    vox:{mode:0,uni:7,wide:1}, mix:{lvl:1,pan:-0.1}}),
+ /* ── 909 RIDE ────────────────────────────────────────────────────────────
+    The 909's ride is a sample on the real machine, but the sound it samples is
+    the same trick its hi-hats use and the 808's cymbals before them: six
+    SQUARE waves at deliberately inharmonic ratios. Squares because the odd
+    harmonics of six detuned ones interfere into a dense metal shimmer that no
+    single oscillator and no amount of noise gets you — noise is a hiss, this
+    is a sheet of metal.
+
+    The ratios are the classic cymbal set, 1 : 1.2312 : 1.342 : 1.6532 :
+    1.9523 : 2.1523, sitting on ~800Hz. What makes it a RIDE rather than a
+    crash is that it keeps a defined PING on top of the wash: a seventh
+    partial with its own short envelope, so the stick lands, speaks, and gets
+    out of the way while the body rings on for two and a half seconds. */
+ mkJ('RD909','cymb',{
+   osc:{0:{wav:3,rat:3.05, amt:1,   phm:1,pw:0.5},
+        1:{wav:3,rat:3.755,amt:0.9, phm:1,pw:0.42},
+        2:{wav:3,rat:4.093,amt:0.85,phm:1,pw:0.5},
+        3:{wav:3,rat:5.042,amt:0.8, phm:1,pw:0.58},
+        4:{wav:3,rat:5.954,amt:0.72,phm:1,pw:0.5},
+        5:{wav:3,rat:6.564,amt:0.66,phm:1,pw:0.45},
+        /* the ping: one partial up in the stick's own register */
+        6:{wav:3,rat:9.7,  amt:0.55,phm:1,pw:0.5}},
+   /* clear the mud, focus the band the stick lives in, take the fizz off */
+   flt:{0:{typ:2,frq:1500,q:0.7,pol:1},
+        1:{typ:5,frq:3400,q:2,gn:11},
+        2:{typ:1,frq:11000,q:0.7,pol:0}},
+   mod:{/* the wash: bent hard so it drops off the stick and then hangs */
+        0:{src:1,rsel:0,routes:[{dst:1,idx:0,amt:100,ctr:0,tgt:null}],
+           a:0.0008,d:2.4,s:0,r:0.35,crv:130},
+        /* THE PING DIES LONG BEFORE THE BODY DOES. That is the whole
+           difference between a ride and a crash, and it is the only thing the
+           attack needs — a filter envelope on top of it closed the lowpass to
+           nothing and took the wash with it, three seconds of ring down to
+           sixty milliseconds. The stick speaks through this partial instead. */
+        1:{src:1,rsel:0,routes:[{dst:0,idx:0,amt:-90,ctr:0,tgt:null,
+             addr:{rack:'osc',slot:6,key:'amt',lbl:'level'}}],
+           a:0.001,d:0.32,s:0,r:0.1,crv:110}},
+   fx:{0:{typ:21,p1:0.22,p2:0.6,p3:0,p4:0.3,mix:0.18},
+       1:{typ:8,p1:0.34,p2:0.62,p3:0.7,mix:0.14}},
+   vox:{mode:0,uni:1,wide:0.35}, mix:{lvl:0.55,pan:0.12}}),
  mkP('H808','hh',p=>{                        // square stack through a hipass, as it was built
    Object.assign(p.osc[0],{wav:3,rat:8});
    p.osc[1]={wav:3,mode:0,dst:0,rat:11.6,amt:0.62,fine:0,ph:0,phm:1};
@@ -5558,7 +5598,7 @@ function libAll(){
        at the oscillator, and the LFO stopped defaulting to pitch. The FACTORY
        half is ours to replace, so drop it and let libInit() lay it down again;
        anything the user saved is not ours and stays exactly where it is. */
-    const keep=v<16?items.filter(en=>en&&!en.factory):items;  // v4-8 levels · v9-11 voicings · v13 SNGB/LDGB · v15 KKGB/VABGA/HHGB · v16 their tuning + envelopes retranslated
+    const keep=v<17?items.filter(en=>en&&!en.factory):items;  // v4-8 levels · v9-11 voicings · v13 SNGB/LDGB · v15 KKGB/VABGA/HHGB · v16 their tuning + envelopes retranslated
     libStore(keep);
     return libCache=keep;
   }
@@ -5575,7 +5615,7 @@ function libNos(){
   }
   return libNoCache=m;
 }
-const LIBV=16;   // bump BOTH: libStore writes it, libAll checks it
+const LIBV=17;   // bump BOTH: libStore writes it, libAll checks it
 function libStore(a){libMigrated=true; libCache=null; libNoCache=null;
   try{localStorage.setItem(LIBKEY,JSON.stringify({v:LIBV,items:a}));}catch(_){} if(typeof prepCache!=='undefined')prepCache.clear();}
 function presetData(p){const {modLoop,...rest}=p;return JSON.parse(JSON.stringify(rest));}
