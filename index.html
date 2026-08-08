@@ -1040,7 +1040,12 @@ const FX_P=sl=>{
          SP('depth','p2','lin',{min:0,max:1,step:0.05}),SP('mix','mix','lin',{min:0,max:1,step:0.05})],
     send:[SP('bus','p1','lin',{min:1,max:10,step:1,fmt:v=>'slot'+Math.round(v)}),
          SP('amt','p2','lin',{min:0,max:1,step:0.05})],
-    duck:[SP('follow','p1','lin',{min:0,max:9,step:1,fmt:v=>'ch'+((Math.round(v)+1)%10)}),
+    /* CHANNEL 0 IS THE MASTER — CHANS() is 1..9 — so a channel's number IS its
+       index, unlike a rack slot where 0 is the tenth. This borrowed the slot
+       formula and so labelled index 1 as "ch2": set it to follow ch2 and it
+       followed ch1, every time. The range starts at 1 because ducking off the
+       master is ducking off yourself. */
+    duck:[SP('follow','p1','lin',{min:1,max:9,step:1,fmt:v=>'ch'+Math.round(v)}),
          SP('amt','p2','lin',{min:0,max:1,step:0.05}),
          SP('rel','p3','lin',{min:0,max:1,step:0.05})],
     amix:[SP('amt','p1','lin',{min:0,max:1,step:0.05}),
@@ -1374,8 +1379,15 @@ function adjust(spec,v,dir,m=1){
     const nvB=clamp(Math.round(v/spec.big+dir)*spec.big,spec.min,spec.max);
     return Math.round(nvB*10000)/10000;
   }
-  const m2=spec.step>=1?Math.max(m,1):m;
-  let nv=clamp(v+dir*spec.step*m2,spec.min,spec.max);
+  /* ⌥ IS THE FINE STEP AND IT HAD NO EFFECT ON HALF THE DESK. Any param whose
+     step is a whole number — amt and center step by 5, curve by 10, spread by
+     2 — took `Math.max(m,1)`, which threw the fine multiplier away and moved
+     by the coarse step anyway. Scale the step instead, and floor it at ONE for
+     those params rather than at their own step, so ⌥ on a 5%-step amount moves
+     by 1% and ⌥ on something that already steps by 1 stays where it is. */
+  let st=spec.step*m;
+  if(spec.step>=1)st=Math.max(1,Math.round(st));
+  let nv=clamp(v+dir*st,spec.min,spec.max);
   if(spec.step>=1)nv=Math.round(nv);
   return Math.round(nv*10000)/10000;
 }
@@ -1716,6 +1728,16 @@ function mkP(name,cat,fn){const p=basePreset(name);p.cat=cat;fn(p);return p;}
    amp envelope there and foldMod would fold it straight over mod slot 0. */
 function mkJ(name,cat,d){
   const p=basePreset(name); p.cat=cat;
+  /* START FROM SILENCE. A dump lists every slot that was LIVE, so anything it
+     does not mention was not there — but basePreset is not empty: filter slot
+     1 is a lowpass at 9000 and oscillator 1 is a saw at full level. Both were
+     arriving on top of every sound saved this way, which is a filter the sound
+     never had. That is what made the snare come back dull. */
+  p.osc.forEach(o=>{o.amt=0;});
+  p.flt.forEach(f=>{f.typ=0;});
+  p.fx.forEach(f=>{f.typ=0;});
+  p.ply.forEach(f=>{f.typ=0;});
+  p.mod.forEach(m=>{m.src=0;});
   if(d.mod){p.env.forEach(e=>{e.dst=0;e.amt=0;}); p.lfo.forEach(l=>{l.dst=0;l.amt=0;});
     p.amp.forEach(a=>{a.typ=0;});}
   for(const k of ['osc','flt','mod','fx','ply'])
@@ -1723,6 +1745,7 @@ function mkJ(name,cat,d){
   if(d.vox)Object.assign(p.vox,d.vox);
   if(d.mix)Object.assign(p.mix,d.mix);
   for(const k of ['tr','trs','cp','pmodel','psel'])if(d[k]!==undefined)p[k]=d[k];
+  if(d.trs!==undefined)p.xtrs=d.trs;      // …and it travels with the sound
   return p;
 }
 const PRESETS0=()=>[
@@ -1904,10 +1927,18 @@ const PRESETS0=()=>[
  mkJ('VABGA','snr',{
    osc:{0:{amt:0},1:{wav:0,rat:9,amt:1},2:{wav:12,rat:1,amt:1}},
    flt:{1:{typ:2,frq:302,q:1,pol:0}},
+   /* CAPTURED BEFORE THE CURVE MEANT THIS. When this was saved, `crv` scaled
+      the decay RATE — the shape was exp(-k·t/d) with k=2^(crv/100), always a
+      plain exponential. It bends the SHAPE now and the rate is fixed, so 190
+      and 150 mean something else entirely and the snare came back wrong.
+      Translated rather than guessed: the old family at crv c is exactly the
+      new one at crv 0 with d scaled by 3/2^(c/100).
+        amp   0.0738 @190  →  3·0.0738/3.732 = 0.0593 @ 0
+        pitch 0.0076 @150  →  3·0.0076/2.828 = 0.0081 @ 0 */
    mod:{0:{src:1,rsel:0,routes:[{dst:1,idx:0,amt:200,ctr:0,tgt:null}],
-           a:0.0005,d:0.0738,s:0.05,r:0.1388,crv:190},
+           a:0.0005,d:0.0593,s:0.05,r:0.1388,crv:0},
         2:{src:1,rsel:0,routes:[{dst:2,idx:0,amt:200,ctr:100,tgt:null}],
-           a:0.005,d:0.0076,s:0,r:0.001,crv:150}},
+           a:0.005,d:0.0081,s:0,r:0.001,crv:0}},
    fx:{0:{typ:8,p1:0.27,p2:0.35,p3:3,p4:0.5,mix:0.15},
        1:{typ:21,p1:0.5,p2:0.75,p3:0,p4:0.35,p5:0.5,mix:0.3}},
    vox:{mode:1}, mix:{lvl:1,pan:0}, trs:12}),
@@ -3596,7 +3627,7 @@ class Engine{
       const g=keep(ac.createGain());
       dry.gain.value=0; wet.gain.value=1;
       cur.connect(g); g.connect(wet);
-      this.duckList.push({g,src:clamp(Math.round(fx.p1),0,9),amt:clamp(fx.p2??0.7,0,1),
+      this.duckList.push({g,src:clamp(Math.round(fx.p1)||1,1,9),amt:clamp(fx.p2??0.7,0,1),
         rel:0.06+(fx.p3??0.3)*0.6,env:0,owner});
     }else if(t==='hp'||t==='lp'){            // plain filters (dj sweeps, tone shaping)
       const f2=keep(ac.createBiquadFilter());
@@ -5424,7 +5455,7 @@ function libAll(){
        at the oscillator, and the LFO stopped defaulting to pitch. The FACTORY
        half is ours to replace, so drop it and let libInit() lay it down again;
        anything the user saved is not ours and stays exactly where it is. */
-    const keep=v<15?items.filter(en=>en&&!en.factory):items;  // v4-8 levels · v9-11 voicings · v13 SNGB/LDGB · v15 KKGB/VABGA/HHGB
+    const keep=v<16?items.filter(en=>en&&!en.factory):items;  // v4-8 levels · v9-11 voicings · v13 SNGB/LDGB · v15 KKGB/VABGA/HHGB · v16 their tuning + envelopes retranslated
     libStore(keep);
     return libCache=keep;
   }
@@ -5441,7 +5472,7 @@ function libNos(){
   }
   return libNoCache=m;
 }
-const LIBV=15;   // bump BOTH: libStore writes it, libAll checks it
+const LIBV=16;   // bump BOTH: libStore writes it, libAll checks it
 function libStore(a){libMigrated=true; libCache=null; libNoCache=null;
   try{localStorage.setItem(LIBKEY,JSON.stringify({v:LIBV,items:a}));}catch(_){} if(typeof prepCache!=='undefined')prepCache.clear();}
 function presetData(p){const {modLoop,...rest}=p;return JSON.parse(JSON.stringify(rest));}
@@ -5515,6 +5546,13 @@ function setPresetData(pi,name,cat,data){   // same, no undo — for composite g
      clips), which passes them explicitly. */
   if(data.__chan){p.tr=data.tr||0; p.trs=data.trs||0; p.vof=data.vof||0;}
   else{p.tr=keepTr; p.trs=keepTrs; p.vof=keepVof;}
+  /* …EXCEPT WHEN THE TUNING IS THE SOUND. A snare built an octave up is not a
+     channel sitting against the others, it is what the drum IS — and loading
+     it onto a channel at 0 gave back something an octave low that sounded
+     nothing like what was saved. `xtrs` is a transpose the PATCH owns, set
+     only by presets saved off the desk; nothing else writes it, so every other
+     preset keeps the rule above. */
+  if(data.xtrs!==undefined){p.trs=data.xtrs; p.xtrs=data.xtrs;}
   /* MIX used to be a MODULE, so the loop above carried level and pan with
      everything else. Retiring that rack quietly stopped them travelling — a
      pasted channel or a recalled clip came back at whatever the destination
@@ -5861,7 +5899,7 @@ function genPreset(cat,rnd,wild=0.5){
   if((cat==='lead'||cat==='bass')&&P(0.25))p.vox.glide=+R(0.02,0.1).toFixed(2);
   if(cat==='pad'||cat==='lead'||cat==='chord')Object.assign(p.vox,{uni:pick(wild>0.5?[3,5,7]:[1,3,5]),sprd:RI(6,15)*2});
   if(cat==='bass'){p.vox.mode=1;
-    p.fx[9]={typ:16,p1:0,p2:+R(0.4,0.65).toFixed(2),p3:0.3,mix:1};}  // duck: follow ch 1's kick
+    p.fx[9]={typ:16,p1:1,p2:+R(0.4,0.65).toFixed(2),p3:0.3,mix:1};}  // duck: follow ch 1's kick
   p.mix.lvl=+R(0.25,0.38).toFixed(2);   // supporting, not buried — see MIXT
   foldMod(p);
   genSpice(p,cat,wild,{R,RI,P,pick});
