@@ -1218,6 +1218,28 @@ const destRate=(rack,key)=>
   :(rack==='ply')?'next'
   :null;
 const slotNo=sl=>sl==='*'?'*':String((sl+1)%10);
+/* THE RANGE A PARAMETER ACTUALLY SPANS. Reading spec.min/max raw is not enough:
+   `SP('dec','d','time')` carries neither, so a decay that goes to eight seconds
+   looked like it spanned 1 and a route at 200% moved it by a fifth of a second.
+   These are the same defaults the arrow keys have always used. */
+function destSpan(sp){
+  const lo=sp.min!==undefined?sp.min:(sp.type==='time'?0.001:sp.type==='freq'?20:0);
+  const hi=sp.max!==undefined?sp.max:(sp.type==='time'?8:sp.type==='freq'?20000:1);
+  return [lo,hi];
+}
+/* x is the modulation in units of THE WHOLE RANGE: ±1 reaches both ends from
+   anywhere. Times and frequencies move through it logarithmically, because a
+   decay swept linearly from a millisecond to eight seconds spends almost all
+   of its travel above one second and is useless everywhere you actually work. */
+function destApply(sp,base,x){
+  const [lo,hi]=destSpan(sp);
+  if((sp.type==='time'||sp.type==='freq')&&lo>0&&hi>lo){
+    const L=Math.log(hi/lo);
+    const pos=clamp(Math.log(clamp(base,lo,hi)/lo)/L,0,1);
+    return lo*Math.exp(clamp(pos+x,0,1)*L);
+  }
+  return clamp(base+x*(hi-lo),lo,hi);
+}
 function destLabel(a){
   if(!a||!a.rack)return '—';
   return a.rack+slotNo(a.slot)+'·'+(a.lbl||a.key);
@@ -3960,20 +3982,23 @@ class Engine{
     const touched={};
     for(let pi=0;pi<10;pi++){
       const p=S.presets[pi]; if(!p||!p.mod)continue;
-      for(const m of p.mod){
+      for(let mi2=0;mi2<p.mod.length;mi2++){
+        const m=p.mod[mi2];
         if(!m||m.off||!m.src||!m.routes)continue;
         for(const rt of m.routes){
           const a=rt.addr; if(!a||rt.dst)continue;
           const rate=destRate(a.rack,a.key);
           if(rate!=='ctrl'&&rate!=='next')continue;   // 'audio' is wired at note-on
           const hits=resolveDest(p,a); if(!hits.length)continue;   // unresolved: nothing happens
-          const src=this._modSrc(m,pi,now); if(src===null)continue;
-          const amt=(rt.amt||0)/100, ctr=(rt.ctr||0)/100;
+          const src=this._modSrc(m,pi,now,mi2); if(src===null)continue;
           for(const h of hits){
-            const sp=h.spec, lo=sp.min??0, hi=sp.max??1;
-            const base=h.slot[sp.key]??lo;
-            const span=(hi-lo);
-            const v=clamp(base+ctr*span+src*amt*span,lo,hi);
+            const sp=h.spec;
+            const base=h.slot[sp.key]??destSpan(sp)[0];
+            /* amt and center in the same units: ±200% is the whole range, so
+               200 on a bipolar source reaches both ends of whatever it is
+               pointed at, and 100 reaches half. It used to be span-per-100%
+               against a span it had guessed wrong. */
+            const v=destApply(sp,base,((rt.amt||0)*src+(rt.ctr||0))/200);
             const id=pi+'.'+a.rack+'.'+h.si+'.'+sp.key;
             touched[id]=1;
             this._ctrlHeld[id]={pi,si:h.si,key:sp.key,base,rack:a.rack};
@@ -4053,7 +4078,7 @@ class Engine{
   }
   /* a mod slot's output right now, in −1..1. The audio-rate lane builds an
      oscillator for this; here it is arithmetic on the clock. */
-  _modSrc(m,pi,now){
+  _modSrc(m,pi,now,si){
     const s=Math.round(m.src||0);
     if(s===2){                                          // lfo, free-running
       const ph=fmod((now*lfoHz(m))+((m.ph||0)/360),1);
@@ -4074,7 +4099,17 @@ class Engine{
     }
     if(s===3)return L?L.vel:0;                          // velocity of that note
     if(s===4)return L?clamp((L.midi-60)/24,-2,2):0;     // key follow
-    if(s===5)return this._rndHold=(this._rndHold===undefined?Math.random()*2-1:this._rndHold);
+    if(s===5){
+      /* THE RATE FIELD ON `rnd` HAS ALWAYS BEEN THERE, labelled S&H, and
+         nothing read it: this returned one number and then returned it
+         forever, so a random route was a constant offset. It is a sample and
+         hold — a fresh value `rate` times a second, held in between, which is
+         the only thing that field could have meant. */
+      const hz=Math.max(0.02,lfoHz(m)), k=pi+'|'+si, step=Math.floor(now*hz);
+      this._sh=this._sh||{};
+      if(!this._sh[k]||this._sh[k].step!==step)this._sh[k]={step,v:Math.random()*2-1};
+      return this._sh[k].v;
+    }
     return null;
   }
   cutLive(pi,slot){
