@@ -292,7 +292,8 @@ const XTYPES=['off','dly','cho','fla','pha','trm','drv','crush','verb','comp','g
    three effects welded into one slot. That is what an effects CHAIN is for, and
    it hid the most expensive node in the instrument inside something that did
    not say "reverb". Hidden from the picker; old presets still resolve. */
-const XHIDE=new Set([XTYPES.indexOf('drv'),XTYPES.indexOf('crush'),XTYPES.indexOf('bld')]);
+const XHIDE=new Set([XTYPES.indexOf('drv'),XTYPES.indexOf('crush'),XTYPES.indexOf('bld'),
+  XTYPES.indexOf('plate')]);   // plate is verb's mode 1 now, not its own slot
 const XDIST=XTYPES.indexOf('dist');
 /* reverb size: squared so the short end has real resolution — 50ms rooms to 4.5s halls */
 const vrbSec=v=>0.05+4.45*Math.pow(clamp(v,0,1),2);
@@ -512,7 +513,13 @@ function rpitApply(midi,sl){
   }
   return m+r()*(sl.p1||0)/100;                             // cents ride on top
 }
-const mkFx  =()=>({typ:0,p1:0.3,p2:0.3,p3:0.5,p4:0.3,p5:0,p6:0.5,p7:0.7,p8:0.45,mix:0.3});
+/* `rv` is its own field, not a p-slot. Every p already carries a non-zero
+   default from somewhere, so putting the reverb's algorithm on one would have
+   read whatever junk a preset happened to hold — VABGA's p4 is 0.5, which
+   rounds to 1, which would have silently turned its convolution reverb into a
+   plate. A new field is undefined on every preset ever saved, and undefined
+   is convolve. */
+const mkFx  =()=>({typ:0,p1:0.3,p2:0.3,p3:0.5,p4:0.3,p5:0,p6:0.5,p7:0.7,p8:0.45,mix:0.3,rv:0});
 /* per-type starting points, for the units whose generic 0.3/0.3 is wrong.
    A compressor at 0.3/0.3 is -42dB at 6.7:1 — not a setting, a decision. */
 const FXDEF={
@@ -1022,18 +1029,23 @@ const FX_P=sl=>{
          SP('tone','p2','lin',{min:0,max:1,step:0.05}),SP('mix','mix','lin',{min:0,max:1,step:0.05})],
     crush:[SP('crush','p1','lin',{min:0,max:1,step:0.05}),
          SP('-','p2','lin',{min:0,max:1,step:0.05}),SP('mix','mix','lin',{min:0,max:1,step:0.05})],
-    plate:[SP('size','p1','lin',{min:0,max:1,step:0.05,fmt:v=>Math.round(0.3+v*4.2)+'s'}),
+    /* ONE REVERB, FOUR WAYS TO BUILD IT — the same shape `dist` uses for its
+       curves. They are not variations on a sound, they are different machines,
+       and they cost wildly different amounts:
+         convolve  a real impulse response. ~3000 cycles a sample, which is two
+                   thirds of a microcontroller's entire budget for one effect.
+         plate     eight combs into four allpasses. ~a tenth of that.
+         spring    a dispersion chain — allpasses smear the highs ahead of the
+                   lows, which is the boing. Cheaper still.
+         room      four diffusers and one short delay. Nearly free.
+       `mode` sits on p4, which verb never used, and rounds to 0 — so every
+       preset already saved keeps the convolver it was built with. */
+    verb:[SP('mode','rv','enum',{opts:['convolve','plate','spring','room'],
+            get:o=>Math.round(o.rv||0), set:(o,v)=>{o.rv=Math.round(v);}}),
+         SP('size','p1','lin',{min:0,max:1,step:0.05,
+            fmt:(v,m)=>Math.round((m&&m.rv)||0)===0?fT(vrbSec(v)):Math.round(0.2+v*4.3)+'s'}),
          SP('damp','p2','lin',{min:0,max:1,step:0.05}),
          SP('width','p3','lin',{min:0,max:1,step:0.05}),
-         SP('pre','p4','lin',{min:0,max:1,step:0.05,
-            fmt:v=>v<0.005?'off':Math.round(v*150)+'ms'}),
-         SP('mix','mix','lin',{min:0,max:1,step:0.05})],
-    verb:[SP('size','p1','lin',{min:0,max:1,step:0.05,fmt:v=>fT(vrbSec(v))}),
-         SP('color','p2','lin',{min:0,max:1,step:0.05}),
-         SP('width','p3','lin',{min:0,max:1,step:0.05}),
-         /* PRE-DELAY: the gap before the room answers. It is the one control
-            that lets a big reverb sit behind a sound instead of swallowing it
-            — the dry hit lands alone, then the tail arrives. 0 is off. */
          SP('pre','p5','lin',{min:0,max:1,step:0.05,
             fmt:v=>v<0.005?'off':Math.round(v*200)+'ms'}),
          SP('mix','mix','lin',{min:0,max:1,step:0.05})],
@@ -2275,7 +2287,8 @@ let fxwReady=false;
       {name:'size', defaultValue:0.6,minValue:0,maxValue:1,automationRate:'k-rate'},
       {name:'damp', defaultValue:0.5,minValue:0,maxValue:1,automationRate:'k-rate'},
       {name:'width',defaultValue:0.8,minValue:0,maxValue:1,automationRate:'k-rate'},
-      {name:'pre',  defaultValue:0,  minValue:0,maxValue:1,automationRate:'k-rate'}];}
+      {name:'pre',  defaultValue:0,  minValue:0,maxValue:1,automationRate:'k-rate'},
+      {name:'mode', defaultValue:1,  minValue:0,maxValue:3,automationRate:'k-rate'}];}
     constructor(){
       super();
       const sc=sampleRate/44100;
@@ -2286,6 +2299,24 @@ let fxwReady=false;
       this.cL=mk(CL,0);  this.cR=mk(CL,SP);
       this.aL=mk(AL,0);  this.aR=mk(AL,SP);
       this.pd=new Float32Array(Math.ceil(sampleRate*0.2)+2); this.pw=0;   // pre-delay
+      /* SPRING. What makes a spring tank sound like one is DISPERSION: high
+         frequencies travel down the wire faster than low ones, so a transient
+         arrives smeared into a descending chirp. That is exactly what a long
+         cascade of allpass filters does — each one delays by an amount that
+         depends on frequency, and sixteen of them in series turns a click into
+         a boing. Nothing else about it is expensive: two delay lines, a chain
+         of multiply-adds, and a bandpass, because a real tank hears almost
+         nothing below 100Hz or above 4k.
+         Two lines because a real tank has two or three springs of different
+         lengths, and the beating between them is half the character. */
+      const mkSp=(sec,n)=>({d:new Float32Array(Math.ceil(sampleRate*sec)+2),i:0,
+                            ap:new Float32Array(n),n:n,lp:0,hp:0});
+      this.s1=mkSp(0.075,16); this.s2=mkSp(0.075,13);
+      /* ROOM: four allpass diffusers and one short delay. The cheapest thing
+         here that still reads as a space rather than an echo. */
+      const mkR=n=>({b:new Float32Array(Math.round(n*sampleRate/44100)+2),i:0});
+      this.rA=[mkR(347),mkR(113),mkR(37),mkR(59)];
+      this.rd=new Float32Array(Math.ceil(sampleRate*0.09)+2); this.ri=0; this.rs=0;
     }
     process(inp,out){
       const I=inp[0], O=out[0];
@@ -2294,16 +2325,66 @@ let fxwReady=false;
       const iL=I&&I[0]?I[0]:null, iR=I&&I[1]?I[1]:iL;
       const P=arguments[2];
       const size=P.size[0], damp=P.damp[0], width=P.width[0], pre=P.pre[0];
+      const mode=Math.round(P.mode[0]);
       const fb=0.7+size*0.28;                     // 0.70 .. 0.98
       const dp=damp*0.4, dp1=1-dp;
       const pdN=this.pd.length, pdD=Math.max(1,Math.round(pre*0.15*sampleRate));
       const wetR=0.5+width*0.5, wetX=0.5-width*0.5;
+      /* spring coefficients, recomputed per block not per sample */
+      const spG=0.62+damp*0.22;                   // dispersion: how much boing
+      const spFb=0.62+size*0.34;
+      const spD1=Math.max(2,Math.round((0.020+size*0.030)*sampleRate));
+      const spD2=Math.max(2,Math.round((0.027+size*0.038)*sampleRate));
+      const spLp=1-Math.exp(-6.2832*3600/sampleRate);
+      const spHp=1-Math.exp(-6.2832*160/sampleRate);
+      const rmD=Math.max(2,Math.round((0.012+size*0.055)*sampleRate));
+      const rmFb=0.25+size*0.45;
       for(let k=0;k<n;k++){
         const dry=((iL?iL[k]:0)+(iR?iR[k]:0))*0.5;
         this.pd[this.pw]=dry;
         let r=this.pw-pdD; if(r<0)r+=pdN;
-        const x=this.pd[r]*0.015;                  // Schroeder's input scale
+        const xin=this.pd[r];
         this.pw=this.pw+1; if(this.pw>=pdN)this.pw=0;
+
+        if(mode===2){                              // ---- SPRING ----
+          let a=0,b=0;
+          for(let s2=0;s2<2;s2++){
+            const L=s2?this.s2:this.s1, dl=s2?spD2:spD1;
+            let rp=L.i-dl; if(rp<0)rp+=L.d.length;
+            let v=L.d[rp];
+            for(let c=0;c<L.n;c++){                // the dispersion chain
+              const z=L.ap[c], o=z-spG*v;
+              L.ap[c]=v+spG*o;
+              v=o;
+            }
+            L.lp+=(v-L.lp)*spLp;                   // tank bandwidth
+            L.hp+=(L.lp-L.hp)*spHp;
+            const band=L.lp-L.hp;
+            L.d[L.i]=xin*0.5+band*spFb;
+            L.i=L.i+1; if(L.i>=L.d.length)L.i=0;
+            if(s2)b=band; else a=band;
+          }
+          const sl=(a*1.6)*wetR+(b*1.6)*wetX, sr=(b*1.6)*wetR+(a*1.6)*wetX;
+          O[0][k]=sl; if(O[1])O[1][k]=sr;
+          continue;
+        }
+        if(mode===3){                              // ---- ROOM ----
+          let v=xin*0.6;
+          for(let c=0;c<4;c++){
+            const t=this.rA[c], y=t.b[t.i];
+            t.b[t.i]=v+y*0.5; v=y-v;
+            t.i=t.i+1; if(t.i>=t.b.length)t.i=0;
+          }
+          let rp=this.ri-rmD; if(rp<0)rp+=this.rd.length;
+          const e=this.rd[rp];
+          this.rs+=(e-this.rs)*(1-dp);
+          this.rd[this.ri]=v+this.rs*rmFb;
+          this.ri=this.ri+1; if(this.ri>=this.rd.length)this.ri=0;
+          const y2=(v+e)*0.7;
+          O[0][k]=y2*wetR+y2*wetX; if(O[1])O[1][k]=y2;
+          continue;
+        }
+        const x=xin*0.015;                         // ---- PLATE ----
         let l=0,rr=0;
         for(let c=0;c<8;c++){
           let t=this.cL[c], y=t.b[t.i];
@@ -3791,18 +3872,6 @@ class Engine{
       dcb2.type='highpass'; dcb2.frequency.value=12; dcb2.Q.value=0.707;
       cur.connect(cp); cp.connect(mk); mk.connect(dcb2); dcb2.connect(wet);
       dry.gain.value=0; wet.gain.value=1;             // a ceiling is not a parallel effect
-    }else if(t==='plate'){
-      if(!fxwReady)cur.connect(wet);           // module still compiling: pass audio through
-      else{
-        const pl=keep(new AudioWorkletNode(ac,'ten-plate',
-          {numberOfInputs:1,numberOfOutputs:1,outputChannelCount:[2]}));
-        const P=k=>pl.parameters.get(k);
-        P('size').value=clamp(fx.p1??0.6,0,1);
-        P('damp').value=clamp(fx.p2??0.5,0,1);
-        P('width').value=clamp(fx.p3??0.8,0,1);
-        P('pre').value=clamp(fx.p4??0,0,1);
-        cur.connect(pl); pl.connect(wet);
-      }
     }else if(t==='grain'){
       if(!fxwReady)cur.connect(wet);           // module still compiling: pass audio through
       else{
@@ -3819,6 +3888,20 @@ class Engine{
         P('wide').value=clamp(fx.p7??0.7,0,1);
         P('fbt').value=xFbT(fx.p8??0.45);
         cur.connect(gn); gn.connect(wet);
+      }
+    }else if(t==='verb'&&Math.round(fx.rv||0)>0){
+      /* the algorithmic three — one worklet, mode picks which */
+      if(!fxwReady)cur.connect(wet);
+      else{
+        const pl=keep(new AudioWorkletNode(ac,'ten-plate',
+          {numberOfInputs:1,numberOfOutputs:1,outputChannelCount:[2]}));
+        const P=k=>pl.parameters.get(k);
+        P('size').value=clamp(fx.p1??0.6,0,1);
+        P('damp').value=clamp(fx.p2??0.5,0,1);
+        P('width').value=clamp(fx.p3??0.8,0,1);
+        P('pre').value=clamp(fx.p5??0,0,1);
+        P('mode').value=clamp(Math.round(fx.rv||0),1,3);
+        cur.connect(pl); pl.connect(wet);
       }
     }else if(t==='verb'){
       const cv=keep(ac.createConvolver()); cv.buffer=this.getIR(vrbSec(fx.p1));
