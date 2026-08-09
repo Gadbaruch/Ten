@@ -285,10 +285,14 @@ const LFOW_PW=[0,1,3,2];
    needs them long before the render section runs */
 const PCH='CcDdEFfGgAaB';
 const NN=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
-const XTYPES=['off','dly','cho','fla','pha','trm','drv','crush','verb','comp','gate','roll','tape','grs8','send','limit','duck','amix','hp','lp','bld','dist','grain','filt','clip'];
+const XTYPES=['off','dly','cho','fla','pha','trm','drv','crush','verb','comp','gate','roll','tape','grs8','send','limit','duck','amix','hp','lp','bld','dist','grain','filt','clip','plate'];
 /* drv and crush are the same two curves `dist` already offers — kept in the
    table so old indices still resolve, hidden from the picker (v17 folds them). */
-const XHIDE=new Set([XTYPES.indexOf('drv'),XTYPES.indexOf('crush')]);
+/* `bld` was a macro — a highpass into a synced delay AND a convolution wash,
+   three effects welded into one slot. That is what an effects CHAIN is for, and
+   it hid the most expensive node in the instrument inside something that did
+   not say "reverb". Hidden from the picker; old presets still resolve. */
+const XHIDE=new Set([XTYPES.indexOf('drv'),XTYPES.indexOf('crush'),XTYPES.indexOf('bld')]);
 const XDIST=XTYPES.indexOf('dist');
 /* reverb size: squared so the short end has real resolution — 50ms rooms to 4.5s halls */
 const vrbSec=v=>0.05+4.45*Math.pow(clamp(v,0,1),2);
@@ -1018,6 +1022,12 @@ const FX_P=sl=>{
          SP('tone','p2','lin',{min:0,max:1,step:0.05}),SP('mix','mix','lin',{min:0,max:1,step:0.05})],
     crush:[SP('crush','p1','lin',{min:0,max:1,step:0.05}),
          SP('-','p2','lin',{min:0,max:1,step:0.05}),SP('mix','mix','lin',{min:0,max:1,step:0.05})],
+    plate:[SP('size','p1','lin',{min:0,max:1,step:0.05,fmt:v=>Math.round(0.3+v*4.2)+'s'}),
+         SP('damp','p2','lin',{min:0,max:1,step:0.05}),
+         SP('width','p3','lin',{min:0,max:1,step:0.05}),
+         SP('pre','p4','lin',{min:0,max:1,step:0.05,
+            fmt:v=>v<0.005?'off':Math.round(v*150)+'ms'}),
+         SP('mix','mix','lin',{min:0,max:1,step:0.05})],
     verb:[SP('size','p1','lin',{min:0,max:1,step:0.05,fmt:v=>fT(vrbSec(v))}),
          SP('color','p2','lin',{min:0,max:1,step:0.05}),
          SP('width','p3','lin',{min:0,max:1,step:0.05}),
@@ -2249,8 +2259,81 @@ let fxwReady=false;
         out[0][i]=this.a; if(out[1])out[1][i]=this.b;
       }
       return true;}}
+  /* ---- PLATE ----------------------------------------------------------
+     A reverb built out of arithmetic instead of a 4.5-second impulse
+     response. Eight comb filters per channel feeding four allpasses — the
+     Schroeder topology Freeverb made standard — with the right channel's
+     delays offset so the two ears never hear the same thing.
+     Measured, the convolver costs about 3033 cycles a sample and there are
+     five of them in the shipped library: two thirds of the entire DSP budget
+     for one effect. This is roughly a tenth of that, it has the early
+     reflections a noise-burst impulse response does not, and it is plain
+     scalar arithmetic over ring buffers, which is the shape it has to be in
+     to compile for a device later. */
+  class PL extends AudioWorkletProcessor{
+    static get parameterDescriptors(){return[
+      {name:'size', defaultValue:0.6,minValue:0,maxValue:1,automationRate:'k-rate'},
+      {name:'damp', defaultValue:0.5,minValue:0,maxValue:1,automationRate:'k-rate'},
+      {name:'width',defaultValue:0.8,minValue:0,maxValue:1,automationRate:'k-rate'},
+      {name:'pre',  defaultValue:0,  minValue:0,maxValue:1,automationRate:'k-rate'}];}
+    constructor(){
+      super();
+      const sc=sampleRate/44100;
+      const CL=[1116,1188,1277,1356,1422,1491,1557,1617].map(n=>Math.round(n*sc));
+      const AL=[556,441,341,225].map(n=>Math.round(n*sc));
+      const SP=Math.round(23*sc);                 // the stereo offset
+      const mk=(lens,off)=>lens.map(n=>({b:new Float32Array(n+off),i:0,s:0}));
+      this.cL=mk(CL,0);  this.cR=mk(CL,SP);
+      this.aL=mk(AL,0);  this.aR=mk(AL,SP);
+      this.pd=new Float32Array(Math.ceil(sampleRate*0.2)+2); this.pw=0;   // pre-delay
+    }
+    process(inp,out){
+      const I=inp[0], O=out[0];
+      if(!O||!O[0])return true;
+      const n=O[0].length;
+      const iL=I&&I[0]?I[0]:null, iR=I&&I[1]?I[1]:iL;
+      const P=arguments[2];
+      const size=P.size[0], damp=P.damp[0], width=P.width[0], pre=P.pre[0];
+      const fb=0.7+size*0.28;                     // 0.70 .. 0.98
+      const dp=damp*0.4, dp1=1-dp;
+      const pdN=this.pd.length, pdD=Math.max(1,Math.round(pre*0.15*sampleRate));
+      const wetR=0.5+width*0.5, wetX=0.5-width*0.5;
+      for(let k=0;k<n;k++){
+        const dry=((iL?iL[k]:0)+(iR?iR[k]:0))*0.5;
+        this.pd[this.pw]=dry;
+        let r=this.pw-pdD; if(r<0)r+=pdN;
+        const x=this.pd[r]*0.015;                  // Schroeder's input scale
+        this.pw=this.pw+1; if(this.pw>=pdN)this.pw=0;
+        let l=0,rr=0;
+        for(let c=0;c<8;c++){
+          let t=this.cL[c], y=t.b[t.i];
+          t.s=y*dp1+t.s*dp; t.b[t.i]=x+t.s*fb;
+          t.i=t.i+1; if(t.i>=t.b.length)t.i=0; l+=y;
+          t=this.cR[c]; y=t.b[t.i];
+          t.s=y*dp1+t.s*dp; t.b[t.i]=x+t.s*fb;
+          t.i=t.i+1; if(t.i>=t.b.length)t.i=0; rr+=y;
+        }
+        for(let c=0;c<4;c++){
+          let t=this.aL[c], y=t.b[t.i];
+          t.b[t.i]=l+y*0.5; l=y-l;
+          t.i=t.i+1; if(t.i>=t.b.length)t.i=0;
+          t=this.aR[c]; y=t.b[t.i];
+          t.b[t.i]=rr+y*0.5; rr=y-rr;
+          t.i=t.i+1; if(t.i>=t.b.length)t.i=0;
+        }
+        /* eight combs summed at an input scale of 0.015 land far below the
+           convolver at the same mix setting, so the two are not swappable
+           without this. Levelled by ear against verb at mix 0.8. */
+        l*=3.6; rr*=3.6;
+        O[0][k]=l*wetR+rr*wetX;
+        if(O[1])O[1][k]=rr*wetR+l*wetX;
+      }
+      return true;
+    }
+  }
   registerProcessor('ten-grain',G);
-  registerProcessor('ten-deci',D);`;
+  registerProcessor('ten-deci',D);
+  registerProcessor('ten-plate',PL);`;
   const url=URL.createObjectURL(new Blob([code],{type:'application/javascript'}));
   AC.audioWorklet.addModule(url).then(()=>{
     fxwReady=true;
@@ -2624,6 +2707,14 @@ class Voice{
        the dead channel, and it is the choke before it. */
     this.eng=E;
     const ops=p.osc, rootW=ops[0].wav, isS=rootW===9, isN=isNoiseW(rootW)||isS;
+    /* Is operator 0 worth building? It is skipped only when it is silent AND
+       something else is making sound AND no operator is in a modulation mode —
+       because any modulator might be pointed at op 0, and knowing that for
+       certain needs routing that has not been built yet. Additive stacks, which
+       is where the waste lives, drop it. */
+    const skipOp0=(ops[0].off||ops[0].amt<=0.001)
+      && ops.some((o,i)=>i>0&&o&&!o.off&&o.amt>0.001)
+      && !ops.some((o,i)=>i>0&&o&&!o.off&&o.amt>0.001&&o.mode!==0&&o.mode!==3);
     /* NOISE has no pitch: resampling it (playbackRate) just makes it grainy low /
        thin+aliased high. Keep the buffer at rate 1 and track the note on the
        FILTERS instead — that's how hardware drum machines transpose noise.
@@ -2910,8 +3001,9 @@ class Voice{
       const off=uniN===1?0:(u/(uniN-1))*2-1;
       this.uniOff.push(off);
       const target=baseTarget*Math.pow(2,(VX.sprd||0)*off/1200);
-      let src,pitchParam;
-      if(isN){src=ac.createBufferSource();
+      let src=null,pitchParam=null;
+      if(skipOp0){}                     // silent and unreachable: never built at all
+      else if(isN){src=ac.createBufferSource();
         src.buffer=isS?(E.opSamples.get(pi+':0')||E.noiseBuf):E.nbuf(rootW,ops[0].pw);
         src.loop=true;pitchParam=src.playbackRate;}
       else{src=ac.createOscillator();
@@ -2925,21 +3017,35 @@ class Voice{
          has said "keep the buffer at rate 1 and track the note on the filters"
          since the day it was written; the code just never did it.
          The sampler still repitches, because that is what a sampler is. */
-      if(isS)pitchParam.setValueAtTime(target,at);
-      else if(isN)pitchParam.setValueAtTime(
-        clamp((ops[0].rat||1)*Math.pow(2,(ops[0].fine||0)/1200),0.05,8),at);
-      else setF(pitchParam,target);
-      rootMods.push(isN?src.playbackRate:src.detune);
-      (this.opPitch[0]=this.opPitch[0]||[]).push({pm:pitchParam,base:target});
-      (this.opDet[0]=this.opDet[0]||[]).push({pm:isN?src.playbackRate:src.detune,sc:isN?0.5:200});
+      if(src){
+        if(isS)pitchParam.setValueAtTime(target,at);
+        else if(isN)pitchParam.setValueAtTime(
+          clamp((ops[0].rat||1)*Math.pow(2,(ops[0].fine||0)/1200),0.05,8),at);
+        else setF(pitchParam,target);
+        rootMods.push(isN?src.playbackRate:src.detune);
+        (this.opPitch[0]=this.opPitch[0]||[]).push({pm:pitchParam,base:target});
+        (this.opDet[0]=this.opDet[0]||[]).push({pm:isN?src.playbackRate:src.detune,sc:isN?0.5:200});
+      }
       const sum=ac.createGain(); sum.gain.value=1;
       const ob0=this.opBias&&this.opBias[0]?1+this.opBias[0]:1;
-      const g0=ac.createGain(); g0.gain.value=ops[0].off?0:clamp(ops[0].amt*ob0,0,4);
-      src.connect(g0);
-      (this.opGains[0]=this.opGains[0]||[]).push(g0);
-      (this.opNodes[0]=this.opNodes[0]||[]).push(src);
-      (this.opAmt[0]=this.opAmt[0]||[]).push({g:g0,sc:1});
-      const built=[{i:0,s:src,osc:!isN,f:target,op:ops[0]}];
+      const g0=src?ac.createGain():null;
+      if(g0)g0.gain.value=ops[0].off?0:clamp(ops[0].amt*ob0,0,4);
+      /* A SILENT OPERATOR STILL RAN. Ops 1-9 are skipped at zero level, op 0
+         never was — so a preset that silences its first operator to build the
+         sound out of the others (VABGA does exactly this) carried a muted
+         oscillator per unison copy per voice, computing a waveform nothing
+         listens to. Only skipped when nothing can reach it: any operator in a
+         modulation mode might be pointed at op 0, and finding that out for
+         certain needs the routing that has not been built yet, so the presence
+         of ANY modulator keeps it. Additive-only stacks — which is where the
+         waste actually is — drop it. */
+      if(src){
+        src.connect(g0);
+        (this.opGains[0]=this.opGains[0]||[]).push(g0);
+        (this.opNodes[0]=this.opNodes[0]||[]).push(src);
+        (this.opAmt[0]=this.opAmt[0]||[]).push({g:g0,sc:1});
+      }
+      const built=skipOp0?[]:[{i:0,s:src,osc:!isN,f:target,op:ops[0]}];
       for(let i=1;i<10;i++){
         const op=ops[i]; if(!op||op.amt<=0.001||op.off)continue;
         const wv=op.wav;
@@ -2975,7 +3081,7 @@ class Voice{
         else s2.start(at);
         this.nodes.push(s2);
       }
-      const outN={0:g0};
+      const outN=skipOp0?{}:{0:g0};
       for(const b of built){
         if(b.i===0||b.op.mode!==0)continue;
         const ob=this.opBias&&this.opBias[b.i]?1+this.opBias[b.i]:1;
@@ -2988,11 +3094,14 @@ class Voice{
         const d=b.op.dst||0;
         if(d>0&&d-1!==b.i&&built.some(x=>x.i===d-1))return d-1;
         for(let j=b.i-1;j>=0;j--)if(built.some(x=>x.i===j))return j;
-        return 0;
+        /* op 0 may not exist any more, so fall back to whatever IS built
+           rather than to an index that was assumed to always be there */
+        return built.length?built[0].i:-1;
       };
       for(const b of built){
         if(b.i===0||b.op.mode===0)continue;
         const j=tgtOf(b), tb=built.find(x=>x.i===j);
+        if(j<0||!tb)continue;                       // nothing left to modulate
         if((b.op.mode===1||b.op.mode===4)&&tb.osc){
           /* FM AND PM DIFFER BY WHOSE FREQUENCY SETS THE DEPTH, and that is
              the whole of it. An OscillatorNode has no phase input, but phase
@@ -3043,10 +3152,12 @@ class Voice{
         if(dsec>0.0005){const dl=ac.createDelay(0.06); dl.delayTime.value=dsec; node.connect(dl); node=dl;}
       }
       node.connect(merge);
-      if(noiseRoot)src.start(at,Math.random()*src.buffer.duration);  // decorrelate unison noise voices
-      else src.start(at);
-      this.nodes.push(src);
-      if(!firstSrc)firstSrc=src;
+      if(src){
+        if(noiseRoot)src.start(at,Math.random()*src.buffer.duration);  // decorrelate unison noise voices
+        else src.start(at);
+        this.nodes.push(src);
+        if(!firstSrc)firstSrc=src;
+      }
     }
     E.lastPitch[pi]=baseTarget;
 
@@ -3229,8 +3340,11 @@ class Voice{
     }else merge.connect(vca);
     if(this.pGain){vca.connect(this.pGain); this.pGain.connect(E.voiceOut(pi,this.pad));}
     else vca.connect(E.voiceOut(pi,this.pad));   // kits: this pad's own fx/level bus
-    this.src=firstSrc;
-    firstSrc.onended=()=>{const a=E.act[pi],i=a.indexOf(this); if(i>=0)a.splice(i,1);
+    /* the voice frees itself when its FIRST source ends — and op 0 may no
+       longer be that source, or exist. Any started node will do; they all stop
+       together. */
+    this.src=firstSrc||this.nodes.find(n=>n&&n.onended!==undefined)||null;
+    if(this.src)this.src.onended=()=>{const a=E.act[pi],i=a.indexOf(this); if(i>=0)a.splice(i,1);
       try{vca.disconnect();}catch(_){}};
     if(this.oneShot)this._end(this._oneShotEnd);   // percussive: self-free once the nodes exist
   }
@@ -3677,6 +3791,18 @@ class Engine{
       dcb2.type='highpass'; dcb2.frequency.value=12; dcb2.Q.value=0.707;
       cur.connect(cp); cp.connect(mk); mk.connect(dcb2); dcb2.connect(wet);
       dry.gain.value=0; wet.gain.value=1;             // a ceiling is not a parallel effect
+    }else if(t==='plate'){
+      if(!fxwReady)cur.connect(wet);           // module still compiling: pass audio through
+      else{
+        const pl=keep(new AudioWorkletNode(ac,'ten-plate',
+          {numberOfInputs:1,numberOfOutputs:1,outputChannelCount:[2]}));
+        const P=k=>pl.parameters.get(k);
+        P('size').value=clamp(fx.p1??0.6,0,1);
+        P('damp').value=clamp(fx.p2??0.5,0,1);
+        P('width').value=clamp(fx.p3??0.8,0,1);
+        P('pre').value=clamp(fx.p4??0,0,1);
+        cur.connect(pl); pl.connect(wet);
+      }
     }else if(t==='grain'){
       if(!fxwReady)cur.connect(wet);           // module still compiling: pass audio through
       else{
