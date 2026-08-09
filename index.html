@@ -2018,6 +2018,40 @@ const PRESETS0=()=>[
    fx:{0:{typ:21,p1:0.22,p2:0.6,p3:0,p4:0.3,mix:0.18},
        1:{typ:8,p1:0.34,p2:0.62,p3:0.7,mix:0.14}},
    vox:{mode:0,uni:1,wide:0.35}, mix:{lvl:0.55,pan:0.12}}),
+ /* ── VEP9 ────────────────────────────────────────────────────────────────
+    Gad's bass, and the first sound in the library that uses all three
+    operator modes at once: a saw ring-modulating at ×8, a triangle FM-ing
+    from below at ×0.5, and a square PHASE-modulating at unison — which only
+    became possible when pm stopped being fm-by-another-name. Two sines hold
+    the bottom.
+    Then two LFOs doing different jobs: one synced and retriggered, opening
+    the lowpass 25% from a 70% centre, and one running at a twentieth of a
+    hertz across the square's pulse width — a destination that did not exist
+    until the width became modulatable. The duck in slot 9 follows ch1, so it
+    breathes with the kick.
+    Mono with two unison voices, which is what keeps it thick without smearing
+    the pitch. */
+ mkJ('VEP9','bass',{
+   osc:{0:{wav:0,rat:2,  amt:1,   mode:0},
+        1:{wav:2,rat:8,  amt:1,   mode:2,pw:0.75},          // saw, ring
+        2:{wav:1,rat:0.5,amt:0.35,mode:1,fine:2},           // tri, fm from below
+        3:{wav:3,rat:1,  amt:1,   mode:4,fine:-5,pw:0.625}, // square, PM
+        4:{wav:0,rat:0.5,amt:1,   mode:0,pw:0.45}},
+   flt:{0:{typ:1,frq:678,q:0.1,pol:0}},
+   mod:{0:{src:1,rsel:0,routes:[{dst:1,idx:0,amt:100,ctr:0,tgt:null,
+             addr:{rack:'voice',slot:0,key:'amp',lbl:'amp'}}],
+           a:0.003,d:0.248,s:0.382,r:0.1,crv:0},
+        1:{src:2,rsel:0,routes:[{dst:3,idx:1,amt:25,ctr:70,tgt:null,
+             addr:{rack:'flt',slot:0,key:'frq',lbl:'freq'}}],
+           a:0.003,d:0.247,s:0,r:0.2,crv:0,wav:0,rate:0.5369,syn:1,rdiv:0,ltr:1},
+        2:{src:2,rsel:0,routes:[{dst:0,idx:0,amt:200,ctr:0,tgt:null,
+             addr:{rack:'osc',slot:3,key:'pw',lbl:'width'}}],
+           a:0.4337,d:0.859,s:0,r:0.2,crv:0,wav:0,rate:0.05,ltr:1}},
+   fx:{0:{typ:2,p1:0.27,p2:0.35,p3:3,p4:0.3,mix:0.4},
+       1:{typ:9,p1:0.65,p2:0.15,p3:0.25,p4:0.35,mix:0.15},
+       2:{typ:21,p1:0.35,p2:0.7,p3:0,p4:0.55,p5:0.4,p6:1,p8:0.65,mix:0.25},
+       9:{typ:16,p1:1,p2:0.62,p3:0.3,p4:0.3,mix:1}},
+   vox:{mode:1,uni:2,sprd:12,wide:0.6,slop:0.008}, mix:{lvl:1,pan:0}}),
  mkP('H808','hh',p=>{                        // square stack through a hipass, as it was built
    Object.assign(p.osc[0],{wav:3,rat:8});
    p.osc[1]={wav:3,mode:0,dst:0,rat:11.6,amt:0.62,fine:0,ph:0,phm:1};
@@ -5635,7 +5669,7 @@ function libAll(){
        at the oscillator, and the LFO stopped defaulting to pitch. The FACTORY
        half is ours to replace, so drop it and let libInit() lay it down again;
        anything the user saved is not ours and stays exactly where it is. */
-    const keep=v<17?items.filter(en=>en&&!en.factory):items;  // v4-8 levels · v9-11 voicings · v13 SNGB/LDGB · v15 KKGB/VABGA/HHGB · v16 their tuning + envelopes retranslated
+    const keep=v<18?items.filter(en=>en&&!en.factory):items;  // v4-8 levels · v9-11 voicings · v13 SNGB/LDGB · v15 KKGB/VABGA/HHGB · v16 their tuning + envelopes retranslated
     libStore(keep);
     return libCache=keep;
   }
@@ -5652,7 +5686,7 @@ function libNos(){
   }
   return libNoCache=m;
 }
-const LIBV=17;   // bump BOTH: libStore writes it, libAll checks it
+const LIBV=18;   // bump BOTH: libStore writes it, libAll checks it
 function libStore(a){libMigrated=true; libCache=null; libNoCache=null;
   try{localStorage.setItem(LIBKEY,JSON.stringify({v:LIBV,items:a}));}catch(_){} if(typeof prepCache!=='undefined')prepCache.clear();}
 function presetData(p){const {modLoop,...rest}=p;return JSON.parse(JSON.stringify(rest));}
