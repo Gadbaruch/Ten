@@ -97,6 +97,22 @@
   .cur.inv{background:var(--fg);color:var(--bg);}
   /* a note with no room for a letter: a block at the column its pitch maps to */
   .pk{position:absolute;background:currentColor;border-radius:1px;}
+  /* the automation layer sits exactly where the notes do, over the top of them */
+  .alay{position:absolute;top:0;left:calc(-1 * var(--bleed));
+        overflow:visible;pointer-events:none;}
+  /* every OTHER address on the channel, faint: enough to say "this is moving
+     too", not enough to argue with the one you are reading */
+  .acv{fill:none;stroke:var(--fg);stroke-width:1;opacity:.2;
+       stroke-linejoin:miter;vector-effect:non-scaling-stroke;}
+  .acv.af{opacity:.85;stroke-width:1.4;}
+  .apt{fill:var(--fg);opacity:.9;}
+  /* the census row: same height and fill as a strip cell, so it reads as part
+     of the strip rather than as something bolted under it */
+  .arow{height:var(--striph,20px);background:var(--k);position:relative;}
+  .adot{position:absolute;top:calc(50% - 1.5px);width:3px;height:3px;
+        border-radius:50%;background:var(--fg);}
+  .adot.af{top:calc(50% - 2.5px);width:5px;height:5px;}
+  .ahead{position:absolute;top:2px;bottom:2px;width:1px;background:var(--fg);opacity:.5;}
   /* held: the letters are live. Slow enough to read as breathing rather than
      blinking, which is what a warning looks like. */
   .puls{animation:pul 1.5s ease-in-out infinite;}
@@ -1262,6 +1278,27 @@ function autoWhere(pre,a){
   if(px<0)return null;
   return {mi,si,px,spec:specs[px]};
 }
+/* THE AUTOMATION ON A CHANNEL, ONE ENTRY PER ADDRESS. Reading it is also what
+   upgrades the old positional points, since evAddr writes the address back the
+   first time anything asks — so opening the overlay migrates a channel. */
+function autoLanes(pre){
+  const ml=pre&&pre.modLoop;
+  if(!ml||!ml.events.length)return [];
+  const m=new Map();
+  for(const ev of ml.events){
+    const a=evAddr(pre,ev); if(!a)continue;
+    const k=addrKey(a);
+    let r=m.get(k); if(!r){r={a,k,pts:[]};m.set(k,r);}
+    r.pts.push(ev);
+  }
+  const out=[...m.values()];
+  for(const r of out)r.pts.sort((x,y)=>x.t-y.t);
+  /* rack order, then slot, then param — cycling with [ ] has to land somewhere
+     predictable, and insertion order is whatever you happened to touch first */
+  const rk=a=>{const j=DPICK_ORDER.indexOf(a.rack); return j<0?99:j;};
+  out.sort((x,y)=>rk(x.a)-rk(y.a)||(+x.a.slot||0)-(+y.a.slot||0)||(x.a.key<y.a.key?-1:1));
+  return out;
+}
 
 /* ---------------- mod destinations ------------------------------------
    A DESTINATION IS AN ADDRESS, not a place in an enum. `dst:3, idx:2` only
@@ -1326,9 +1363,21 @@ const slotNo=sl=>sl==='*'?'*':String((sl+1)%10);
    looked like it spanned 1 and a route at 200% moved it by a fifth of a second.
    These are the same defaults the arrow keys have always used. */
 function destSpan(sp){
+  /* a menu's range is its options — without this every enum reported 0..1 and
+     an automation point at option 7 drew pinned to the right-hand edge */
+  if(sp.opts&&sp.opts.length)return [0,sp.opts.length-1];
   const lo=sp.min!==undefined?sp.min:(sp.type==='time'?0.001:sp.type==='freq'?20:0);
   const hi=sp.max!==undefined?sp.max:(sp.type==='time'?8:sp.type==='freq'?20000:1);
   return [lo,hi];
+}
+/* where a value sits in its own range, 0..1. Times and frequencies are placed
+   logarithmically for the same reason they are MOVED that way — half of a
+   decay's travel is under a second and a linear picture hides all of it. */
+function spanPos(sp,v){
+  const [lo,hi]=destSpan(sp);
+  if((sp.type==='time'||sp.type==='freq')&&lo>0&&hi>lo)
+    return clamp(Math.log(clamp(v,lo,hi)/lo)/Math.log(hi/lo),0,1);
+  return hi>lo?clamp((v-lo)/(hi-lo),0,1):0;
 }
 /* x is the modulation in units of THE WHOLE RANGE: ±1 reaches both ends from
    anywhere. Times and frequencies move through it logarithmically, because a
@@ -1336,11 +1385,8 @@ function destSpan(sp){
    of its travel above one second and is useless everywhere you actually work. */
 function destApply(sp,base,x){
   const [lo,hi]=destSpan(sp);
-  if((sp.type==='time'||sp.type==='freq')&&lo>0&&hi>lo){
-    const L=Math.log(hi/lo);
-    const pos=clamp(Math.log(clamp(base,lo,hi)/lo)/L,0,1);
-    return lo*Math.exp(clamp(pos+x,0,1)*L);
-  }
+  if((sp.type==='time'||sp.type==='freq')&&lo>0&&hi>lo)
+    return lo*Math.exp(clamp(spanPos(sp,base)+x,0,1)*Math.log(hi/lo));
   return clamp(base+x*(hi-lo),lo,hi);
 }
 function destLabel(a){
@@ -2125,6 +2171,11 @@ const S={
   oct:0,                                   // ONE keyboard register, global — not per channel
   curPat:0, editPat:0, curPreset:4, editSnd:4,
   curMod:1, curParam:0, curSlot:0, slotParam:0, libSel:0,   // 1 = OSC; 0 and 6 are retired
+  /* the automation overlay: null is off, otherwise which of THIS channel's
+     addresses is in front. A view, so it is not saved — but it is remembered
+     by address, not by index, so adding a point somewhere else does not move
+     what you are looking at. */
+  aView:null, aAddr:null,
   master:mkMaster(),
   dj:DJ0(),
   arr:new Looper('B',4,'on'),
@@ -10576,6 +10627,40 @@ const onKeyDown=e=>{
     engine.refresh(S.editSnd); engine.lfoLive(S.editSnd);
     dirty=true; dirtySave=true; return;
   }
+  /* THE AUTOMATION OVERLAY. Recorded knob moves were a number in a text row at
+     the bottom of the third layer — you could see that there were fourteen
+     points and nothing about what they did. They are curves over the notes
+     now, in the same column, on the same clock, so a filter opening across a
+     bar is a shape next to the notes it is opening under.
+     Backslash because it was one of five keys left, and because it sits under
+     the brackets that walk between the knobs. */
+  if(c==='Backslash'&&!e.repeat&&!e.metaKey&&!e.ctrlKey&&!PICK&&!DPICK){
+    e.preventDefault();
+    if(S.aView!==null){S.aView=null; flash('automation hidden'); dirty=true; return;}
+    const pre=S.presets[S.curPreset], ls=autoLanes(pre);
+    S.aView=0; S.aAddr=ls.length?(aFront(pre)||ls[0]).k:null;
+    flash(ls.length?'automation — '+ls.length+' knob'+(ls.length>1?'s':'')+' on '+pre.name
+                   :'automation — nothing recorded on '+pre.name+' yet');
+    dirty=true; return;
+  }
+  if((c==='BracketLeft'||c==='BracketRight')&&!e.metaKey&&!e.ctrlKey&&!PICK&&!DPICK){
+    e.preventDefault();
+    if(S.aView===null){flash('\\ shows the automation first');return;}
+    const pre=S.presets[S.curPreset], ls=autoLanes(pre);
+    if(ls.length<2){flash(ls.length?'only one knob is automated here':'nothing recorded on '+pre.name);return;}
+    const at=Math.max(0,aIndexOf(ls,S.aAddr));
+    const nx=ls[(at+(c==='BracketRight'?1:ls.length-1))%ls.length];
+    S.aAddr=nx.k; dirty=true;
+    /* stepping between knobs also TAKES YOU THERE — the parameter you are
+       looking at is the parameter your arrows are on, or the overlay is a
+       picture of somewhere else. */
+    const w=autoWhere(pre,nx.a);
+    if(w&&S.layer>=2&&S.editSnd===S.curPreset){
+      S.curMod=w.mi; if(w.si>=0)S.curSlot=w.si;
+      if(flatView(w.mi))S.curParam=w.px; else S.slotParam=w.px;
+    }
+    return;
+  }
   if(c==='Enter'){e.preventDefault(); if(!e.repeat)diveIn(); return;}
   if(c==='Escape'){e.preventDefault();
     if(HE.cancelLearn())return;
@@ -10711,6 +10796,20 @@ const onKeyDown=e=>{
        further down were unreachable — ⇧⌫ is the lane, at every depth, which is
        how it was asked for — so there was no key at all for the points. Option
        takes the same two shapes: this rack, or the whole channel. */
+    /* …and while the overlay is up it takes a third and better shape: the ONE
+       knob you are looking at. Clearing by rack was as precise as the display
+       could be; now the display is precise, so the erase is too. */
+    if(altOf(e)&&!rs(e)&&autoOn()&&!S.mSel){
+      const pre=S.presets[S.curPreset], fr=aFront(pre);
+      if(!fr){flash('no automation on '+pre.name);return;}
+      pushUndo('automation clear');
+      const was=Math.max(0,aIndexOf(autoLanes(pre),fr.k));
+      pre.modLoop.clear(ev=>sameAddr(evAddr(pre,ev),fr.a));
+      flash(fr.pts.length+' points cleared — '+destLabel(fr.a));
+      const rest=autoLanes(pre);                 // land on a knob that still exists
+      S.aAddr=rest.length?rest[Math.min(was,rest.length-1)].k:null;
+      dirty=true; dirtySave=true; return;
+    }
     if(altOf(e)&&S.layer>=2&&!S.mSel){
       const ml=S.presets[S.editSnd].modLoop;
       if(!ml.events.length){flash('no automation on '+S.presets[S.editSnd].name);return;}
@@ -12571,6 +12670,59 @@ function measureChar(){
   w3.remove();
   if(hh>4)r.setProperty('--striph',hh.toFixed(2)+'px');
 }
+const autoOn=()=>S.aView!==null;
+/* which address is in front, remembered BY ADDRESS: recording a point on some
+   other knob must not slide the overlay onto it mid-take. */
+function aFront(pre){
+  const ls=autoLanes(pre); if(!ls.length)return null;
+  return ls.find(l=>l.k===S.aAddr)||ls[0];
+}
+/* autoLanes rebuilds its entries every call, so two calls never share an
+   object and indexOf is always -1. Position is asked for by ADDRESS, which is
+   the only thing that survives the rebuild — and the only thing that means
+   anything anyway. */
+const aIndexOf=(ls,k)=>ls.findIndex(l=>l.k===k);
+/* One channel's automation, drawn over its column. Value runs across, time
+   runs down with the notes — so a sweep leans the way you hear it lean.
+   It is a STAIRCASE because playback is one: a point sets the parameter and it
+   stays there until the next one. Drawing straight lines between them would
+   show a glide the ear never gets. */
+function autoCurves(pre,laneLen,anc,H,CW,frontKey){
+  const ls=autoLanes(pre); if(!ls.length||laneLen<=0)return '';
+  const ml=pre.modLoop, mlen=ml.len;
+  if(mlen<=0)return '';
+  let h='';
+  for(const L of ls){
+    const w=autoWhere(pre,L.a); if(!w)continue;   // unresolved — nothing to point at
+    const pts=L.pts.filter(p=>p.t<mlen-1e-9);     // what occur() will actually play
+    if(!pts.length)continue;
+    const X=v=>1+spanPos(w.spec,v)*Math.max(1,CW-2);
+    /* the automation loop and the note lane are two clocks. Walk the column in
+       ITS time and ask the mod loop what it is doing there, so a 2-bar sweep
+       under a 1-bar part draws the half you are actually going to hear. */
+    const ph0=fmod(anc,mlen);
+    let held=pts[pts.length-1].v;                 // before the first point: last cycle's value
+    for(const p of pts)if(p.t<=ph0+1e-9)held=p.v;
+    const brk=[{ct:0,v:held}];
+    for(let base=-ph0;base<laneLen-1e-9&&brk.length<400;base+=mlen)
+      for(const p of pts){
+        const t=base+p.t;
+        if(t>1e-9&&t<laneLen-1e-9)brk.push({ct:t,v:p.v});
+      }
+    const front=L.k===frontKey;
+    let d='M'+X(brk[0].v).toFixed(1)+',0';
+    for(let j=1;j<brk.length;j++){
+      const y=(brk[j].ct/laneLen*H).toFixed(1);
+      d+='V'+y+'H'+X(brk[j].v).toFixed(1);        // hold, then jump — the staircase
+    }
+    d+='V'+H.toFixed(1);
+    h+='<path class="acv'+(front?' af':'')+'" d="'+d+'"/>';
+    if(front)for(const b of brk)
+      h+='<circle class="apt" cx="'+X(b.v).toFixed(1)+'" cy="'+
+         (b.ct/laneLen*H).toFixed(1)+'" r="1.7"/>';
+  }
+  return h?'<svg class="alay" width="'+CW.toFixed(1)+'" height="'+H+'">'+h+'</svg>':'';
+}
 function gridHTML(pat,pos,anc,chans){
   const step=0.25;
   /* A row was a whole 22.75px line because it used to BE one. It is a div
@@ -12584,6 +12736,12 @@ function gridHTML(pat,pos,anc,chans){
 
   const cu=pat.lanes[S.curPreset];
   const curStep=cu?Math.round(curCell(cu)*cellOf(cu)/step):-1;
+  /* the automation belongs to the CHANNEL, not to the pattern being peeked at,
+     so it reads the desk directly. Only the channel you are on has a front
+     curve; everywhere else every address draws faint, which is how you see
+     that channel 7 is moving without going to look. */
+  const PR2=i=>S.presets[i];
+  const frontKey=autoOn()?(x=>x&&x.k)(aFront(S.presets[S.curPreset])):null;
   const nowOf=i=>{const l=pat.lanes[i];
     return (T.playing&&l&&l.len>0)?Math.floor(fmod(pos-anc,l.len)/step):-1;};
 
@@ -12648,7 +12806,7 @@ function gridHTML(pat,pos,anc,chans){
         const top=(e.t/step)/n16*H;
         const full=Math.max(1.6,((e.dur||0.25)/step)/n16*H-0.6);
         const left=(m-lo)/span*CW;
-        const cls=dim?'n1':velCls(e.vel);
+        const cls=(dim||autoOn())?'n1':velCls(e.vel);
         const bar=(y,ht)=>'<i class="pk '+cls+'" style="top:'+y.toFixed(1)+
           'px;height:'+ht.toFixed(1)+'px;left:'+left.toFixed(1)+'px;width:'+nw.toFixed(1)+'px"></i>';
         /* A note held past the loop point is still sounding when the loop comes
@@ -12660,6 +12818,8 @@ function gridHTML(pat,pos,anc,chans){
       }
       h+='</div>';
     }
+    /* over the notes, not under them — the curve is what you came to look at */
+    if(autoOn())h+=autoCurves(PR2(i),lane.len,anc,H,CW,frontKey);
     h+='</div>';
   }
   return h+'</div>';
@@ -12710,6 +12870,35 @@ function meterRow(LN,PR,peeking){
   }, sp('d',pad('Mix',GUTW)),
      mixCell(S.mLvl!==undefined?S.mLvl:1,0,peeking?0:masterLevel(),!peeking));
 }
+/* WHO ELSE IS MOVING. One dot per automation point, laid across the channel's
+   own cell on its own clock, brightening with how many knobs are on it — so a
+   channel with one slow sweep and a channel with four are different pictures
+   at a glance. The grid draws the shapes; this draws the census, and it covers
+   channels the grid is not showing. */
+function autoRow(pos){
+  return colRow('arow',i=>{
+    const pre=S.presets[i]; if(!pre||isAudioCh(i))return '';
+    const ls=autoLanes(pre); if(!ls.length)return '';
+    const ml=pre.modLoop, mlen=ml.len; if(mlen<=0)return '';
+    const front=i===S.curPreset&&autoOn()?(x=>x&&x.k)(aFront(pre)):null;
+    let h='';
+    for(const L of ls){
+      const on=L.k===front;
+      const r=on?2.5:1.5;
+      for(const p of L.pts){
+        if(p.t>=mlen-1e-9)continue;
+        /* a dot at t=0 is half outside the cell unless it is pulled back in —
+           the same clamp the pan line needs at hard left and hard right */
+        h+='<i class="adot'+(on?' af':'')+'" style="left:min(calc(100% - '+(r*2)+
+           'px), max(0px, calc('+(p.t/mlen*100).toFixed(2)+'% - '+r+'px)));opacity:'+
+           (on?0.95:clamp(0.16+0.1*ls.length,0,0.5)).toFixed(2)+'"></i>';
+      }
+    }
+    /* the automation loop's own playhead, which is not the note lane's */
+    if(T.playing)h+='<i class="ahead" style="left:'+(fmod(pos,mlen)/mlen*100).toFixed(2)+'%"></i>';
+    return h;
+  }, sp('d',pad('Auto',GUTW)));
+}
 /* What each channel is sounding RIGHT NOW, under its own column — the names
    the pixels gave up, put back where they belong instead of on one line that
    could only ever describe the channel you happened to be on. */
@@ -12731,6 +12920,20 @@ function liveRow(pat,pos,anc){
 function noteReadout(pat,pos,anc){
   const i=S.curPreset, lane=pat.lanes[i];
   if(!lane||isAudioCh(i))return '';
+  /* the overlay takes the readout line while it is up: which knob is in front,
+     where it is in its own list, and how to get to the next one. */
+  if(autoOn()){
+    const pre=S.presets[i], ls=autoLanes(pre), fr=aFront(pre);
+    if(!fr)return '   '+sp('i',' AUTO ')+sp('d','  no automation on '+pre.name+
+      ' — hold tab with the transport rolling, then move a knob');
+    const w=autoWhere(pre,fr.a);
+    const now=w?fmtVal(w.spec,getV(pre,w.mi,w.si,w.spec)):'—';
+    return '   '+sp('i',' AUTO ')+' '+sp('a',destLabel(fr.a))+
+      sp('v','  '+now)+
+      sp('d','   '+(aIndexOf(ls,fr.k)+1)+'/'+ls.length+' · '+fr.pts.length+' pts'+
+        (w?'':' · slot is gone — kept, not played')+(ls.length>1?'   [ ] next knob':'')+
+        '   ⌥⌫ clears it');
+  }
   if(SELALL!=null){
     const l2=pat.lanes[SELALL];
     return '   '+sp('i',' SEL ')+' '+sp('a',(l2?l2.events.length:0)+' notes on ch '+SELALL)+
@@ -12865,7 +13068,10 @@ function renderPat(L,pos){
      belongs to the channel columns and has to be there whether the grid is
      drawn vertically or not */
   {if(!CHWdone){measureChar(); CHWdone=true;}
-   rawAt.add(L.length); L.push(meterRow(LN,PR,!!pkL));}
+   rawAt.add(L.length); L.push(meterRow(LN,PR,!!pkL));
+   /* only while the overlay is up — a permanent row of dots for a set with no
+      automation in it is a row of nothing, every frame, forever */
+   if(autoOn()&&!pkL){rawAt.add(L.length); L.push(autoRow(pos));}}
   /* Loop length and transpose are things you set and then stop thinking about,
      so they are not worth two permanent rows. They appear on the hold that
      edits them — tab for the loop, n for the pitch — which is exactly when
@@ -13167,8 +13373,14 @@ function renderSlots(L){
   const ml=pre.modLoop, mEdit=ml.state==='edit';
   const cellM=cellOf(ml);
   const phM=T.playing?Math.floor(fmod(posNow(),ml.len)/cellM):-1;
-  const evSlot=ml.events.filter(e=>e.m===S.curMod&&(e.s??-1)===S.curSlot);
-  const evMod=ml.events.filter(e=>e.m===S.curMod);
+  /* by ADDRESS, not by module index — this row was the last thing still
+     counting points positionally, so bypassing a slot made its automation
+     disappear from the only place it was ever shown */
+  const rkId=MODULES[S.curMod]&&MODULES[S.curMod].id;
+  const evMod=ml.events.filter(e=>{const a=evAddr(pre,e);return a&&a.rack===rkId;});
+  const evSlot=MODULES[S.curMod]&&MODULES[S.curMod].flat
+    ? evMod                                      // a flat rack has one slot, and it is this one
+    : evMod.filter(e=>String(e.a.slot)===String(S.curSlot));
   /* armed has to READ as armed — this was dim grey next to the point count,
      which is indistinguishable from not being armed at all */
   L.push('  '+sp('d','mod loop (slot '+((S.curSlot+1)%10)+'): '+evSlot.length+' pts · rack '+evMod.length)
@@ -13536,6 +13748,10 @@ function renderHelp(L){
     ['','every one of these is a scope: hold it and the arrows mean that one thing. Tap and release without moving does the tap action instead'],
     ['hold tab','LOOP: ↑↓ length ×2 / ÷2 · ←→ ±one unit · +/- double or halve the SPEED, stretching what is in it · ⇧↑↓ offset the content · ⇧←→ unit size'],
     ['hold tab (in a channel)','also arms AUTOMATION: knobs you move while it is held are written to the channel’s mod loop. The Auto block under the rack shows what is recorded and says ● while it is arming'],
+    ['\\','SEE THE AUTOMATION — every recorded knob drawn over the notes in its own column, value across, time down, on the same clock as the part. It is a staircase because playback is one: a point sets the value and it stays until the next. The notes go dim underneath, and every other channel’s automation draws faint so you can see who else is moving without going to look'],
+    ['[ ]','walk between the automated knobs on this channel — and it takes you to the parameter, so your arrows are already on the thing you are looking at'],
+    ['⌥⌫ (with \\ up)','clear THIS knob’s automation. Without the overlay ⌥⌫ still clears the whole rack’s, and ⌥⇧⌫ the whole channel’s'],
+    ['','a point that can no longer find its parameter — the slot was emptied, the effect changed type — is KEPT and skipped, never applied to the wrong knob. Put the slot back and the automation comes back with it'],
     ['hold q','QUANTIZE: 1-8 set THIS channel\u2019s grid — 1 beats · 2 8ths · 3 8th triplets · 4 16ths · 5 dotted 8ths · 6 16th triplets · 7 sevenths · 8 32nds'],
     ['hold q + 0','quantize OFF — notes land exactly where you played them. Picking a grid turns it back on, because asking for a grid is asking to be on it'],
     ['⌘E','EXPORT: set · mixdown · channels. The set is a .json you can reload anywhere — develop here, export, drop it into the live one. Mixdown and channels are rendered by PLAYING the pattern once in real time, because the engine lives in one audio context and what comes out is exactly what you heard; channels gives you the master plus one wav per channel, all captured in the same pass so they line up'],
