@@ -113,6 +113,10 @@
         border-radius:50%;background:var(--fg);}
   .adot.af{top:calc(50% - 2.5px);width:5px;height:5px;}
   .ahead{position:absolute;top:2px;bottom:2px;width:1px;background:var(--fg);opacity:.5;}
+  /* the song column: a dj window is a band across the mix, a clip recall is a
+     mark at the channel it moved */
+  .djw{position:absolute;left:0;right:0;background:var(--fg);opacity:.22;border-radius:1px;}
+  .clw{position:absolute;width:3px;height:3px;background:var(--fg);opacity:.85;border-radius:1px;}
   /* held: the letters are live. Slow enough to read as breathing rather than
      blinking, which is what a warning looks like. */
   .puls{animation:pul 1.5s ease-in-out infinite;}
@@ -796,8 +800,27 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    entries in one flat line was a row you scanned rather than read; grouped,
    you go to the group and then to the thing. Sections are named in SETSECT
    below and every entry declares which one it is in. */
-const SETSECT=['Sets','Feel','Record','Look','Input','Scale'];
+const SETSECT=['Sets','Song','Feel','Record','Look','Input','Scale'];
 const SETTINGS=[
+ /* THE OLD GLOBAL TIMELINE. The master lane is the arrangement now, but sets
+    made before that carry an S.arr — and its every control lived on an ARRANGE
+    layer that no longer exists, so it switched patterns underneath you with no
+    column showing it, no key to stop it and no way to clear it. These two rows
+    are the way out. A set that never had one shows 'none' and both are inert. */
+ /* short enough to FIT: a settings cell is narrow, and '6 events — PLAYING'
+    rendered as '6 events —', which reads like the sentence was cut off */
+ {n:'old song',g:'Song', v:()=>{const n=S.arr.events.length;
+              return n?n+(S.arrOn===false?' muted':' LIVE'):'none';},
+              a:()=>{if(!S.arr.events.length){flash('no old song on this set');return;}
+                     pushUndo('timeline clear');
+                     const n=S.arr.events.length; S.arr.events=[];
+                     flash(n+' cleared — the pattern you are on just loops now');
+                     dirty=true; dirtySave=true;}},
+ {n:'play it',g:'Song',  v:()=>S.arr.events.length?(S.arrOn===false?'no':'yes'):'—',
+              a:()=>{S.arrOn=S.arrOn===false;
+                     flash(S.arrOn?'the old song drives the patterns again'
+                                  :'old song silenced — kept, in case you want it back');
+                     dirty=true; dirtySave=true;}},
  /* what used to be the ARRANGE layer's own params — they were never about
     arranging, they were global feel, and there is no arrange layer now */
  {n:'swing',g:'Feel',  v:()=>S.grv.amt+'%',            a:d=>S.grv.amt=clamp(S.grv.amt+d*5,0,100)},
@@ -5843,6 +5866,10 @@ function newSet(){
   S.clips={}; S.scenes={}; S.clipAt={}; S.sceneAt=0;
   CHANS().forEach(i=>{S.clipAt[i]=0;});
   S.setSlot=null;                       // it has no home until you give it one
+  /* AND THE SONG. Every lane went, clips and scenes went, and the old global
+     timeline stayed — so "new set" handed you ten empty patterns with the same
+     arrangement still switching between them every eight bars. */
+  S.arr.events=[]; S.arrOn=true;
   S.curPreset=CH_LOW; S.editSnd=CH_LOW; S.mSel=false;
   engine.rebuildMaster();
   flash('new set — tempo, key and settings kept');
@@ -11377,7 +11404,6 @@ const onKeyDown=e=>{
   if(S.mSel&&S.layer>=1&&DJCODE[c]!==undefined&&!e.repeat&&HOLD.dig<0){
     e.preventDefault();
     const k=DJCODE[c];
-    const ml=S.patterns[S.editPat].lanes[0];
     if(S.patterns[S.editPat].state==='rec'&&T.playing&&!djLatch[k])djRecStart[k]=posNow();
     djPress(k,KM.sl);      // latch is the left shift, like every other momentary
     return;
@@ -11646,10 +11672,20 @@ document.addEventListener('keyup',e=>{
     const k=DJCODE[c]; delete djHeld[k];
     if(djRecStart[k]!==undefined){                     // close the recorded automation window
       const st=djRecStart[k]; delete djRecStart[k];
-      const L2=S.arr.len;
-      S.arr.events.push({t:fmod(st,L2),dj:k,dur:Math.max(0.25,posNow()-st)});
-      flash('● dj '+djName(k)+' recorded into the arrangement');
-      dirtySave=true;
+      /* THE MASTER LANE IS THE ARRANGEMENT — the scheduler says so, recClip
+         writes clip recalls there, and the keydown above declared exactly this
+         lane and then never used it. This was the one writer left pointing at
+         the old global S.arr: a timeline with no column, no clear and no off
+         switch, which grew every time you performed and could never shrink.
+         Anchored like recClip, so a window lands where you played it. */
+      const ml=S.patterns[S.editPat].lanes[0];
+      if(ml&&ml.len>0){
+        const t=fmod(st-editAnchor(),ml.len);
+        ml.clear(ev=>ev.dj===k&&Math.abs(ev.t-t)<1e-6);
+        ml.events.push({t,dj:k,dur:Math.max(0.25,posNow()-st)});
+        flash('● dj '+djName(k)+' → the master lane');
+        dirtySave=true;
+      }
     }
     djApply();
   }
@@ -12868,6 +12904,54 @@ function gridHTML(pat,pos,anc,chans){
     /* over the notes, not under them — the curve is what you came to look at */
     if(autoOn())h+=autoCurves(PR2(i),lane.len,anc,H,CW,frontKey);
     h+='</div>';
+  }
+  /* THE MASTER COLUMN — the song, where the song lives. Lane 0 has held the
+     arrangement since clip recalls moved onto it, and it was the one lane with
+     no column: the scheduler played it, recClip wrote to it, and nothing drew
+     it. So a performance you recorded was real, audible, and invisible.
+     It is not pitched, so it does not draw like notes. A DJ WINDOW is a band
+     across the whole width for as long as it holds, because it is on the whole
+     mix. A CLIP RECALL is a mark placed at the channel it moved, left to right
+     in strip order — so a scene change is a mark at the far left and a single
+     channel flipping clips is a mark under roughly where that channel sits. */
+  {
+    const ml=pat.lanes[0], sel=S.mSel;
+    h+='<div class="gcol mcol" style="width:'+COLW+'ch">';
+    const n16=ml?Math.max(1,Math.round(ml.len/step)):0;
+    if(!n16){ h+='<div class="gc k" style="height:'+H+'px"></div></div>'; }
+    else{
+      const per=Math.max(1,Math.ceil(n16/Math.max(1,Math.floor(H/5.4))));
+      const n=Math.ceil(n16/per), ch=H/n;
+      const u=Math.max(1,Math.round(Math.max(1,Math.round(UNITS[ml.unit]/step))/per));
+      const now=(T.playing&&ml.len>0)?Math.floor(fmod(pos-anc,ml.len)/step):-1;
+      const nowR=now<0?-1:Math.floor(now/per);
+      const base=sel?'ks':'k', lift=sel?'ksp':'ks';
+      for(let r=0;r<n;r++){
+        const atUnit=(r+1)%u===0||r+1>=n;
+        const rule=r%4===0?' bt':(r%2?' z':'');
+        const g=atUnit?(ch>=11?2.6:ch>=7?1.6:1):(ch>=11?0.9:ch>=7?0.6:0);
+        h+='<div class="gc '+((nowR===r?lift:base)+rule)+'" style="height:'+ch.toFixed(2)+
+           'px;line-height:'+ch.toFixed(2)+'px;border-bottom-width:'+g+'px"></div>';
+      }
+      const evs=ml.events.filter(e=>e.t<ml.len-1e-9);
+      if(evs.length){
+        h+='<div class="nlay">';
+        for(const e of evs){
+          const top=(e.t/step)/n16*H;
+          if(e.dj!==undefined){
+            const ht=Math.max(2,((e.dur||1)/step)/n16*H-0.6);
+            h+='<i class="djw" style="top:'+top.toFixed(1)+'px;height:'+
+               Math.min(ht,H-top).toFixed(1)+'px"></i>';
+          }else if(e.clip!==undefined){
+            const c2=clamp(e.ch|0,0,9);
+            h+='<i class="clw" style="top:'+top.toFixed(1)+'px;left:'+
+               (c2/9*Math.max(1,CW-3)).toFixed(1)+'px"></i>';
+          }
+        }
+        h+='</div>';
+      }
+      h+='</div>';
+    }
   }
   return h+'</div>';
 }

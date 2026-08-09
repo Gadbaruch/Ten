@@ -53,18 +53,29 @@ for i, l in enumerate(lines):
     for m in KEY.finditer(l):
         rows.append((m.group(1), i + 1, guards_of(l), meaning(i)))
 
-note = set()
-m = re.search(r'const NOTEKEYS\s*=\s*\{([^}]*)\}', SRC.read_text(), re.S)
-if m:
-    note = {k[3:] for k in re.findall(r'(\w+)\s*:', m.group(1)) if k.startswith('Key')}
+def codes_in(name):
+    """Every KeyboardEvent.code in a `const NAME={Code:n,...}` table.
+
+    This used to keep only the entries starting with 'Key', which threw away
+    Semicolon and Quote — both note keys, and Semicolon a dj pad as well. The
+    generated map then advertised them as FREE PUNCTUATION, which is the one
+    thing this file exists to get right."""
+    m = re.search(r'const ' + name + r'\s*=\s*\{([^}]*)\}', SRC.read_text(), re.S)
+    return set(re.findall(r'(\w+)\s*:', m.group(1))) if m else set()
+
+note = codes_in('NOTEKEYS')          # the musical keyboard
+dj   = codes_in('DJCODE')            # the master's dj pads, same physical row
+taken = note | dj
 
 bound = {k[3:] for k, *_ in rows if k.startswith('Key')}
-free = [chr(c) for c in range(65, 91) if chr(c) not in note and chr(c) not in bound]
+free = [chr(c) for c in range(65, 91)
+        if 'Key' + chr(c) not in taken and chr(c) not in bound]
 
 PUNCT = ['Backquote','Minus','Equal','BracketLeft','BracketRight','Backslash',
          'Semicolon','Quote','Comma','Period','Slash','Tab','Space','Enter',
          'Escape','Backspace','CapsLock']
-punct_free = [p for p in PUNCT if not any(k == p for k, *_ in rows)]
+punct_free = [p for p in PUNCT
+              if p not in taken and not any(k == p for k, *_ in rows)]
 
 doc = ["# TEN — key map",
        "",
@@ -78,6 +89,8 @@ doc = ["# TEN — key map",
        f"**Letters:** {' '.join(free) if free else 'none'} — every other letter either plays a note or is bound.",
        "",
        f"**Note keys** (cannot be reused): {' '.join(sorted(note))}",
+       "",
+       f"**DJ pads** (master, cannot be reused): {' '.join(sorted(dj))}",
        "",
        f"**Punctuation free:** {' '.join(punct_free) if punct_free else 'none'}",
        "",
