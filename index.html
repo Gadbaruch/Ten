@@ -515,10 +515,10 @@ function rpitApply(midi,sl){
 }
 /* `rv` is its own field, not a p-slot. Every p already carries a non-zero
    default from somewhere, so putting the reverb's algorithm on one would have
-   read whatever junk a preset happened to hold — VABGA's p4 is 0.5, which
-   rounds to 1, which would have silently turned its convolution reverb into a
-   plate. A new field is undefined on every preset ever saved, and undefined
-   is convolve. */
+   read whatever junk a preset happened to hold: p4 is 0.3 by default and 0.5
+   in places, and both round to a mode nobody chose — a convolution reverb
+   would have silently become a plate the moment this shipped. A new field is
+   undefined on every preset ever saved, and undefined is convolve. */
 const mkFx  =()=>({typ:0,p1:0.3,p2:0.3,p3:0.5,p4:0.3,p5:0,p6:0.5,p7:0.7,p8:0.45,mix:0.3,rv:0});
 /* per-type starting points, for the units whose generic 0.3/0.3 is wrong.
    A compressor at 0.3/0.3 is -42dB at 6.7:1 — not a setting, a decision. */
@@ -1967,28 +1967,6 @@ const PRESETS0=()=>[
    fx:{0:{typ:23,p1:0.24,p2:1,p3:0.5,p4:0,mix:0.95},
        1:{typ:8,p1:0.27,p2:0.25,p3:3,p4:0.3,p5:0.5,mix:0.15}},
    vox:{mode:1}, mix:{lvl:1,pan:0}, trs:-16}),
- /* SNARE: no fundamental at all — a sine nine times up for the crack and blue
-    noise for the body, through one highpass at 300. The amp env is bent 190
-    with a hair of sustain; the pitch env is centred, which is what gives it
-    the shell. Reverb in front of the distortion, tuned up an octave. */
- mkJ('VABGA','snr',{
-   osc:{0:{amt:0},1:{wav:0,rat:9,amt:1},2:{wav:12,rat:1,amt:1}},
-   flt:{1:{typ:2,frq:302,q:1,pol:0}},
-   /* CAPTURED BEFORE THE CURVE MEANT THIS. When this was saved, `crv` scaled
-      the decay RATE — the shape was exp(-k·t/d) with k=2^(crv/100), always a
-      plain exponential. It bends the SHAPE now and the rate is fixed, so 190
-      and 150 mean something else entirely and the snare came back wrong.
-      Translated rather than guessed: the old family at crv c is exactly the
-      new one at crv 0 with d scaled by 3/2^(c/100).
-        amp   0.0738 @190  →  3·0.0738/3.732 = 0.0593 @ 0
-        pitch 0.0076 @150  →  3·0.0076/2.828 = 0.0081 @ 0 */
-   mod:{0:{src:1,rsel:0,routes:[{dst:1,idx:0,amt:200,ctr:0,tgt:null}],
-           a:0.0005,d:0.0593,s:0.05,r:0.1388,crv:0},
-        2:{src:1,rsel:0,routes:[{dst:2,idx:0,amt:200,ctr:100,tgt:null}],
-           a:0.005,d:0.0081,s:0,r:0.001,crv:0}},
-   fx:{0:{typ:8,p1:0.27,p2:0.35,p3:3,p4:0.5,mix:0.15},
-       1:{typ:21,p1:0.5,p2:0.75,p3:0,p4:0.35,p5:0.5,mix:0.3}},
-   vox:{mode:1}, mix:{lvl:1,pan:0}, trs:12}),
  /* HAT: dust under blue noise, a 24dB highpass at 10k with the resonance all
     the way up, seven unison voices spread full width and pushed slightly left.
     Poly, so it layers with itself, and a harmonize slot on the play rack. */
@@ -3113,9 +3091,8 @@ class Voice{
       if(g0)g0.gain.value=ops[0].off?0:clamp(ops[0].amt*ob0,0,4);
       /* A SILENT OPERATOR STILL RAN. Ops 1-9 are skipped at zero level, op 0
          never was — so a preset that silences its first operator to build the
-         sound out of the others (VABGA does exactly this) carried a muted
-         oscillator per unison copy per voice, computing a waveform nothing
-         listens to. Only skipped when nothing can reach it: any operator in a
+         sound out of the others carried a muted oscillator per unison copy
+         per voice, computing a waveform nothing listens to. Only skipped when nothing can reach it: any operator in a
          modulation mode might be pointed at op 0, and finding that out for
          certain needs the routing that has not been built yet, so the presence
          of ANY modulator keeps it. Additive-only stacks — which is where the
@@ -5878,7 +5855,7 @@ function libAll(){
        at the oscillator, and the LFO stopped defaulting to pitch. The FACTORY
        half is ours to replace, so drop it and let libInit() lay it down again;
        anything the user saved is not ours and stays exactly where it is. */
-    const keep=v<18?items.filter(en=>en&&!en.factory):items;  // v4-8 levels · v9-11 voicings · v13 SNGB/LDGB · v15 KKGB/VABGA/HHGB · v16 their tuning + envelopes retranslated
+    const keep=v<19?items.filter(en=>en&&!en.factory):items;  // v4-8 levels · v9-11 voicings · v13 SNGB/LDGB · v15 KKGB/HHGB · v16 tuning + envelopes retranslated · v19 VABGA out
     libStore(keep);
     return libCache=keep;
   }
@@ -5895,7 +5872,7 @@ function libNos(){
   }
   return libNoCache=m;
 }
-const LIBV=18;   // bump BOTH: libStore writes it, libAll checks it
+const LIBV=19;   // bump BOTH: libStore writes it, libAll checks it
 function libStore(a){libMigrated=true; libCache=null; libNoCache=null;
   try{localStorage.setItem(LIBKEY,JSON.stringify({v:LIBV,items:a}));}catch(_){} if(typeof prepCache!=='undefined')prepCache.clear();}
 function presetData(p){const {modLoop,...rest}=p;return JSON.parse(JSON.stringify(rest));}
