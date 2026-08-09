@@ -1212,6 +1212,57 @@ const MODULES=[
 ];
 const paramsFor=(mi,slot)=>{const M=MODULES[mi];return M.flat?M.flat:M.params(slot);};
 
+/* ---------------- automation addressing --------------------------------
+   AN AUTOMATION POINT USED TO SAY `{m:3, s:1, p:1}` — module index, slot,
+   parameter index. Positional, and therefore only meaningful next to the
+   MODULES table as it stood the day it was written. When the racks were
+   renumbered the loader had no choice but this:
+
+       if(o.v<13) p.modLoop.events=[];   // module indices changed
+
+   Every automation anyone had recorded was deleted, because there was no way
+   to know what the numbers had meant. The mod rack already solved this: an
+   address is {rack, slot, key, lbl} and the label is a guard, so it survives
+   renumbering, says what it points at, and can report being unresolved
+   instead of silently landing somewhere else.
+
+   Points carry `a` now. `m/s/p` is still written alongside for one version so
+   a downgrade does not lose anything, and is read only when `a` is absent. */
+function autoAddr(pre,mi,si,px){
+  const M=MODULES[mi]; if(!M||!M.id||M.prs)return null;
+  const slot=M.flat?null:(modHolder(pre,M.id)[M.id]||[])[si<0?0:si];
+  const spec=(M.flat?M.flat:M.params(slot))[px];
+  if(!spec)return null;
+  return {rack:M.id,slot:M.flat?0:(si<0?0:si),key:spec.key,lbl:spec.lbl};
+}
+const sameAddr=(a,b)=>!!a&&!!b&&a.rack===b.rack&&String(a.slot)===String(b.slot)
+  &&a.key===b.key&&a.lbl===b.lbl;
+/* the address an event names, deriving it from the legacy triple when a point
+   predates this and has none */
+function evAddr(pre,ev){
+  if(ev.a)return ev.a;
+  const a=autoAddr(pre,ev.m,(ev.s??-1),ev.p);
+  if(a)ev.a=a;                                   // upgrade in place, once
+  return a;
+}
+const addrKey=a=>a?a.rack+'/'+a.slot+'/'+a.key:'?';
+/* an address back to the (module, slot, param) triple the setters take —
+   resolved fresh every time, which is the whole point: the numbers are allowed
+   to move, the address is not. Null when it no longer names anything. */
+function autoWhere(pre,a){
+  if(!a)return null;
+  const mi=MODULES.findIndex(M=>M&&M.id===a.rack);
+  if(mi<0)return null;
+  const M=MODULES[mi];
+  const si=M.flat?-1:clamp(Math.round(+a.slot||0),0,9);
+  const slot=M.flat?null:(modHolder(pre,M.id)[M.id]||[])[si];
+  if(!M.flat&&!slot)return null;
+  const specs=M.flat?M.flat:M.params(slot);
+  const px=specs.findIndex(x=>x.key===a.key&&x.lbl===a.lbl);
+  if(px<0)return null;
+  return {mi,si,px,spec:specs[px]};
+}
+
 /* ---------------- mod destinations ------------------------------------
    A DESTINATION IS AN ADDRESS, not a place in an enum. `dst:3, idx:2` only
    means anything next to the enum that happened to be current when it was
@@ -1578,8 +1629,9 @@ function optWrite(ch,c,pKey,nv){
   const ml=pre.modLoop;
   if(ml&&ml.state==='rec'&&T.playing){
     const t=fmod(qz(fmod(posNow(),ml.len),0.25),ml.len);
-    ml.clear(ev=>ev.m===mi&&(ev.s??-1)===si&&ev.p===px&&Math.abs(ev.t-t)<1e-6);
-    ml.events.push({t,m:mi,s:si,p:px,v:nv});
+    const a=autoAddr(pre,mi,si,px);
+    ml.clear(ev=>sameAddr(evAddr(pre,ev),a)&&Math.abs(ev.t-t)<1e-6);
+    ml.events.push({t,a,m:mi,s:si,p:px,v:nv});   // m/s/p kept for one version
   }
 }
 function optSet(key,on){
@@ -2607,9 +2659,17 @@ function scheduleRange(from,to){
   for(let si=0;si<10;si++){
     const ml=S.presets[si].modLoop;
     if(!ml.events.length)continue;
+    const pre=S.presets[si];
     ml.occur(from,to,(t,e)=>{
+      /* resolved through the address, so a point survives its rack being
+         renumbered. Where the address names something that is no longer there
+         the point is simply not applied — it is kept, not deleted, so putting
+         the slot back brings the automation back with it. */
+      const a=evAddr(pre,e);
+      const w=a?autoWhere(pre,a):null;
+      if(!w)return;
       const ms=Math.max(0,(timeAt(t)-AC.currentTime)*1000);
-      setTimeout(()=>{applyParam(si,e.m,e.s??-1,e.p,e.v);dirty=true;},ms);
+      setTimeout(()=>{applyParam(si,w.mi,w.si,w.px,e.v);dirty=true;},ms);
     });
   }
 }
@@ -7514,8 +7574,9 @@ function adjustParam(d,m){
   const ml=pre.modLoop;
   if(ml.state==='edit'&&S.layer>=2&&holder===pre){   // mod-loop records channel params only
     const cell=cellOf(ml), t0=curCell(ml)*cell;
-    let pt=ml.events.find(ev=>ev.m===mi&&(ev.s??-1)===si&&ev.p===px&&ev.t>=t0-1e-9&&ev.t<t0+cell-1e-9);
-    if(!pt){pt={t:t0,m:mi,s:si,p:px,v:getV(pre,mi,si,spec)};ml.events.push(pt);}
+    const a0=autoAddr(pre,mi,si,px);
+    let pt=ml.events.find(ev=>sameAddr(evAddr(pre,ev),a0)&&ev.t>=t0-1e-9&&ev.t<t0+cell-1e-9);
+    if(!pt){pt={t:t0,a:a0,m:mi,s:si,p:px,v:getV(pre,mi,si,spec)};ml.events.push(pt);}
     pt.v=adjust(spec,pt.v,d,m);
     applyParam(S.editSnd,mi,si,px,pt.v);
   }else{
@@ -7523,8 +7584,9 @@ function adjustParam(d,m){
     writeParam(S.editSnd,mi,si,px,nv);
     if(ml.state==='rec'&&T.playing&&holder===pre){
       const t=fmod(qz(fmod(posNow(),ml.len),0.25),ml.len);
-      ml.clear(ev=>ev.m===mi&&(ev.s??-1)===si&&ev.p===px&&Math.abs(ev.t-t)<1e-6);
-      ml.events.push({t,m:mi,s:si,p:px,v:nv});
+      const a2=autoAddr(pre,mi,si,px);
+      ml.clear(ev=>sameAddr(evAddr(pre,ev),a2)&&Math.abs(ev.t-t)<1e-6);
+      ml.events.push({t,a:a2,m:mi,s:si,p:px,v:nv});
     }
   }
   dirty=true;
@@ -10464,6 +10526,56 @@ const onKeyDown=e=>{
     if(c==='Equal')addSlotHere(); else removeSlotHere();
     return;
   }
+  /* R — ROUTE SOMETHING HERE. The mod rack is the right place for modulators
+     to LIVE (one LFO can drive eight destinations; that does not fit under a
+     parameter) but it is the wrong place to have to start from. You are
+     standing on the filter cutoff because you were thinking about the filter
+     cutoff, and the old flow was: remember what it was called, leave, open the
+     mod rack, find a free slot, open the destination browser, find your way
+     back to it. Now: press r.
+     It takes the first free mod slot, points it here, and leaves you on that
+     slot's amount so the next thing you press is the thing you meant.
+     R is the only letter in the whole instrument that was still free — every
+     other one plays a note or is already bound. Spent here because this is the
+     gesture that gets used a hundred times a session. */
+  if(c==='KeyR'&&!e.repeat&&!e.metaKey&&!e.ctrlKey&&S.layer>=2&&!PICK&&!DPICK){
+    e.preventDefault();
+    const pre=S.presets[S.editSnd], M=MODULES[S.curMod];
+    if(!M||!M.id||M.prs){flash('nothing to modulate here');return;}
+    const hold=modHolder(pre,'mod');
+    const specs=paramsFor(S.curMod,M.flat?null:modHolder(pre,M.id)[M.id][S.curSlot]);
+    const spec=specs[flatView(S.curMod)?S.curParam:S.slotParam];
+    if(!spec){flash('nothing to modulate here');return;}
+    if(spec.type==='enum'||(spec.key&&spec.key[0]==='_')){
+      flash(spec.lbl+' is a menu — modulation needs a range');return;}
+    const rate=destRate(M.id,spec.key);
+    if(!rate){flash('nothing can drive '+M.name.toLowerCase()+'·'+spec.lbl+' yet');return;}
+    const addr={rack:M.id,slot:M.flat?0:S.curSlot,key:spec.key,lbl:spec.lbl};
+    /* an existing modulator already pointed here? go to it rather than making
+       a second one — pressing r twice should take you back, not pile up */
+    let at=-1;
+    hold.mod.forEach((m,i)=>{ if(at>=0||!m||!m.src)return;
+      if((m.routes||[]).some(rt=>rt.addr&&sameAddr(rt.addr,addr)))at=i; });
+    if(at<0){
+      at=hold.mod.findIndex(m=>!m||!m.src);
+      if(at<0){flash('all ten mod slots are in use');return;}
+      pushUndo('route');
+      const m=hold.mod[at];
+      Object.assign(m,mkMod(at),{src:2,off:false});     // an LFO is the useful default
+      m.routes=[{dst:0,idx:0,amt:40,ctr:0,tgt:null,addr}];
+      m.rsel=0;
+      flash('◎ lfo → '+destLabel(addr)+'  ('+(rate==='audio'?'audio rate':rate==='ctrl'?'live':'next note')+')');
+    }else flash('◎ already routed — '+MSRC[hold.mod[at].src]+' → '+destLabel(addr));
+    /* land on the new modulator's AMOUNT, because that is always the next
+       thing you want and it is the one value that decides whether you can
+       hear what you just made */
+    S.curMod=MODULES.findIndex(M2=>M2&&M2.id==='mod');
+    S.curSlot=at;
+    const ms=paramsFor(S.curMod,hold.mod[at]);
+    S.slotParam=Math.max(0,ms.findIndex(x=>x.key==='amt'));
+    engine.refresh(S.editSnd); engine.lfoLive(S.editSnd);
+    dirty=true; dirtySave=true; return;
+  }
   if(c==='Enter'){e.preventDefault(); if(!e.repeat)diveIn(); return;}
   if(c==='Escape'){e.preventDefault();
     if(HE.cancelLearn())return;
@@ -10606,7 +10718,8 @@ const onKeyDown=e=>{
       if(rs(e)){ml.events=[]; flash('all automation cleared on '+S.presets[S.editSnd].name);}
       else{
         const n0=ml.events.length;
-        ml.events=ml.events.filter(ev=>ev.m!==S.curMod);
+        {const pre=S.presets[S.editSnd], rk=MODULES[S.curMod]&&MODULES[S.curMod].id;
+         ml.events=ml.events.filter(ev=>{const a=evAddr(pre,ev);return !a||a.rack!==rk;});}
         flash((n0-ml.events.length)+' '+MODULES[S.curMod].name.toLowerCase()+' points cleared');
       }
       dirty=true; dirtySave=true; return;
@@ -10631,8 +10744,10 @@ const onKeyDown=e=>{
     if(inEdit()){
       pushUndo('cell clear');
       const cell=cellOf(lp), t0=curCell(lp)*cell;
-      if(S.layer===3)lp.clear(ev=>ev.m===S.curMod&&(ev.s??-1)===S.curSlot&&ev.t>=t0-1e-9&&ev.t<t0+cell-1e-9);
-      else if(S.layer===2)lp.clear(ev=>ev.m===S.curMod&&(ev.s??-1)===S.curSlot&&ev.t>=t0-1e-9&&ev.t<t0+cell-1e-9);
+      if(S.layer>=2){const pre=S.presets[S.editSnd], rk=MODULES[S.curMod]&&MODULES[S.curMod].id;
+        lp.clear(ev=>{const a=evAddr(pre,ev);
+          return a&&a.rack===rk&&String(a.slot)===String(S.curSlot)
+                 &&ev.t>=t0-1e-9&&ev.t<t0+cell-1e-9;});}
       else lp.clear(ev=>ev.t>=t0-1e-9&&ev.t<t0+cell-1e-9);
       dirty=true; dirtySave=true; return;}
     const recing=T.playing&&curHolder().state==='rec'&&S.layer>0;
@@ -10657,8 +10772,11 @@ const onKeyDown=e=>{
         flash('deleted '+en.name+' from library');
       }
       dirty=true; return;}
-    else if(S.layer===2&&rs(e)){pushUndo('mod clear');curHolder().clear(ev=>ev.m===S.curMod);flash('mod points cleared');}
-    else if(S.layer===3&&rs(e)){pushUndo('mod clear');curHolder().clear(ev=>ev.m===S.curMod&&(ev.s??-1)===S.curSlot);flash('slot mod points cleared');}
+    else if(S.layer>=2&&rs(e)){pushUndo('mod clear');
+      const pre=S.presets[S.editSnd], rk=MODULES[S.curMod]&&MODULES[S.curMod].id;
+      curHolder().clear(ev=>{const a=evAddr(pre,ev);
+        return a&&a.rack===rk&&(S.layer===2||String(a.slot)===String(S.curSlot));});
+      flash((S.layer===2?'mod':'slot mod')+' points cleared');}
     else {resetParam();return;}
     dirty=true; dirtySave=true; return;}
 
@@ -12968,7 +13086,7 @@ function autoRows(L,pre){
   /* group by the address a point belongs to: rack, slot, param */
   const by=new Map();
   for(const ev of ml.events){
-    const k=ev.m+'/'+(ev.s??-1)+'/'+ev.p;
+    const k=addrKey(evAddr(pre,ev));
     if(!by.has(k))by.set(k,[]);
     by.get(k).push(ev);
   }
