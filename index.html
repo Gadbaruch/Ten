@@ -121,6 +121,9 @@
   /* an address whose slot is gone: still counted, never applied */
   .adot.dead{background:none;box-shadow:inset 0 0 0 1px var(--fg);opacity:.4;}
   /* the gesture readout: text in the empty space above the column, no box */
+  .wlay{position:absolute;top:0;left:calc(-1 * var(--bleed));pointer-events:none;}
+  .wlay path{stroke:var(--fg);stroke-width:1;opacity:.5;fill:none;}
+  .cuet{position:absolute;left:0;width:100%;height:1px;background:var(--fg);opacity:.65;}
   .cinf{position:absolute;top:-16px;left:0;width:100%;text-align:center;
         font-size:11px;line-height:14px;color:var(--fg);opacity:.9;
         white-space:nowrap;pointer-events:none;}
@@ -923,7 +926,7 @@ const SETTINGS=[
 ];
 function basePreset(name){return{
   name, cat:'misc', tr:0, trs:0, prep:null,
-  au:{gain:0.9,semis:0,rate:1,st:0,en:1,fit:0,src:0},
+  au:{gain:0.9,semis:0,rate:1,st:0,en:1,fit:0,src:0,pmode:0,chan:0,cues:{}},
   osc:rack(mkOsc), amp:rack(mkAmp), flt:rack(mkFlt), env:rack(mkEnv),
   lfo:rack(mkLfo), mod:rack(mkMod), fx:rack(mkFx), ply:rack(mkPly),
   vox:{mode:0,glide:0,uni:1,sprd:12,wide:0.6,slop:0.008},
@@ -1549,6 +1552,9 @@ const destRate=(rack,key)=>
      destination it could only ever be wired from an oscillator, and an
      envelope or velocity pointed at it did nothing at all. */
   :(rack==='voice'&&key==='pan')?'ctrl'
+  /* the audio channel's pitch: free mode bends the sounding sources, sync
+     mode retunes the shifter — either way it answers live */
+  :(rack==='aud'&&key==='semis')?'ctrl'
   /* A THIRD KIND. These have no node to write and no value to ramp — they are
      read once, when a note starts. So the modulator parks its value and the
      voice builder reads that instead of the slot; the change lands on the next
@@ -1670,6 +1676,8 @@ function modDests_(pre){
     });
     for(const sp of seen.values())add(M.id,'*',sp,'all');   // one entry per param, every slot
   }
+  if((pre.cat||'')==='audio')
+    add('aud',0,SP('pitch','semis','lin',{min:-24,max:24,step:1,fmt:v=>v+'st'}),'');
   for(const sp of VOICE_P)add('voice',0,sp,'');
   for(const sp of MIX_P)add('mix',0,sp,'');
   return out;
@@ -1680,7 +1688,7 @@ function modDests_(pre){
 let _destCache={sig:null,list:null};
 function destList(pre){
   if(!pre)return [];
-  let sig=String(S.editSnd);
+  let sig=String(S.editSnd)+'|'+(pre.cat||'');
   for(const id of ['osc','flt','mod','fx','ply']){
     const M=MODULES.find(m=>m&&m.id===id); if(!M)continue;
     const rk=(modHolder(pre,id)||{})[id]||[];
@@ -1701,6 +1709,10 @@ function resolveDest(pre,a){
        Pan is a real number on the channel and has one; amp and pitch are wired
        at note-on and never reach this, so an empty object is honest. */
     return [{voice:true,key:a.key,spec:sp,si:0,slot:a.key==='pan'?(pre.mix||{}):{}}];
+  }
+  if(a.rack==='aud'){
+    const sp=SP('pitch','semis','lin',{min:-24,max:24,step:1,fmt:v=>v+'st'});
+    return (a.key==='semis'&&a.lbl===sp.lbl)?[{aud:true,key:'semis',spec:sp,si:0,slot:pre.au||{}}]:[];
   }
   if(a.rack==='mix'){
     const sp=MIX_P.find(x=>x.key===a.key&&x.lbl===a.lbl); if(!sp)return [];
@@ -1932,6 +1944,8 @@ const OPTRACK={
         make:sl=>sl, unmake:sl=>Object.assign(sl,{typ:0})},
 };
 const ALTSUS=new Set();     // scopes riding on a held ⌥ after their letter went up
+const AUD={hold:null};      // the audio slice key currently down, and its cue
+const WAVEC=new Map();      // rendered waveform columns, by buffer+height
 const HOLD={tab:false,tabAt:0,tabUsed:false,tabLatch:false,m:false,mUsed:false,
             opt:null,optUsed:false,optLatch:false,optLatched:false,   // OPT: a rack grabbed by its letter
             ms:null,msLatch:false,msLatched:false,msUsed:false,   // MUTE/SOLO: ⌥m and ⌥s, and the digits that follow
@@ -2965,6 +2979,43 @@ let fxwReady=false;
       return true;
     }
   }
+  /* granular pitch shifter: two taps sweep a short delay at (ratio-1),
+     crossfaded so neither is heard wrapping. The classic, cheap and clean
+     enough for octave-and-a-half either way. */
+  class PS extends AudioWorkletProcessor{
+    constructor(o){super();
+      const d=(o&&o.processorOptions)||{};
+      this.ratio=Math.pow(2,(d.semis||0)/12);
+      this.n=Math.round(sampleRate*0.12);
+      this.buf=[new Float32Array(this.n),new Float32Array(this.n)];
+      this.w=0; this.ph=0;
+      this.win=Math.round(sampleRate*0.05);
+      this.port.onmessage=e=>{const m=e.data||{};
+        if(m.semis!=null)this.ratio=Math.pow(2,m.semis/12);};
+    }
+    process(I,O){
+      const inp=I[0], out=O[0]; if(!out||!out[0])return true;
+      const L=inp&&inp[0], R=inp&&(inp[1]||inp[0]);
+      const N=out[0].length, W=this.win, drift=1-this.ratio;
+      for(let k=0;k<N;k++){
+        this.buf[0][this.w]=L?L[k]:0; this.buf[1][this.w]=R?R[k]:0;
+        this.ph=(this.ph+drift+W)%W;
+        const p1=this.ph, p2=(this.ph+W/2)%W;
+        const f1=Math.sin(Math.PI*p1/W), f2=Math.sin(Math.PI*p2/W);
+        const rd=(p3)=>{const i2=((this.w-p3)%this.n+this.n)%this.n;
+          const i0=Math.floor(i2), fr=i2-i0;
+          const a2=this.buf[0][i0], b2=this.buf[0][(i0+1)%this.n];
+          const c2=this.buf[1][i0], d2=this.buf[1][(i0+1)%this.n];
+          return [a2+(b2-a2)*fr, c2+(d2-c2)*fr];};
+        const [l1,r1]=rd(p1), [l2,r2]=rd(p2);
+        out[0][k]=l1*f1+l2*f2;
+        if(out[1])out[1][k]=r1*f1+r2*f2;
+        this.w=(this.w+1)%this.n;
+      }
+      return true;
+    }
+  }
+  registerProcessor('ten-psh',PS);
   registerProcessor('ten-buf',B2);
   registerProcessor('ten-grain',G);
   registerProcessor('ten-deci',D);
@@ -5105,6 +5156,11 @@ class Engine{
     /* the channel's own panner. `undefined` means the route stopped, so it
        goes back to the number on the fader rather than staying where the
        modulator happened to leave it. */
+    if(rack==='aud'&&key==='semis'){
+      const au=S.presets[pi].au||{};
+      engine.audPitch(pi,(v===undefined?au.semis??0:v)-(au.semis??0));
+      return true;
+    }
     if(rack==='voice'&&key==='pan'){
       const b=this.buses[pi]; if(!b||!b.pan)return false;
       const base=(S.presets[pi]&&S.presets[pi].mix&&S.presets[pi].mix.pan)||0;
@@ -6231,21 +6287,57 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     if(t<s0-1e-6)t+=L;
     for(;t<s1-1e-9;t+=L)this.audPlay(li,timeAt(t),L);
   }
-  audPlay(pi,at,lenBeats,skipBeats=0){
+  audPlay(pi,at,lenBeats,skipBeats=0,cue){
     const buf=this.audBuf[pi]; if(!buf)return;
     const au=S.presets[pi].au||{};
     const st=clamp(au.st??0,0,0.98), en=clamp(au.en??1,st+0.01,1);
     const off=st*buf.duration, dur=(en-st)*buf.duration, loopSec=lenBeats*spb();
-    const rate=Math.round(au.fit)?dur/loopSec:(au.rate??1)*Math.pow(2,(au.semis??0)/12);
+    const sync=Math.round(au.pmode||0)===1;
+    const semis=(au.semis??0)+(cue?cue.semis||0:0)+(this.audPB&&this.audPB[pi]||0);
+    /* SYNC keeps the clock: the rate is the loop fit (or ×rate), and pitch
+       travels separately through the shifter. FREE is tape: one knob, both. */
+    const baseRate=Math.round(au.fit)?dur/loopSec:(au.rate??1);
+    const rate=sync?baseRate:baseRate*Math.pow(2,semis/12);
     const skipSec=skipBeats*spb(), skipBuf=skipSec*rate;
     if(skipBuf>=dur-0.001)return;
     const src=AC.createBufferSource(); src.buffer=buf;
     src.playbackRate.value=Math.max(0.05,rate);
-    const g=AC.createGain(); g.gain.value=au.gain??0.9;
-    src.connect(g); g.connect(this.buses[pi].vIn);
+    const g=AC.createGain(); g.gain.value=(au.gain??0.9)*(cue?cue.vol??1:1);
+    let head=src;
+    /* stereo | left | right — a mono buffer passes straight through */
+    const chn=Math.round(au.chan||0);
+    if(chn&&buf.numberOfChannels>1){
+      const sp2=AC.createChannelSplitter(2), mg=AC.createChannelMerger(2);
+      src.connect(sp2); sp2.connect(mg,chn-1,0); sp2.connect(mg,chn-1,1);
+      head=mg; head.connect(g);
+    }else src.connect(g);
+    let tail=g;
+    if(sync&&Math.abs(semis)>0.01&&fxwReady){
+      const ps=new AudioWorkletNode(AC,'ten-psh',
+        {outputChannelCount:[2],processorOptions:{semis}});
+      g.connect(ps); tail=ps; src._psh=ps;
+    }
+    if(cue&&Math.abs(cue.pan||0)>0.01){
+      const pn=AC.createStereoPanner(); pn.pan.value=clamp(cue.pan,-1,1);
+      tail.connect(pn); tail=pn;
+    }
+    tail.connect(this.buses[pi].vIn);
     src.start(at,off+skipBuf); src.stop(at+Math.min(loopSec-skipSec,(dur-skipBuf)/rate)+0.002);
     const arr=this.audActive[pi]; arr.push(src);
-    src.onended=()=>{const i=arr.indexOf(src);if(i>=0)arr.splice(i,1);try{g.disconnect();}catch(_){}};
+    src._auFree=!sync; src._auBase=baseRate;
+    src.onended=()=>{const i=arr.indexOf(src);if(i>=0)arr.splice(i,1);
+      try{g.disconnect();}catch(_){} try{tail.disconnect();}catch(_){}};
+  }
+  /* live pitch for the mod/automation destination: free mode bends the rate of
+     whatever is sounding; sync mode retunes the shifter */
+  audPitch(pi,semis){
+    this.audPB=this.audPB||{}; this.audPB[pi]=semis||0;
+    const au=S.presets[pi].au||{};
+    for(const src of this.audActive[pi]||[]){
+      if(src._auFree)src.playbackRate.setTargetAtTime(
+        Math.max(0.05,src._auBase*Math.pow(2,((au.semis??0)+(semis||0))/12)),AC.currentTime,0.02);
+      else if(src._psh)src._psh.port.postMessage({semis:(au.semis??0)+(semis||0)});
+    }
   }
   audRecStart(pi){
     if(this.audRec)return;
@@ -8008,6 +8100,11 @@ function prsFieldDefs(){
 const AUDF=[
  SP('gain','gain','lin',{min:0,max:1,step:0.05}),
  SP('pitch','semis','lin',{min:-24,max:24,step:1,fmt:v=>v+'st'}),
+ /* free: varispeed — pitch and speed are one knob, tape rules.
+    sync: the clip keeps its timing (rate is the loop fit) and pitch moves
+    alone, through the ten-psh shifter. */
+ SP('mode','pmode','enum',{opts:['free','sync']}),
+ SP('chan','chan','enum',{opts:['stereo','left','right']}),
  SP('rate','rate','lin',{min:0.25,max:4,step:0.05,fmt:v=>'\u00d7'+v}),
  SP('start','st','lin',{min:0,max:0.98,step:0.01,fmt:v=>Math.round(v*100)+'%'}),
  SP('end','en','lin',{min:0.02,max:1,step:0.01,fmt:v=>Math.round(v*100)+'%'}),
@@ -11842,6 +11939,26 @@ const onKeyDown=e=>{
     dirty=true; return;
   }
 
+  /* a held slice key scopes the arrows to ITS cue */
+  if((c==='ArrowLeft'||c==='ArrowRight'||c==='ArrowUp'||c==='ArrowDown')&&AUD.hold){
+    e.preventDefault();
+    const {pi,sl}=AUD.hold, au=S.presets[pi].au;
+    const cue=au.cues[sl]=au.cues[sl]||{o:0,semis:0,vol:1,pan:0};
+    const d2=(c==='ArrowUp'||c==='ArrowRight')?1:-1, vert=c==='ArrowUp'||c==='ArrowDown';
+    if(vert&&(e.shiftKey||rs(e))){cue.vol=clamp(+((cue.vol??1)+d2*0.05).toFixed(2),0,1.5);
+      flash('cue '+(sl+1)+' vol '+Math.round(cue.vol*100)+'%');}
+    else if(vert){cue.semis=clamp(Math.round((cue.semis||0)+d2),-24,24);
+      flash('cue '+(sl+1)+' pitch '+(cue.semis>0?'+':'')+cue.semis+'st');}
+    else if(altOf(e)){cue.pan=clamp(+((cue.pan||0)+d2*0.1).toFixed(2),-1,1);
+      flash('cue '+(sl+1)+' pan '+panCh(cue.pan).trim());}
+    else{cue.o=clamp(+((cue.o||0)+d2*(e.shiftKey||rs(e)?0.25:0.0625)).toFixed(4),-4,4);
+      flash('cue '+(sl+1)+' @ '+(sl*0.25+cue.o).toFixed(3)+'b');}
+    /* re-audition immediately: stop and refire from the edited cue */
+    for(const s2 of [...engine.audActive[pi]]){try{s2.stop(AC.currentTime+0.004);}catch(_){}}
+    const L=S.patterns[S.editPat].lanes[pi].len;
+    engine.audPlay(pi,AC.currentTime+0.006,L,clamp(sl*0.25+(cue.o||0),0,L-0.01),cue);
+    dirty=true; dirtySave=true; return;
+  }
   if((c==='ArrowLeft'||c==='ArrowRight'||c==='ArrowUp'||c==='ArrowDown')&&
      (HOLD.tab||HOLD.m||HOLD.c||HOLD.n||HOLD.r||HOLD.i||HOLD.v||HOLD.sc)){
     e.preventDefault();
@@ -12227,7 +12344,27 @@ const onKeyDown=e=>{
     const pi=S.layer>=2?S.editSnd:S.curPreset;
     const midi=60+S.oct*12+noteOf(c,pi);
     const hitVel=EXP.take();          // MIDI velocity if this key came from EXP, else the c/v value
-    if(isAudioCh(pi)){flash('audio channel — tab records mic, drop a file to load a clip');return;}
+    if(isAudioCh(pi)){
+      /* THE KEYBOARD IS A SET OF JUMP POINTS. The clip divides into 16ths of
+         the loop — one bar is sixteen slices, two bars thirty-two — and the
+         letters, in note order, each hold one. Held, the clip plays from that
+         cue; released, the cycle resumes exactly where the transport says it
+         should be. Each cue is its own little take: while held, ←→ nudges its
+         position, ↑↓ its pitch, ⇧↑↓ its volume, ⌥←→ its pan. */
+      if(!engine.audBuf[pi]){flash('audio channel — tab records ('+(Math.round((S.presets[pi].au||{}).src||0)?'resample':'mic')+'), or drop a file');return;}
+      const lane=S.patterns[S.editPat].lanes[pi], L=lane.len;
+      const nS=Math.max(1,Math.round(L/0.25));
+      const ki=KBSEQ.indexOf(c); if(ki<0)return;
+      const sl=ki%nS;
+      const au=S.presets[pi].au; au.cues=au.cues||{};
+      const cue=au.cues[sl]=au.cues[sl]||{o:0,semis:0,vol:1,pan:0};
+      for(const s2 of [...engine.audActive[pi]]){try{s2.stop(AC.currentTime+0.005);}catch(_){}}
+      AUD.hold={c,pi,sl};
+      engine.audPlay(pi,AC.currentTime+0.005,L,clamp(sl*0.25+(cue.o||0),0,L-0.01),cue);
+      flash('cue '+(sl+1)+'/'+nS+(cue.semis?' '+(cue.semis>0?'+':'')+cue.semis+'st':'')+
+        (cue.o?' @'+(sl*0.25+cue.o).toFixed(2)+'b':''));
+      dirty=true; return;
+    }
     const pat=S.patterns[S.editPat];
     if(S.layer===1&&pat.state==='edit'){
       pushUndo('step');
@@ -12599,6 +12736,16 @@ document.addEventListener('keyup',e=>{
       if(ml.state==='rec'){ml.state='on';dirty=true;dirtySave=true;}
     }
   }
+  if(AUD.hold&&AUD.hold.c===c){
+    const {pi}=AUD.hold; AUD.hold=null;
+    for(const s2 of [...engine.audActive[pi]]){try{s2.stop(AC.currentTime+0.004);}catch(_){}}
+    if(T.playing){                    // resume the cycle exactly in phase
+      const lane=S.patterns[S.editPat].lanes[pi], L=lane.len;
+      const a2=actAt(posNow());
+      engine.audPlay(pi,AC.currentTime+0.006,L,fmod(posNow()-a2.anchor,L));
+    }
+    dirty=true;
+  }
   endNote(c);
 });
 window.addEventListener('blur',()=>{
@@ -12758,7 +12905,7 @@ function load(json){
         p.tr=sp.tr||0; p.trs=sp.trs||0; p.prep=sp.prep||null;
         p.code=sp.code||null; p.pmodel=resolveModel(sp.pmodel)||null; p.psel=sp.psel|0;
         p.cp=Array.isArray(sp.cp)?sp.cp.slice(0,8):[1,1,1,0.5,0,0,0.5,0.3];
-        p.au=Object.assign({gain:0.9,semis:0,rate:1,st:0,en:1,fit:0,src:0},sp.au||{});
+        p.au=Object.assign({gain:0.9,semis:0,rate:1,st:0,en:1,fit:0,src:0,pmode:0,chan:0,cues:{}},sp.au||{});
         /* MIX AND VOF ARE NOT RACKS ANY MORE, so the MODULES walk above no
            longer carries them and every reload flattened all nine channels to
            80% and centre. serialize() was writing them the whole time — the
@@ -13815,7 +13962,36 @@ function gridHTML(pat,pos,anc,chans){
     const lane=pat.lanes[i], sel=i===S.curPreset, dim=dimOf(i);
     const n16=(lane&&!isAudioCh(i))?Math.max(1,Math.round(lane.len/step)):0;
     h+='<div class="gcol" style="width:'+COLW+'ch">';
-    if(!n16){ h+='<div class="gc k" style="height:'+H+'px"></div></div>'; continue; }
+    if(!n16){
+      h+='<div class="gc k" style="height:'+H+'px"></div>';
+      if(isAudioCh(i)&&engine.audBuf[i]){
+        const wb=engine.audBuf[i];
+        const key2=i+'|'+wb.length+'|'+H;
+        let wsvg=WAVEC.get(key2);
+        if(!wsvg){
+          const d0=wb.getChannelData(0), rows=Math.max(16,Math.round(H/2));
+          let path='';
+          for(let r2=0;r2<rows;r2++){
+            const a2=Math.floor(r2*d0.length/rows), b2=Math.floor((r2+1)*d0.length/rows);
+            let mn=0,mx=0; const step2=Math.max(1,Math.floor((b2-a2)/48));
+            for(let q2=a2;q2<b2;q2+=step2){const v2=d0[q2]; if(v2<mn)mn=v2; if(v2>mx)mx=v2;}
+            const y2=(r2+0.5)/rows*H;
+            path+='M'+((0.5+mn*0.48)*CW).toFixed(1)+','+y2.toFixed(1)+
+                  'L'+((0.5+mx*0.48)*CW).toFixed(1)+','+y2.toFixed(1);
+          }
+          wsvg='<svg class="wlay" width="'+CW.toFixed(1)+'" height="'+H+'"><path d="'+path+'"/></svg>';
+          WAVEC.set(key2,wsvg); if(WAVEC.size>20)WAVEC.delete(WAVEC.keys().next().value);
+        }
+        h+=wsvg;
+        const cues=(S.presets[i].au||{}).cues||{}, LN2=lane.len||8;
+        let ct='';
+        for(const k2 in cues){const cu=cues[k2];
+          const bt=(+k2*0.25+(cu.o||0));
+          if(bt<0||bt>=LN2)continue;
+          ct+='<i class="cuet" style="top:'+(bt/LN2*H).toFixed(1)+'px"></i>';}
+        if(ct)h+='<div class="alay" style="height:'+H+'px">'+ct+'</div>';
+      }
+      h+='</div>'; continue; }
     /* a cell cannot render below about five pixels, so past that density the
        column would grow instead of staying level — the last resort, and only
        then, is more than one 16th to a cell */
@@ -14832,6 +15008,8 @@ function renderHelp(L){
     ['⌥e','go to the ENVELOPES. a / d / s / r jump to attack, decay, sustain, release by their own letters; digits jump between envelopes; ⌫ removes one'],
     ['⌥f ⌥l ⌥k ⌥/','the same grammar for the FILTER, the LFOs, KEYTRACK and RANDOM mods — the letter takes you there, making one if the rack has none'],
     ['⌥r ⌥g ⌥s ⌥x','…and for the fx: REVERB, GRAIN, SATURATION (drive, née dist), or ⌥x for the fx rack itself. Digits jump instances, ⌫ removes, the strip edits'],
+    ['audio: letters','JUMP POINTS: the clip divides into 16ths of the loop and the letters, in note order, each hold one. Held = play from that cue; released = the cycle resumes in phase. While held: ←→ nudge the cue, ↑↓ pitch, ⇧↑↓ volume, ⌥←→ pan — each cue is its own little take'],
+    ['audio: params','pitch has FREE (tape: speed and pitch together) and SYNC (timing kept, pitch alone via the shifter) · chan picks stereo/left/right · start/end crop · input picks mic or resample · rec obeys ⇧o overdub/overwrite'],
     ['⌥p ⌥c','PHASE (chorus·flanger·phaser·trem) and COMP (comp·limit·clip·duck) — each family is ONE effect with a `kind`, the way filt holds its filters'],
     ['⌥d (delay)','the DELAY is a family now: delay · dub · tape echo · resonator · wobble · roll — the kinds differ in what lives in the feedback loop'],
     ['⌥q','QUALITY: what the signal loses — phone · lowbit · amp · lofi. amt is how much, tone is where the ceiling sits'],
