@@ -2049,9 +2049,10 @@ let SELALL=null;               // the channel whose notes cmd+A selected, or nul
    press one and the channel you are on toggles, and while you keep holding it
    — or latch it — the digits do it to whichever channel you name. That also
    hands ⇧+digit back, which is what the channel SELECTION needs. */
-/* ⌥- silences, ⌥= insists — the two live next to the volume keys they
-   qualify, and the letters they sat on are notes now. */
-const MSCOPE={Minus:'mute',Equal:'solo'};
+/* ⌥; silences, ⌥' insists — they moved off -/= so option on those keys
+   could mean the rack (add/remove a slot), which is where the cursor
+   actually lives when you reach for them. */
+const MSCOPE={Semicolon:'mute',Quote:'solo'};
 /* channels picked out for something that acts on several at once */
 const CHSEL=new Set();
 /* WHO AN ACTION IS FOR. Everything that does something to a channel asks this
@@ -11589,7 +11590,7 @@ const onKeyDown=e=>{
     e.preventDefault(); mergeToKit(); return;
   }
 
-  /* ⌥m / ⌥s — mute and solo, on a letter that says which */
+  /* ⌥; / ⌥' — mute and solo */
   if(MSCOPE[e.code]&&altOf(e)&&!e.repeat&&S.layer>=1&&!e.metaKey&&!e.ctrlKey&&!HOLD.q&&!ALTSUS.size&&!HOLD.opt){
     e.preventDefault();
     const kind=MSCOPE[e.code];
@@ -11904,13 +11905,15 @@ const onKeyDown=e=>{
   }
   /* - and = ARE THE FADER, [ and ] ARE THE PAN — everywhere, every layer, on
      the selection when there is one. ⇧ is the coarse step; ⌥ on the brackets
-     is the fine one, and on -/= option already means mute and solo, which is
-     why volume has two step sizes where pan has three. */
-  /* LEFT-shift -/= edits the RACK: = adds a slot at the cursor, - removes it.
-     Right shift stays the fader's coarse step — the two shifts already mean
-     different things everywhere else. */
-  if((c==='Equal'||c==='Minus')&&e.shiftKey&&KM.sl&&!e.metaKey&&!altOf(e)&&S.layer>=2&&!e.repeat){
-    e.preventDefault(); LATCH.used=true;
+     is the fine one. */
+  /* ⌥-/= edits the RACK: = adds a slot at the cursor, - removes it. Mute and
+     solo moved to ⌥;/⌥' to free these — the left shift is exclusively the
+     latch and could not carry a chord. A held rack-letter scope keeps its own
+     =/- (add/remove an INSTANCE of that letter), which is why this waits for
+     no scope to be open. */
+  if((c==='Equal'||c==='Minus')&&altOf(e)&&!e.metaKey&&!e.ctrlKey&&S.layer>=2&&!e.repeat
+     &&!HOLD.opt&&!ALTSUS.size){
+    e.preventDefault();
     if(c==='Equal')addSlotHere(); else removeSlotHere();
     return;
   }
@@ -13022,7 +13025,16 @@ function endNote(c){
        is the only honest length. Recording held time for everything docked
        every quantized note-off late by exactly the quantize delay. */
     const spanD=relG-p.ts;
-    const dur=(lp&&spanD<=0.02)?Math.max(0.05,heldSec/spb()):Math.max(0.05,spanD);
+    /* THE LENGTH IS THE GESTURE, and it is what the monitor already plays:
+       release() holds the live note for heldSec from the quantized start.
+       Recording the grid-to-finger span instead docked every early-pressed
+       note by the quantize displacement — a staccato 60ms tap that crossed
+       the grid point by 10ms recorded as a 10ms stub while you HEARD 60ms.
+       Recorded and monitored are now the same number. The span only wins
+       when it is LONGER (the key outlived the wall-clock hold across a
+       transport pause or tempo drop). */
+    const heldB=lp?heldSec/spb():0;
+    const dur=Math.max(0.05,heldB,spanD);
     lane.clear(ev=>ev.midi===p.midi&&Math.abs(ev.t-p.qt)<1e-6);
     lane.events.push({t:p.qt,midi:p.midi,vel:p.vel??0.9,dur,born:performance.now()});
     if(lane._cap)lane._cap.lastEnd=Math.max(lane._cap.lastEnd,p.qt+dur);
@@ -15541,8 +15553,8 @@ function renderHelp(L){
     [', / .','keyboard register, down / up — one global octave'],
     ['- / =','channel VOLUME down / up (⇧ = coarse) — on the selection when there is one'],
     ['[ / ]','channel PAN left / right (⇧ = coarse · ⌥ = fine) — same selection rule'],
-    ['⌘- / ⌘=','remove / add a rack slot (they were bare - and = before volume took those)'],
-    ['⇧(left)- / ⇧(left)=','same, one hand: LEFT shift with -/= edits the rack; the RIGHT shift stays the fader’s coarse step'],
+    ['⌥- / ⌥=','remove / add a rack slot at the cursor (mute and solo moved to ⌥; and ⌥\')'],
+    ['⌘- / ⌘=','same, from anywhere — kept as the two-hand spelling'],
     ['⌥\\','next automated knob (⇧⌥\\ = previous) — \\ alone shows and hides the curves'],
     ['⌥m','MOD: route one from the param you are on — first free slot, lfo aimed here, cursor lands on amt'],
     ['⌥ holds the scope','open any ⌥ scope, let the letter go with ⌥ still down, and it behaves as if the letter were held — and the LETTERS PLAY, so you dial with one hand and hear it with the other. No other ⌥ command opens until ⌥ comes up'],
@@ -15568,10 +15580,10 @@ function renderHelp(L){
     ['⇧s (right)','THE SCALE, held: ←→ walks the scales, ↑↓ moves the key a semitone. Tapped: scale on/off'],
     ['(master) z x c v b n m','the GLOBAL NOTE FX, the midi mirror of the dj pads above them: scatter · r-pitch · chop · oct dice · ratchet · dropout · ghost. Hold = momentary, ⇧ = latch, ←→ while held picks the TARGET — everything, the drums, or the melodic channels. They bend what the sequencer emits; nothing is written to the lanes'],
     ['⇧, / ⇧.','keyboard velocity down / up — how hard, next to how high'],
-    ['⌥= / ⌥-','SOLO / INSIST and MUTE / SILENCE the channel you are on — next to the volume keys they qualify. While held, the digits do it to any other channel; latch keeps the digits doing it'],
+    ['⌥\' / ⌥;','SOLO / INSIST and MUTE / SILENCE the channel you are on. While held, the digits do it to any other channel; latch keeps the digits doing it'],
     ['','they are plain toggles: press again for off. Asking for one withdraws the other, and the channel you touched becomes the one you are on'],
     ['⇧1-9','pick channels OUT — a selection, not a solo · ⇧←→ drags it along with the cursor · esc clears it'],
-    ['','WITH A SELECTION, EVERYTHING IS BULK. ⌥s/⌥m · hold c volume and pan · hold v velocity · hold n pitch · hold ` instrument · hold q grid · hold tab loop · / rolls them all · ⌘C/⌘X/⌘V as a block · ⌘D duplicate · n+⌫ and ⇧⌫ clear · c+⌫ resets the mix. Same keys, more than one subject'],
+    ['','WITH A SELECTION, EVERYTHING IS BULK. ⌥\'/⌥; · hold c volume and pan · hold v velocity · hold n pitch · hold ` instrument · hold q grid · hold tab loop · / rolls them all · ⌘C/⌘X/⌘V as a block · ⌘D duplicate · n+⌫ and ⇧⌫ clear · c+⌫ resets the mix. Same keys, more than one subject'],
     ['','a copied block pastes from wherever the cursor is, not back where it came from — lift four drums off 2-5, esc, walk to 6, paste, and they land on 6-9'],
     ['⌘⌥⇧K','fold the selected channels into ONE KIT channel: each becomes a pad on its own key, and its part moves with it. Every modifier on the board, because it rewrites several channels at once'],
     ['left shift','LATCH. A control sticks if latch was down at any point while you held it. Tapped alone it releases everything'],
