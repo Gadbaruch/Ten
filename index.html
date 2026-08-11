@@ -913,15 +913,27 @@ function basePreset(name){return{
    The last note you played is the slot you see and edit. */
 const isKit=p=>(p&&p.cat==='kit');
 const pcOf=m=>((Math.round(m)%12)+12)%12;
-function kitSlot(p,midi){            // the full preset for this pitch class (lazily created)
+/* A PAD YOU NEVER MADE DOES NOT MAKE A SOUND. This used to conjure one out of
+   basePreset the instant anything asked — including PLAYING it — and
+   basePreset is a saw. So a kit folded from three channels answered on three
+   keys and handed back a default saw on the other nine, indistinguishable
+   from a pad you had built. That is the whole of "all sounds in kit sound
+   like just a saw wave": nine twelfths of the keyboard was init patches.
+   Creating on demand is still right when you are EDITING — that is how you
+   build a kit pad by pad — so the caller has to ask for it. */
+function kitSlot(p,midi,make){
   if(!isKit(p))return null;
   if(!p.kit)p.kit=new Array(12).fill(null);
   const i=pcOf(midi);
-  if(!p.kit[i]){const b=foldMod(basePreset(NN[i]));b.cat='kik';delete b.kit;p.kit[i]=b;}
+  if(!p.kit[i]){
+    if(!make)return null;
+    const b=foldMod(basePreset(NN[i]));b.cat='kik';delete b.kit;p.kit[i]=b;
+  }
   return p.kit[i];
 }
+const kitHas=(p,midi)=>!!(isKit(p)&&p.kit&&p.kit[pcOf(midi)]);
 /* which preset the sound layer is editing: a kit's focused slot, else the channel */
-function edKit(p){return isKit(p)&&S.prepFocus!=null?kitSlot(p,S.prepFocus):null;}
+function edKit(p){return isKit(p)&&S.prepFocus!=null?kitSlot(p,S.prepFocus,true):null;}
 function modHolder(p,modId){const K=edKit(p);return K||p;}
 const RACK_MK={osc:mkOsc,amp:mkAmp,flt:mkFlt,env:mkEnv,lfo:mkLfo,mod:mkMod,fx:mkFx,ply:mkPly};
 
@@ -1961,8 +1973,8 @@ function mergeToKit(){
   CHSEL.clear();
   S.curPreset=tgt; S.mSel=false;
   clipMark(tgt);
-  flash('ch '+tgt+' is a kit of '+sel.length+' — pads on '+NN[0]+'…'+NN[sel.length-1]+
-        ', '+out.length+' notes moved');
+  flash('ch '+tgt+' is a kit of '+sel.length+' — pads '+NN.slice(0,sel.length).join(' ')+
+        ' ('+out.length+' notes moved). The other keys are empty and silent until you fill them.');
   dirty=true; dirtySave=true;
 }
 /* the one gesture that puts the desk back: everything latched, off */
@@ -4899,6 +4911,7 @@ class Engine{
     const p=S.presets[pi];
     if(!isKit(p))return this.buses[pi].vIn;
     const pc=pcOf(midi), K=kitSlot(p,midi);
+    if(!K)return this.buses[pi].vIn;          // nothing on this pad to give a bus to
     this.kitBuses=this.kitBuses||{};
     const store=this.kitBuses[pi]=this.kitBuses[pi]||{};
     const sig=JSON.stringify([K.fx,K.mix]);
@@ -5542,6 +5555,7 @@ class Engine{
        polyphonically — the old note just kept ringing under the new one. */
     const pm0=padMidi==null?midi:padMidi;
     const K0=isKit(p)?kitSlot(p,pm0):null;
+    if(isKit(p)&&!K0)return null;
     const pre0=K0||prepEffective(p,pm0);
     const lid0=K0?pcOf(pm0):'ch';
     /* GLIDE ONLY FROM A NOTE YOU ARE STILL HOLDING. Portamento used to slide
@@ -5640,6 +5654,9 @@ class Engine{
     /* kit channels: the pitch class picks a whole independent preset chain;
        octaves transpose it (C2/C3/C4 = the same instrument, different pitch) */
     const K=isKit(p)?kitSlot(p,pm):null;
+    /* empty pad, no voice — falling back to the channel's own preset would
+       play the leftover sound of whichever channel the kit was folded onto */
+    if(isKit(p)&&!K)return null;
     const pre=K?K:prepEffective(p,pm);
     const lid=K?pcOf(pm):'ch';
     const v=new Voice(this,at,pi,midi,vel,pre,pm,legato); v._lid=lid;
@@ -5734,6 +5751,7 @@ class Engine{
        live notes — a chord effect on a mono channel is already contradictory. */
     if(midis.length===1){
       const K0=isKit(p)?kitSlot(p,pads[0]):null;
+      if(isKit(p)&&!K0)return;
       const pr0=K0||prepEffective(p,pads[0]);
       const mv=(pr0.vox&&pr0.vox.mode)|0;
       if(mv>=1)return durSec==null
@@ -7696,7 +7714,7 @@ function _prsAction(d){
       const base=Math.floor(S.prepFocus/12)*12;
       S.prepFocus=base+fmod(pcOf(S.prepFocus)+d,12);
       engine.lastMidi[pi]=S.prepFocus;
-      flash('pad '+NN[pcOf(S.prepFocus)]+' — '+(kitSlot(p,S.prepFocus).name));
+      flash('pad '+NN[pcOf(S.prepFocus)]+' — '+(kitSlot(p,S.prepFocus,true).name));
       dirty=true; return;
     }
     if(f==='sound'){                 // this pad's instrument type
@@ -11085,7 +11103,7 @@ const onKeyDown=e=>{
     if(S.layer>=2&&!rs(e)&&MODULES[S.curMod].prs){   // reset the focused kit pad
       const p=S.presets[S.editSnd], K=edKit(p);
       if(K){pushUndo('kit pad');
-        p.kit[pcOf(S.prepFocus)]=null; kitSlot(p,S.prepFocus);
+        p.kit[pcOf(S.prepFocus)]=null; kitSlot(p,S.prepFocus,true);
         flash('pad '+NN[pcOf(S.prepFocus)]+' reset'); dirty=true; dirtySave=true; return;}
     }
     if(S.layer===0&&rs(e)){          // clear everything inside the selected pattern
@@ -13673,9 +13691,22 @@ function stackStrip(){}          // (stacking removed — kits are per-pad chain
 function layerBanner(L,pre){     // which kit pad you're editing
   if(!isKit(pre))return;
   const M=MODULES[S.curMod];
+  /* WHICH KEYS HOLD SOMETHING. Twelve pads, named by the note that plays
+     them: filled ones bright, empty ones dim. An empty pad is silent now, so
+     the row is the difference between "this key does nothing" and "this key
+     is broken" — which is exactly what was impossible to tell before. */
+  const row='  '+NN.map((n,i)=>{
+    const has=pre.kit&&pre.kit[i];
+    const here=S.prepFocus!=null&&pcOf(S.prepFocus)===i;
+    const lbl=' '+pad(n,3);
+    return here?sp('i',lbl):has?sp('a',lbl):sp('d',lbl);
+  }).join('');
+  const nHas=(pre.kit||[]).filter(Boolean).length;
+  L.push(row+sp('d','   '+nHas+'/12 pads'));
   if(S.prepFocus==null){L.push('  '+sp('r','◆ KIT')+sp('d','  play a pad (a note) to pick which instrument you edit'));return;}
-  const K=kitSlot(pre,S.prepFocus), pc=pcOf(S.prepFocus);
+  const pc=pcOf(S.prepFocus);
   if(M.prs)return;
+  const K=kitSlot(pre,S.prepFocus,true);
   L.push('  '+sp('r','◆ pad '+NN[pc])+sp('a',' '+K.name+' ('+(K.cat||'kik')+')')+
     sp('d',' — this pad is its own full chain; every rack edits THIS pad'));
 }
