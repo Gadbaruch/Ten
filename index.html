@@ -705,7 +705,7 @@ const KEYN=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
 /* THE LOOK, as numbers you can turn. Every fill on screen is derived from
    these three, so tuning the feel is three knobs rather than a hunt through
    hex literals. Lightness is in percent. */
-const CFG=Object.assign({overdub:0,listen:1,defLen:1,scaleOn:1,key:0,scale:0,wild:35,amix:1,qOn:1,qMon:1,vgrid:1,
+const CFG=Object.assign({overdub:0,listen:1,defLen:1,scaleOn:1,key:0,scale:0,wild:35,amix:1,qOn:1,vgrid:1,
   uiCell:9,uiLift:11,uiDim:5,uiText:62,theme:'dark',font:'mono',rowH:14},
   (()=>{try{return JSON.parse(localStorage.getItem('ten-cfg'))||{};}catch(_){return{};}})());
 const saveCfg=()=>{try{localStorage.setItem('ten-cfg',JSON.stringify(CFG));}catch(_){}};
@@ -2048,9 +2048,9 @@ let SELALL=null;               // the channel whose notes cmd+A selected, or nul
    press one and the channel you are on toggles, and while you keep holding it
    — or latch it — the digits do it to whichever channel you name. That also
    hands ⇧+digit back, which is what the channel SELECTION needs. */
-/* ⌥; silences, ⌥' insists — they moved off -/= so option on those keys
-   could mean the rack (add/remove a slot), which is where the cursor
-   actually lives when you reach for them. */
+/* ⇧; silences, ⇧' insists. They moved off option so ⌥ could stay purely
+   the channel-rack layer; shift on these two keys means nothing else at
+   layer 1+, and the left shift still latches the scope like everywhere. */
 const MSCOPE={Semicolon:'mute',Quote:'solo'};
 /* channels picked out for something that acts on several at once */
 const CHSEL=new Set();
@@ -7231,6 +7231,15 @@ function setPresetData(pi,name,cat,data){   // same, no undo — for composite g
   engine.rebuildRack(pi); engine.refresh(pi);
   dirty=true; dirtySave=true;
 }
+function jumpPreset(pi,n){
+  const p=S.presets[pi], pool=libAll().filter(en=>en.cat===(p.cat||'misc'));
+  if(!pool.length){flash('no '+(p.cat||'misc')+' presets in library');return;}
+  if(n>=pool.length){flash((p.cat||'misc')+' has '+pool.length+' preset'+(pool.length>1?'s':''));return;}
+  pushUndo('preset');
+  applyPresetData(pi,pool[n].name,pool[n].cat,pool[n].data);
+  flash((p.cat||'misc')+' '+(n+1)+'/'+pool.length+' → '+pool[n].name);
+  dirty=true; dirtySave=true;
+}
 function scrollPreset(pi,dir){
   const p=S.presets[pi], pool=libAll().filter(en=>en.cat===(p.cat||'misc'));
   if(!pool.length){flash('no '+(p.cat||'misc')+' presets in library');return;}
@@ -7964,6 +7973,7 @@ function genBeat(pat,mutate,ctx,section){
 const PATSECT=['intro','a','a','b','build','drop','drop','break','b','outro'];
 /* song sections: which roles play, and how they're thinned or intensified */
 function sectionKeep(sec,cat){
+  if(sec==='minimal')return ['kik','snr','hh','perc','kit','bass','chord'].includes(cat);
   if(!sec||sec==='drop'||sec==='b')return true;
   if(sec==='intro')return ['kik','hh','perc','cymb','chord','pad','kit','misc'].includes(cat);
   if(sec==='outro')return ['kik','hh','perc','cymb','chord','pad','kit','bass','misc'].includes(cat);
@@ -7993,19 +8003,17 @@ function sectionShape(sec,cat,lane){
 }
 /* whole-song generator: 4 sections into 4 patterns + an arrangement with dj drops */
 function genSong(crazy){
+  /* ONE BEAT, NO SONG. The generator used to write four sections and an
+     arrangement that switched between them — a whole composition you then
+     had to unpick before you could play. What a fresh set wants is a
+     starting point: one pattern, drums + bass + one harmonic voice, and
+     the arranging left to you. */
   sortChannels();
-  const ctx=prodCtx(Math.random,{crazy:!!crazy}), base=S.curPat;
-  const SECS=['intro','build','drop','break'];
-  SECS.forEach((sec,i2)=>genBeat((base+i2)%10,false,ctx,sec));
-  S.arr.unit='B'; S.arr.count=32; S.arr.auto=false;
+  const ctx=prodCtx(Math.random,{crazy:!!crazy});
+  genBeat(S.curPat,false,ctx,'minimal');
+  S.arr.events=[];
   if(S.arr.state==='rec'||S.arr.state==='edit')S.arr.state='on';
-  S.arr.events=[
-    {t:0,pattern:base},{t:32,pattern:(base+1)%10},
-    {t:64,pattern:(base+2)%10},{t:96,pattern:(base+3)%10},
-    {t:56,dj:1,dur:8},                         // classic buildup into the drop
-    {t:124,dj:0,dur:4}];                       // hipass out of the break, into the loop
-  S.curPat=base;
-  flash('♪ song: '+SECS.map((s3,i2)=>((base+i2)%10)+'='+s3).join(' · ')+' · 8 bars each · space to play');
+  flash('♪ one beat, pattern '+S.curPat+' — minimal on purpose · space to play');
 }
 /* cmd+C/X/V clipboard: parts (arrange) · channels (pattern) · rack slots */
 let CLIP=null;
@@ -11203,6 +11211,15 @@ function retroCapture(){
     const t0=seg[0].t;
     lane.events=seg.map(n=>({t:fmod(n.t-t0,L),midi:n.midi,vel:n.vel??0.9,
       dur:n.dur||0.25,born:performance.now()}));
+    /* THE TRANSPORT IS ABOUT TO START A NEW CLOCK, with beat 0 = this take's
+       first note. The buffer's history lives on the OLD clock — leave it and
+       the next tab+N looks for "the last two bars" among numbers that no
+       longer mean anything, finds none, and hands back an empty loop (the
+       reveal-clears-the-loop bug, second sighting). Rebase EVERY lane's
+       memory onto the new clock and anchor this take's window end at L. */
+    for(let li=0;li<10;li++)retroBuf[li]=retroBuf[li].map(n2=>({...n2,t:n2.t-t0}));
+    for(const k2 in RETRO.end)delete RETRO.end[k2];
+    RETRO.end[pi]=L;
     T.startTime=AC.currentTime+0.06; T.startBeat=0; T.schedBeat=0; T.playing=true;
     acts=[{pat:S.editPat,start:-1e9,anchor:0}];
     flash('◉ retro: last '+fmtLen(lane)+' · '+seg.length+' notes · first note = the 1'+
@@ -11612,8 +11629,8 @@ const onKeyDown=e=>{
     e.preventDefault(); mergeToKit(); return;
   }
 
-  /* ⌥; / ⌥' — mute and solo */
-  if(MSCOPE[e.code]&&altOf(e)&&!e.repeat&&S.layer>=1&&!e.metaKey&&!e.ctrlKey&&!HOLD.q&&!ALTSUS.size&&!HOLD.opt){
+  /* ⇧; / ⇧' — mute and solo */
+  if(MSCOPE[e.code]&&e.shiftKey&&!altOf(e)&&!e.repeat&&S.layer>=1&&!e.metaKey&&!e.ctrlKey&&!HOLD.q&&!ALTSUS.size&&!HOLD.opt){
     e.preventDefault();
     const kind=MSCOPE[e.code];
     if(HOLD.ms&&HOLD.ms.kind===kind&&HOLD.msLatched){   // the way out is the key you came in on
@@ -11929,7 +11946,7 @@ const onKeyDown=e=>{
      the selection when there is one. ⇧ is the coarse step; ⌥ on the brackets
      is the fine one. */
   /* ⌥-/= edits the RACK: = adds a slot at the cursor, - removes it. Mute and
-     solo moved to ⌥;/⌥' to free these — the left shift is exclusively the
+     solo moved to ⇧;/⇧' to free these — the left shift is exclusively the
      latch and could not carry a chord. A held rack-letter scope keeps its own
      =/- (add/remove an INSTANCE of that letter), which is why this waits for
      no scope to be open. */
@@ -12172,7 +12189,7 @@ const onKeyDown=e=>{
   /* SNAP LIVES INSIDE THE SCOPE: hold the quantize key, press s — snap what
      is recorded to the grid. It had its own chord (⇧q) when shift meant
      nothing here; shift IS the layer now, so the gesture moves in with its
-     family: q+digits grid, q+m monitor, q+s snap. */
+     family: q+digits grid, q+s snap. */
   if(c==='KeyS'&&HOLD.q&&!e.repeat&&S.layer>=1){
     e.preventDefault(); HOLD.qUsed=true;
     const ch=S.layer>=2?S.editSnd:S.curPreset;
@@ -12197,11 +12214,11 @@ const onKeyDown=e=>{
     /* the toggle moved to the RELEASE: reaching for q+s (post-rec snap) or
        q+digit (grid) used to flip live-Q on the way in, every time. Tap =
        toggle; hold-and-use = the scope, with Q left exactly as it was. */
-    flash('Q — tap toggles live quantize · s snaps recorded notes · digits grid · m monitor');
+    flash('Q — tap toggles live quantize · s snaps recorded notes · digits set the grid');
     dirty=true; return;}
   if(c==='KeyQ'&&gblOf(e)&&!e.repeat&&!HOLD.q){  // ⌃q = live-quantize toggle, everywhere
     CFG.qOn=CFG.qOn?0:1; saveCfg();
-    flash('live quantize '+(CFG.qOn?'ON':'OFF')+' · grid '+gridName(gridOf())+' — digits change it, s snaps, m monitors');
+    flash('live quantize '+(CFG.qOn?'ON':'OFF')+' · grid '+gridName(gridOf())+' — digits change it, s snaps');
     dirty=true; return;}
 
   const lp=curLoop();
@@ -12320,6 +12337,15 @@ const onKeyDown=e=>{
     else {resetParam();return;}
     dirty=true; dirtySave=true; return;}
 
+  /* `+digit: the first ten library presets for this channel's category —
+     browsing with arrows is for finding, digits are for going back to the
+     one you know. 1-9 then 0 is tenth, like every other digit row here. */
+  if(/^Digit\d$/.test(c)&&HOLD.i&&S.layer>=1&&!e.repeat){
+    e.preventDefault(); HOLD.iUsed=true;
+    const pi2=S.layer>=2?S.editSnd:S.curPreset;
+    jumpPreset(pi2,(+c.slice(5)+9)%10);
+    return;
+  }
   /* hold q, press a digit: THIS channel's grid. The digits are the divisions
      in order of how coarse they are, so 4 (16ths) sits where your hand already
      is and either direction from it is finer or broader — and 0, past the
@@ -12328,21 +12354,6 @@ const onKeyDown=e=>{
      HOLD.qUsed is set before anything can go wrong with the digit, including
      on a repeat: choosing a grid must never be mistaken for a tap, or setting
      one would switch quantize off on the way out. */
-  /* WHERE YOU HEAR IT vs WHERE IT LANDS. Snapping the note you hear onto the
-     grid is the whole feel of playing this thing — and it is also why a roll
-     faster than the grid loses notes, because two hits inside one step become
-     two note-ons at the SAME instant and a mono channel can only sound one.
-     No downstream fix exists: four grid points can hold four events. So the
-     monitor is a switch. Grid = locked to the beat, rolls thin out. Live = you
-     hear your fingers, the grid still owns what records. */
-  if(c==='KeyM'&&(gblOf(e)||ctlOf(e))&&HOLD.q&&S.layer>=1){
-    e.preventDefault(); HOLD.qUsed=true;
-    if(e.repeat)return;
-    CFG.qMon=CFG.qMon===0?1:0; saveCfg();
-    flash(CFG.qMon?'monitor → GRID — you hear yourself locked to the beat'
-                  :'monitor → LIVE — you hear every hit as you play it; the grid still records');
-    dirty=true; return;
-  }
   if(/^Digit\d$/.test(c)&&HOLD.q&&S.layer>=1){
     e.preventDefault();
     HOLD.qUsed=true;
@@ -12928,8 +12939,10 @@ const onKeyDown=e=>{
         if(tr<t0)tr=t0;
         /* monitor exactly where playback will put it: groove included, full
            strength — playback applies the same groove to the stored note */
-        /* q+m picks which of these you hear: the grid point, or your finger */
-        const heard=CFG.qMon===0?t0:tr+grooveOff(pi,tr);
+        /* Q on IS the monitor: you hear the grid point because that is what
+           records. Q off, tr===t0 and this is your finger. The separate
+           monitor switch (q+m) is gone — two settings describing one thing. */
+        const heard=tr+grooveOff(pi,tr);
         at=Math.max(at,gridTime(heard));
         /* THE NOTE ON IS QUANTIZED; THE NOTE OFF MUST BE TOO. The key-up fires
            in real time, so a tap shorter than the quantize delay released a note
@@ -14171,7 +14184,7 @@ function render(){
     dot+sp(S.metro?'a':'d','metro')+
     dot+sp('d','vel ')+sp(EXP.midiOn?'a':'d',String(Math.round(clamp(CFG.kvel??0.9,0.02,1)*127)))+
     dot+sp('d','kb ')+sp(S.oct?'a':'d',S.oct>0?'+'+S.oct:String(S.oct))+
-    dot+sp('d','q ')+(CFG.qOn?sp('a',Math.round((qv&&qv.qlive!=null?qv.qlive:1)*100)+'%')+(CFG.qMon===0?sp('d','·live'):''):sp('r','off'))+
+    dot+sp('d','q ')+(CFG.qOn?sp('a',Math.round((qv&&qv.qlive!=null?qv.qlive:1)*100)+'%'):sp('r','off'))+
     (HOLD.optLatched&&HOLD.opt?dot+sp('ri',' ⟳ '+OPTRACK[HOLD.opt.c].name+' ch '+HOLD.opt.ch+' '):'')+
     /* WHETHER THE SET IS ON A DISK, at a glance. Not knowing was the whole
        problem: an autosave you cannot see is one you find out about afterwards. */
@@ -15589,7 +15602,7 @@ function renderHelp(L){
     [', / .','keyboard register, down / up — one global octave'],
     ['- / =','channel VOLUME down / up (⇧ = coarse) — on the selection when there is one'],
     ['[ / ]','channel PAN left / right (⇧ = coarse · ⌥ = fine) — same selection rule'],
-    ['⌥- / ⌥=','remove / add a rack slot at the cursor (mute and solo moved to ⌥; and ⌥\')'],
+    ['⌥- / ⌥=','remove / add a rack slot at the cursor'],
     ['⌘- / ⌘=','same, from anywhere — kept as the two-hand spelling'],
     ['⌥\\','next automated knob (⇧⌥\\ = previous) — \\ alone shows and hides the curves'],
     ['⌥m','MOD: route one from the param you are on — first free slot, lfo aimed here, cursor lands on amt'],
@@ -15616,15 +15629,15 @@ function renderHelp(L){
     ['⇧s (right)','THE SCALE, held: ←→ walks the scales, ↑↓ moves the key a semitone. Tapped: scale on/off'],
     ['(master) z x c v b n m','the GLOBAL NOTE FX, the midi mirror of the dj pads above them: scatter · r-pitch · chop · oct dice · ratchet · dropout · ghost. Hold = momentary, ⇧ = latch, ←→ while held picks the TARGET — everything, the drums, or the melodic channels. They bend what the sequencer emits; nothing is written to the lanes'],
     ['⇧, / ⇧.','keyboard velocity down / up — how hard, next to how high'],
-    ['⌥\' / ⌥;','SOLO / INSIST and MUTE / SILENCE the channel you are on. While held, the digits do it to any other channel; latch keeps the digits doing it'],
+    ['⇧\' / ⇧;','SOLO / INSIST and MUTE / SILENCE the channel you are on. While held, the digits do it to any other channel; the left shift latches it so the digits keep doing it'],
     ['','they are plain toggles: press again for off. Asking for one withdraws the other, and the channel you touched becomes the one you are on'],
     ['⇧1-9','pick channels OUT — a selection, not a solo · ⇧←→ drags it along with the cursor · esc clears it'],
-    ['','WITH A SELECTION, EVERYTHING IS BULK. ⌥\'/⌥; · hold c volume and pan · hold v velocity · hold n pitch · hold ` instrument · hold q grid · hold tab loop · / rolls them all · ⌘C/⌘X/⌘V as a block · ⌘D duplicate · n+⌫ and ⇧⌫ clear · c+⌫ resets the mix. Same keys, more than one subject'],
+    ['','WITH A SELECTION, EVERYTHING IS BULK. ⇧\'/⇧; · hold c volume and pan · hold v velocity · hold n pitch · hold ` instrument · hold q grid · hold tab loop · / rolls them all · ⌘C/⌘X/⌘V as a block · ⌘D duplicate · n+⌫ and ⇧⌫ clear · c+⌫ resets the mix. Same keys, more than one subject'],
     ['','a copied block pastes from wherever the cursor is, not back where it came from — lift four drums off 2-5, esc, walk to 6, paste, and they land on 6-9'],
     ['⌘⌥⇧K','fold the selected channels into ONE KIT channel: each becomes a pad on its own key, and its part moves with it. Every modifier on the board, because it rewrites several channels at once'],
     ['left shift','LATCH. A control sticks if latch was down at any point while you held it. Tapped alone it releases everything'],
     ['latch + a note','the note keeps sounding after the key comes up. Press it again, or tap latch alone, to let it go'],
-    ['⇧q (right)','TAP: live quantize on/off — what you hear is exactly what records. HOLD: the quantize scope — digits set the grid, m picks what you monitor, and S SNAPS the recorded notes to the grid (post-rec quantize), all without touching the on/off'],
+    ['⇧q (right)','TAP: live quantize on/off — what you hear is exactly what records. HOLD: the quantize scope — digits set the grid and S SNAPS the recorded notes to it (post-rec quantize), without touching the on/off. Q on = you hear the grid; Q off = you hear your fingers'],
     ['⇧Q','snap the selected lane to the grid now, for a take recorded with q off'],
     [', .','channel volume −/+ on the desk · bpm elsewhere (⇧ = ±10)'],
     ['b','tap tempo'],
