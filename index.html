@@ -827,7 +827,10 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    entries in one flat line was a row you scanned rather than read; grouped,
    you go to the group and then to the thing. Sections are named in SETSECT
    below and every entry declares which one it is in. */
-const SETSECT=['Sets','Song','Feel','Record','Look','Input','Scale'];
+/* THREE SECTIONS. Sets and Record held nothing and one thing respectively, and
+   Feel/Scale were the same question — how the instrument behaves — split
+   across two headings you had to remember the difference between. */
+const SETSECT=['Behavior','Look','Input'];
 const SETTINGS=[
  /* THE OLD GLOBAL TIMELINE. The master lane is the arrangement now, but sets
     made before that carry an S.arr — and its every control lived on an ARRANGE
@@ -836,23 +839,8 @@ const SETTINGS=[
     are the way out. A set that never had one shows 'none' and both are inert. */
  /* short enough to FIT: a settings cell is narrow, and '6 events — PLAYING'
     rendered as '6 events —', which reads like the sentence was cut off */
- {n:'old song',g:'Song', v:()=>{const n=S.arr.events.length;
-              return n?n+(S.arrOn===false?' muted':' LIVE'):'none';},
-              a:()=>{if(!S.arr.events.length){flash('no old song on this set');return;}
-                     pushUndo('timeline clear');
-                     const n=S.arr.events.length; S.arr.events=[];
-                     flash(n+' cleared — the pattern you are on just loops now');
-                     dirty=true; dirtySave=true;}},
- {n:'play it',g:'Song',  v:()=>S.arr.events.length?(S.arrOn===false?'no':'yes'):'—',
-              a:()=>{S.arrOn=S.arrOn===false;
-                     flash(S.arrOn?'the old song drives the patterns again'
-                                  :'old song silenced — kept, in case you want it back');
-                     dirty=true; dirtySave=true;}},
- /* what used to be the ARRANGE layer's own params — they were never about
-    arranging, they were global feel, and there is no arrange layer now */
- {n:'swing',g:'Feel',  v:()=>S.grv.amt+'%',            a:d=>S.grv.amt=clamp(S.grv.amt+d*5,0,100)},
- {n:'groove',g:'Feel', v:()=>GROOVES[S.grv.typ].n,     a:d=>S.grv.typ=fmod(S.grv.typ+d,GROOVES.length)},
- {n:'human',g:'Feel',  v:()=>Math.round(S.hum*100)+'%',a:d=>S.hum=clamp(+(S.hum+d*0.05).toFixed(2),0,1)},
+ {n:'swing',g:'Behavior',  v:()=>S.grv.amt+'%',            a:d=>S.grv.amt=clamp(S.grv.amt+d*5,0,100)},
+ {n:'groove',g:'Behavior', v:()=>GROOVES[S.grv.typ].n,     a:d=>S.grv.typ=fmod(S.grv.typ+d,GROOVES.length)},
  {n:'grid',g:'Look',   v:()=>CFG.vgrid?'vertical':'lanes',a:()=>CFG.vgrid=CFG.vgrid?0:1},
  /* the look, as knobs — turn them while looking at the thing they change */
  {n:'theme',g:'Look',  v:()=>(THEMES[CFG.theme]||THEMES.dark).n,
@@ -867,14 +855,14 @@ const SETTINGS=[
  {n:'text',g:'Look',   v:()=>(CFG.uiText??62)+'%',     a:d=>{CFG.uiText=clamp((CFG.uiText??62)+d,20,100);applyTheme();}},
  {n:'rows',g:'Look',   v:()=>String(CFG.vrows??16),    a:d=>CFG.vrows=clamp((CFG.vrows??16)+d*4,8,64)},
  {n:'rowpx',g:'Look',  v:()=>(CFG.rowH??14)+'px',      a:d=>CFG.rowH=clamp((CFG.rowH??14)+d,5,30)},
- {n:'rec',g:'Record',    v:()=>['ovwrt','ovdub','smart'][CFG.overdub||0], a:d=>CFG.overdub=fmod((CFG.overdub||0)+d,3)},
- {n:'listen',g:'Record', v:()=>CFG.listen?'on':'off',     a:()=>CFG.listen=CFG.listen?0:1},
- {n:'defLen',g:'Record', v:()=>DEFLENS[CFG.defLen]+'bar', a:d=>CFG.defLen=clamp(CFG.defLen+d,0,3)},
- {n:'smix',g:'Feel',   v:()=>CFG.amix?'on':'off',       a:()=>{CFG.amix=CFG.amix?0:1;if(!CFG.amix)engine.rebuildMaster();}},
- {n:'scale',g:'Scale',  v:()=>CFG.scaleOn?'on':'off',    a:()=>CFG.scaleOn=CFG.scaleOn?0:1},
- {n:'key',g:'Scale',    v:()=>KEYN[CFG.key],             a:d=>CFG.key=fmod(CFG.key+d,12)},
- {n:'mode',g:'Scale',   v:()=>SCALES[CFG.scale][0],      a:d=>CFG.scale=fmod(CFG.scale+d,SCALES.length)},
- {n:'vel',    v:()=>String(Math.round(clamp(CFG.kvel??0.9,0.02,1)*127)), a:d=>EXP.bump(d*0.05)},
+ {n:'rec',g:'Behavior',    v:()=>['ovwrt','ovdub','smart'][CFG.overdub||0], a:d=>CFG.overdub=fmod((CFG.overdub||0)+d,3)},
+ {n:'listen',g:'Behavior', v:()=>CFG.listen?'on':'off',     a:()=>CFG.listen=CFG.listen?0:1},
+ {n:'defLen',g:'Behavior', v:()=>DEFLENS[CFG.defLen]+'bar', a:d=>CFG.defLen=clamp(CFG.defLen+d,0,3)},
+ {n:'smix',g:'Behavior',   v:()=>CFG.amix?'on':'off',       a:()=>{CFG.amix=CFG.amix?0:1;if(!CFG.amix)engine.rebuildMaster();}},
+ {n:'scale',g:'Behavior',  v:()=>CFG.scaleOn?'on':'off',    a:()=>CFG.scaleOn=CFG.scaleOn?0:1},
+ {n:'key',g:'Behavior',    v:()=>KEYN[CFG.key],             a:d=>CFG.key=fmod(CFG.key+d,12)},
+ {n:'mode',g:'Behavior',   v:()=>SCALES[CFG.scale][0],      a:d=>CFG.scale=fmod(CFG.scale+d,SCALES.length)},
+ {n:'vel',g:'Input', v:()=>String(Math.round(clamp(CFG.kvel??0.9,0.02,1)*127)), a:d=>EXP.bump(d*0.05)},
  {n:'midi in',g:'Input',v:()=>EXP.midiOn?['off','solo','+kbd'][CFG.midiIn|0]:'off', a:d=>EXP.cycleMidi(d)},
  {n:'hid',g:'Input',    v:()=>HE.on?(HE.srcName||'on').slice(0,8):'off',
               a:()=>{if(HE.on)HE.disconnect(); else HE.connect();}},
@@ -1914,18 +1902,66 @@ function optSet(key,on){
   engine.rebuildRack(ch);
   dirty=true; dirtySave=true; return true;
 }
+/* A NOTE THAT IS ALREADY SOUNDING WHEN YOU UNMUTE. The scheduler only emits a
+   note at its START, so unmuting halfway through a long one used to wait in
+   silence until the next one came round — the channel appeared to come back a
+   bar late. Anything spanning the playhead is retriggered for the time it has
+   left, including a note whose tail has wrapped past the loop point. */
+function reviveLane(n){
+  if(!T.playing)return;
+  const lane=S.patterns[S.editPat].lanes[n];
+  if(!lane||!lane.events.length||lane.len<=0||isAudioCh(n))return;
+  const L=lane.len, t=fmod(posNow()-editAnchor(),L);
+  for(const e of lane.events){
+    if(e.t>=L-1e-9)continue;
+    const dur=Math.max(0,e.dur||0.25);
+    /* how far into this note the playhead is, measured forward from its start
+       so a note that began before the loop point still counts */
+    const into=fmod(t-e.t,L);
+    if(into<=1e-9||into>=dur)continue;
+    engine.trigger(AC.currentTime+0.005,n,e.midi,e.vel??0.9,(dur-into)*spb());
+  }
+}
+function msApply(n,kind){
+  const l=S.patterns[S.editPat].lanes[n]; if(!l)return;
+  const other=kind==='solo'?'mute':'solo';
+  l[kind]=!l[kind];
+  if(l[kind])l[other]=false;     // you cannot both insist on a channel and silence it
+  /* SILENCE IS IMMEDIATE, not a fade. Muting used to leave whatever was
+     ringing to die on its own envelope, so a held pad hung on for a second
+     after you cut it — which on a mute you meant as a drop reads as the mute
+     not working. */
+  const soloing=CHANS().some(i=>S.patterns[S.editPat].lanes[i].solo);
+  for(const i of CHANS()){
+    const li=S.patterns[S.editPat].lanes[i];
+    const audible=soloing?li.solo:!li.mute;
+    if(!audible)engine.chokeSeq(i); else reviveLane(i);
+  }
+  flash('ch '+n+' '+S.presets[n].name+' '+kind.toUpperCase()+(l[kind]?'':' off'));
+  dirty=true; dirtySave=true;
+}
+const MSPEND={};                 // toggles waiting for the grid
 function msToggle(n,kind){
   if(n<CH_LOW)return;
   const l=S.patterns[S.editPat].lanes[n]; if(!l)return;
-  const other=kind==='solo'?'mute':'solo';
   pushUndo(kind);
-  l[kind]=!l[kind];
-  if(l[kind])l[other]=false;     // you cannot both insist on a channel and silence it
   /* go to what you just touched — muting something is a statement about it,
      and looking at it is almost always the next thing you want */
   if(S.layer<2){S.curPreset=n; S.mSel=false; SELALL=null; stepWalked=false;}
-  flash('ch '+n+' '+S.presets[n].name+' '+kind.toUpperCase()+(l[kind]?'':' off'));
-  dirty=true; dirtySave=true;
+  /* ON THE GRID, when the grid is on. Dropping a channel is a musical move and
+     it wants to land on the beat like everything else you play — the same
+     quantize that decides where a note goes decides when a mute happens. */
+  if(CFG.qOn&&T.playing){
+    const k=n+'|'+kind;
+    if(MSPEND[k]){flash('already queued');return;}
+    const g=gridOf(l), at=qnext(posNow(),g);
+    MSPEND[k]=1; dirty=true;
+    setTimeout(()=>{delete MSPEND[k]; msApply(n,kind); },
+               Math.max(0,(timeAt(at)-AC.currentTime)*1000));
+    flash('ch '+n+' '+kind+' on the next '+gridName(g));
+    return;
+  }
+  msApply(n,kind);
 }
 /* NINE CHANNELS INTO ONE KIT. A kit channel is twelve complete instruments on
    twelve pitch classes, so folding a drum bus into one is mostly bookkeeping:
