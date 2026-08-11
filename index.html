@@ -109,17 +109,17 @@
        stroke-linejoin:miter;vector-effect:non-scaling-stroke;}
   .acv.af{opacity:.85;stroke-width:1.4;}
   .apt{fill:var(--fg);opacity:.9;}
-  /* the census row: same height and fill as a strip cell, so it reads as part
-     of the strip rather than as something bolted under it */
-  .arow{height:var(--striph,20px);background:var(--k);position:relative;}
-  .adot{position:absolute;top:calc(50% - 2.5px);width:5px;height:5px;
-        border-radius:50%;background:var(--fg);}
-  /* the one the overlay is reading gets a ring, so \ and [ ] have somewhere
-     visible to point */
-  .adot.af{box-shadow:0 0 0 1.5px var(--bg),0 0 0 3px var(--fg);}
+  /* the dots ride the top of the grid column, in a layer of their own so they
+     sit over the first cell rather than pushing it down */
+  .dlay{position:absolute;top:0;left:calc(-1 * var(--bleed));
+        width:var(--cellw,64.4px);height:0;overflow:visible;pointer-events:none;}
+  .adot{position:absolute;top:1px;width:3px;height:3px;margin-left:-1.5px;
+        border-radius:50%;background:var(--fg);opacity:.55;}
+  /* the one the cursor is on: solid, and ringed in the page colour so it
+     reads even where it sits on top of a note */
+  .adot.af{opacity:1;box-shadow:0 0 0 1px var(--bg);}
   /* an address whose slot is gone: still counted, never applied */
-  .adot.dead{background:none;box-shadow:inset 0 0 0 1px var(--fg);}
-  .ahead{position:absolute;top:2px;bottom:2px;width:1px;background:var(--fg);opacity:.5;}
+  .adot.dead{background:none;box-shadow:inset 0 0 0 1px var(--fg);opacity:.4;}
   /* the song column: a dj window is a band across the mix, a clip recall is a
      mark at the channel it moved */
   .djw{position:absolute;left:0;right:0;background:var(--fg);opacity:.22;border-radius:1px;}
@@ -12959,9 +12959,25 @@ function measureChar(){
 const autoOn=()=>S.aView!==null;
 /* which address is in front, remembered BY ADDRESS: recording a point on some
    other knob must not slide the overlay onto it mid-take. */
+/* the address the param cursor is standing on, or null if it is not standing
+   on a parameter at all */
+function cursorAddr(pre){
+  if(S.layer<2||S.mSel||pre!==S.presets[S.editSnd])return null;
+  const M=MODULES[S.curMod]; if(!M||!M.id||M.prs)return null;
+  const px=flatView(S.curMod)?S.curParam:S.slotParam;
+  return autoAddr(pre,S.curMod,M.flat?-1:S.curSlot,px);
+}
+/* WHICH CURVE IS LIT: the one under the cursor. Walking onto a knob with
+   automation brings its curve forward, and walking onto one without leaves
+   nothing lit — which is the honest answer, and it means the arrows and [ ]
+   are the same gesture rather than two ways of choosing.
+   S.aAddr only carries it where there IS no param cursor — out on the desk,
+   where [ ] is the only way to pick. */
 function aFront(pre){
   const ls=autoLanes(pre); if(!ls.length)return null;
-  return ls.find(l=>l.k===S.aAddr)||ls[0];
+  const c=cursorAddr(pre);
+  if(c)return ls.find(l=>sameAddr(l.a,c))||null;
+  return ls.find(l=>l.k===S.aAddr)||null;
 }
 /* autoLanes rebuilds its entries every call, so two calls never share an
    object and indexOf is always -1. Position is asked for by ADDRESS, which is
@@ -13040,7 +13056,7 @@ function gridHTML(pat,pos,anc,chans){
      curve; everywhere else every address draws faint, which is how you see
      that channel 7 is moving without going to look. */
   const PR2=i=>S.presets[i];
-  const frontKey=autoOn()?(x=>x&&x.k)(aFront(S.presets[S.curPreset])):null;
+  const frontKey=(x=>x&&x.k)(aFront(S.presets[S.curPreset]));
   const nowOf=i=>{const l=pat.lanes[i];
     return (T.playing&&l&&l.len>0)?Math.floor(fmod(pos-anc,l.len)/step):-1;};
 
@@ -13125,6 +13141,7 @@ function gridHTML(pat,pos,anc,chans){
     }
     /* over the notes, not under them — the curve is what you came to look at */
     if(autoOn())h+=autoCurves(PR2(i),lane.len,anc,H,CW,frontKey);
+    h+=autoDots(PR2(i),anc,CW,frontKey);      // always: closed, the dots ARE the display
     h+='</div>';
   }
   /* THE MASTER COLUMN — the song, where the song lives. Lane 0 has held the
@@ -13223,33 +13240,25 @@ function meterRow(LN,PR,peeking){
   }, sp('d',pad('Mix',GUTW)),
      mixCell(S.mLvl!==undefined?S.mLvl:1,0,peeking?0:masterLevel(),!peeking));
 }
-/* WHICH CHANNELS ARE AUTOMATED, AND WHERE THEIR KNOBS ARE. One dot per
-   automated parameter, sitting over that channel's own column, brightening as
-   its value rises — so a channel with four dots has four knobs moving and you
-   can watch them breathe without opening anything.
-   It is always up, not just while the overlay is: the whole point is to know
-   what a channel carries before you decide to go and look at it. */
-function autoRow(){
-  const any=CHANS().some(i=>{const p=S.presets[i];
-    return p&&!isAudioCh(i)&&p.modLoop&&p.modLoop.events.length;});
-  if(!any)return null;                       // no automation anywhere: no row
-  return colRow('arow',i=>{
-    const pre=S.presets[i]; if(!pre||isAudioCh(i))return '';
-    const ls=autoLanes(pre); if(!ls.length)return '';
-    const front=(autoOn()&&i===S.curPreset)?(x=>x&&x.k)(aFront(pre)):null;
-    let h='';
-    ls.forEach((lane,n)=>{
-      const w=autoWhere(pre,lane.a);
-      /* brightness is where that knob sits in its OWN range right now, so the
-         dot tracks the automation rather than just reporting it exists */
-      const u=w?spanPos(w.spec,getV(pre,w.mi,w.si,w.spec)):0;
-      const x=ls.length<2?50:6+(n/(ls.length-1))*88;
-      h+='<i class="adot'+(lane.k===front?' af':'')+(w?'':' dead')+
-         '" style="left:min(calc(100% - 5px), max(0px, calc('+x.toFixed(1)+'% - 2.5px)));opacity:'+
-         (w?(0.22+0.78*u).toFixed(2):'0.18')+'"></i>';
-    });
-    return h;
-  }, sp('d',pad('Auto',GUTW)));
+/* WHERE EACH AUTOMATED KNOB STARTS THE BAR. One small dot per automated
+   parameter, sitting at the top of that channel's own column at the x its
+   curve begins from — so with the overlay closed you still see how many knobs
+   a channel moves and roughly where they sit, and with it open each dot is the
+   head of the line below it. It needed a row of its own only while it was
+   pretending to be a strip; in the column it belongs to, it needs nothing. */
+function autoDots(pre,anc,CW,frontKey){
+  const ls=autoLanes(pre); if(!ls.length)return '';
+  const ml=pre.modLoop, mlen=ml.len; if(mlen<=0)return '';
+  const ph0=fmod(anc,mlen);
+  let h='';
+  for(const L of ls){
+    const w=autoWhere(pre,L.a);
+    const pts=L.pts.filter(p=>p.t<mlen-1e-9);
+    const u=(w&&pts.length)?spanPos(w.spec,autoValueAt(w.spec,pts,ph0,mlen)):0;
+    h+='<i class="adot'+(L.k===frontKey?' af':'')+(w?'':' dead')+'" style="left:'+
+       (1+u*Math.max(1,CW-2)).toFixed(1)+'px"></i>';
+  }
+  return '<div class="dlay">'+h+'</div>';
 }
 /* What each channel is sounding RIGHT NOW, under its own column — the names
    the pixels gave up, put back where they belong instead of on one line that
@@ -13276,8 +13285,12 @@ function noteReadout(pat,pos,anc){
      where it is in its own list, and how to get to the next one. */
   if(autoOn()){
     const pre=S.presets[i], ls=autoLanes(pre), fr=aFront(pre);
-    if(!fr)return '   '+sp('i',' AUTO ')+sp('d','  no automation on '+pre.name+
+    if(!ls.length)return '   '+sp('i',' AUTO ')+sp('d','  no automation on '+pre.name+
       ' — hold tab with the transport rolling, then move a knob');
+    /* the channel HAS automation, you are just not standing on any of it —
+       so say how much there is rather than claiming there is none */
+    if(!fr)return '   '+sp('i',' AUTO ')+sp('d','  '+ls.length+' knob'+
+      (ls.length>1?'s':'')+' automated on '+pre.name+' — arrows or [ ] to one of them');
     const w=autoWhere(pre,fr.a);
     const now=w?fmtVal(w.spec,getV(pre,w.mi,w.si,w.spec)):'—';
     return '   '+sp('i',' AUTO ')+' '+sp('a',destLabel(fr.a))+
@@ -13413,9 +13426,6 @@ function renderPat(L,pos){
     if(!CHWdone){measureChar(); CHWdone=true;}
     const ro=noteReadout(pat,pos,anc);     // just this channel, quietly, above the notes
     L.push(ro||' ');
-    /* the automation census sits directly on top of the columns it is talking
-       about, so a dot and the notes under it are the same channel */
-    if(!pkL){const ar=autoRow(); if(ar){rawAt.add(L.length); L.push(ar);}}
     gridAt=L.length;                       // one entry, emitted as raw markup
     L.push(gridHTML(showPat,pos,anc,CHANS()));
   }
