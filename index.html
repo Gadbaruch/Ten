@@ -380,7 +380,7 @@ const CHORDS=[['oct',[0,12]],['5th',[0,7]],['maj',[0,4,7]],['min',[0,3,7]],['ma7
 const ARPDIV=['1/32','1/16T','1/16','1/8T','1/16.','1/8','1/4T','1/8.','1/4','1/4.'],
       ARPDIVB=[0.125,1/6,0.25,1/3,0.375,0.5,2/3,0.75,1,1.5];
 const ARPDIV_V19=[8,9,6,5,7,3,2,4,1,0];   // old index -> new, for saves written before this
-const ARPMODE=['up','down','updn','rand','chord'];   // chord = every note of the pool, together
+const ARPMODE=['up','down','updn','rand','chord','order'];   // order = the sequence you played them in
 const MODE=['poly','mono','legato'];   // legato = mono, but pitch moves without retriggering
 const SWM=['sync','rstrt','wait'];
 
@@ -1264,10 +1264,9 @@ const PLY_P=sl=>{
   if(sl.typ===7)return T(SP('amt','p1','lin',{min:0,max:100,step:5,fmt:v=>v+'%'}));
   if(sl.typ===8)return T(SP('chance','p1','lin',{min:0,max:100,step:5,fmt:v=>v+'%'}));
   if(sl.typ===9)return T(
-    SP('hits','p1','lin',{min:1,max:16,step:1}),
-    SP('steps','p2','lin',{min:2,max:16,step:1}),
-    SP('rot','p3','lin',{min:0,max:15,step:1}),
-    SP('note','p4','lin',{min:24,max:96,step:1,fmt:v=>NN[Math.round(v)%12]+(Math.floor(Math.round(v)/12)-1)}));
+    /* sixteen steps, phase = the note's own start — the one number that
+       matters is how many of the sixteen hit */
+    SP('hits','p1','lin',{min:1,max:16,step:1,fmt:v=>Math.round(v)+'/16'}));
   if(sl.typ===10)return T(SP('shift','p1','lin',{min:-60,max:60,step:1,fmt:v=>(v>0?'+':'')+v+'ms'}));
   if(sl.typ===11)return T(SP('range','p1','lin',{min:0,max:80,step:1,fmt:v=>'\u00b1'+v+'ms'}));
   if(sl.typ===12)return T(
@@ -1759,7 +1758,7 @@ const cmdOf=e=>!!e.metaKey;
    A scope stays open on the LETTER once ⌥ has opened it, so the thumb can
    come off ⌥ and the arrows step normally; ⌥ held through an arrow is still
    the fine step, same as everywhere else. */
-const ctlOf=e=>altOf(e)&&!e.metaKey&&!e.ctrlKey;
+const ctlOf=e=>altOf(e)&&!e.metaKey&&!e.ctrlKey&&!ALTSUS.size;
 const LATCH={held:false,used:false,on:false};
 /* HELD KEYS SCOPE THE ARROWS. The arrows always mean "adjust"; the key you are
    holding says adjust WHAT. tab = the loop, m = tempo. `used` records whether
@@ -1782,10 +1781,18 @@ const LATCH={held:false,used:false,on:false};
    back to the desk. */
 const OPTRACK={
   KeyA:{id:'ply',typ:2,name:'arp',
-        dial:{p:'p1',n:()=>ARPDIV.length,lbl:v=>ARPDIV[v]},        // digits / ↑↓
+        seed:{p1:2,p2:5,p3:1},                                     // 1/16 · order · 1 oct
+        dial:{p:'p1',n:()=>ARPDIV.length,lbl:v=>ARPDIV[v]},        // digits / ↑↓ / - =
         mode:{p:'p2',n:()=>ARPMODE.length,lbl:v=>ARPMODE[v]},      // ←→
-        size:{p:'p3',min:-3,max:3,lbl:v=>{const n=Math.abs(v)||1;return n===1?'1 oct':n+' oct '+(v<0?'down':'up');}}},
+        size:{p:'p3',min:-3,max:3,lbl:v=>{const n=Math.abs(v)||1;return n===1?'1 oct':n+' oct '+(v<0?'down':'up');}}},   // , .
+  /* EUC IS A GATE ON WHAT YOU HOLD. Sixteen steps, one primary number — how
+     many of them hit — and each held note's pattern starts where THAT note
+     started, so two notes pressed a beat apart chase each other. */
+  KeyU:{id:'ply',typ:9,name:'euc',
+        seed:{p1:4,p2:16,p3:0},
+        dial:{p:'p1',n:()=>16,lbl:v=>(v+1)+'/16 hits'}},
 };
+const ALTSUS=new Set();     // scopes riding on a held ⌥ after their letter went up
 const HOLD={tab:false,tabAt:0,tabUsed:false,tabLatch:false,m:false,mUsed:false,
             opt:null,optUsed:false,optLatch:false,optLatched:false,   // OPT: a rack grabbed by its letter
             ms:null,msLatch:false,msLatched:false,msUsed:false,   // MUTE/SOLO: ⌥m and ⌥s, and the digits that follow
@@ -1872,6 +1879,7 @@ function optSlot(ch,c,make){
     const free=rack.findIndex(x=>!x.typ);
     if(free<0){flash(T2.id.toUpperCase()+' rack is full');return null;}
     sl=rack[free]; sl.typ=T2.typ;
+    if(T2.seed)Object.assign(sl,T2.seed);
   }
   return sl||null;
 }
@@ -2967,18 +2975,8 @@ function scheduleRange(from,to){
           }
         }
       }else lane.occur(f0,f1,(t,e)=>{if(!e._ov)emit(t,e,Math.round((t-e.t)/L2));});
-      if(eucS){                                       // euclidean generator (works on empty lanes too)
-        const steps=clamp(Math.round(eucS.p2??8),2,16), hits=clamp(Math.round(eucS.p1??4),1,steps);
-        const rot=Math.round(eucS.p3??0), root=clamp(Math.round(eucS.p4??60),24,96), sl2=L2/steps;
-        for(let k=Math.ceil(f0/sl2-1e-9);k*sl2<f1-1e-9;k++){
-          if(k*sl2<f0-1e-9)continue;
-          const i2=((k%steps)+steps+rot)%steps;
-          if(((i2*hits)%steps)<hits){
-            const tt=k*sl2+grooveOff(li,k*sl2+a.anchor)+(laneP.nud?((laneP.nud.p1||0)/1000)/spb():0);
-            engine.trigger(timeAt(tt+a.anchor),li,root,0.85,sl2*0.5*spb());
-          }
-        }
-      }
+      /* the euclidean lane generator retired: euc is a LIVE gate on held
+         notes now (see arpTick) — a pattern with no note in it is silence */
     }
   }
   engine.arpTick(from,to);
@@ -5798,7 +5796,9 @@ class Engine{
       else pcHandle=()=>pcs.forEach(subPC);
     }
     const arp=arpIdx>=0?p.ply[arpIdx]:null;
-    if(arp){
+    const eucLive=!arp?(isKit(p)?((kitSlot(p,midis.length?pads[0]:60)||{}).ply||[]):p.ply)
+      .find(sl=>sl.typ===9&&!sl.off):null;
+    if(arp||eucLive){
       const until=durSec!=null?beatsAt(at)+durSec/spb():Infinity;
       /* born + heard: a tap shorter than the gap to the next arp step used to
          set `until` before that step arrived, so the fastest presses made no
@@ -5841,6 +5841,29 @@ class Engine{
       const rack=isKit(p)?((kitSlot(p,pool[0].pad??pool[0].midi)||{}).ply||[]):p.ply;
       const ai=rack.findIndex(sl=>sl.typ===2&&!sl.off), arp=ai>=0?rack[ai]:null;
       const postChords=ai>=0?rack.filter((sl,i2)=>sl.typ===1&&!sl.off&&i2>ai):[];
+      /* EUC, LIVE: a euclidean gate on the notes you are holding. Sixteen
+         16th steps; each note's pattern is counted from ITS OWN start, so the
+         rotation is where you pressed it, not where the bar happens to be. */
+      const euc=!arp?rack.find(sl=>sl.typ===9&&!sl.off):null;
+      if(euc){
+        const hits=clamp(Math.round(euc.p1??4),1,16), div=0.25;
+        for(let b=Math.ceil(from/div-1e-9)*div;b<to-1e-9;b+=div){
+          if(b<from-1e-9)continue;
+          const bg=b+grooveOff(pi,b);
+          for(const en of pool){
+            if(!(en.until>b||(!en.heard&&(en.born??-1e9)<=b+1e-9)))continue;
+            const k=Math.max(0,Math.round((b-(en.born??b))/div));
+            if(((k%16)*hits)%16>=hits)continue;
+            en.heard=true;
+            const v=this.noteOn(timeAt(bg),pi,en.midi,en.vel,en.pad??en.midi);
+            v.release(timeAt(bg+div*0.85));
+            if(Math.round(euc.p6||0)===1)recPlayNote(pi,bg,en.midi,en.vel,div*0.85);
+          }
+        }
+        const nw=posNow();
+        this.arpPool[pi]=pool.filter(n2=>n2.until>nw-8);
+        continue;
+      }
       if(!arp)continue;
       const div=ARPDIVB[clamp(Math.round(arp.p1),0,ARPDIVB.length-1)];
       /* the SIGN is the direction. Stacking octaves upward is the default
@@ -5849,14 +5872,15 @@ class Engine{
       const oRaw=Math.round(arp.p3||1), octs=clamp(Math.abs(oRaw)||1,1,3), oDir=oRaw<0?-1:1;
       for(let b=Math.ceil(from/div-1e-9)*div;b<to-1e-9;b+=div){
         if(b<from-1e-9)continue;
-        const act2=pool.filter(n2=>n2.until>b||(!n2.heard&&(n2.born??-1e9)<=b+1e-9))
-          .sort((x,y)=>x.midi-y.midi);
+        const mode0=ARPMODE[clamp(Math.round(arp.p2),0,ARPMODE.length-1)];
+        const act2=pool.filter(n2=>n2.until>b||(!n2.heard&&(n2.born??-1e9)<=b+1e-9));
+        if(mode0!=='order')act2.sort((x,y)=>x.midi-y.midi);   // order = as you played them
         act2.forEach(n2=>n2.heard=true);
         if(!act2.length)continue;
         const seq=[];
         for(let o=0;o<octs;o++)for(const n2 of act2)
           seq.push({midi:n2.midi+o*12*oDir,vel:n2.vel,pad:(n2.pad??n2.midi)+o*12*oDir});
-        const mode=ARPMODE[clamp(Math.round(arp.p2),0,ARPMODE.length-1)];
+        const mode=mode0==='order'?'up':mode0;   // order walks the pool sequence with up's stepping
         /* CHORD MODE: the rhythm of an arp with the voicing of a chord — every
            note in the pool fires on every step instead of one at a time. It is
            the same machine; only the choosing changes. */
@@ -5985,7 +6009,7 @@ function applyParam(pi,mi,si,px,v){
   if(M.id==='ply'&&spec.key==='typ'){        // sane defaults when a play slot changes type
     const sl2=S.presets[pi].ply[si];
     if(v===1){sl2.p1=2;sl2.p2=0.01;sl2.p3=0;}
-    else if(v===2){sl2.p1=2;sl2.p2=0;sl2.p3=1;}      // arp default: 1/16
+    else if(v===2){sl2.p1=2;sl2.p2=5;sl2.p3=1;}      // arp default: 1/16 · order
     else if(v===3){sl2.p1=0;sl2.p2=100;}
     else if(v===4){sl2.p1=0;}
     else if(v===6||v===7){sl2.p1=50;}
@@ -10716,7 +10740,7 @@ const onKeyDown=e=>{
   }
 
   /* ⌥m / ⌥s — mute and solo, on a letter that says which */
-  if(MSCOPE[e.code]&&altOf(e)&&!e.repeat&&S.layer>=1&&!e.metaKey&&!e.ctrlKey&&!HOLD.q){
+  if(MSCOPE[e.code]&&altOf(e)&&!e.repeat&&S.layer>=1&&!e.metaKey&&!e.ctrlKey&&!HOLD.q&&!ALTSUS.size){
     e.preventDefault();
     const kind=MSCOPE[e.code];
     if(HOLD.ms&&HOLD.ms.kind===kind&&HOLD.msLatched){   // the way out is the key you came in on
@@ -10745,7 +10769,7 @@ const onKeyDown=e=>{
      reason the clip branch is: the letters it uses are already spoken for
      further down, and while one is held the digits and arrows belong to it
      rather than to mute, the step cursor or the channel row. */
-  if(OPTRACK[e.code]&&altOf(e)&&!e.repeat&&S.layer>=1&&!e.metaKey&&!e.ctrlKey){
+  if(OPTRACK[e.code]&&altOf(e)&&!e.repeat&&S.layer>=1&&!e.metaKey&&!e.ctrlKey&&!ALTSUS.size){
     e.preventDefault();
     const c=e.code;
     if(HOLD.opt&&HOLD.opt.c===c&&HOLD.optLatched){   // the way out is the key you came in on
@@ -10760,8 +10784,22 @@ const onKeyDown=e=>{
       HOLD.opt={c,ch,key}; HOLD.optUsed=false; HOLD.optLatch=KM.sl;
       if(KM.sl)LATCH.used=true;
       const sl=optSlot(ch,c,false);
+      /* THE CURSOR GOES WHERE THE KEY POINTS. Opening a rack by its letter
+         also walks the strip to that slot, so what you dial is what you are
+         looking at — and it walks back when the scope closes, because the
+         visit belongs to the hold. */
+      if(S.layer>=2){
+        const rk=modHolder(S.presets[ch],T2.id)[T2.id];
+        const si2=rk.findIndex(x=>x===sl);
+        if(si2>=0){
+          HOLD.opt.prev={curMod:S.curMod,curSlot:S.curSlot,slotParam:S.slotParam};
+          S.curMod=MODULES.findIndex(M2=>M2&&M2.id===T2.id);
+          S.curSlot=si2; S.slotParam=0;
+        }
+      }
       flash(T2.name+(had?' ch ':' on ch ')+ch+' — '+T2.dial.lbl(Math.round(sl[T2.dial.p]))+
-        ' · '+T2.mode.lbl(Math.round(sl[T2.mode.p]))+' · '+T2.size.lbl(Math.round(sl[T2.size.p]))+
+        (T2.mode?' · '+T2.mode.lbl(Math.round(sl[T2.mode.p])):'')+
+        (T2.size?' · '+T2.size.lbl(Math.round(sl[T2.size.p])):'')+
         '   ⌫ removes it');
     }
     return;
@@ -10774,6 +10812,17 @@ const onKeyDown=e=>{
         optWrite(ch,oc,pKey,nv); flash(T2.name+' '+w);
         dirty=true; dirtySave=true;};
       const D=T2.dial, M=T2.mode, Z=T2.size;
+      if((e.code==='Equal'||e.code==='Minus')&&D){       // - = walk the rate
+        const nv=fmod(Math.round(sl[D.p])+(e.code==='Equal'?1:-1),D.n());
+        say(D.lbl(nv),D.p,nv); return;
+      }
+      if((e.code==='Comma'||e.code==='Period')&&Z){      // , . = octaves
+        const d2=e.code==='Period'?1:-1;
+        let v=Math.round(sl[Z.p]||1)+d2;
+        if(v===0)v=d2>0?1:-1;                            // there is no zeroth octave
+        v=clamp(v,Z.min,Z.max);
+        say(Z.lbl(v),Z.p,v); return;
+      }
       if(/^Digit\d$/.test(e.code)&&!e.repeat){
         const n=+e.code.slice(5)||10;                    // 0 is the tenth
         if(n<=D.n())say(D.lbl(n-1),D.p,n-1);
@@ -10784,16 +10833,9 @@ const onKeyDown=e=>{
         const nv=fmod(Math.round(sl[D.p])+(e.code==='ArrowDown'?1:-1),D.n());
         say(D.lbl(nv),D.p,nv); return;                   // down = finer, the way the list reads
       }
-      if(e.code==='ArrowLeft'||e.code==='ArrowRight'){
+      if((e.code==='ArrowLeft'||e.code==='ArrowRight')&&M){
         const nv=fmod(Math.round(sl[M.p])+(e.code==='ArrowRight'?1:-1),M.n());
         say(M.lbl(nv),M.p,nv); return;
-      }
-      if(e.code==='Equal'||e.code==='Minus'){
-        const d2=e.code==='Equal'?1:-1;
-        let v=Math.round(sl[Z.p]||1)+d2;
-        if(v===0)v=d2>0?1:-1;                            // there is no zeroth octave
-        v=clamp(v,Z.min,Z.max);
-        say(Z.lbl(v),Z.p,v); return;
       }
       /* ONLY WHILE THE KEY IS ACTUALLY DOWN. A latched scope keeps the digits
          and the arrows, which is the point of latching it — but it must not
@@ -11575,10 +11617,19 @@ const onKeyDown=e=>{
       S.libSel=Math.max(0,(S.libSel||0)+d*10);
     }
     else{
+      /* the ←→ grammar with the strip open: plain walks params (flowing into
+         the next slot at the ends), ⌥ jumps a slot, ⇧ changes CHANNEL — the
+         same thing ⇧←→ means on the desk, so the strip stops needing its own
+         dialect. */
+      if(rs(e)){
+        const n2=CH_LOW+fmod((S.editSnd-CH_LOW)+d,10-CH_LOW);
+        S.editSnd=n2; S.curPreset=n2; S.mSel=false;
+        dirty=true; return;
+      }
       const pre=S.presets[S.editSnd], M=MODULES[S.curMod], hold=modHolder(pre,M.id);
       const specs=paramsFor(S.curMod,hold[M.id][S.curSlot]);   // same holder the render uses
       const np=S.slotParam+d;
-      if(rs(e)||np<0||np>=specs.length){  // ran off the end: next slot, same strip
+      if(altOf(e)||np<0||np>=specs.length){  // ⌥, or ran off the end: next slot, same strip
         /* WHERE YOU WERE IN THE SLOT YOU ARE LEAVING. Jumping out and back
            used to dump you on the first param every time, so checking one
            slot against another meant walking the row again on every trip. */
@@ -11586,9 +11637,9 @@ const onKeyDown=e=>{
         S.curSlot=fmod(S.curSlot+d,10);
         const s2=paramsFor(S.curMod,hold[M.id][S.curSlot]);
         const back=PSLOT[S.editSnd+'|'+M.id+'|'+S.curSlot];
-        S.slotParam=(rs(e)&&back!=null&&back<s2.length)
-          ? back                                   // shift+←→ is the jump: put me back
-          : ((rs(e)||d>0)?0:s2.length-1);
+        S.slotParam=(altOf(e)&&back!=null&&back<s2.length)
+          ? back                                   // ⌥←→ is the jump: put me back
+          : ((altOf(e)||d>0)?0:s2.length-1);
       }else S.slotParam=np;
     }
     dirty=true; return;}
@@ -11729,7 +11780,10 @@ const onKeyDown=e=>{
   /* a MODIFIED letter is never a note — the modifier is what says "this is a
      control, not a pitch", and it has to hold in both directions or ⌃c would
      both open the volume hold and sound a note */
-  if(isNoteKey(c)&&!e.repeat&&(S.layer>0||S.layer===-1)&&!e.ctrlKey&&!e.metaKey&&!altOf(e)){
+  /* WITH A SCOPE RIDING ON ⌥ the letters play right through it — that is the
+     point of keeping ⌥ down: dial with one hand, hear it with the other. */
+  if(isNoteKey(c)&&!e.repeat&&(S.layer>0||S.layer===-1)&&!e.ctrlKey&&!e.metaKey
+     &&(!altOf(e)||ALTSUS.size>0)&&!scopeHeldOn(c)){
     e.preventDefault();
     /* midi solo: the board's own keystrokes are noise — only the events EXP
        synthesises for a midi note get through, so a note can't fire twice */
@@ -11897,7 +11951,6 @@ function endNote(c){
    keep adjusting, digits keep answering. The release logic runs when ⌥ comes
    up, replayed through the ordinary keyup path so taps still tap and latches
    still latch. */
-const ALTSUS=new Set();
 const scopeHeldOn=c=>
   (c==='KeyQ'&&HOLD.q)||(c==='KeyM'&&HOLD.m)||(c==='KeyN'&&HOLD.n)||
   (c==='KeyV'&&HOLD.v)||(c==='KeyC'&&HOLD.c)||
@@ -11988,7 +12041,10 @@ document.addEventListener('keyup',e=>{
     if(HOLD.optLatch){        // latch overlapped: the keyboard stays pointed here
       HOLD.optLatched=true; HOLD.optLatch=false; HOLD.optUsed=false;
       flash('⟳ '+OPTRACK[c].name+' latched — play; digits and arrows are still its own');
-    }else{HOLD.opt=null; HOLD.optUsed=false;}
+    }else{
+      if(HOLD.opt.prev){Object.assign(S,HOLD.opt.prev);}
+      HOLD.opt=null; HOLD.optUsed=false;
+    }
     dirty=true; return;
   }
   if(c==='KeyQ'&&HOLD.q){
@@ -14305,7 +14361,7 @@ function renderHelp(L){
     ['0 then enter','the master rack: ⇧←→ its inserts, ←→ their params, ↑↓ to change'],
     ['(on the master) a-;','the dj pads. HOLD one and the rack below shows that pad’s own effect, so ←→ and ↑↓ edit it — latch the pad to keep it there while you work'],
     ['←→','pick a channel (on the desk) · walk params, spilling into the next rack (in a channel)'],
-    ['⇧←→ (in a channel)','pick the SLOT — one list of slots across the whole chain, in the order it runs'],
+    ['←→ (in a channel)','params, flowing into the next slot at the ends · ⌥←→ jumps the slot · ⇧←→ changes CHANNEL, same as on the desk'],
     ['↑↓','on the desk: walk the step cursor down the grid · in a channel: change the focused value'],
     ['CAPS LOCK','PATTERN EDIT on/off — letters place steps instead of playing'],
 
@@ -14324,7 +14380,9 @@ function renderHelp(L){
     ['⌘- / ⌘=','remove / add a rack slot (they were bare - and = before volume took those)'],
     ['⌥\\','next automated knob (⇧⌥\\ = previous) — \\ alone shows and hides the curves'],
     ['⌥r','route a mod from the param you are on: first free slot, lfo aimed here, cursor lands on amt'],
-    ['⌥ holds the scope','open any ⌥ scope, let the letter go with ⌥ still down, and it behaves as if the letter were held — arrows and digits keep working until ⌥ comes up'],
+    ['⌥ holds the scope','open any ⌥ scope, let the letter go with ⌥ still down, and it behaves as if the letter were held — and the LETTERS PLAY, so you dial with one hand and hear it with the other. No other ⌥ command opens until ⌥ comes up'],
+    ['⌥a','the ARP: digits / ↑↓ / - = walk the rate · ←→ mode (order = the sequence you played) · , . octaves · ⌫ removes it. Opening it walks the strip to its slot; closing walks back'],
+    ['⌥u','the EUC gate: sixteen 16th steps, digits / ↑↓ / - = set how many hit. It fires only on notes you are HOLDING, and each note\u2019s pattern starts where that note started'],
     ['⇧, / ⇧.','keyboard velocity down / up — how hard, next to how high'],
     ['⌥= / ⌥-','SOLO / INSIST and MUTE / SILENCE the channel you are on — next to the volume keys they qualify. While held, the digits do it to any other channel; latch keeps the digits doing it'],
     ['','they are plain toggles: press again for off. Asking for one withdraws the other, and the channel you touched becomes the one you are on'],
