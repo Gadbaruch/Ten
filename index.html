@@ -316,7 +316,8 @@ const LFOW_PW=[0,1,3,2];
    needs them long before the render section runs */
 const PCH='CcDdEFfGgAaB';
 const NN=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
-const XTYPES=['off','dly','phase','fla','pha','trm','drv','crush','verb','comp','gate','roll','tape','grs8','send','limit','duck','amix','hp','lp','bld','sat','grain','filt','clip','plate'];
+const XTYPES=['off','dly','phase','fla','pha','trm','drv','crush','verb','comp','gate','roll','tape','grs8','send','limit','duck','amix','hp','lp','bld','sat','grain','filt','clip','plate',
+  'dub','tec','res','wob','qual','buf'];
 /* drv and crush are the same two curves `dist` already offers — kept in the
    table so old indices still resolve, hidden from the picker (v17 folds them). */
 /* `bld` was a macro — a highpass into a synced delay AND a convolution wash,
@@ -325,7 +326,11 @@ const XTYPES=['off','dly','phase','fla','pha','trm','drv','crush','verb','comp',
    not say "reverb". Hidden from the picker; old presets still resolve. */
 const XHIDE=new Set([XTYPES.indexOf('drv'),XTYPES.indexOf('crush'),XTYPES.indexOf('bld'),XTYPES.indexOf('hp'),XTYPES.indexOf('lp'),
   XTYPES.indexOf('fla'),XTYPES.indexOf('pha'),XTYPES.indexOf('trm'),   // phase's kinds
-  XTYPES.indexOf('limit'),XTYPES.indexOf('clip'),                      // comp's kinds
+  XTYPES.indexOf('limit'),XTYPES.indexOf('clip'),XTYPES.indexOf('duck'),// comp's kinds
+  XTYPES.indexOf('roll'),XTYPES.indexOf('dub'),XTYPES.indexOf('tec'),  // delay's kinds
+  XTYPES.indexOf('res'),XTYPES.indexOf('wob'),
+  XTYPES.indexOf('tape'),                                              // sat's kind
+  XTYPES.indexOf('grs8'),XTYPES.indexOf('gate'),                       // retired outright
   XTYPES.indexOf('plate')]);   // plate is verb's mode 1 now, not its own slot
 const XDIST=XTYPES.indexOf('sat');
 /* reverb size: squared so the short end has real resolution — 50ms rooms to 4.5s halls */
@@ -483,6 +488,7 @@ function fxFold(p){
     if(!sl)continue;
     const t=XTYPES[Math.round(sl.typ||0)];
     if(t==='hp'||t==='lp'){sl.p3=XFT.indexOf(t); sl.typ=XTYPES.indexOf('filt');}
+    if(t==='grs8'||t==='gate')sl.typ=0;    // retired outright — env-follower → volume covers gate
   }
   return p;
 }
@@ -1117,11 +1123,15 @@ const FX_P=sl=>{
      comp holds comp/limit/clip. The slot's typ still IS the member — every
      engine path is untouched — the family just presents as one type with a
      `kind`, exactly the way filt holds its filters. */
-  const FAM=t==='phase'||t==='fla'||t==='pha'||t==='trm'
-    ? {names:['chorus','flanger','phaser','trem'],typs:['phase','fla','pha','trm'].map(x=>XTYPES.indexOf(x))}
-    : (t==='comp'||t==='limit'||t==='clip')
-    ? {names:['comp','limit','clip'],typs:['comp','limit','clip'].map(x=>XTYPES.indexOf(x))}
-    : null;
+  const FAMS=[
+    {names:['chorus','flanger','phaser','trem'],members:['phase','fla','pha','trm']},
+    {names:['comp','limit','clip','duck'],members:['comp','limit','clip','duck']},
+    {names:['delay','dub','tape echo','resonator','wobble','roll'],
+     members:['dly','dub','tec','res','wob','roll']},
+    {names:['sat','tape'],members:['sat','tape']},
+  ];
+  const FAM=(f=>f?{names:f.names,typs:f.members.map(x=>XTYPES.indexOf(x))}:null)
+    (FAMS.find(f=>f.members.includes(t)));
   if(FAM)base.push(SP('kind','_fk','enum',{opts:FAM.names,
     get:o=>Math.max(0,FAM.typs.indexOf(Math.round(o.typ))),
     set:(o,v)=>{o.typ=FAM.typs[clamp(Math.round(v),0,FAM.typs.length-1)];
@@ -1261,6 +1271,12 @@ const FX_P=sl=>{
             fmt:v=>{const t=xFbT(v);return t>=1?t.toFixed(2)+'s':Math.round(t*1000)+'ms';}}),
          SPMIX()],
   };
+  tail.dub=tail.tec=tail.wob=tail.res=tail.dly;   // the delay kinds share the dial
+  tail.qual=[SP('kind','p3','enum',{opts:['phone','lowbit','amp','lofi']}),
+    SP('amt','p1','lin',{min:0,max:1,step:0.05}),
+    SP('tone','p2','lin',{min:0,max:1,step:0.05}),SPMIX()];
+  tail.buf=[SP('kind','p3','enum',{opts:['repeat','reverse','chop','shuffle','stop']}),
+    SP('size','p1','lin',{min:0,max:1,step:0.05,fmt:v=>Math.round(50+v*750)+'ms'}),SPMIX()];
   return base.concat(tail[t]||[]);
 };
 const PLY_SCOPE=[SP('stage','p6','enum',{opts:['post','pre']})];   // pre = the recorder captures the output
@@ -1891,6 +1907,14 @@ const OPTRACK={
         find:rk=>{const f=[XTYPES.indexOf('comp'),XTYPES.indexOf('limit'),XTYPES.indexOf('clip')];
           return rk.map((x,i)=>x&&f.includes(Math.round(x.typ))&&!x.off?i:-1).filter(i=>i>=0);},
         make:sl=>Object.assign(sl,{typ:XTYPES.indexOf('comp'),p1:0.4,p2:0.5,p3:0.5,mix:1}),
+        unmake:sl=>Object.assign(sl,{typ:0})},
+  KeyQ:{id:'fx',name:'quality',nav:1,
+        find:rk=>rk.map((x,i)=>x&&XTYPES[Math.round(x.typ)]==='qual'&&!x.off?i:-1).filter(i=>i>=0),
+        make:sl=>Object.assign(sl,{typ:XTYPES.indexOf('qual'),p1:0.5,p2:0.5,p3:0,mix:fToVol(70)}),
+        unmake:sl=>Object.assign(sl,{typ:0})},
+  KeyB:{id:'fx',name:'buffer',nav:1,
+        find:rk=>rk.map((x,i)=>x&&XTYPES[Math.round(x.typ)]==='buf'&&!x.off?i:-1).filter(i=>i>=0),
+        make:sl=>Object.assign(sl,{typ:XTYPES.indexOf('buf'),p1:0.3,p3:0,mix:fToVol(80)}),
         unmake:sl=>Object.assign(sl,{typ:0})},
   KeyX:{id:'fx',name:'fx',nav:1,
         find:rk=>{const a2=rk.map((x,i)=>x&&x.typ?i:-1).filter(i=>i>=0);
@@ -2891,6 +2915,47 @@ let fxwReady=false;
       return true;
     }
   }
+  class B2 extends AudioWorkletProcessor{
+    constructor(o){super();
+      const d=(o&&o.processorOptions)||{};
+      this.mode=d.mode|0; this.slice=d.slice||0.25;
+      this.n=Math.round(sampleRate*4);
+      this.buf=[new Float32Array(this.n),new Float32Array(this.n)];
+      this.w=0; this.shufSrc=1; this.acc=0;
+      this.port.onmessage=e=>{const m=e.data||{};
+        if(m.mode!=null)this.mode=m.mode|0;
+        if(m.slice!=null)this.slice=Math.max(0.03,m.slice);};
+    }
+    process(I,O){
+      const inp=I[0], out=O[0]; if(!out||!out[0])return true;
+      const L=inp&&inp[0], R=inp&&(inp[1]||inp[0]);
+      const N=out[0].length, sl=Math.max(64,Math.round(this.slice*sampleRate));
+      for(let k=0;k<N;k++){
+        this.buf[0][this.w%this.n]=L?L[k]:0;
+        this.buf[1][this.w%this.n]=R?R[k]:0;
+        const pos=this.w%sl, start=this.w-pos;
+        let rp;
+        if(this.mode===0)rp=start-sl+pos;                    // repeat the previous slice
+        else if(this.mode===1)rp=start-1-pos;                // the previous slice, backwards
+        else if(this.mode===2)rp=pos<sl*0.5?this.w:-1;       // chop: the back half is silence
+        else if(this.mode===3){                              // shuffle: deal an old slice
+          if(pos===0)this.shufSrc=1+((this.w/sl)*2654435761%7|0);
+          rp=this.w-this.shufSrc*sl;
+        }else{                                               // stop: the tape winds down
+          if(pos===0)this.acc=0;
+          this.acc+=Math.max(0,1-pos/sl);
+          rp=start-sl+Math.floor(this.acc);
+        }
+        let ol=0, orr=0;
+        if(rp>=0&&rp<=this.w){const i2=((rp%this.n)+this.n)%this.n;
+          ol=this.buf[0][i2]; orr=this.buf[1][i2];}
+        out[0][k]=ol; if(out[1])out[1][k]=orr;
+        this.w++;
+      }
+      return true;
+    }
+  }
+  registerProcessor('ten-buf',B2);
   registerProcessor('ten-grain',G);
   registerProcessor('ten-deci',D);
   registerProcessor('ten-plate',PL);`;
@@ -4177,8 +4242,8 @@ class Engine{
     const wet=keep(ac.createGain()); wet.gain.value=full?1:fx.mix;
     cur.connect(dry); dry.connect(out); wet.connect(out);
     const LIVE=liveMap&&slotI!=null?(liveMap[slotI]={t,dry,wet,full:full||!!sendMode}):null;
-    if(t==='dly'){
-      let sec=0.02+fx.p1*1.3;
+    if(t==='dly'||t==='dub'||t==='tec'||t==='res'||t==='wob'){
+      let sec=t==='res'?0.002+fx.p1*0.06:0.02+fx.p1*1.3;   // resonator: 2..62ms, a comb you can tune
       const mode=clamp(Math.round(fx.p3??1),0,3);        // free · sync · pong · sync+pong
       if(mode===1||mode===3){                            // snap to the beat grid
         let best=spb()*0.25;
@@ -4186,7 +4251,24 @@ class Engine{
           if(Math.abs(dv-sec)<Math.abs(best-sec))best=dv;
         sec=best;
       }
-      const fb=keep(ac.createGain()); fb.gain.value=fx.p2;
+      /* the kinds differ in what lives in the FEEDBACK LOOP:
+         dub — a dark lowpass and hotter regeneration, the echo sinking as it
+               repeats; tec — tape: saturation, band-limiting and a slow wobble
+               on the time; res — very short and very hot, a tuned comb;
+         wob — the plain delay with its time visibly seasick. */
+      const fbAmt=t==='res'?clamp(fx.p2*1.06,0,0.97):t==='dub'?clamp(fx.p2*1.05,0,0.92):fx.p2;
+      const fb=keep(ac.createGain()); fb.gain.value=fbAmt;
+      let loopIn=fb;
+      if(t==='dub'||t==='tec'){
+        const lp=keep(ac.createBiquadFilter()); lp.type='lowpass';
+        lp.frequency.value=t==='dub'?900+fx.p5*1500:3200; lp.Q.value=0.5;
+        const shp=keep(ac.createWaveShaper());
+        {const c2=new Float32Array(257);
+         for(let i2=0;i2<257;i2++){const x=i2/128-1;c2[i2]=Math.tanh(x*1.6)/Math.tanh(1.6);}
+         shp.curve=c2;}
+        fb.connect(shp); shp.connect(lp); loopIn=fb; // signal: fb→shp→lp→delay
+        fb._loopTail=lp;
+      }
       /* one tone node per tap, sitting between the delay and everything it
          feeds — so the first repeat is already coloured and each one after it
          goes through again. Flat is a lowpass parked above the audio band
@@ -4203,14 +4285,20 @@ class Engine{
         const cl=mkCol(), cr=mkCol();
         const mg=keep(ac.createChannelMerger(2));
         cur.connect(dl); dl.connect(cl); cl.connect(dr); dr.connect(cr);
-        cr.connect(fb); fb.connect(dl);
+        cr.connect(fb); (fb._loopTail||fb).connect(dl);
         cl.connect(mg,0,0); cr.connect(mg,0,1);
         mg.connect(wet);
         if(LIVE)Object.assign(LIVE,{dls:[dl,dr],fb,cols:[cl,cr],mode});
       }else{
         const dl=keep(ac.createDelay(2)); dl.delayTime.value=sec;
         const cf=mkCol();
-        cur.connect(dl); dl.connect(cf); cf.connect(fb); fb.connect(dl); cf.connect(wet);
+        cur.connect(dl); dl.connect(cf); cf.connect(fb); (fb._loopTail||fb).connect(dl); cf.connect(wet);
+        if(t==='tec'||t==='wob'){                    // the time itself moves
+          const lo=keep(ac.createOscillator()), lg=keep(ac.createGain());
+          lo.frequency.value=t==='tec'?0.4:0.25+(fx.p5??0.5)*6;
+          lg.gain.value=t==='tec'?0.0035:0.002+(fx.p5??0.5)*0.01;
+          lo.connect(lg); lg.connect(dl.delayTime); lo.start();
+        }
         if(LIVE)Object.assign(LIVE,{dls:[dl],fb,cols:[cf],mode});
       }
     }else if(t==='phase'||t==='fla'){
@@ -4486,6 +4574,45 @@ class Engine{
       f2.connect(dl); dl.connect(fb); fb.connect(dl); dl.connect(wg);
       f2.connect(cv); cv.connect(wg);
       wg.connect(wet);
+    }else if(t==='qual'){
+      /* QUALITY: what the signal loses. phone is a narrow band and a hot
+         mouthpiece; lowbit quantizes the waveform itself; amp is a driven
+         box with no top; lofi is a gentler lowbit with the ceiling pulled
+         down. All waveshaper + biquads — nothing here needs a worklet. */
+      const kind=clamp(Math.round(fx.p3??0),0,3);
+      const amt=clamp(fx.p1??0.5,0,1), tone=clamp(fx.p2??0.5,0,1);
+      const shp=keep(ac.createWaveShaper());
+      {const c2=new Float32Array(1025);
+       const bits=kind===1?2+Math.round((1-amt)*6):kind===3?4+Math.round((1-amt)*5):0;
+       const drv=kind===0?1+amt*6:kind===2?1+amt*10:1+amt*2;
+       const lv=bits?Math.pow(2,bits):0;
+       for(let i2=0;i2<1025;i2++){let x=i2/512-1;
+         x=Math.tanh(x*drv)/Math.tanh(drv);
+         if(lv)x=Math.round(x*lv)/lv;
+         c2[i2]=x;}
+       shp.curve=c2; shp.oversample='2x';}
+      let nde=shp; cur.connect(shp);
+      const f1=keep(ac.createBiquadFilter());
+      if(kind===0){f1.type='bandpass'; f1.frequency.value=700+tone*900; f1.Q.value=1.6;}
+      else if(kind===2){f1.type='lowpass'; f1.frequency.value=2200+tone*3800; f1.Q.value=0.8;}
+      else{f1.type='lowpass'; f1.frequency.value=2500+tone*5500; f1.Q.value=0.6;}
+      nde.connect(f1); nde=f1;
+      if(kind===0||kind===2){const hp2=keep(ac.createBiquadFilter());
+        hp2.type='highpass'; hp2.frequency.value=kind===0?280:90;
+        nde.connect(hp2); nde=hp2;}
+      nde.connect(wet);
+    }else if(t==='buf'){
+      /* BUFFER: the last moments of the channel, replayed wrong on purpose —
+         repeat loops the previous slice, reverse plays it backwards, chop
+         gates it, shuffle deals old slices, stop winds the tape down. */
+      if(fxwReady){
+        const nb=keep(new AudioWorkletNode(ac,'ten-buf',
+          {outputChannelCount:[2],processorOptions:{
+            mode:clamp(Math.round(fx.p3??0),0,4),
+            slice:(0.05+clamp(fx.p1??0.3,0,1)*0.75)}}));
+        cur.connect(nb); nb.connect(wet);
+        if(LIVE)LIVE.bufNode=nb;
+      }else{const g=keep(ac.createGain()); cur.connect(g); g.connect(wet);}
     }else if(t==='amix'){                    // smart auto-mix: registers, audio passes through
       const g=keep(ac.createGain());
       dry.gain.value=0; wet.gain.value=1;
@@ -14691,7 +14818,10 @@ function renderHelp(L){
     ['⌥e','go to the ENVELOPES. a / d / s / r jump to attack, decay, sustain, release by their own letters; digits jump between envelopes; ⌫ removes one'],
     ['⌥f ⌥l ⌥k ⌥/','the same grammar for the FILTER, the LFOs, KEYTRACK and RANDOM mods — the letter takes you there, making one if the rack has none'],
     ['⌥r ⌥g ⌥s ⌥x','…and for the fx: REVERB, GRAIN, SATURATION (drive, née dist), or ⌥x for the fx rack itself. Digits jump instances, ⌫ removes, the strip edits'],
-    ['⌥p ⌥c','PHASE (chorus·flanger·phaser·trem) and COMP (comp·limit·clip) — each family is ONE effect with a `kind`, the way filt holds its filters'],
+    ['⌥p ⌥c','PHASE (chorus·flanger·phaser·trem) and COMP (comp·limit·clip·duck) — each family is ONE effect with a `kind`, the way filt holds its filters'],
+    ['⌥d (delay)','the DELAY is a family now: delay · dub · tape echo · resonator · wobble · roll — the kinds differ in what lives in the feedback loop'],
+    ['⌥q','QUALITY: what the signal loses — phone · lowbit · amp · lofi. amt is how much, tone is where the ceiling sits'],
+    ['⌥b','BUFFER: the last moments of the channel replayed wrong on purpose — repeat · reverse · chop · shuffle · stop. size is the slice'],
     ['slot memory','every slot remembers the param you last touched, and every JUMP back (digits, ⌥←→, the letter scopes) lands there'],
     ['rtc (PLAY rack)','the RATCHET: one note becomes a burst of itself — ×2..×8 equal sub-hits, fading if you ask. Sequenced notes divide their own footprint; a LIVE held note repeats at that division of the beat, phase from where you pressed it'],
     ['⇧o (right)','OVERDUB vs OVERWRITE. Overwrite only means anything while RECORDING — just playing over a lane no longer punches holes in it'],
