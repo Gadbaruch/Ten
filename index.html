@@ -1014,7 +1014,8 @@ const MOD_P=sl=>{                    // unified: source picks which extra fields
        get:dGet,
        set:(m,v)=>{const rt=modRt(m), d=DL[Math.round(v)-1];
          if(!d){rt.addr=null;}
-         else rt.addr={rack:d.rack,slot:d.slot,key:d.key,lbl:d.lbl};
+         else{rt.addr={rack:d.rack,slot:d.slot,key:d.key,lbl:d.lbl};
+              if(d.sid!=null)rt.addr.sid=d.sid;}
          rt.dst=0; rt.tgt=null;}}),
     /* negative for EVERY source, not just env and lfo. Velocity that opens
        the filter is one idea; velocity that closes it is another, and there
@@ -1286,15 +1287,42 @@ const paramsFor=(mi,slot)=>{const M=MODULES[mi];return M.flat?M.flat:M.params(sl
 
    Points carry `a` now. `m/s/p` is still written alongside for one version so
    a downgrade does not lose anything, and is read only when `a` is absent. */
+/* STABLE SLOT IDENTITY. A rack is a plain array and removing a slot splices
+   it, so every slot below the hole moves up one — and an address that named a
+   slot by POSITION quietly re-aimed at whatever slid into its place. The id
+   lives ON the slot object, so it travels with the splice and a destination
+   follows its slot wherever it ends up.
+   Ids are never reused: the counter is per rack and only ever climbs, so the
+   blank pushed in after a removal cannot inherit the id of the slot that just
+   left and inherit its automation with it. */
+function slotId(pre,rid,i){
+  const rack=(modHolder(pre,rid)||{})[rid], sl=rack&&rack[i];
+  if(!sl)return null;
+  if(sl.id==null){
+    const c=pre._sid=pre._sid||{};
+    let n=c[rid];
+    if(n==null){n=0; for(const x of rack)if(x&&x.id!=null&&x.id>=n)n=x.id+1;}
+    sl.id=n; c[rid]=n+1;
+  }
+  return sl.id;
+}
+const bySid=(rack,sid)=>{
+  if(sid==null||!rack)return -1;
+  for(let i=0;i<rack.length;i++)if(rack[i]&&rack[i].id===sid)return i;
+  return -1;
+};
 function autoAddr(pre,mi,si,px){
   const M=MODULES[mi]; if(!M||!M.id||M.prs)return null;
-  const slot=M.flat?null:(modHolder(pre,M.id)[M.id]||[])[si<0?0:si];
+  const idx=M.flat?0:(si<0?0:si);
+  const slot=M.flat?null:(modHolder(pre,M.id)[M.id]||[])[idx];
   const spec=(M.flat?M.flat:M.params(slot))[px];
   if(!spec)return null;
-  return {rack:M.id,slot:M.flat?0:(si<0?0:si),key:spec.key,lbl:spec.lbl};
+  const a={rack:M.id,slot:idx,key:spec.key,lbl:spec.lbl};
+  if(!M.flat){const sid=slotId(pre,M.id,idx); if(sid!=null)a.sid=sid;}
+  return a;
 }
-const sameAddr=(a,b)=>!!a&&!!b&&a.rack===b.rack&&String(a.slot)===String(b.slot)
-  &&a.key===b.key&&a.lbl===b.lbl;
+const sameAddr=(a,b)=>!!a&&!!b&&a.rack===b.rack&&a.key===b.key&&a.lbl===b.lbl
+  &&((a.sid!=null&&b.sid!=null)?a.sid===b.sid:String(a.slot)===String(b.slot));
 /* the address an event names, deriving it from the legacy triple when a point
    predates this and has none */
 function evAddr(pre,ev){
@@ -1303,7 +1331,7 @@ function evAddr(pre,ev){
   if(a)ev.a=a;                                   // upgrade in place, once
   return a;
 }
-const addrKey=a=>a?a.rack+'/'+a.slot+'/'+a.key:'?';
+const addrKey=a=>a?a.rack+'/'+(a.sid!=null?'#'+a.sid:a.slot)+'/'+a.key:'?';
 /* an address back to the (module, slot, param) triple the setters take —
    resolved fresh every time, which is the whole point: the numbers are allowed
    to move, the address is not. Null when it no longer names anything. */
@@ -1312,9 +1340,19 @@ function autoWhere(pre,a){
   const mi=MODULES.findIndex(M=>M&&M.id===a.rack);
   if(mi<0)return null;
   const M=MODULES[mi];
-  const si=M.flat?-1:clamp(Math.round(+a.slot||0),0,9);
-  const slot=M.flat?null:(modHolder(pre,M.id)[M.id]||[])[si];
-  if(!M.flat&&!slot)return null;
+  let si=-1, slot=null;
+  if(!M.flat){
+    const rack=modHolder(pre,M.id)[M.id]||[];
+    si=bySid(rack,a.sid);
+    if(si<0){
+      si=clamp(Math.round(+a.slot||0),0,9);
+      /* an address written before slots had identity: adopt the slot it is
+         pointing at now, once, so it stops being positional from here on */
+      const sid=slotId(pre,M.id,si); if(sid!=null)a.sid=sid;
+    }else if(si!==a.slot)a.slot=si;   // it moved — keep the label honest
+    slot=rack[si];
+    if(!slot)return null;
+  }
   const specs=M.flat?M.flat:M.params(slot);
   const px=specs.findIndex(x=>x.key===a.key&&x.lbl===a.lbl);
   if(px<0)return null;
@@ -1505,8 +1543,11 @@ function modDests_(pre){
     if(!spec||spec.type==='enum')return;
     if(spec.key&&spec.key[0]==='_')return;      // '_rt', '_dest': UI, not parameters
     if(!destRate(rack,spec.key))return;         // nothing can drive it yet
-    out.push({rack,slot,key:spec.key,lbl:spec.lbl,typ:typ||'',
-      rate:destRate(rack,spec.key),spec});
+    const e={rack,slot,key:spec.key,lbl:spec.lbl,typ:typ||'',
+      rate:destRate(rack,spec.key),spec};
+    if(slot!=='*'){const rk2=(modHolder(pre,rack)||{})[rack];
+      if(rk2&&rk2[slot]&&rk2[slot].id!=null)e.sid=rk2[slot].id;}
+    out.push(e);
   };
   for(let mi=0;mi<MODULES.length;mi++){
     const M=MODULES[mi]; if(!M||!M.id||M.prs)continue;
@@ -1517,6 +1558,7 @@ function modDests_(pre){
     rk.forEach((sl,i)=>{
       if(M.abbr(sl)==='···')return;
       const ty=M.abbr(sl);
+      slotId(pre,M.id,i);                 // so anything picked here is identified
       for(const sp of paramsFor(mi,sl)){
         add(M.id,i,sp,ty);
         const k=sp.key+'|'+sp.lbl; if(!seen.has(k))seen.set(k,sp);
@@ -1565,7 +1607,18 @@ function resolveDest(pre,a){
   if(M.flat){const sp=M.flat.find(x=>x.key===a.key&&x.lbl===a.lbl);
     return sp?[{mi,si:0,spec:sp,slot:modHolder(pre,M.id)[M.id]}]:[];}
   const rk=modHolder(pre,M.id)[M.id]||[], out=[];
-  for(const i of (a.slot==='*'?rk.map((_,k)=>k):[a.slot])){
+  /* the wildcard still means every slot; a single destination is found by
+     IDENTITY first, so moving the slot it names does not re-aim it */
+  let idxs;
+  if(a.slot==='*')idxs=rk.map((_,k)=>k);
+  else{
+    let i=bySid(rk,a.sid);
+    if(i<0){i=clamp(Math.round(+a.slot||0),0,9);
+      const sid=slotId(pre,M.id,i); if(sid!=null)a.sid=sid;}
+    else if(i!==a.slot)a.slot=i;
+    idxs=[i];
+  }
+  for(const i of idxs){
     const sl=rk[i]; if(!sl||M.abbr(sl)==='···')continue;
     const sp=paramsFor(mi,sl).find(x=>x.key===a.key&&x.lbl===a.lbl);
     if(sp)out.push({mi,si:i,spec:sp,slot:sl});
@@ -10750,6 +10803,7 @@ const onKeyDown=e=>{
     const rate=destRate(M.id,spec.key);
     if(!rate){flash('nothing can drive '+M.name.toLowerCase()+'·'+spec.lbl+' yet');return;}
     const addr={rack:M.id,slot:M.flat?0:S.curSlot,key:spec.key,lbl:spec.lbl};
+    if(!M.flat){const sid=slotId(pre,M.id,S.curSlot); if(sid!=null)addr.sid=sid;}
     /* an existing modulator already pointed here? go to it rather than making
        a second one — pressing r twice should take you back, not pile up */
     let at=-1;
