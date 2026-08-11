@@ -1273,7 +1273,8 @@ const PLY_P=sl=>{
      you ask. An arpeggio with nowhere to go. */
   if(sl.typ===15)return T(
     SP('divs','p1','lin',{min:0,max:16,step:1,fmt:v=>Math.round(v)<2?'off':'\u00d7'+Math.round(v)}),
-    SP('fade','p2','lin',{min:0,max:100,step:10,fmt:v=>v+'%'}));
+    SP('fade','p2','lin',{min:-100,max:100,step:10,
+       fmt:v=>v?(v>0?'-':'+')+Math.abs(Math.round(v))+'%':'flat'}));
   if(sl.typ===11)return T(SP('range','p1','lin',{min:0,max:80,step:1,fmt:v=>'\u00b1'+v+'ms'}));
   if(sl.typ===12)return T(
     SP('gap','p1','lin',{min:5,max:120,step:1,fmt:v=>v+'ms'}),
@@ -3008,10 +3009,12 @@ function scheduleRange(from,to){
            note's footprint is divided into equal sub-hits, fading if asked. */
         const divs=rtcS?(Math.round(rtcS.p1??0)>=2?clamp(Math.round(rtcS.p1),2,16):0):rt;   // 0 and 1 = off
         if(divs>=2){
-          const fade=rtcS?clamp(rtcS.p2??20,0,100)/100:0.25, step=dur2/divs;
+          /* negative fade is a crescendo: the burst grows into the beat
+             instead of dying out of it */
+          const fade=rtcS?clamp(rtcS.p2??20,-100,100)/100:0.25, step=dur2/divs;
           for(let i2=0;i2<divs;i2++)
             engine.trigger(timeAt(tt+i2*step+a.anchor),li,midi2,
-              Math.max(0.05,v*(1-fade*i2/divs)),step*0.9*spb());
+              clamp(v*(1-fade*i2/divs),0.05,1),step*0.9*spb());
           return;
         }
         engine.trigger(timeAt(tt+a.anchor),li,midi2,v,dur2*spb());
@@ -5913,7 +5916,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
         ?rack.find(sl=>sl.typ===15&&!sl.off&&Math.round(sl.p1??0)>=2):null;
       if(rtc2){
         const divs=clamp(Math.round(rtc2.p1),2,16), step=1/divs;
-        const fade=clamp(rtc2.p2??20,0,100)/100;
+        const fade=clamp(rtc2.p2??20,-100,100)/100;
         for(let b=Math.ceil(from/step-1e-9)*step;b<to-1e-9;b+=step){
           if(b<from-1e-9)continue;
           const bg=b+grooveOff(pi,b);
@@ -5922,7 +5925,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
             const k=Math.max(0,Math.round((b-(en.born??b))/step));
             en.heard=true;
             const v=this.noteOn(gridTime(bg),pi,en.midi,
-              Math.max(0.05,en.vel*(1-fade*(k%divs)/divs)),en.pad??en.midi);
+              clamp(en.vel*(1-fade*(k%divs)/divs),0.05,1),en.pad??en.midi);
             v.release(gridTime(bg+step*0.85));
           }
         }
@@ -10891,7 +10894,6 @@ const onKeyDown=e=>{
       HOLD.opt={c,ch,key,nav:1}; HOLD.optUsed=false; HOLD.optLatch=KM.sl;
       if(KM.sl)LATCH.used=true;
       if(S.layer>=2){
-        HOLD.opt.prev={curMod:S.curMod,curSlot:S.curSlot,slotParam:S.slotParam};
         S.editSnd=ch;
         S.curMod=MODULES.findIndex(M2=>M2&&M2.id===T2.id);
         gotoSlot(list[0]);
@@ -10909,13 +10911,15 @@ const onKeyDown=e=>{
          also walks the strip to that slot, so what you dial is what you are
          looking at — and it walks back when the scope closes, because the
          visit belongs to the hold. */
+      /* NAVIGATION, NOT A VISIT. The cursor stays where the letter took it
+         after the scope closes — opening a rack by key is how you get around,
+         not just how you set things. */
       if(S.layer>=2){
         const rk=modHolder(S.presets[ch],T2.id)[T2.id];
         const si2=rk.findIndex(x=>x===sl);
         if(si2>=0){
-          HOLD.opt.prev={curMod:S.curMod,curSlot:S.curSlot,slotParam:S.slotParam};
           S.curMod=MODULES.findIndex(M2=>M2&&M2.id===T2.id);
-          S.curSlot=si2; S.slotParam=0;
+          gotoSlot(si2);
         }
       }
       flash(T2.name+(had?' ch ':' on ch ')+ch+' — '+T2.dial.lbl(Math.round(sl[T2.dial.p]))+
@@ -11303,8 +11307,12 @@ const onKeyDown=e=>{
       flash('keyboard vel '+Math.round(clamp(CFG.kvel??0.9,0.02,1)*127)); return;}
     if(!e.repeat){S.oct=clamp(S.oct+d,-3,3); dirty=true;} return;
   }
+  /* THE ACTION IS THE PRESS. Waiting for the keyup to decide tap-vs-hold made
+     the click land late; now the toggle fires the moment the key goes down and
+     the scope opens anyway — arrows after it still set the tempo. */
   if(c==='KeyM'&&gblOf(e)&&!HOLD.q){
-    if(!e.repeat){HOLD.m=true; HOLD.mUsed=false;}
+    if(!e.repeat){HOLD.m=true; HOLD.mUsed=false;
+      S.metro=!S.metro; flash('click '+(S.metro?'on':'off')); dirty=true;}
     return;}
   if(c==='KeyO'&&gblOf(e)&&!e.repeat){               // ⌃o — how recording meets what is there
     CFG.overdub=CFG.overdub?0:1; saveCfg();
@@ -11328,7 +11336,10 @@ const onKeyDown=e=>{
      Tapped: scale on/off. The browser wants ⌃s for saving a page it did not
      write; preventDefault takes it back. */
   if(c==='KeyS'&&gblOf(e)&&!e.repeat&&!HOLD.q){   // …unless the q scope is open: q+s = snap
-    e.preventDefault(); HOLD.sc=true; HOLD.scUsed=false; return;}
+    e.preventDefault(); HOLD.sc=true; HOLD.scUsed=false;
+    CFG.scaleOn=CFG.scaleOn?0:1; saveCfg();
+    flash('scale '+(CFG.scaleOn?NN[CFG.key||0]+' '+SCALES[CFG.scale||0][0]:'OFF — chromatic'));
+    dirty=true; return;}
   /* SNAP LIVES INSIDE THE SCOPE: hold the quantize key, press s — snap what
      is recorded to the grid. It had its own chord (⇧q) when shift meant
      nothing here; shift IS the layer now, so the gesture moves in with its
@@ -11353,7 +11364,10 @@ const onKeyDown=e=>{
     dirty=true; dirtySave=true; return;
   }
   if(c==='KeyQ'&&gblOf(e)&&!e.repeat&&S.layer>=1&&!HOLD.q){
-    e.preventDefault(); HOLD.q=true; HOLD.qUsed=false; return;}
+    e.preventDefault(); HOLD.q=true; HOLD.qUsed=false;
+    CFG.qOn=CFG.qOn?0:1; saveCfg();
+    flash('live quantize '+(CFG.qOn?'ON':'OFF')+' — what you hear is what records');
+    dirty=true; return;}
   if(c==='KeyQ'&&gblOf(e)&&!e.repeat){           // ⌃q = live-quantize toggle, everywhere
     CFG.qOn=CFG.qOn?0:1; saveCfg();
     flash('live quantize '+(CFG.qOn?'ON':'OFF')+' — what you hear is what records');
@@ -12266,31 +12280,12 @@ document.addEventListener('keyup',e=>{
     if(HOLD.optLatch){        // latch overlapped: the keyboard stays pointed here
       HOLD.optLatched=true; HOLD.optLatch=false; HOLD.optUsed=false;
       flash('⟳ '+OPTRACK[c].name+' latched — play; digits and arrows are still its own');
-    }else{
-      if(HOLD.opt.prev){Object.assign(S,HOLD.opt.prev);}
-      HOLD.opt=null; HOLD.optUsed=false;
-    }
+    }else{HOLD.opt=null; HOLD.optUsed=false;}
     dirty=true; return;
   }
-  if(c==='KeyS'&&HOLD.sc){
-    const used=HOLD.scUsed; HOLD.sc=false; HOLD.scUsed=false;
-    if(!used){CFG.scaleOn=CFG.scaleOn?0:1; saveCfg();
-      flash('scale '+(CFG.scaleOn?NN[CFG.key||0]+' '+SCALES[CFG.scale||0][0]:'OFF — chromatic'));
-      dirty=true;}
-    return;
-  }
-  if(c==='KeyQ'&&HOLD.q){
-    const used=HOLD.qUsed; HOLD.q=false; HOLD.qUsed=false;
-    if(!used){CFG.qOn=CFG.qOn?0:1; saveCfg();
-      flash('live quantize '+(CFG.qOn?'ON':'OFF')+' — what you hear is what records');
-      dirty=true;}
-    return;
-  }
-  if(c==='KeyM'&&HOLD.m){
-    const used=HOLD.mUsed; HOLD.m=false; HOLD.mUsed=false;
-    if(!used){S.metro=!S.metro; flash('click '+(S.metro?'on':'off')); dirty=true;}
-    return;
-  }
+  if(c==='KeyS'&&HOLD.sc){HOLD.sc=false; HOLD.scUsed=false; return;}
+  if(c==='KeyQ'&&HOLD.q){HOLD.q=false; HOLD.qUsed=false; return;}
+  if(c==='KeyM'&&HOLD.m){HOLD.m=false; HOLD.mUsed=false; return;}
   if((c==='ShiftLeft'||c==='ShiftRight')&&PICK){PICK.peek=false; dirty=true;}
   if(PICK&&/^Digit\d$/.test(c)){PICK.dig=0;}   // the digit is no longer held
   if(c==='ShiftRight'){KM.sr=false;
