@@ -5848,9 +5848,12 @@ class Engine{
       else pcHandle=()=>pcs.forEach(subPC);
     }
     const arp=arpIdx>=0?p.ply[arpIdx]:null;
-    const eucLive=!arp?(isKit(p)?((kitSlot(p,midis.length?pads[0]:60)||{}).ply||[]):p.ply)
-      .find(sl=>sl.typ===9&&!sl.off):null;
-    if(arp||eucLive){
+    const rack0=isKit(p)?((kitSlot(p,midis.length?pads[0]:60)||{}).ply||[]):p.ply;
+    const eucLive=!arp?rack0.find(sl=>sl.typ===9&&!sl.off):null;
+    /* live ratchet: only LIVE notes route through the pool — sequenced ones
+       are already subdivided at emit time, and both would be twice */
+    const rtcLive=(!arp&&!eucLive&&durSec==null)?rack0.find(sl=>sl.typ===15&&!sl.off):null;
+    if(arp||eucLive||rtcLive){
       const until=durSec!=null?beatsAt(at)+durSec/spb():Infinity;
       /* born + heard: a tap shorter than the gap to the next arp step used to
          set `until` before that step arrived, so the fastest presses made no
@@ -5897,6 +5900,30 @@ class Engine{
          16th steps; each note's pattern is counted from ITS OWN start, so the
          rotation is where you pressed it, not where the bar happens to be. */
       const euc=!arp?rack.find(sl=>sl.typ===9&&!sl.off):null;
+      /* LIVE RATCHET: a held note repeats at a division of the beat — ×4 is
+         16ths, ×3 triplet 8ths — phase counted from the note's own start,
+         fading across each beat if asked. The same gate as euc with every
+         step lit. */
+      const rtc2=!arp&&!(rack.find(sl=>sl.typ===9&&!sl.off))?rack.find(sl=>sl.typ===15&&!sl.off):null;
+      if(rtc2){
+        const divs=clamp(Math.round(rtc2.p1??3),2,8), step=1/divs;
+        const fade=clamp(rtc2.p2??20,0,100)/100;
+        for(let b=Math.ceil(from/step-1e-9)*step;b<to-1e-9;b+=step){
+          if(b<from-1e-9)continue;
+          const bg=b+grooveOff(pi,b);
+          for(const en of pool){
+            if(!(en.until>b||(!en.heard&&(en.born??-1e9)<=b+1e-9)))continue;
+            const k=Math.max(0,Math.round((b-(en.born??b))/step));
+            en.heard=true;
+            const v=this.noteOn(timeAt(bg),pi,en.midi,
+              Math.max(0.05,en.vel*(1-fade*(k%divs)/divs)),en.pad??en.midi);
+            v.release(timeAt(bg+step*0.85));
+          }
+        }
+        const nw2=posNow();
+        this.arpPool[pi]=pool.filter(n2=>n2.until>nw2-8);
+        continue;
+      }
       if(euc){
         const hits=clamp(Math.round(euc.p1??4),1,16), div=0.25;
         for(let b=Math.ceil(from/div-1e-9)*div;b<to-1e-9;b+=div){
@@ -11273,6 +11300,11 @@ const onKeyDown=e=>{
   if(c==='KeyM'&&gblOf(e)&&!HOLD.q){
     if(!e.repeat){HOLD.m=true; HOLD.mUsed=false;}
     return;}
+  if(c==='KeyO'&&gblOf(e)&&!e.repeat){               // ⌃o — how recording meets what is there
+    CFG.overdub=CFG.overdub?0:1; saveCfg();
+    flash(CFG.overdub?'OVERDUB — recording adds to what is there'
+                     :'OVERWRITE — recording replaces what the playhead passes');
+    dirty=true; return;}
   if(c==='KeyB'&&gblOf(e)&&!e.repeat){               // tap tempo, on repeated taps
     const n2=performance.now();
     taps=taps.filter(t2=>n2-t2<3000); taps.push(n2);
@@ -11286,6 +11318,11 @@ const onKeyDown=e=>{
     S.arrOn=S.arrOn===false?true:false;
     flash(S.arrOn?'timeline ON — arrangement drives the song':'timeline OFF — looping the current pattern');
     dirty=true; dirtySave=true; return;}
+  /* ⌃s — THE SCALE, held: ←→ walks the scales, ↑↓ moves the key a semitone.
+     Tapped: scale on/off. The browser wants ⌃s for saving a page it did not
+     write; preventDefault takes it back. */
+  if(c==='KeyS'&&gblOf(e)&&!e.repeat){
+    e.preventDefault(); HOLD.sc=true; HOLD.scUsed=false; return;}
   if(c==='KeyQ'&&gblOf(e)&&!e.repeat&&!e.shiftKey&&S.layer>=1){
     e.preventDefault(); HOLD.q=true; HOLD.qUsed=false; return;}
   if(c==='KeyQ'&&gblOf(e)&&!e.repeat){           // ⌃q = live-quantize toggle, everywhere
@@ -11568,9 +11605,18 @@ const onKeyDown=e=>{
   }
 
   if((c==='ArrowLeft'||c==='ArrowRight'||c==='ArrowUp'||c==='ArrowDown')&&
-     (HOLD.tab||HOLD.m||HOLD.c||HOLD.n||HOLD.r||HOLD.i||HOLD.v)){
+     (HOLD.tab||HOLD.m||HOLD.c||HOLD.n||HOLD.r||HOLD.i||HOLD.v||HOLD.sc)){
     e.preventDefault();
     const dv=(c==='ArrowUp'||c==='ArrowRight')?1:-1, vert=c==='ArrowUp'||c==='ArrowDown';
+    if(HOLD.sc){                                   // THE SCALE: ←→ scale · ↑↓ key
+      HOLD.scUsed=true;
+      if(vert){CFG.key=fmod((CFG.key||0)+dv,12);}
+      else CFG.scale=fmod((CFG.scale||0)+dv,SCALES.length);
+      if(!CFG.scaleOn)CFG.scaleOn=1;               // touching it is asking for it
+      saveCfg();
+      flash('scale '+NN[CFG.key]+' '+SCALES[CFG.scale][0]);
+      dirty=true; return;
+    }
     if(HOLD.r){                                    // how loaded the dice are — one global number
       if(vert){CFG.wild=clamp(Math.round((CFG.wild??35)+dv*(rs(e)?1:5)),0,100);
         saveCfg(); flash('wild '+CFG.wild+'%'); HOLD.rUsed=true; dirty=true;}
@@ -11964,11 +12010,12 @@ const onKeyDown=e=>{
     let at=AC.currentTime+0.005;
     const lane=(S.layer===1?pat:S.patterns[S.editPat]).lanes[pi];
     const recording=S.layer>=1&&pat.state==='rec'&&T.playing;   // record into the channel's lane from sound layer too
-    /* overwrite mode, playing live but NOT recording: your live notes still
-       silence the recorded lane underneath — same feel as recording, minus the write */
-    if(S.layer===1&&!recording&&(CFG.overdub||0)===0&&T.playing){
-      liveMute[pi]++; engine.chokeSeq(pi); nlive[c]=pi;
-    }
+    /* PLAYING IS NOT ERASING. Overwrite used to silence the recorded lane the
+       moment you played over it even with rec OFF — jamming on top of your own
+       part punched holes in it audibly. Overwrite now only means anything
+       while RECORDING (the sweep replaces what the playhead passes) and in the
+       retro take (which replaces by construction). Just playing, you play WITH
+       the lane. */
     const patEmpty=pat.lanes.every(l=>!l.events.length);
     {
       if(recording&&patEmpty&&!lane._cap){
@@ -12127,7 +12174,7 @@ function endNote(c){
    still latch. */
 const scopeHeldOn=c=>
   (c==='KeyQ'&&HOLD.q)||(c==='KeyM'&&HOLD.m)||(c==='KeyN'&&HOLD.n)||
-  (c==='KeyV'&&HOLD.v)||(c==='KeyC'&&HOLD.c)||
+  (c==='KeyV'&&HOLD.v)||(c==='KeyC'&&HOLD.c)||(c==='KeyS'&&HOLD.sc)||
   (HOLD.opt&&c===HOLD.opt.c&&!HOLD.optLatched)||
   (HOLD.ms&&c===HOLD.ms.c&&!HOLD.msLatched);
 document.addEventListener('keyup',e=>{
@@ -12220,6 +12267,13 @@ document.addEventListener('keyup',e=>{
       HOLD.opt=null; HOLD.optUsed=false;
     }
     dirty=true; return;
+  }
+  if(c==='KeyS'&&HOLD.sc){
+    const used=HOLD.scUsed; HOLD.sc=false; HOLD.scUsed=false;
+    if(!used){CFG.scaleOn=CFG.scaleOn?0:1; saveCfg();
+      flash('scale '+(CFG.scaleOn?NN[CFG.key||0]+' '+SCALES[CFG.scale||0][0]:'OFF — chromatic'));
+      dirty=true;}
+    return;
   }
   if(c==='KeyQ'&&HOLD.q){
     const used=HOLD.qUsed; HOLD.q=false; HOLD.qUsed=false;
@@ -12327,7 +12381,7 @@ document.addEventListener('keyup',e=>{
 window.addEventListener('blur',()=>{
   KM.sl=false; KM.sr=false; LATCH.used=false; HOLD.tab=false; HOLD.m=false; kbHeld.clear();
   SUS.clear(); noteLatch.clear();
-  HOLD.c=false; HOLD.n=false; HOLD.r=false; HOLD.i=false; HOLD.v=false; HOLD.q=false; HOLD.dig=-1;
+  HOLD.c=false; HOLD.n=false; HOLD.r=false; HOLD.i=false; HOLD.v=false; HOLD.q=false; HOLD.sc=false; HOLD.dig=-1;
   HOLD.opt=null; HOLD.optUsed=false; HOLD.optLatch=false; HOLD.optLatched=false;
   HOLD.ms=null; HOLD.msLatch=false; HOLD.msLatched=false;
   KM.srLatch=false; KM.altLatch=false;
@@ -14565,7 +14619,9 @@ function renderHelp(L){
     ['⌥d','go to the DELAY — made if the rack has none. The cursor lands on it, so ↑↓ and ←→ edit it directly; digits jump between several; ⌫ removes it'],
     ['⌥e','go to the ENVELOPES. a / d / s / r jump to attack, decay, sustain, release by their own letters; digits jump between envelopes; ⌫ removes one'],
     ['slot memory','every slot remembers the param you last touched, and every JUMP back (digits, ⌥←→, the letter scopes) lands there'],
-    ['rtc (PLAY rack)','the RATCHET: one note becomes a burst of itself — ×2..×8 equal sub-hits inside its own footprint, fading if you ask. An arpeggio with nowhere to go'],
+    ['rtc (PLAY rack)','the RATCHET: one note becomes a burst of itself — ×2..×8 equal sub-hits, fading if you ask. Sequenced notes divide their own footprint; a LIVE held note repeats at that division of the beat, phase from where you pressed it'],
+    ['⌃o','OVERDUB vs OVERWRITE. Overwrite only means anything while RECORDING — just playing over a lane no longer punches holes in it'],
+    ['⌃s','THE SCALE, held: ←→ walks the scales, ↑↓ moves the key a semitone. Tapped: scale on/off'],
     ['(master) z x c v b n m','the GLOBAL NOTE FX, the midi mirror of the dj pads above them: scatter · r-pitch · chop · oct dice · ratchet · dropout · ghost. Hold = momentary, ⇧ = latch, ←→ while held picks the TARGET — everything, the drums, or the melodic channels. They bend what the sequencer emits; nothing is written to the lanes'],
     ['⇧, / ⇧.','keyboard velocity down / up — how hard, next to how high'],
     ['⌥= / ⌥-','SOLO / INSIST and MUTE / SILENCE the channel you are on — next to the volume keys they qualify. While held, the digits do it to any other channel; latch keeps the digits doing it'],
