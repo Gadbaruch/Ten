@@ -1272,7 +1272,7 @@ const PLY_P=sl=>{
      its footprint; it is divided into equal sub-hits, each a little softer if
      you ask. An arpeggio with nowhere to go. */
   if(sl.typ===15)return T(
-    SP('divs','p1','lin',{min:2,max:8,step:1,fmt:v=>'\u00d7'+Math.round(v)}),
+    SP('divs','p1','lin',{min:0,max:16,step:1,fmt:v=>Math.round(v)<2?'off':'\u00d7'+Math.round(v)}),
     SP('fade','p2','lin',{min:0,max:100,step:10,fmt:v=>v+'%'}));
   if(sl.typ===11)return T(SP('range','p1','lin',{min:0,max:80,step:1,fmt:v=>'\u00b1'+v+'ms'}));
   if(sl.typ===12)return T(
@@ -1768,7 +1768,7 @@ const ctlOf=e=>altOf(e)&&!e.metaKey&&!e.ctrlKey&&!ALTSUS.size;
 /* ⌃ IS THE INSTRUMENT: quantize, tempo, the click — the settings you set and
    then live inside. Reach matters for performance keys; these are not that,
    and giving them their own modifier keeps ⌥ purely the channel's. */
-const gblOf=e=>!!e.ctrlKey&&!e.metaKey&&!altOf(e);
+const gblOf=e=>!e.metaKey&&!altOf(e)&&(!!e.ctrlKey||(KM.sr&&!!e.shiftKey));
 const LATCH={held:false,used:false,on:false};
 /* HELD KEYS SCOPE THE ARROWS. The arrows always mean "adjust"; the key you are
    holding says adjust WHAT. tab = the loop, m = tempo. `used` records whether
@@ -2833,6 +2833,7 @@ const posNow=()=>T.playing?Math.max(0,beatsAt(AC.currentTime)):0;
 const G={t0:0,b0:0};
 const gridNow=()=>T.playing?posNow():G.b0+(AC.currentTime-G.t0)/spb();
 const gridTime=b=>T.playing?timeAt(b):G.t0+(b-G.b0)*spb();
+const gridBeatsAt=t=>T.playing?beatsAt(t):G.b0+(t-G.t0)/spb();
 function setBpm(v){
   const gb=gridNow();
   if(T.playing){const n=AC.currentTime;T.startBeat=beatsAt(n);T.startTime=n;}
@@ -3005,7 +3006,7 @@ function scheduleRange(from,to){
         }
         /* RATCHET — from the channel's own slot or the master's z-row. The
            note's footprint is divided into equal sub-hits, fading if asked. */
-        const divs=rtcS?clamp(Math.round(rtcS.p1??3),2,8):rt;
+        const divs=rtcS?(Math.round(rtcS.p1??0)>=2?clamp(Math.round(rtcS.p1),2,16):0):rt;   // 0 and 1 = off
         if(divs>=2){
           const fade=rtcS?clamp(rtcS.p2??20,0,100)/100:0.25, step=dur2/divs;
           for(let i2=0;i2<divs;i2++)
@@ -5820,7 +5821,9 @@ class Engine{
       }
     }
     let midis=[midi], pads=[midi], strum=0, chordPre=false;
-    const arpIdx=p.ply.findIndex(sl=>sl.typ===2&&!sl.off&&T.playing);
+    /* the transport gate is gone: the pool ticks on the free grid while
+       stopped, so the arp plays the moment you hold notes, like hardware */
+    const arpIdx=p.ply.findIndex(sl=>sl.typ===2&&!sl.off);
     for(let i2=0;i2<p.ply.length;i2++){  // chord slots BEFORE the arp expand pre-pool
       const sl=p.ply[i2];
       if(sl.typ===1&&!sl.off&&(arpIdx<0||i2<arpIdx)){
@@ -5852,7 +5855,8 @@ class Engine{
     const eucLive=!arp?rack0.find(sl=>sl.typ===9&&!sl.off):null;
     /* live ratchet: only LIVE notes route through the pool — sequenced ones
        are already subdivided at emit time, and both would be twice */
-    const rtcLive=(!arp&&!eucLive&&durSec==null)?rack0.find(sl=>sl.typ===15&&!sl.off):null;
+    const rtcLive=(!arp&&!eucLive&&durSec==null)
+      ?rack0.find(sl=>sl.typ===15&&!sl.off&&Math.round(sl.p1??0)>=2):null;
     if(arp||eucLive||rtcLive){
       const until=durSec!=null?beatsAt(at)+durSec/spb():Infinity;
       /* born + heard: a tap shorter than the gap to the next arp step used to
@@ -5860,17 +5864,11 @@ class Engine{
          sound at all. An entry that has never been emitted survives its own
          release until the first step at or after where it was born. */
       const entries=midis.map((m,i)=>({midi:m,pad:pads[i],vel,until,
-        born:T.playing?beatsAt(at):0,heard:false}));
+        born:gridBeatsAt(at),heard:false}));
       this.arpPool[pi].push(...entries);
       if(durSec!=null)return null;
       return {voices:[],arp:entries,release:t=>{if(pcHandle){pcHandle();pcHandle=null;}
-        /* RELEASED IS RELEASED. While stopped, beatsAt is meaningless, and the
-           old '1e9' meant a key let go with the transport stopped stayed in
-           the pool as if held FOREVER — press a ratcheted note, stop, release,
-           play, and it machine-gunned with nothing down. A release with no
-           clock kills the entry outright; a key actually held through the
-           stop keeps its Infinity and rides on, which is the latch case. */
-        const b2=T.playing?beatsAt(t):-1e9;for(const en of entries)en.until=Math.min(en.until,b2);}};
+const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}};
     }
     /* mono & legato get note priority: a stack of what is still held, so
        releasing the newest note drops back to the one under it. Only single
@@ -5911,9 +5909,10 @@ class Engine{
          16ths, ×3 triplet 8ths — phase counted from the note's own start,
          fading across each beat if asked. The same gate as euc with every
          step lit. */
-      const rtc2=!arp&&!(rack.find(sl=>sl.typ===9&&!sl.off))?rack.find(sl=>sl.typ===15&&!sl.off):null;
+      const rtc2=!arp&&!(rack.find(sl=>sl.typ===9&&!sl.off))
+        ?rack.find(sl=>sl.typ===15&&!sl.off&&Math.round(sl.p1??0)>=2):null;
       if(rtc2){
-        const divs=clamp(Math.round(rtc2.p1??3),2,8), step=1/divs;
+        const divs=clamp(Math.round(rtc2.p1),2,16), step=1/divs;
         const fade=clamp(rtc2.p2??20,0,100)/100;
         for(let b=Math.ceil(from/step-1e-9)*step;b<to-1e-9;b+=step){
           if(b<from-1e-9)continue;
@@ -5922,12 +5921,12 @@ class Engine{
             if(!(en.until>b||(!en.heard&&(en.born??-1e9)<=b+1e-9)))continue;
             const k=Math.max(0,Math.round((b-(en.born??b))/step));
             en.heard=true;
-            const v=this.noteOn(timeAt(bg),pi,en.midi,
+            const v=this.noteOn(gridTime(bg),pi,en.midi,
               Math.max(0.05,en.vel*(1-fade*(k%divs)/divs)),en.pad??en.midi);
-            v.release(timeAt(bg+step*0.85));
+            v.release(gridTime(bg+step*0.85));
           }
         }
-        const nw2=posNow();
+        const nw2=gridNow();
         this.arpPool[pi]=pool.filter(n2=>n2.until>nw2-8);
         continue;
       }
@@ -5941,12 +5940,12 @@ class Engine{
             const k=Math.max(0,Math.round((b-(en.born??b))/div));
             if(((k%16)*hits)%16>=hits)continue;
             en.heard=true;
-            const v=this.noteOn(timeAt(bg),pi,en.midi,en.vel,en.pad??en.midi);
-            v.release(timeAt(bg+div*0.85));
+            const v=this.noteOn(gridTime(bg),pi,en.midi,en.vel,en.pad??en.midi);
+            v.release(gridTime(bg+div*0.85));
             if(Math.round(euc.p6||0)===1)recPlayNote(pi,bg,en.midi,en.vel,div*0.85);
           }
         }
-        const nw=posNow();
+        const nw=gridNow();
         this.arpPool[pi]=pool.filter(n2=>n2.until>nw-8);
         continue;
       }
@@ -5988,15 +5987,15 @@ class Engine{
         }
         const rpA=rack.find(sl=>sl.typ===13&&!sl.off);
         for(const m of hits){
-          const v=this.noteOn(timeAt(bg),pi,rpA?rpitApply(m,rpA):m,pick.vel,pick.pad??m);
-          v.release(timeAt(bg+div*0.85));
+          const v=this.noteOn(gridTime(bg),pi,rpA?rpitApply(m,rpA):m,pick.vel,pick.pad??m);
+          v.release(gridTime(bg+div*0.85));
           if(Math.round(arp.p6||0)===1)             // stage=pre: the recorder captures the arp output
             recPlayNote(pi,bg,m,pick.vel,div*0.85);
         }
         }
       }
       // prune dead pool entries
-      const now=posNow();
+      const now=gridNow();
       this.arpPool[pi]=pool.filter(n2=>n2.until>now-8);
     }
   }
@@ -11328,38 +11327,34 @@ const onKeyDown=e=>{
   /* ⌃s — THE SCALE, held: ←→ walks the scales, ↑↓ moves the key a semitone.
      Tapped: scale on/off. The browser wants ⌃s for saving a page it did not
      write; preventDefault takes it back. */
-  if(c==='KeyS'&&gblOf(e)&&!e.repeat){
+  if(c==='KeyS'&&gblOf(e)&&!e.repeat&&!HOLD.q){   // …unless the q scope is open: q+s = snap
     e.preventDefault(); HOLD.sc=true; HOLD.scUsed=false; return;}
-  if(c==='KeyQ'&&gblOf(e)&&!e.repeat&&!e.shiftKey&&S.layer>=1){
+  /* SNAP LIVES INSIDE THE SCOPE: hold the quantize key, press s — snap what
+     is recorded to the grid. It had its own chord (⇧q) when shift meant
+     nothing here; shift IS the layer now, so the gesture moves in with its
+     family: q+digits grid, q+m monitor, q+s snap. */
+  if(c==='KeyS'&&HOLD.q&&!e.repeat&&S.layer>=1){
+    e.preventDefault(); HOLD.qUsed=true;
+    const ch=S.layer>=2?S.editSnd:S.curPreset;
+    const tg=(S.layer<2&&CHSEL.size)?[...CHSEL].sort((a,b)=>a-b):[ch];
+    let moved=0, total=0;
+    pushUndo('quantize');
+    for(const i of tg){
+      const lane=S.patterns[S.editPat].lanes[i]; if(!lane)continue;
+      const st=lane.qlive??1, g=gridOf(lane);
+      lane.events.forEach(ev=>{const was=ev.t;
+        ev.t=fmod(ev.t+(qz(ev.t,g)-ev.t)*st,lane.len);
+        total++; if(Math.abs(ev.t-was)>1e-6)moved++;});
+    }
+    const g0=gridOf();
+    flash(!total?'ch '+tg.join(' ')+' has no notes to snap'
+      :moved?'snapped '+moved+' of '+total+' notes to '+gridName(g0)+' · ch '+tg.join(' ')
+            :'already on the '+gridName(g0)+' grid · ch '+tg.join(' '));
+    dirty=true; dirtySave=true; return;
+  }
+  if(c==='KeyQ'&&gblOf(e)&&!e.repeat&&S.layer>=1&&!HOLD.q){
     e.preventDefault(); HOLD.q=true; HOLD.qUsed=false; return;}
   if(c==='KeyQ'&&gblOf(e)&&!e.repeat){           // ⌃q = live-quantize toggle, everywhere
-    /* ⇧Q SNAPS WHAT IS ALREADY RECORDED, and it took three things to reach:
-       the RIGHT shift, layer 1, and a lane with notes — and missing any of
-       them it did nothing and said nothing, which is indistinguishable from
-       a key that does not exist. Either shift now, on any layer that has a
-       channel, and it always reports what it did. */
-    if(e.shiftKey&&S.layer>=1){                 // shift+Q = snap this channel's notes NOW
-      /* AND THE KEY-UP MUST NOT ALSO TOGGLE. The snap ran, then releasing q
-         counted as a tap and flipped live quantize — whose message landed on
-         top of the snap's a moment later. It looked like ⇧Q only toggled Q. */
-      HOLD.q=false; HOLD.qUsed=true;
-      const ch=S.layer>=2?S.editSnd:S.curPreset;
-      const tg=(S.layer<2&&CHSEL.size)?[...CHSEL].sort((a,b)=>a-b):[ch];
-      let moved=0, total=0;
-      pushUndo('quantize');
-      for(const i of tg){
-        const lane=S.patterns[S.editPat].lanes[i]; if(!lane)continue;
-        const st=lane.qlive??1, g=gridOf(lane);
-        lane.events.forEach(ev=>{const was=ev.t;
-          ev.t=fmod(ev.t+(qz(ev.t,g)-ev.t)*st,lane.len);
-          total++; if(Math.abs(ev.t-was)>1e-6)moved++;});
-      }
-      const g0=gridOf(S.patterns[S.editPat].lanes[tg[0]]||{});
-      flash(!total?'ch '+tg.join(' ')+' has no notes to snap'
-        :moved?'snapped '+moved+' of '+total+' notes to '+gridName(g0)+' · ch '+tg.join(' ')
-              :'already on the '+gridName(g0)+' grid · ch '+tg.join(' '));
-      dirty=true; dirtySave=true; return;
-    }
     CFG.qOn=CFG.qOn?0:1; saveCfg();
     flash('live quantize '+(CFG.qOn?'ON':'OFF')+' — what you hear is what records');
     dirty=true; return;}
@@ -11697,9 +11692,11 @@ const onKeyDown=e=>{
       }
       HOLD.nUsed=true; dirty=true; dirtySave=true; return;
     }
-    if(HOLD.m){                                    // tempo: shift ×10, option ×0.1
+    if(HOLD.m){                                    // tempo: ⌥ ×10 · ⌘ ×0.1
       if(c==='ArrowUp'||c==='ArrowDown'){
-        const step=altOf(e)?0.1:rs(e)?10:1, d2=c==='ArrowUp'?1:-1;
+        /* rshift IS the layer's modifier now, so it cannot also be the coarse
+           step — every arrow would be ×10. ⌥ takes coarse, ⌘ fine. */
+        const step=e.metaKey?0.1:altOf(e)?10:1, d2=c==='ArrowUp'?1:-1;
         setBpm(Math.round((T.bpm+step*d2)*10)/10);
         flash('bpm '+T.bpm); HOLD.mUsed=true; dirty=true; dirtySave=true;
       }
@@ -12188,7 +12185,7 @@ document.addEventListener('keyup',e=>{
   const c=e.code;
   syncCaps(e);   // macOS reports caps going OFF on the keyup
   kbHeld.delete(c);
-  if((e.altKey||e.ctrlKey)&&scopeHeldOn(c)){ALTSUS.add(c); return;}
+  if((e.altKey||e.ctrlKey||(KM.sr&&e.shiftKey))&&scopeHeldOn(c)){ALTSUS.add(c); return;}
   if(c==='AltLeft'||c==='AltRight'||c==='ControlLeft'||c==='ControlRight'){
     for(const k of [...ALTSUS]){ALTSUS.delete(k);
       document.dispatchEvent(new KeyboardEvent('keyup',
@@ -12296,7 +12293,10 @@ document.addEventListener('keyup',e=>{
   }
   if((c==='ShiftLeft'||c==='ShiftRight')&&PICK){PICK.peek=false; dirty=true;}
   if(PICK&&/^Digit\d$/.test(c)){PICK.dig=0;}   // the digit is no longer held
-  if(c==='ShiftRight'){KM.sr=false; return;}
+  if(c==='ShiftRight'){KM.sr=false;
+    for(const k of [...ALTSUS]){ALTSUS.delete(k);
+      document.dispatchEvent(new KeyboardEvent('keyup',{code:k,bubbles:true}));}
+    return;}
   if(c==='ShiftLeft'){
     KM.sl=false;
     /* tapped alone = clear every mute and solo. Held with something else it is
@@ -14290,7 +14290,7 @@ function renderSlots(L){
     flt:'peq/lsh/hsh use gain — stack EQ bands alongside filters',
     mod:'src = env/lfo/vel/key/rnd/press · dest = amp/pitch/filt/pan/op · cmd+C then cmd+V learns any param',
     fx:'serial chain top to bottom · dist holds every drive/crush curve (drv + crush retired into it)',
-    ply:'chord (±strum: + low→high, − high→low) · arp needs transport · grv = this part’s groove · rpit = per-note random pitch'};
+    ply:'chord (±strum: + low→high, − high→low) · arp runs with the transport stopped too · grv = this part’s groove · rpit = per-note random pitch'};
   L.push('   '+sp('d','←→ flows params → next slot · shift+←→ jumps slot · digits pick slot · ↑↓ value'));
   L.push('   '+sp('d',hints[M.id]||''));
 }
@@ -14627,8 +14627,8 @@ function renderHelp(L){
     ['⌥e','go to the ENVELOPES. a / d / s / r jump to attack, decay, sustain, release by their own letters; digits jump between envelopes; ⌫ removes one'],
     ['slot memory','every slot remembers the param you last touched, and every JUMP back (digits, ⌥←→, the letter scopes) lands there'],
     ['rtc (PLAY rack)','the RATCHET: one note becomes a burst of itself — ×2..×8 equal sub-hits, fading if you ask. Sequenced notes divide their own footprint; a LIVE held note repeats at that division of the beat, phase from where you pressed it'],
-    ['⌃o','OVERDUB vs OVERWRITE. Overwrite only means anything while RECORDING — just playing over a lane no longer punches holes in it'],
-    ['⌃s','THE SCALE, held: ←→ walks the scales, ↑↓ moves the key a semitone. Tapped: scale on/off'],
+    ['⇧o (right)','OVERDUB vs OVERWRITE. Overwrite only means anything while RECORDING — just playing over a lane no longer punches holes in it'],
+    ['⇧s (right)','THE SCALE, held: ←→ walks the scales, ↑↓ moves the key a semitone. Tapped: scale on/off'],
     ['(master) z x c v b n m','the GLOBAL NOTE FX, the midi mirror of the dj pads above them: scatter · r-pitch · chop · oct dice · ratchet · dropout · ghost. Hold = momentary, ⇧ = latch, ←→ while held picks the TARGET — everything, the drums, or the melodic channels. They bend what the sequencer emits; nothing is written to the lanes'],
     ['⇧, / ⇧.','keyboard velocity down / up — how hard, next to how high'],
     ['⌥= / ⌥-','SOLO / INSIST and MUTE / SILENCE the channel you are on — next to the volume keys they qualify. While held, the digits do it to any other channel; latch keeps the digits doing it'],
@@ -14639,7 +14639,7 @@ function renderHelp(L){
     ['⌘⌥⇧K','fold the selected channels into ONE KIT channel: each becomes a pad on its own key, and its part moves with it. Every modifier on the board, because it rewrites several channels at once'],
     ['left shift','LATCH. A control sticks if latch was down at any point while you held it. Tapped alone it releases everything'],
     ['latch + a note','the note keeps sounding after the key comes up. Press it again, or tap latch alone, to let it go'],
-    ['⌃q','live quantize on/off — what you hear is exactly what records'],
+    ['⇧q (right)','live quantize on/off — what you hear is exactly what records'],
     ['⇧Q','snap the selected lane to the grid now, for a take recorded with q off'],
     [', .','channel volume −/+ on the desk · bpm elsewhere (⇧ = ±10)'],
     ['b','tap tempo'],
@@ -14661,14 +14661,15 @@ function renderHelp(L){
     ['[ ]','walk between the automated knobs on this channel — and it takes you to the parameter, so your arrows are already on the thing you are looking at'],
     ['⌥⌫ (with \\ up)','clear THIS knob’s automation. Without the overlay ⌥⌫ still clears the whole rack’s, and ⌥⇧⌫ the whole channel’s'],
     ['','a point that can no longer find its parameter — the slot was emptied, the effect changed type — is KEPT and skipped, never applied to the wrong knob. Put the slot back and the automation comes back with it'],
-    ['hold ⌃q','QUANTIZE: 1-8 set THE grid — one grid for the whole instrument — 1 beats · 2 8ths · 3 8th triplets · 4 16ths · 5 dotted 8ths · 6 16th triplets · 7 sevenths · 8 32nds'],
-    ['hold ⌃q + 0','quantize OFF — notes land exactly where you played them. Picking a grid turns it back on, because asking for a grid is asking to be on it'],
+    ['hold ⇧q (right)','QUANTIZE: 1-8 set THE grid — one grid for the whole instrument — 1 beats · 2 8ths · 3 8th triplets · 4 16ths · 5 dotted 8ths · 6 16th triplets · 7 sevenths · 8 32nds'],
+    ['hold ⇧q + 0','quantize OFF — notes land exactly where you played them. Picking a grid turns it back on, because asking for a grid is asking to be on it'],
     ['⌘E','EXPORT: set · mixdown · channels. The set is a .json you can reload anywhere — develop here, export, drop it into the live one. Mixdown and channels are rendered by PLAYING the pattern once in real time, because the engine lives in one audio context and what comes out is exactly what you heard; channels gives you the master plus one wav per channel, all captured in the same pass so they line up'],
     ['⌘I','IMPORT a set file. Dragging a .json onto the window does the same thing'],
     ['⌘⇧E','KEEP THE SET IN A FILE. Pick one once and every change is written into it as you work — the ordinary autosave only ever reaches localStorage, which belongs to the browser profile and goes when the profile does. The header shows ◆ file while it is writing. ⌘E still exports a one-off copy, and dragging a .json back in loads it'],
-    ['hold ⌃q + m','MONITOR: grid or live. On grid you hear yourself snapped to the beat — the feel of the thing, but a roll faster than the grid puts two hits on one step and a mono channel can only sound one, so notes thin out. On live you hear every hit as you played it and the grid still owns what records. Play rolls on live, or give the channel a finer grid'],
+    ['hold ⇧q + s','SNAP what is already recorded to the grid — the old ⇧Q, moved in with its family'],
+    ['hold ⇧q + m','MONITOR: grid or live. On grid you hear yourself snapped to the beat — the feel of the thing, but a roll faster than the grid puts two hits on one step and a mono channel can only sound one, so notes thin out. On live you hear every hit as you played it and the grid still owns what records. Play rolls on live, or give the channel a finer grid'],
     ['tap q','toggle quantize. Only the TAP toggles: choosing a grid leaves the switch alone'],
-    ['hold ⌃m','TEMPO: ↑↓ bpm · tap ⌃m = click on/off · ⌃b taps = tap tempo. ⌃ is the INSTRUMENT layer — settings you set and then live inside; ⌥ stays the channel\u2019s'],
+    ['hold ⇧m (right shift)','TEMPO: ↑↓ bpm · tap = click on/off · ⇧b taps = tap tempo. RIGHT SHIFT (or ⌃) is the INSTRUMENT layer — settings you set and then live inside; ⌥ stays the channel\u2019s'],
     ['hold c','CHANNEL: ↑↓ volume (⇧ fine) · ←→ pan · c+⌫ resets both'],
     ['hold v','VELOCITY: ↑↓ this channel’s offset · ⇧↑↓ the keyboard’s own velocity'],
     ['hold n','NOTES: ↑↓ octave · ←→ semitone — one number, ±36 semitones · n+⌫ clears the lane'],
@@ -14774,6 +14775,19 @@ let lastR=0, lastF=0, cpuLoad=0;
    the DSP onto the audio thread buys. */
 setInterval(()=>{try{engine.modTick();}catch(_){}
                  try{engine.autoTick();}catch(_){}},8);
+/* THE POOL PLAYS WITHOUT THE TRANSPORT. The arp, the euc gate and the ratchet
+   are performance effects — holding a chord with everything stopped should
+   still arpeggiate, the way it does on any hardware box. While stopped they
+   tick on the free grid G, from this driver; the moment the transport runs,
+   scheduleRange owns the tick and this stands down. */
+let _agB=null;
+setInterval(()=>{
+  if(T.playing){_agB=null;return;}
+  if(!engine.arpPool.some(p2=>p2.length))return;
+  const b=gridNow();
+  if(_agB==null)_agB=b;
+  if(b>_agB){try{engine.arpTick(_agB,b+0.06);}catch(_){}_agB=b+0.06;}
+},25);
 (function raf(t){
   requestAnimationFrame(raf);
   if(lastF){                       // main-thread load: how far frames stretch past 60fps
