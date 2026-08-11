@@ -29,7 +29,7 @@ inside an existing held scope.
 | `KeyC` | — | 10839 | MOD learn: arm on a mod slot, map on a target param |
 | `KeyC` | — | 10841 | MOD learn: arm on a mod slot, map on a target param |
 | `KeyC` | hold digit | 11693 | latch is the left shift, like every other momentary |
-| `KeyC` | hold c | 11873 | vel  |
+| `KeyC` | hold c | 11881 | vel  |
 | `KeyD` | layer 1+ | 10710 | loop already at the maximum |
 | `KeyE` | — | 10832 | cmd+↑↓ = per-note prep tweak |
 | `KeyI` | — | 10835 | cmd+↑↓ = per-note prep tweak |
@@ -37,19 +37,19 @@ inside an existing held scope.
 | `KeyL` | — | 10685 | nothing on ch  |
 | `KeyM` | — | 11081 | tap tempo |
 | `KeyM` | hold q + layer 1+ | 11262 |  |
-| `KeyM` | — | 11939 | right-shift+m tapped = tap tempo |
+| `KeyM` | hold m | 11947 | right-shift+m tapped = tap tempo |
 | `KeyN` | — | 10679 | start a new set? enter confirms · esc cancels |
 | `KeyN` | hold digit | 11695 | latch is the left shift, like every other momentary |
-| `KeyN` | hold n | 11877 | vel  |
-| `KeyQ` | ⇧ + layer 1+ | 11097 | q = live-quantize toggle, everywhere |
-| `KeyQ` | — | 11099 | q = live-quantize toggle, everywhere |
-| `KeyQ` | — | 11932 | live quantize  |
+| `KeyN` | hold n | 11885 | vel  |
+| `KeyQ` | ⇧ + layer 1+ | 11097 | ⌃q = live-quantize toggle, everywhere |
+| `KeyQ` | — | 11099 | ⌃q = live-quantize toggle, everywhere |
+| `KeyQ` | hold q | 11940 | live quantize  |
 | `KeyR` | ⌘ + dest browser + set picker + layer 2+ | 10956 | nothing to modulate here |
 | `KeyS` | — | 10672 | straight back to where it lives |
 | `KeyT` | layer 0 | 11093 | t = timeline on/off (focus mode) |
 | `KeyV` | — | 10839 | MOD learn: arm on a mod slot, map on a target param |
 | `KeyV` | hold digit | 11697 | latch is the left shift, like every other momentary |
-| `KeyV` | hold v | 11878 | vel  |
+| `KeyV` | hold v | 11886 | vel  |
 | `KeyX` | — | 10839 | MOD learn: arm on a mod slot, map on a target param |
 | `KeyX` | — | 10841 | MOD learn: arm on a mod slot, map on a target param |
 | `KeyX` | — | 11689 |  |
@@ -109,7 +109,7 @@ inside an existing held scope.
 | `ArrowUp` | — | 11575 | master — ←→ picks a channel, 0 stays here |
 | `ArrowUp` | — | 11576 | master — ←→ picks a channel, 0 stays here |
 | `Backquote` | ⌘ | 11051 | DJ pads: full home row |
-| `Backquote` | hold ` | 11882 | what the dice are for |
+| `Backquote` | hold ` | 11890 | what the dice are for |
 | `Backslash` | ⌘ + dest browser + set picker | 11002 | automation hidden |
 | `Backspace` | — | 2105 | ⟲ loop length cleared |
 | `Backspace` | — | 2113 | nothing recorded to restore  (⇧⌫ clears the loop length) |
@@ -121,7 +121,7 @@ inside an existing held scope.
 | `Backspace` | hold tab + ⇧ | 11147 | press space — erase happens as the playhead passes |
 | `Backspace` | hold tab | 11154 |  |
 | `Backspace` | — | 11157 | no automation on  |
-| `Backspace` | — | 11990 |  |
+| `Backspace` | — | 11998 |  |
 | `BracketLeft` | ⌘ + dest browser + set picker | 11011 | \\ shows the automation first |
 | `BracketRight` | ⌘ + dest browser + set picker | 11011 | \\ shows the automation first |
 | `BracketRight` | — | 11017 |  |
@@ -153,10 +153,10 @@ inside an existing held scope.
 | `Slash` | set picker | 6168 | slot  |
 | `Slash` | — | 10878 | the dice key: a whole song (⇧⌥ = wild) |
 | `Slash` | — | 11053 | DJ pads: full home row |
-| `Slash` | — | 11883 | what the dice are for |
+| `Slash` | — | 11891 | what the dice are for |
 | `Space` | — | 6198 | copy out of what you are looking at |
 | `Space` | — | 10881 | rec unlatched |
 | `Space` | — | 10885 | rec unlatched |
 | `Tab` | — | 10886 | rec unlatched |
-| `Tab` | — | 11999 | latch overlapped the hold: rec stays on |
-| `Tab` | — | 12030 | the hold ended and nothing latched it: rec off |
+| `Tab` | — | 12007 | latch overlapped the hold: rec stays on |
+| `Tab` | — | 12038 | the hold ended and nothing latched it: rec off |

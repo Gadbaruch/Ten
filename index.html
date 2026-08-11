@@ -11081,7 +11081,7 @@ const onKeyDown=e=>{
   if(c==='KeyM'&&ctlOf(e)){
     if(!e.repeat){HOLD.m=true; HOLD.mUsed=false;}
     return;}
-  if(c==='KeyB'&&!e.repeat){                        // tap tempo
+  if(c==='KeyB'&&ctlOf(e)&&!e.repeat){              // tap tempo
     const n2=performance.now();
     taps=taps.filter(t2=>n2-t2<3000); taps.push(n2);
     if(taps.length>=2){
@@ -11094,9 +11094,9 @@ const onKeyDown=e=>{
     S.arrOn=S.arrOn===false?true:false;
     flash(S.arrOn?'timeline ON — arrangement drives the song':'timeline OFF — looping the current pattern');
     dirty=true; dirtySave=true; return;}
-  if(c==='KeyQ'&&!e.repeat&&!e.shiftKey&&S.layer>=1){
+  if(c==='KeyQ'&&ctlOf(e)&&!e.repeat&&!e.shiftKey&&S.layer>=1){
     e.preventDefault(); HOLD.q=true; HOLD.qUsed=false; return;}
-  if(c==='KeyQ'&&!e.repeat){                     // q = live-quantize toggle, everywhere
+  if(c==='KeyQ'&&ctlOf(e)&&!e.repeat){           // ⌃q = live-quantize toggle, everywhere
     /* ⇧Q SNAPS WHAT IS ALREADY RECORDED, and it took three things to reach:
        the RIGHT shift, layer 1, and a lane with notes — and missing any of
        them it did nothing and said nothing, which is indistinguishable from
@@ -11259,7 +11259,7 @@ const onKeyDown=e=>{
      No downstream fix exists: four grid points can hold four events. So the
      monitor is a switch. Grid = locked to the beat, rolls thin out. Live = you
      hear your fingers, the grid still owns what records. */
-  if(c==='KeyM'&&HOLD.q&&S.layer>=1){
+  if(c==='KeyM'&&ctlOf(e)&&HOLD.q&&S.layer>=1){
     e.preventDefault(); HOLD.qUsed=true;
     if(e.repeat)return;
     CFG.qMon=CFG.qMon===0?1:0; saveCfg();
@@ -11685,8 +11685,8 @@ const onKeyDown=e=>{
       dirty=true; dirtySave=true; return;}
     S.oct=clamp(S.oct+d,-3,3); dirty=true; return;}
 
-  if(c==='KeyZ'&&!e.repeat){S.oct=clamp(S.oct-1,-3,3);dirty=true;return;}
-  if(c==='KeyX'&&!e.repeat){S.oct=clamp(S.oct+1,-3,3);dirty=true;return;}
+  if(c==='KeyZ'&&ctlOf(e)&&!e.repeat){S.oct=clamp(S.oct-1,-3,3);dirty=true;return;}
+  if(c==='KeyX'&&ctlOf(e)&&!e.repeat){S.oct=clamp(S.oct+1,-3,3);dirty=true;return;}
   /* c / v = velocity down / up for the laptop keyboard, the way z / x move the
      octave. A real velocity source (midi, and later the hall-effect board)
      overrides this per note; this is what you play with until then. */
@@ -11706,7 +11706,10 @@ const onKeyDown=e=>{
     djPress(k,KM.sl);      // latch is the left shift, like every other momentary
     return;
   }
-  if(isNoteKey(c)&&!e.repeat&&S.layer>0){
+  /* a MODIFIED letter is never a note — the modifier is what says "this is a
+     control, not a pitch", and it has to hold in both directions or ⌃c would
+     both open the volume hold and sound a note */
+  if(isNoteKey(c)&&!e.repeat&&S.layer>0&&!e.ctrlKey&&!e.metaKey&&!altOf(e)){
     e.preventDefault();
     /* midi solo: the board's own keystrokes are noise — only the events EXP
        synthesises for a midi note get through, so a note can't fire twice */
@@ -11870,12 +11873,17 @@ document.addEventListener('keyup',e=>{
   /* c and v are velocity when TAPPED and scopes when HELD — the tell every
      other hold in here already uses. Taking the taps away to make room for the
      scopes lost the one control you reach for mid-phrase. */
-  if(c==='KeyC'){const used=HOLD.cUsed; HOLD.c=false; HOLD.cUsed=false;
+  /* ARMED OR NOT ARMED decides, not the letter. Every one of these used to
+     match on the bare keycode, swallow the keyup, and return before endNote —
+     which is why bottom-row notes hung: c, v, n, m and q are NOTES now, and
+     their releases were being eaten by control handlers for holds that were
+     never opened. */
+  if(c==='KeyC'&&HOLD.c){const used=HOLD.cUsed; HOLD.c=false; HOLD.cUsed=false;
     if(!used&&S.layer>0){EXP.bump(-(rs(e)?0.2:0.05));
       flash('vel '+Math.round(clamp(CFG.kvel??0.9,0.02,1)*127));}
     return;}
-  if(c==='KeyN'){HOLD.n=false; HOLD.nUsed=false; return;}
-  if(c==='KeyV'){const used=HOLD.vUsed; HOLD.v=false; HOLD.vUsed=false;
+  if(c==='KeyN'&&HOLD.n){HOLD.n=false; HOLD.nUsed=false; return;}
+  if(c==='KeyV'&&HOLD.v){const used=HOLD.vUsed; HOLD.v=false; HOLD.vUsed=false;
     if(!used&&S.layer>0){EXP.bump(rs(e)?0.2:0.05);
       flash('vel '+Math.round(clamp(CFG.kvel??0.9,0.02,1)*127));}
     return;}
@@ -11929,14 +11937,14 @@ document.addEventListener('keyup',e=>{
     }else{HOLD.opt=null; HOLD.optUsed=false;}
     dirty=true; return;
   }
-  if(c==='KeyQ'){
+  if(c==='KeyQ'&&HOLD.q){
     const used=HOLD.qUsed; HOLD.q=false; HOLD.qUsed=false;
     if(!used){CFG.qOn=CFG.qOn?0:1; saveCfg();
       flash('live quantize '+(CFG.qOn?'ON':'OFF')+' — what you hear is what records');
       dirty=true;}
     return;
   }
-  if(c==='KeyM'){
+  if(c==='KeyM'&&HOLD.m){
     const used=HOLD.mUsed; HOLD.m=false; HOLD.mUsed=false;
     if(!used){
       if(rs(e)){                                   // right-shift+m tapped = tap tempo
