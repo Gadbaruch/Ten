@@ -366,8 +366,13 @@ const mkMaster=()=>Array.from({length:10},(_,i)=>
   i===9?{typ:15,rt:0,p1:0.95,p2:0.3,p3:0.5,mix:0}:    // slot 0: transparent safety limiter (~-1.5dB)
   {typ:0,rt:0,p1:0.3,p2:0.3,p3:0.5,mix:0.3});
 const CHORDS=[['oct',[0,12]],['5th',[0,7]],['maj',[0,4,7]],['min',[0,3,7]],['ma7',[0,4,7,11]],['mi7',[0,3,7,10]],['su4',[0,5,7]],['9th',[0,4,7,14]]];
-const ARPDIV=['1/4','1/4.','1/4T','1/8','1/8.','1/8T','1/16','1/16.','1/16T','1/32'],
-      ARPDIVB=[1,1.5,2/3,0.5,0.75,1/3,0.25,0.375,1/6,0.125];
+/* SORTED BY HOW LONG THEY ACTUALLY ARE, fastest first. The old order was
+   grouped by note name, so 1/4. sat next to 1/4 while being half again as
+   long and 1/8T was slower than the 1/16. that followed it — turning the dial
+   sped up and slowed down at random. Now it only ever gets slower. */
+const ARPDIV=['1/32','1/16T','1/16','1/8T','1/16.','1/8','1/4T','1/8.','1/4','1/4.'],
+      ARPDIVB=[0.125,1/6,0.25,1/3,0.375,0.5,2/3,0.75,1,1.5];
+const ARPDIV_V19=[8,9,6,5,7,3,2,4,1,0];   // old index -> new, for saves written before this
 const ARPMODE=['up','down','updn','rand','chord'];   // chord = every note of the pool, together
 const MODE=['poly','mono','legato'];   // legato = mono, but pitch moves without retriggering
 const SWM=['sync','rstrt','wait'];
@@ -396,14 +401,16 @@ const mkLfo =()=>({dst:0,idx:0,wav:0,rate:5,amt:30});
    made should affect the whole thing, and you narrow it if you want to. */
 const mkRoute=()=>({dst:0,idx:0,amt:100,ctr:0,tgt:null});
 const mkMod =i=>({src:0,rsel:0,routes:[mkRoute()],a:0.005,d:0.15,s:0.7,r:0.2,crv:0,
-                  wav:0,rate:5,ph:0,syn:0,rdiv:3,ltr:0,
+                  wav:0,rate:5,ph:0,syn:0,rdiv:4,ltr:0,
                   fch:1,fa:0.01,fr:0.15,fg:4});
 /* tempo divisions for a synced LFO, in beats */
-const LFODIV=[['4 bar',16],['2 bar',8],['1 bar',4],['1/2',2],['1/4',1],['1/4T',2/3],
-              ['1/8',0.5],['1/8T',1/3],['1/16',0.25],['1/16T',1/6],['1/32',0.125]];
+const LFODIV=[['4 bar',16],['2 bar',8],['1 bar',4],['1/2.',3],['1/2',2],['1/4.',1.5],
+              ['1/4',1],['1/8.',0.75],['1/4T',2/3],['1/8',0.5],['1/16.',0.375],
+              ['1/8T',1/3],['1/16',0.25],['1/16T',1/6],['1/32',0.125]];
+const LFODIV_V19=[0,1,2,4,6,8,9,11,12,13,14];   // old index -> new
 const lfoHz=m=>{
   if(Math.round(m.syn||0)!==1)return clamp(m.rate||5,0.01,60);
-  const d=LFODIV[clamp(Math.round(m.rdiv??3),0,LFODIV.length-1)][1];
+  const d=LFODIV[clamp(Math.round(m.rdiv??4),0,LFODIV.length-1)][1];
   return clamp(1/(d*spb()),0.01,60);      // one cycle per that many beats
 };
 const modRt=m=>{m.routes=m.routes||[mkRoute()];return m.routes[clamp(Math.round(m.rsel||0),0,m.routes.length-1)];};
@@ -454,6 +461,19 @@ function routeAddr(dst,idx){
   return null;
 }
 const PANADDR={rack:'voice',slot:0,key:'pan',lbl:'pan'};
+/* THE DIVISION LISTS WERE REORDERED, so the numbers in every save written
+   before v20 point at the wrong entry. An arp saved on 1/16 held index 6, and
+   index 6 is 1/4T now — the part would come back a third slower and nothing
+   would say why. Remapped once, by where each old name landed. */
+function div20(p){
+  if(!p||p._d20)return p;
+  for(const m of (p.mod||[]))if(m&&m.rdiv!=null)
+    m.rdiv=LFODIV_V19[clamp(Math.round(m.rdiv),0,LFODIV_V19.length-1)];
+  for(const sl of (p.ply||[]))if(sl&&Math.round(sl.typ||0)===2&&sl.p1!=null)
+    sl.p1=ARPDIV_V19[clamp(Math.round(sl.p1),0,ARPDIV_V19.length-1)];
+  p._d20=true;
+  return p;
+}
 function addrMod(p){
   if(!p)return p;
   /* PAN MOVED OUT OF `mix` AND INTO `voice`, and this runs BEFORE the _addr
@@ -5855,7 +5875,7 @@ function applyParam(pi,mi,si,px,v){
   if(M.id==='ply'&&spec.key==='typ'){        // sane defaults when a play slot changes type
     const sl2=S.presets[pi].ply[si];
     if(v===1){sl2.p1=2;sl2.p2=0.01;sl2.p3=0;}
-    else if(v===2){sl2.p1=6;sl2.p2=0;sl2.p3=1;}      // arp default: 1/16
+    else if(v===2){sl2.p1=2;sl2.p2=0;sl2.p3=1;}      // arp default: 1/16
     else if(v===3){sl2.p1=0;sl2.p2=100;}
     else if(v===4){sl2.p1=0;}
     else if(v===6||v===7){sl2.p1=50;}
@@ -6189,7 +6209,7 @@ function libNos(){
   }
   return libNoCache=m;
 }
-const LIBV=19;   // bump BOTH: libStore writes it, libAll checks it
+const LIBV=20;   // bump BOTH: libStore writes it, libAll checks it
 function libStore(a){libMigrated=true; libCache=null; libNoCache=null;
   try{localStorage.setItem(LIBKEY,JSON.stringify({v:LIBV,items:a}));}catch(_){} if(typeof prepCache!=='undefined')prepCache.clear();}
 function presetData(p){const {modLoop,...rest}=p;return JSON.parse(JSON.stringify(rest));}
@@ -11883,7 +11903,7 @@ window.addEventListener('blur',()=>{
 
 /* ---------------- persistence + migration ---------------------------- */
 const LS='ten-v1';
-const SAVEV=19;                       // bump BOTH: serialize writes it, load checks it
+const SAVEV=20;                       // bump BOTH: serialize writes it, load checks it
 function serialize(){return JSON.stringify({v:SAVEV,bpm:T.bpm,metro:S.metro,hum:S.hum,grv:S.grv,oct:S.oct,master:S.master,dj:S.dj,arrOn:S.arrOn!==false,
   clips:S.clips,scenes:S.scenes,clipAt:S.clipAt,sceneAt:S.sceneAt,
   arr:S.arr,
@@ -11991,6 +12011,7 @@ function load(json){
            voice. A v13+ save never goes through foldMod at all, so this is the
            only place those routes get addressed. */
         addrMod(p); (p.kit||[]).forEach(k=>k&&addrMod(k));
+        if(o.v<20)div20(p), (p.kit||[]).forEach(k=>k&&div20(k));
         p.modLoop=Looper.from(sp.modLoop||{unit:'b',count:8}); p.modLoop.auto=false;
         if(o.v<13)p.modLoop.events=[]; // module indices changed — drop stale automation
         if(o.v===4){  // module order changed in v5: ply 6->9, vox 8->7, mix 9->8
