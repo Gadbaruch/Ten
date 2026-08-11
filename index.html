@@ -97,6 +97,9 @@
   .cur.inv{background:var(--fg);color:var(--bg);}
   /* a note with no room for a letter: a block at the column its pitch maps to */
   .pk{position:absolute;background:currentColor;border-radius:1px;}
+  /* the attack line: cut out of the note in the page colour, so it reads as a
+     gap in the bar rather than something drawn on top of it */
+  .nst{position:absolute;height:1px;background:var(--bg);opacity:.85;}
   /* the automation layer sits exactly where the notes do, over the top of them */
   .alay{position:absolute;top:0;left:calc(-1 * var(--bleed));
         overflow:visible;pointer-events:none;}
@@ -109,9 +112,13 @@
   /* the census row: same height and fill as a strip cell, so it reads as part
      of the strip rather than as something bolted under it */
   .arow{height:var(--striph,20px);background:var(--k);position:relative;}
-  .adot{position:absolute;top:calc(50% - 1.5px);width:3px;height:3px;
+  .adot{position:absolute;top:calc(50% - 2.5px);width:5px;height:5px;
         border-radius:50%;background:var(--fg);}
-  .adot.af{top:calc(50% - 2.5px);width:5px;height:5px;}
+  /* the one the overlay is reading gets a ring, so \ and [ ] have somewhere
+     visible to point */
+  .adot.af{box-shadow:0 0 0 1.5px var(--bg),0 0 0 3px var(--fg);}
+  /* an address whose slot is gone: still counted, never applied */
+  .adot.dead{background:none;box-shadow:inset 0 0 0 1px var(--fg);}
   .ahead{position:absolute;top:2px;bottom:2px;width:1px;background:var(--fg);opacity:.5;}
   /* the song column: a dj window is a band across the mix, a clip recall is a
      mark at the channel it moved */
@@ -959,7 +966,7 @@ const OSC_P=sl=>[
 const AMP_P=()=>[
   SP('type','typ','enum',{opts:DTYPES}),
   SP('drive','drv','lin',{min:0,max:1,step:0.05}),
-  SP('mix','mix','lin',{min:0,max:1,step:0.05}),
+  SPMIX(),
   SP('route','par','enum',{opts:DROUTE})];
 /* peaking and the two shelves are the only types with a gain; on a lowpass it
    is a control that does nothing, sitting in the row you walk through most. */
@@ -1092,22 +1099,22 @@ const FX_P=sl=>{
             of a range — flat is the middle and you go either way from it. */
          SP('color','p5','lin',{min:-1,max:1,step:0.1,
             fmt:v=>Math.abs(v)<0.05?'flat':(v<0?'dark ':'bright ')+Math.round(Math.abs(v)*100)}),
-         SP('mix','mix','lin',{min:0,max:1,step:0.05})],
+         SPMIX()],
     cho:[SP('rate','p1','lin',{min:0,max:1,step:0.05,fmt:v=>(0.1+v*4).toFixed(1)+'Hz'}),
          SP('depth','p2','lin',{min:0,max:1,step:0.05}),
-         SP('width','p3','lin',{min:0,max:1,step:0.05}),SP('mix','mix','lin',{min:0,max:1,step:0.05})],
+         SP('width','p3','lin',{min:0,max:1,step:0.05}),SPMIX()],
     fla:[SP('rate','p1','lin',{min:0,max:1,step:0.05,fmt:v=>(0.05+v*2).toFixed(2)+'Hz'}),
          SP('fdbk','p2','lin',{min:0,max:0.9,step:0.05}),
-         SP('width','p3','lin',{min:0,max:1,step:0.05}),SP('mix','mix','lin',{min:0,max:1,step:0.05})],
+         SP('width','p3','lin',{min:0,max:1,step:0.05}),SPMIX()],
     pha:[SP('rate','p1','lin',{min:0,max:1,step:0.05,fmt:v=>(0.05+v*3).toFixed(2)+'Hz'}),
          SP('depth','p2','lin',{min:0,max:1,step:0.05}),
-         SP('width','p3','lin',{min:0,max:1,step:0.05}),SP('mix','mix','lin',{min:0,max:1,step:0.05})],
+         SP('width','p3','lin',{min:0,max:1,step:0.05}),SPMIX()],
     trm:[SP('rate','p1','lin',{min:0,max:1,step:0.05,fmt:v=>(0.5+v*15).toFixed(1)+'Hz'}),
-         SP('depth','p2','lin',{min:0,max:1,step:0.05}),SP('mix','mix','lin',{min:0,max:1,step:0.05})],
+         SP('depth','p2','lin',{min:0,max:1,step:0.05}),SPMIX()],
     drv:[SP('drive','p1','lin',{min:0,max:1,step:0.05}),
-         SP('tone','p2','lin',{min:0,max:1,step:0.05}),SP('mix','mix','lin',{min:0,max:1,step:0.05})],
+         SP('tone','p2','lin',{min:0,max:1,step:0.05}),SPMIX()],
     crush:[SP('crush','p1','lin',{min:0,max:1,step:0.05}),
-         SP('-','p2','lin',{min:0,max:1,step:0.05}),SP('mix','mix','lin',{min:0,max:1,step:0.05})],
+         SP('-','p2','lin',{min:0,max:1,step:0.05}),SPMIX()],
     /* ONE REVERB, FOUR WAYS TO BUILD IT — the same shape `dist` uses for its
        curves. They are not variations on a sound, they are different machines,
        and they cost wildly different amounts:
@@ -1127,7 +1134,7 @@ const FX_P=sl=>{
          SP('width','p3','lin',{min:0,max:1,step:0.05}),
          SP('pre','p5','lin',{min:0,max:1,step:0.05,
             fmt:v=>v<0.005?'off':Math.round(v*200)+'ms'}),
-         SP('mix','mix','lin',{min:0,max:1,step:0.05})],
+         SPMIX()],
     limit:[SP('ceil','p1','lin',{min:0,max:1,step:0.05,fmt:v=>Math.round(-30+v*30)+'dB'}),
          SP('rel','p2','lin',{min:0,max:1,step:0.05}),
          SP('gain','mix','lin',{min:0,max:1,step:0.05})],
@@ -1144,13 +1151,13 @@ const FX_P=sl=>{
             fmt:v=>Math.round((0.02+v*v*0.9)*1000)+'ms'}),
          SP('makeup','mix','lin',{min:0,max:1,step:0.05})],
     gate:[SP('thresh','p1','lin',{min:0,max:1,step:0.05}),
-         SP('depth','p2','lin',{min:0,max:1,step:0.05}),SP('mix','mix','lin',{min:0,max:1,step:0.05})],
+         SP('depth','p2','lin',{min:0,max:1,step:0.05}),SPMIX()],
     roll:[SP('div','p1','lin',{min:0,max:3,step:1,fmt:v=>['1/4','1/8','1/16','1/32'][clamp(Math.round(v),0,3)]}),
-         SP('fdbk','p2','lin',{min:0,max:1,step:0.05}),SP('mix','mix','lin',{min:0,max:1,step:0.05})],
+         SP('fdbk','p2','lin',{min:0,max:1,step:0.05}),SPMIX()],
     tape:[SP('wow','p1','lin',{min:0,max:1,step:0.05}),
-         SP('sat','p2','lin',{min:0,max:1,step:0.05}),SP('mix','mix','lin',{min:0,max:1,step:0.05})],
+         SP('sat','p2','lin',{min:0,max:1,step:0.05}),SPMIX()],
     grs8:[SP('pat','p1','lin',{min:0,max:4,step:1,fmt:v=>['half','off8','gate8','fade','trip'][clamp(Math.round(v),0,4)]}),
-         SP('depth','p2','lin',{min:0,max:1,step:0.05}),SP('mix','mix','lin',{min:0,max:1,step:0.05})],
+         SP('depth','p2','lin',{min:0,max:1,step:0.05}),SPMIX()],
     send:[SP('bus','p1','lin',{min:1,max:10,step:1,fmt:v=>'slot'+Math.round(v)}),
          SP('amt','p2','lin',{min:0,max:1,step:0.05})],
     /* CHANNEL 0 IS THE MASTER — CHANS() is 1..9 — so a channel's number IS its
@@ -1164,9 +1171,9 @@ const FX_P=sl=>{
     amix:[SP('amt','p1','lin',{min:0,max:1,step:0.05}),
          SP('react','p2','lin',{min:0,max:1,step:0.05})],
     hp:[SP('freq','p1','lin',{min:0,max:1,step:0.02,fmt:v=>xHz(v)}),
-         SP('reso','p2','lin',{min:0,max:1,step:0.05}),SP('mix','mix','lin',{min:0,max:1,step:0.05})],
+         SP('reso','p2','lin',{min:0,max:1,step:0.05}),SPMIX()],
     lp:[SP('freq','p1','lin',{min:0,max:1,step:0.02,fmt:v=>xHz(v)}),
-         SP('reso','p2','lin',{min:0,max:1,step:0.05}),SP('mix','mix','lin',{min:0,max:1,step:0.05})],
+         SP('reso','p2','lin',{min:0,max:1,step:0.05}),SPMIX()],
     bld:[SP('hp','p1','lin',{min:0,max:1,step:0.02,fmt:v=>xHz(v)}),
          SP('wet','p2','lin',{min:0,max:1,step:0.05}),
          SP('time','p3','enum',{opts:['1/16','1/8','1/8.','1/4']})],
@@ -1184,7 +1191,7 @@ const FX_P=sl=>{
                :fF(clamp(700*Math.pow(28.6,v),700,20000))}),
          SP('out','p7','lin',{min:0,max:1,step:0.05,
             fmt:v=>((v-0.5)*24>0?'+':'')+Math.round((v-0.5)*24)+'dB'}),
-         SP('mix','mix','lin',{min:0,max:1,step:0.05})],
+         SPMIX()],
     filt:(()=>{
       const ty=XFT[clamp(Math.round(sl.p3||0),0,XFT.length-1)];
       const a=[SP('kind','p3','enum',{opts:XFT})];   // 'type' is taken by the fx selector
@@ -1197,7 +1204,7 @@ const FX_P=sl=>{
       if(ty==='peq'||ty==='lsh'||ty==='hsh')
         a.push(SP('gain','p4','lin',{min:0,max:1,step:0.05,
           fmt:v=>((v-0.5)*36>0?'+':'')+Math.round((v-0.5)*36)+'dB'}));
-      a.push(SP('mix','mix','lin',{min:0,max:1,step:0.05}));
+      a.push(SPMIX());
       return a;})(),
     grain:[SP('size','p1','lin',{min:0,max:1,step:0.02,
               fmt:v=>Math.round((0.004+v*v*0.6)*1000)+'ms'}),
@@ -1215,7 +1222,7 @@ const FX_P=sl=>{
          SP('fdbk','p5','lin',{min:0,max:0.92,step:0.04}),
          SP('ftime','p8','lin',{min:0,max:1,step:0.02,
             fmt:v=>{const t=xFbT(v);return t>=1?t.toFixed(2)+'s':Math.round(t*1000)+'ms';}}),
-         SP('mix','mix','lin',{min:0,max:1,step:0.05})],
+         SPMIX()],
   };
   return base.concat(tail[t]||[]);
 };
@@ -1427,6 +1434,12 @@ function autoLanes(pre){
    The TYPE is deliberately not in the address. A filter's `freq` is `freq` on
    every filter type, so changing lp→hp keeps the route: you addressed that
    slot's cutoff, not a lowpass's cutoff. */
+/* WET/DRY IS A FADER, so it gets the fader's curve. Linear 0..1 spent half
+   its travel above the point where wet already drowns dry — the same reason
+   channel volume is not linear either. Stored value is unchanged; only the
+   way the knob walks through it moves. */
+const SPMIX=()=>SP('mix','mix','lin',{min:0,max:1,step:0.05,curve:'vol',
+                   fmt:v=>volToF(v).toFixed(0)});
 const MIX_P=[SP('level','lvl','lin',{min:0,max:1,step:0.05})];
 /* AMP, PAN AND PITCH BELONG TO THE VOICE, not to a rack. The amp envelope is
    the VCA every operator runs through, `pitch` is all of them at once, and pan
@@ -1455,7 +1468,9 @@ const destRate=(rack,key)=>
   /* an LFO's speed and a route's depth, which is what "modulate a modulator"
      actually means — both reach the running LFO nodes, so they are heard on
      the note already sounding rather than the next one */
-  :(rack==='mod'&&(key==='rate'||key==='amt'))?'ctrl'
+  /* rdiv is the SYNCED rate. It was left out, so an LFO locked to the tempo
+     was the one LFO whose speed nothing could touch. */
+  :(rack==='mod'&&(key==='rate'||key==='amt'||key==='rdiv'))?'ctrl'
   /* the closest thing these oscillators have to a phase sweep: the wave is
      rebuilt as the width moves, on the note that is already sounding */
   :(rack==='osc'&&(key==='pw'))?'ctrl'
@@ -1667,6 +1682,12 @@ const setV=(pre,mi,si,spec,v)=>{const o=MODULES[mi].flat?pre[MODULES[mi].id]:slo
   if(spec.set)spec.set(o,v); else o[spec.key]=v;};
 
 function adjust(spec,v,dir,m=1){
+  if(spec.curve==='vol'){
+    /* ⇧ coarse · plain · ⌥ fine, in fader units — the same three sizes the
+       channel fader uses, so the two feel like one control */
+    const st=m>=10?10:m<=0.2?0.5:2;
+    return +fToVol(clamp(volToF(v)+dir*st,0,100)).toFixed(4);
+  }
   if(spec.type==='enum'){
     const n2=spec.opts.length; let nv=fmod(Math.round(v)+dir,n2);
     if(spec.skip)for(let i=0;i<n2&&spec.skip.has(nv);i++)nv=fmod(nv+(dir||1),n2);   // step over hidden entries
@@ -4749,7 +4770,7 @@ class Engine{
       return true;
     }
     if(rack==='fx')return this.fxLive(pi,si,key,v);
-    if(rack==='mod'&&(key==='rate'||key==='amt'))return this.modLive(pi,si,key,v);
+    if(rack==='mod'&&(key==='rate'||key==='amt'||key==='rdiv'))return this.modLive(pi,si,key,v);
     if(rack==='osc'&&key==='pw')return this.pwLive(pi,si,v);
     return this.ovPut(pi,rack,si,key,v);
   }
@@ -4805,6 +4826,11 @@ class Engine{
         if(L.g0===undefined)L.g0=L.lg.gain.value;
         if(key==='rate')L.lo.frequency.setTargetAtTime(
           clamp(v===undefined?lfoHz(m):v,0.02,80),n,0.02);
+        /* a division INDEX, not a frequency — so it is turned into one against
+           the current tempo before it reaches the oscillator */
+        else if(key==='rdiv')L.lo.frequency.setTargetAtTime(
+          clamp(v===undefined?lfoHz(m)
+                :1/(LFODIV[clamp(Math.round(v),0,LFODIV.length-1)][1]*spb()),0.02,80),n,0.02);
         else if(key==='amt'&&L.base)L.lg.gain.setTargetAtTime(
           L.g0*((v===undefined?L.base:v)/L.base),n,0.02);
       }
@@ -10206,6 +10232,8 @@ const ARRP=[
    more — the strip and the grid are still on screen — so the loop these act on
    is the one you can see: this channel's lane, master included. */
 const focusCh=()=>S.mSel?0:(S.layer>=2?S.editSnd:S.curPreset);
+/* the param the cursor was on, per channel+rack+slot */
+const PSLOT={};
 const curHolder=()=>S.patterns[S.editPat];
 const curLoop=()=>S.patterns[S.editPat].lanes[focusCh()];
 const inEdit=()=>curHolder().state==='edit';
@@ -11416,9 +11444,16 @@ const onKeyDown=e=>{
       const specs=paramsFor(S.curMod,hold[M.id][S.curSlot]);   // same holder the render uses
       const np=S.slotParam+d;
       if(rs(e)||np<0||np>=specs.length){  // ran off the end: next slot, same strip
+        /* WHERE YOU WERE IN THE SLOT YOU ARE LEAVING. Jumping out and back
+           used to dump you on the first param every time, so checking one
+           slot against another meant walking the row again on every trip. */
+        PSLOT[S.editSnd+'|'+M.id+'|'+S.curSlot]=S.slotParam;
         S.curSlot=fmod(S.curSlot+d,10);
         const s2=paramsFor(S.curMod,hold[M.id][S.curSlot]);
-        S.slotParam=(rs(e)||d>0)?0:s2.length-1;
+        const back=PSLOT[S.editSnd+'|'+M.id+'|'+S.curSlot];
+        S.slotParam=(rs(e)&&back!=null&&back<s2.length)
+          ? back                                   // shift+←→ is the jump: put me back
+          : ((rs(e)||d>0)?0:s2.length-1);
       }else S.slotParam=np;
     }
     dirty=true; return;}
@@ -12524,6 +12559,23 @@ function rackStrip(L,rackA,M){
 /* ONE row of params. Wrapping at five put the sixth parameter on a line of its
    own below the values of the first five, which read as a second slot. Squeeze
    the column instead — the whole rack is one horizontal move again. */
+/* WHAT IS ALREADY ACTING ON THIS KNOB. A dot means automation is recorded on
+   it; a tilde means something in the mod rack is pointed at it. Without these
+   the only way to find out was to turn it and wonder why it sprang back. */
+function paramMarks(pre,mi,si,spec){
+  const M=MODULES[mi]; if(!M||!M.id||M.prs||!spec)return '';
+  const a={rack:M.id,slot:M.flat?0:si,key:spec.key,lbl:spec.lbl};
+  if(!M.flat){const rk=(modHolder(pre,M.id)||{})[M.id];
+    if(rk&&rk[si]&&rk[si].id!=null)a.sid=rk[si].id;}
+  let m='';
+  const ml=pre.modLoop;
+  if(ml&&ml.events.length&&ml.events.some(ev=>sameAddr(evAddr(pre,ev),a)))m+='\u00b7';
+  const hit=rt=>{ const b=rt&&rt.addr; if(!b)return false;
+    if(b.rack!==a.rack||b.key!==a.key||b.lbl!==a.lbl)return false;
+    return b.slot==='*'||sameAddr(b,a); };     // the wildcard aims at every slot
+  if((pre.mod||[]).some(md=>md&&md.src&&!md.off&&(md.routes||[]).some(hit)))m+='~';
+  return m;
+}
 function rackParams(L,pre,specs){
   /* '+' is the last cell of the param row: reaching the end of what this slot
      has and pressing on is how you get another one. It is not a button parked
@@ -12545,7 +12597,9 @@ function rackParams(L,pre,specs){
     const foc=i===S.slotParam, cw=wAt(i);
     const pd=prepDisp(pre,S.curMod,S.curSlot,pspec);
     const v=(pd.dot?'•':'')+fmtVal(pspec,pd.v);
-    lr+=(foc?spH('a',' '+pad(pspec.lbl,cw),'slot',i):spH('d',' '+pad(pspec.lbl,cw),'slot',i))+' ';
+    const mk=paramMarks(pre,S.curMod,S.curSlot,pspec);
+    const lbl=pad(pspec.lbl+(mk?' '+mk:''),cw);
+    lr+=(foc?spH('a',' '+lbl,'slot',i):spH('d',' '+lbl,'slot',i))+' ';
     vr+=(foc?spH('i',' '+pad(v,cw),'slot',i)
            :(pd.dot?spH('r k',' '+pad(v,cw),'slot',i):spH('v k',' '+pad(v,cw),'slot',i)))+' ';
   });
@@ -13060,6 +13114,12 @@ function gridHTML(pat,pos,anc,chans){
         h+=bar(top,Math.min(full,H-top));
         let over=full-(H-top);
         for(let g=0;over>0.5&&g<4;g++){ h+=bar(0,Math.min(over,H)); over-=H; }
+        /* WHERE THE NOTE ACTUALLY BEGINS. A long note whose tail wraps into
+           the top of the same column joins its own head, and one unbroken bar
+           down the whole column says nothing about when it was played. The
+           attack gets a hairline; the wrapped tail does not. */
+        h+='<i class="nst" style="top:'+top.toFixed(1)+'px;left:'+left.toFixed(1)+
+           'px;width:'+nw.toFixed(1)+'px"></i>';
       }
       h+='</div>';
     }
@@ -13163,32 +13223,31 @@ function meterRow(LN,PR,peeking){
   }, sp('d',pad('Mix',GUTW)),
      mixCell(S.mLvl!==undefined?S.mLvl:1,0,peeking?0:masterLevel(),!peeking));
 }
-/* WHO ELSE IS MOVING. One dot per automation point, laid across the channel's
-   own cell on its own clock, brightening with how many knobs are on it — so a
-   channel with one slow sweep and a channel with four are different pictures
-   at a glance. The grid draws the shapes; this draws the census, and it covers
-   channels the grid is not showing. */
-function autoRow(pos){
+/* WHICH CHANNELS ARE AUTOMATED, AND WHERE THEIR KNOBS ARE. One dot per
+   automated parameter, sitting over that channel's own column, brightening as
+   its value rises — so a channel with four dots has four knobs moving and you
+   can watch them breathe without opening anything.
+   It is always up, not just while the overlay is: the whole point is to know
+   what a channel carries before you decide to go and look at it. */
+function autoRow(){
+  const any=CHANS().some(i=>{const p=S.presets[i];
+    return p&&!isAudioCh(i)&&p.modLoop&&p.modLoop.events.length;});
+  if(!any)return null;                       // no automation anywhere: no row
   return colRow('arow',i=>{
     const pre=S.presets[i]; if(!pre||isAudioCh(i))return '';
     const ls=autoLanes(pre); if(!ls.length)return '';
-    const ml=pre.modLoop, mlen=ml.len; if(mlen<=0)return '';
-    const front=i===S.curPreset&&autoOn()?(x=>x&&x.k)(aFront(pre)):null;
+    const front=(autoOn()&&i===S.curPreset)?(x=>x&&x.k)(aFront(pre)):null;
     let h='';
-    for(const L of ls){
-      const on=L.k===front;
-      const r=on?2.5:1.5;
-      for(const p of L.pts){
-        if(p.t>=mlen-1e-9)continue;
-        /* a dot at t=0 is half outside the cell unless it is pulled back in —
-           the same clamp the pan line needs at hard left and hard right */
-        h+='<i class="adot'+(on?' af':'')+'" style="left:min(calc(100% - '+(r*2)+
-           'px), max(0px, calc('+(p.t/mlen*100).toFixed(2)+'% - '+r+'px)));opacity:'+
-           (on?0.95:clamp(0.16+0.1*ls.length,0,0.5)).toFixed(2)+'"></i>';
-      }
-    }
-    /* the automation loop's own playhead, which is not the note lane's */
-    if(T.playing)h+='<i class="ahead" style="left:'+(fmod(pos,mlen)/mlen*100).toFixed(2)+'%"></i>';
+    ls.forEach((lane,n)=>{
+      const w=autoWhere(pre,lane.a);
+      /* brightness is where that knob sits in its OWN range right now, so the
+         dot tracks the automation rather than just reporting it exists */
+      const u=w?spanPos(w.spec,getV(pre,w.mi,w.si,w.spec)):0;
+      const x=ls.length<2?50:6+(n/(ls.length-1))*88;
+      h+='<i class="adot'+(lane.k===front?' af':'')+(w?'':' dead')+
+         '" style="left:min(calc(100% - 5px), max(0px, calc('+x.toFixed(1)+'% - 2.5px)));opacity:'+
+         (w?(0.22+0.78*u).toFixed(2):'0.18')+'"></i>';
+    });
     return h;
   }, sp('d',pad('Auto',GUTW)));
 }
@@ -13354,6 +13413,9 @@ function renderPat(L,pos){
     if(!CHWdone){measureChar(); CHWdone=true;}
     const ro=noteReadout(pat,pos,anc);     // just this channel, quietly, above the notes
     L.push(ro||' ');
+    /* the automation census sits directly on top of the columns it is talking
+       about, so a dot and the notes under it are the same channel */
+    if(!pkL){const ar=autoRow(); if(ar){rawAt.add(L.length); L.push(ar);}}
     gridAt=L.length;                       // one entry, emitted as raw markup
     L.push(gridHTML(showPat,pos,anc,CHANS()));
   }
@@ -13361,10 +13423,7 @@ function renderPat(L,pos){
      belongs to the channel columns and has to be there whether the grid is
      drawn vertically or not */
   {if(!CHWdone){measureChar(); CHWdone=true;}
-   rawAt.add(L.length); L.push(meterRow(LN,PR,!!pkL));
-   /* only while the overlay is up — a permanent row of dots for a set with no
-      automation in it is a row of nothing, every frame, forever */
-   if(autoOn()&&!pkL){rawAt.add(L.length); L.push(autoRow(pos));}}
+   rawAt.add(L.length); L.push(meterRow(LN,PR,!!pkL));}
   /* Loop length and transpose are things you set and then stop thinking about,
      so they are not worth two permanent rows. They appear on the hold that
      edits them — tab for the loop, n for the pitch — which is exactly when
@@ -13662,28 +13721,16 @@ function renderSlots(L){
      sideways. Trim on the rendered text, so short racks look exactly as before. */
   L.push(clipLine(sum,100));
   L.push('');
-  // mod loop, scoped to this slot (dim dots = other slots of this module)
-  const ml=pre.modLoop, mEdit=ml.state==='edit';
-  const cellM=cellOf(ml);
-  const phM=T.playing?Math.floor(fmod(posNow(),ml.len)/cellM):-1;
-  /* by ADDRESS, not by module index — this row was the last thing still
-     counting points positionally, so bypassing a slot made its automation
-     disappear from the only place it was ever shown */
-  const rkId=MODULES[S.curMod]&&MODULES[S.curMod].id;
-  const evMod=ml.events.filter(e=>{const a=evAddr(pre,e);return a&&a.rack===rkId;});
-  const evSlot=MODULES[S.curMod]&&MODULES[S.curMod].flat
-    ? evMod                                      // a flat rack has one slot, and it is this one
-    : evMod.filter(e=>String(e.a.slot)===String(S.curSlot));
-  /* armed has to READ as armed — this was dim grey next to the point count,
-     which is indistinguishable from not being armed at all */
-  L.push('  '+sp('d','mod loop (slot '+((S.curSlot+1)%10)+'): '+evSlot.length+' pts · rack '+evMod.length)
-    +(ml.state==='rec'?sp('r',T.playing?'   ● REC — param moves record here':'   ● armed — press space'):'')
-    +sp('d','  ·  ⇧⌫ clear slot pts'));
-  L.push('   '+gridRow(ml,cellM,phM,(a,b)=>
-    evSlot.some(e=>e.t>=a-1e-9&&e.t<b-1e-9)?'▪':
-    evMod.some(e=>e.t>=a-1e-9&&e.t<b-1e-9)?'∙':'·',mEdit?curCell(ml):-1,'cell'));
-  if(mEdit)L.push('  '+sp('i',' EDIT ')+' '+sp('a',(curCell(ml)+1)+'/'+stepCells(ml))+
-    sp('d','  ←→ cursor · shift+←→ slot · ↑↓ set point · ⌫ clear cell'));
+  /* THE OLD MOD-LOOP STRIP IS GONE. It counted points and drew a row of dots
+     scoped to this slot, which is what the desk's Auto row and the \ overlay
+     both do now and do better — and its EDIT line described a state nothing
+     can reach, because modLoop.state is only ever 'on' or 'rec'. What is left
+     is the one thing neither of those says: whether moving a knob right now
+     is being written down. */
+  const ml=pre.modLoop;
+  if(ml.state==='rec')
+    L.push('  '+sp('r',T.playing?'● REC — knob moves are recording':'● armed — press space')
+      +sp('d','   ⌥⌫ clears this rack\u2019s points'));
   L.push('');
   const hints={osc:'dest routes fm/ring/sync at any op · sync: ratio = the sweep, pitch follows the master · edits are live on held notes',
     flt:'peq/lsh/hsh use gain — stack EQ bands alongside filters',
