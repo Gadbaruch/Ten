@@ -120,6 +120,10 @@
   .adot.af{opacity:1;box-shadow:0 0 0 1px var(--bg);}
   /* an address whose slot is gone: still counted, never applied */
   .adot.dead{background:none;box-shadow:inset 0 0 0 1px var(--fg);opacity:.4;}
+  /* the gesture readout: text in the empty space above the column, no box */
+  .cinf{position:absolute;top:-16px;left:0;width:100%;text-align:center;
+        font-size:11px;line-height:14px;color:var(--fg);opacity:.9;
+        white-space:nowrap;pointer-events:none;}
   /* the song column: a dj window is a band across the mix, a clip recall is a
      mark at the channel it moved */
   .djw{position:absolute;left:0;right:0;background:var(--fg);opacity:.22;border-radius:1px;}
@@ -11366,11 +11370,11 @@ const onKeyDown=e=>{
   if(c==='KeyQ'&&gblOf(e)&&!e.repeat&&S.layer>=1&&!HOLD.q){
     e.preventDefault(); HOLD.q=true; HOLD.qUsed=false;
     CFG.qOn=CFG.qOn?0:1; saveCfg();
-    flash('live quantize '+(CFG.qOn?'ON':'OFF')+' — what you hear is what records');
+    flash('live quantize '+(CFG.qOn?'ON':'OFF')+' · grid '+gridName(gridOf())+' — digits change it, s snaps, m monitors');
     dirty=true; return;}
   if(c==='KeyQ'&&gblOf(e)&&!e.repeat){           // ⌃q = live-quantize toggle, everywhere
     CFG.qOn=CFG.qOn?0:1; saveCfg();
-    flash('live quantize '+(CFG.qOn?'ON':'OFF')+' — what you hear is what records');
+    flash('live quantize '+(CFG.qOn?'ON':'OFF')+' · grid '+gridName(gridOf())+' — digits change it, s snaps, m monitors');
     dirty=true; return;}
 
   const lp=curLoop();
@@ -13653,6 +13657,16 @@ function gridHTML(pat,pos,anc,chans){
     /* over the notes, not under them — the curve is what you came to look at */
     if(autoOn())h+=autoCurves(PR2(i),lane.len,anc,H,CW,frontKey);
     h+=autoDots(PR2(i),anc,CW,frontKey);      // always: closed, the dots ARE the display
+    /* PER-CHANNEL GESTURE READOUTS float in the dark above the column — no
+       cell, no row, nothing else moves. Only the channel being edited: the
+       others are not what your hands are on. */
+    if(i===S.curPreset&&(HOLD.tab||HOLD.n)){
+      let txt='';
+      if(HOLD.tab){const l=lane;
+        txt=isAudioCh(i)?'clip':(l.count%1?String(l.count).replace(/^0/,''):String(l.count))+' '+UNIT_NAMES[l.unit];}
+      else{const st=trSemis(PR2(i)); txt=st?(st>0?'+':'')+st+'st':'0st';}
+      h+='<i class="cinf">'+txt+'</i>';
+    }
     h+='</div>';
   }
   /* THE MASTER COLUMN — the song, where the song lives. Lane 0 has held the
@@ -13893,29 +13907,10 @@ function renderPat(L,pos){
        actually listening to somewhere else. They are one picture now, drawn in
        pixels between the grid and the strip — see mixCell(). */
 
-    ['__loop',i=>{
-      const l=LN(i);
-      /* `auto` reads as a DIM row rather than a '~' prefix, which buys back the
-         character "0.25xbar" and "16x16th" need. Strictly ASCII here: '×' and
-         '¼' are a hair narrower than one cell in this font, and a fraction of a
-         column per channel is half a character of skew by the ninth one. */
-      const c2=l.count%1?String(l.count).replace(/^0/,''):String(l.count);
-      const t=isAudioCh(i)?'clip':c2+' '+UNIT_NAMES[l.unit];
-      return sp(T(i)+' '+K(i),' '+pad(t,CELLW-1))+' ';
-    }, ()=>sp(mSel?'ks':'k',' '.repeat(CELLW))+' '],
-
-    ['__grid',i=>{
-      const g=gridOf(LN(i)), k=GRIDS.findIndex(x=>x&&Math.abs(x-g)<1e-9);
-      return sp(T(i)+' '+K(i),' '+pad(k>0?k+' '+GRIDN[k]:'?',CELLW-1))+' ';
-    }, ()=>sp(mSel?'ks':'k',' '.repeat(CELLW))+' '],
-
-    /* transpose in the unit it actually means. An octave down is −12st, not
-       "−1" of something you have to remember the size of; the channel's octave
-       and semitone offsets are one number because they are one pitch. */
-    ['__tr',  i=>{
-      const st=trSemis(PR(i));
-      return sp((st?T(i):'d')+' '+K(i),ctrC(st?(st>0?'+':'')+st+'st':'',CELLW))+' ';
-    }, ()=>sp(mSel?'ks':'k',' '.repeat(CELLW))+' '],
+    /* the pop-in Loop / Grid / Tr rows retired: a row that appears under the
+       meters shoves every channel cell down mid-gesture. Per-channel values
+       (loop, transpose) draw as text above the CURRENT channel's own column;
+       the grid is global now and reports in the message bar. */
   ];
   /* INNER is every channel column plus master, so the frame closes exactly on
      the last one. Text this dense reads as a spreadsheet the moment it has an
@@ -13949,12 +13944,8 @@ function renderPat(L,pos){
      so they are not worth two permanent rows. They appear on the hold that
      edits them — tab for the loop, n for the pitch — which is exactly when
      you want to see them and never otherwise. */
-  const showLoop=HOLD.tab, showTr=HOLD.n, showGrid=HOLD.q;
   for(const [name,cell,mcell] of rows.slice().reverse()){
-    if(name==='__loop'&&!showLoop)continue;
-    if(name==='__tr'&&!showTr)continue;
-    if(name==='__grid'&&!showGrid)continue;
-    let row=sp('d',pad(name==='__loop'?'Loop':name==='__tr'?'Tr':name==='__grid'?'Grid':name,GUTW))+' ';
+    let row=sp('d',pad(name,GUTW))+' ';
     for(const i of CHANS())row+=cell(i);
     L.push(row+mcell());
   }
