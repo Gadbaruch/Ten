@@ -1127,7 +1127,7 @@ const MOD_P=sl=>{                    // unified: source picks which extra fields
 };
 function tgtLabel(t){return (t.mod||'?')+((t.s??-1)>=0?(t.s+1):'')+'·'+(t.key||'?');}
 const FX_P=sl=>{
-  const t=XTYPES[sl.typ], base=[SP('type','typ','enum',{opts:XTYPES,skip:XHIDE,
+  const t=XTYPES[sl.typ], base=[SP('fx','typ','enum',{opts:XTYPES,skip:XHIDE,
     get:o=>xHead(o.typ), fmt:v=>XTYPES[xHead(v)]})];
   /* TWO FAMILIES, ONE DIAL ENTRY EACH. phase holds chorus/flanger/phaser/trem,
      comp holds comp/limit/clip. The slot's typ still IS the member — every
@@ -1142,7 +1142,7 @@ const FX_P=sl=>{
   ];
   const FAM=(f=>f?{names:f.names,typs:f.members.map(x=>XTYPES.indexOf(x))}:null)
     (FAMS.find(f=>f.members.includes(t)));
-  if(FAM)base.push(SP('kind','_fk','enum',{opts:FAM.names,
+  if(FAM)base.push(SP('type','_fk','enum',{opts:FAM.names,
     get:o=>Math.max(0,FAM.typs.indexOf(Math.round(o.typ))),
     set:(o,v)=>{o.typ=FAM.typs[clamp(Math.round(v),0,FAM.typs.length-1)];
                 engine.rebuildRack(S.editSnd); engine.refresh(S.editSnd);}}));
@@ -1251,7 +1251,7 @@ const FX_P=sl=>{
          SPMIX()],
     filt:(()=>{
       const ty=XFT[clamp(Math.round(sl.p3||0),0,XFT.length-1)];
-      const a=[SP('kind','p3','enum',{opts:XFT})];   // 'type' is taken by the fx selector
+      const a=[SP('type','p3','enum',{opts:XFT})];   // the selector is 'fx' now
       if(ty==='vowel')a.push(SP('vowel','p1','lin',{min:0,max:1,step:0.02,
         fmt:v=>{const t=clamp(v,0,1)*4,i=Math.min(3,Math.floor(t));
           return VOWELS[i].toUpperCase()+'-'+VOWELS[i+1].toUpperCase()+' '+Math.round((t-i)*100)+'%';}}));
@@ -1282,10 +1282,10 @@ const FX_P=sl=>{
          SPMIX()],
   };
   tail.dub=tail.tec=tail.wob=tail.res=tail.dly;   // the delay kinds share the dial
-  tail.qual=[SP('kind','p3','enum',{opts:['phone','lowbit','amp','lofi']}),
+  tail.qual=[SP('type','p3','enum',{opts:['phone','lowbit','amp','lofi']}),
     SP('amt','p1','lin',{min:0,max:1,step:0.05}),
     SP('tone','p2','lin',{min:0,max:1,step:0.05}),SPMIX()];
-  tail.buf=[SP('kind','p3','enum',{opts:['repeat','reverse','chop','shuffle','stop']}),
+  tail.buf=[SP('type','p3','enum',{opts:['repeat','reverse','chop','shuffle','stop']}),
     SP('size','p1','lin',{min:0,max:1,step:0.05,fmt:v=>Math.round(50+v*750)+'ms'}),SPMIX()];
   return base.concat(tail[t]||[]);
 };
@@ -8397,17 +8397,21 @@ const NOTEKEYS_PIANO={KeyA:0,KeyW:1,KeyS:2,KeyE:3,KeyD:4,KeyF:5,KeyT:6,KeyG:7,Ke
 const KBSEQ=['KeyZ','KeyX','KeyC','KeyV','KeyB','KeyN','KeyM',
              'KeyA','KeyS','KeyD','KeyF','KeyG','KeyH','KeyJ','KeyK','KeyL',
              'KeyQ','KeyW','KeyE','KeyR','KeyT','KeyY','KeyU','KeyI','KeyO','KeyP'];
-function kbNote(code){
+function kbNote(code,chrom){
   const i=KBSEQ.indexOf(code); if(i<0)return null;
-  const sc=CFG.scaleOn?SCALES[CFG.scale][1]:null;
+  const sc=(!chrom&&CFG.scaleOn)?SCALES[CFG.scale][1]:null;
   if(!sc)return i;                                  // chromatic, one semitone a key
   /* a scale DEGREE a key, so the run climbs the scale and never repeats a note */
   return Math.floor(i/sc.length)*12+sc[i%sc.length];
 }
 const kbFull=()=>(CFG.kbd??'full')!=='piano';
 /* what a key is worth right now, or null if it is not a note key at all */
-function noteOf(code){
-  if(kbFull())return kbNote(code);
+/* A KIT IS TWELVE PADS, and a scale keyboard cannot reach them all — five of
+   the twelve pitch classes vanish with the scale on. Kit channels read the
+   keyboard chromatically no matter what the scale says. */
+function noteOf(code,pi){
+  const chrom=pi!=null&&isKit(S.presets[pi]);
+  if(kbFull())return kbNote(code,chrom);
   const v=NOTEKEYS_PIANO[code];
   return v===undefined?null:v;
 }
@@ -12221,7 +12225,7 @@ const onKeyDown=e=>{
     if(KM.sl){noteLatch.add(c); LATCH.used=true;}
     const wasHeld=new Set(kbHeld); kbHeld.add(c);
     const pi=S.layer>=2?S.editSnd:S.curPreset;
-    const midi=60+S.oct*12+noteOf(c);
+    const midi=60+S.oct*12+noteOf(c,pi);
     const hitVel=EXP.take();          // MIDI velocity if this key came from EXP, else the c/v value
     if(isAudioCh(pi)){flash('audio channel — tab records mic, drop a file to load a clip');return;}
     const pat=S.patterns[S.editPat];
