@@ -324,6 +324,15 @@ const XTYPES=['off','dly','phase','fla','pha','trm','drv','crush','verb','comp',
    three effects welded into one slot. That is what an effects CHAIN is for, and
    it hid the most expensive node in the instrument inside something that did
    not say "reverb". Hidden from the picker; old presets still resolve. */
+/* a family MEMBER wears its head's name on the type dial — the kind field is
+   where the member shows. Without this, switching kind rewrote the type text
+   (dly became dub), which read as the type having changed out from under you. */
+const XFAM_HEAD={fla:'phase',pha:'phase',trm:'phase',
+  limit:'comp',clip:'comp',duck:'comp',
+  dub:'dly',tec:'dly',res:'dly',wob:'dly',roll:'dly',
+  tape:'sat',hp:'filt',lp:'filt'};
+const xHead=v=>{const n=XTYPES[clamp(Math.round(v),0,XTYPES.length-1)];
+  const h=XFAM_HEAD[n]; return h?XTYPES.indexOf(h):Math.round(v);};
 const XHIDE=new Set([XTYPES.indexOf('drv'),XTYPES.indexOf('crush'),XTYPES.indexOf('bld'),XTYPES.indexOf('hp'),XTYPES.indexOf('lp'),
   XTYPES.indexOf('fla'),XTYPES.indexOf('pha'),XTYPES.indexOf('trm'),   // phase's kinds
   XTYPES.indexOf('limit'),XTYPES.indexOf('clip'),XTYPES.indexOf('duck'),// comp's kinds
@@ -1118,7 +1127,8 @@ const MOD_P=sl=>{                    // unified: source picks which extra fields
 };
 function tgtLabel(t){return (t.mod||'?')+((t.s??-1)>=0?(t.s+1):'')+'·'+(t.key||'?');}
 const FX_P=sl=>{
-  const t=XTYPES[sl.typ], base=[SP('type','typ','enum',{opts:XTYPES,skip:XHIDE})];
+  const t=XTYPES[sl.typ], base=[SP('type','typ','enum',{opts:XTYPES,skip:XHIDE,
+    get:o=>xHead(o.typ), fmt:v=>XTYPES[xHead(v)]})];
   /* TWO FAMILIES, ONE DIAL ENTRY EACH. phase holds chorus/flanger/phaser/trem,
      comp holds comp/limit/clip. The slot's typ still IS the member — every
      engine path is untouched — the family just presents as one type with a
@@ -12101,7 +12111,7 @@ const onKeyDown=e=>{
       if(dk!=null){                                  // the held pad's own effect
         if(!Array.isArray(S.dj))S.dj=DJ0();
         const sl2=S.dj[dk]||(S.dj[dk]={typ:0,p1:0.3,p2:0.3,p3:0.5,mix:0.5});
-        const specs2=[SP('fx','typ','enum',{opts:XTYPES})].concat(FX_P(sl2));
+        const specs2=[SP('fx','typ','enum',{opts:XTYPES,skip:XHIDE,get:o=>xHead(o.typ),fmt:v=>XTYPES[xHead(v)]})].concat(FX_P(sl2));
         const spec2=specs2[clamp(S.mParam|0,0,specs2.length-1)];
         if(spec2){
           pushUndo('dj pad');
@@ -14592,7 +14602,7 @@ function masterRack(L){
     const sl2=S.dj[dk]||(S.dj[dk]={typ:0,p1:0.3,p2:0.3,p3:0.5,mix:0.5});
     L.push('   '+sp('d',pad(' DJ pad',12))+
       DJKEYS.map((ch,i)=>spH(i===dk?'ri':(S.dj[i]&&S.dj[i].typ?'v k':'d k'),' '+ch+' ','dj',i)).join(' '));
-    const specs2=[SP('fx','typ','enum',{opts:XTYPES})].concat(FX_P(sl2));
+    const specs2=[SP('fx','typ','enum',{opts:XTYPES,skip:XHIDE,get:o=>xHead(o.typ),fmt:v=>XTYPES[xHead(v)]})].concat(FX_P(sl2));
     S.mParam=clamp(S.mParam|0,0,specs2.length-1);
     const w2=clamp(Math.floor(88/specs2.length)-1,5,10);
     let l2='   ', v2='   ';
