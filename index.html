@@ -316,7 +316,7 @@ const LFOW_PW=[0,1,3,2];
    needs them long before the render section runs */
 const PCH='CcDdEFfGgAaB';
 const NN=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
-const XTYPES=['off','dly','cho','fla','pha','trm','drv','crush','verb','comp','gate','roll','tape','grs8','send','limit','duck','amix','hp','lp','bld','sat','grain','filt','clip','plate'];
+const XTYPES=['off','dly','phase','fla','pha','trm','drv','crush','verb','comp','gate','roll','tape','grs8','send','limit','duck','amix','hp','lp','bld','sat','grain','filt','clip','plate'];
 /* drv and crush are the same two curves `dist` already offers — kept in the
    table so old indices still resolve, hidden from the picker (v17 folds them). */
 /* `bld` was a macro — a highpass into a synced delay AND a convolution wash,
@@ -324,6 +324,8 @@ const XTYPES=['off','dly','cho','fla','pha','trm','drv','crush','verb','comp','g
    it hid the most expensive node in the instrument inside something that did
    not say "reverb". Hidden from the picker; old presets still resolve. */
 const XHIDE=new Set([XTYPES.indexOf('drv'),XTYPES.indexOf('crush'),XTYPES.indexOf('bld'),XTYPES.indexOf('hp'),XTYPES.indexOf('lp'),
+  XTYPES.indexOf('fla'),XTYPES.indexOf('pha'),XTYPES.indexOf('trm'),   // phase's kinds
+  XTYPES.indexOf('limit'),XTYPES.indexOf('clip'),                      // comp's kinds
   XTYPES.indexOf('plate')]);   // plate is verb's mode 1 now, not its own slot
 const XDIST=XTYPES.indexOf('sat');
 /* reverb size: squared so the short end has real resolution — 50ms rooms to 4.5s halls */
@@ -1111,6 +1113,19 @@ const MOD_P=sl=>{                    // unified: source picks which extra fields
 function tgtLabel(t){return (t.mod||'?')+((t.s??-1)>=0?(t.s+1):'')+'·'+(t.key||'?');}
 const FX_P=sl=>{
   const t=XTYPES[sl.typ], base=[SP('type','typ','enum',{opts:XTYPES,skip:XHIDE})];
+  /* TWO FAMILIES, ONE DIAL ENTRY EACH. phase holds chorus/flanger/phaser/trem,
+     comp holds comp/limit/clip. The slot's typ still IS the member — every
+     engine path is untouched — the family just presents as one type with a
+     `kind`, exactly the way filt holds its filters. */
+  const FAM=t==='phase'||t==='fla'||t==='pha'||t==='trm'
+    ? {names:['chorus','flanger','phaser','trem'],typs:['phase','fla','pha','trm'].map(x=>XTYPES.indexOf(x))}
+    : (t==='comp'||t==='limit'||t==='clip')
+    ? {names:['comp','limit','clip'],typs:['comp','limit','clip'].map(x=>XTYPES.indexOf(x))}
+    : null;
+  if(FAM)base.push(SP('kind','_fk','enum',{opts:FAM.names,
+    get:o=>Math.max(0,FAM.typs.indexOf(Math.round(o.typ))),
+    set:(o,v)=>{o.typ=FAM.typs[clamp(Math.round(v),0,FAM.typs.length-1)];
+                engine.rebuildRack(S.editSnd); engine.refresh(S.editSnd);}}));
   const tail={
     dly:[SP('time','p1','lin',{min:0,max:1,step:0.05,fmt:v=>Math.round(20+v*1300)+'ms'}),
          SP('fdbk','p2','lin',{min:0,max:0.9,step:0.05}),
@@ -1122,7 +1137,7 @@ const FX_P=sl=>{
          SP('color','p5','lin',{min:-1,max:1,step:0.1,
             fmt:v=>Math.abs(v)<0.05?'flat':(v<0?'dark ':'bright ')+Math.round(Math.abs(v)*100)}),
          SPMIX()],
-    cho:[SP('rate','p1','lin',{min:0,max:1,step:0.05,fmt:v=>(0.1+v*4).toFixed(1)+'Hz'}),
+    phase:[SP('rate','p1','lin',{min:0,max:1,step:0.05,fmt:v=>(0.1+v*4).toFixed(1)+'Hz'}),
          SP('depth','p2','lin',{min:0,max:1,step:0.05}),
          SP('width','p3','lin',{min:0,max:1,step:0.05}),SPMIX()],
     fla:[SP('rate','p1','lin',{min:0,max:1,step:0.05,fmt:v=>(0.05+v*2).toFixed(2)+'Hz'}),
@@ -1866,6 +1881,16 @@ const OPTRACK={
   KeyS:{id:'fx',name:'saturation',nav:1,
         find:rk=>rk.map((x,i)=>x&&x.typ===XTYPES.indexOf('sat')&&!x.off?i:-1).filter(i=>i>=0),
         make:sl=>Object.assign(sl,{typ:XTYPES.indexOf('sat'),p1:0.35,p2:0.5,p3:0,mix:fToVol(60)}),
+        unmake:sl=>Object.assign(sl,{typ:0})},
+  KeyP:{id:'fx',name:'phase',nav:1,
+        find:rk=>{const f=[2,3,4,5].map(x=>x);
+          return rk.map((x,i)=>x&&f.includes(Math.round(x.typ))&&!x.off?i:-1).filter(i=>i>=0);},
+        make:sl=>Object.assign(sl,{typ:XTYPES.indexOf('phase'),p1:0.3,p2:0.5,p3:0.5,mix:fToVol(45)}),
+        unmake:sl=>Object.assign(sl,{typ:0})},
+  KeyC:{id:'fx',name:'comp',nav:1,
+        find:rk=>{const f=[XTYPES.indexOf('comp'),XTYPES.indexOf('limit'),XTYPES.indexOf('clip')];
+          return rk.map((x,i)=>x&&f.includes(Math.round(x.typ))&&!x.off?i:-1).filter(i=>i>=0);},
+        make:sl=>Object.assign(sl,{typ:XTYPES.indexOf('comp'),p1:0.4,p2:0.5,p3:0.5,mix:1}),
         unmake:sl=>Object.assign(sl,{typ:0})},
   KeyX:{id:'fx',name:'fx',nav:1,
         find:rk=>{const a2=rk.map((x,i)=>x&&x.typ?i:-1).filter(i=>i>=0);
@@ -4188,9 +4213,9 @@ class Engine{
         cur.connect(dl); dl.connect(cf); cf.connect(fb); fb.connect(dl); cf.connect(wet);
         if(LIVE)Object.assign(LIVE,{dls:[dl],fb,cols:[cf],mode});
       }
-    }else if(t==='cho'||t==='fla'){
-      const rate=t==='cho'?0.1+fx.p1*4:0.05+fx.p1*2;
-      const base=t==='cho'?0.018:0.004, depth=(t==='cho'?0.006:0.002)*(t==='cho'?fx.p2:1);
+    }else if(t==='phase'||t==='fla'){
+      const rate=t==='phase'?0.1+fx.p1*4:0.05+fx.p1*2;
+      const base=t==='phase'?0.018:0.004, depth=(t==='phase'?0.006:0.002)*(t==='phase'?fx.p2:1);
       const width=clamp(fx.p3??0,0,1);
       const mrg=keep(ac.createChannelMerger(2));
       const build=(phase,chan)=>{                    // one voice; two in anti-phase = stereo
@@ -10172,10 +10197,10 @@ PROCPRE.tine=[
  PP('Bell Top',   [1,.40,1.0,.80,.15,.20,.62,0], [2,200,.7],[.002,6,1,.8],null,[['verb',.28,.60,.58,.16]]),
  PP('Short Tine', [1,.12,.85,.75,0,.25,.55,0],   null,[.002,6,1,.8],null,[['verb',.20,.55,.50,.12]]),
  PP('Wurly-ish',  [1,.30,.60,.85,.55,.30,.45,0], [1,3200,.9],[.002,6,1,.8],null,[['verb',.26,.48,.55,.14]]),
- PP('Ballad Wide',[.85,.75,.45,.40,.40,.45,.40,0],null,[.003,6,1,.8],[0,2,9,.85,0],[['cho',.28,.40,.5,.22],['verb',.48,.45,.76,.28]]),
+ PP('Ballad Wide',[.85,.75,.45,.40,.40,.45,.40,0],null,[.003,6,1,.8],[0,2,9,.85,0],[['phase',.28,.40,.5,.22],['verb',.48,.45,.76,.28]]),
  PP('Tremolo',    [1,.60,.55,.50,.85,.35,.5,0],  null,[.002,6,1,.8],null,[['verb',.30,.50,.60,.16]]),
  PP('Warm Crunch',[1,.50,.62,.65,.25,.55,.45,.30],null,[.002,6,1,.8],null,[['sat',.26,0,3,.35],['verb',.28,.45,.58,.16]]),
- PP('Ghost',      [.55,.90,.70,.15,.45,.75,.25,0],[1,1800,1.0],[.05,6,1,.8],[0,3,12,.9,0],[['cho',.35,.45,.5,.26],['verb',.82,.52,.92,.42]])];
+ PP('Ghost',      [.55,.90,.70,.15,.45,.75,.25,0],[1,1800,1.0],[.05,6,1,.8],[0,3,12,.9,0],[['phase',.35,.45,.5,.26],['verb',.82,.52,.92,.42]])];
 
 PROCPRE.hammond=[
  PP('Jazz 888',   [.55,0,.30,.20,.30,.45,.5,0],  null,[.004,6,1,.09],null,[['verb',.28,.50,.58,.14]]),
@@ -10209,10 +10234,10 @@ PROCPRE.bowed=[
  PP('Double Bass',[.55,.4,.95,.55,.3,.25,.2,.08],[1,1800,.9],[.08,6,1,.45],null,[['verb',.46,.38,.72,.26]]),
  PP('Sul Tasto',  [.75,.35,.95,.4,.35,.2,.2,.06],[1,3400,.8],[.10,6,1,.5],null,[['verb',.58,.38,.8,.34]]),
  PP('Sul Pont',   [.95,.8,.8,.35,.35,.75,.4,.3],[2,600,1.0],[.04,6,1,.3],null,[['verb',.4,.6,.68,.24]]),
- PP('Section',    [.6,.45,.9,.5,.45,.35,.2,.08],null,[.09,6,1,.5],[0,4,16,.9,0],[['cho',.3,.4,.5,.24],['verb',.7,.45,.88,.4]]),
+ PP('Section',    [.6,.45,.9,.5,.45,.35,.2,.08],null,[.09,6,1,.5],[0,4,16,.9,0],[['phase',.3,.4,.5,.24],['verb',.7,.45,.88,.4]]),
  PP('Warm Solo',  [.62,.42,.92,.55,.5,.3,.2,.08],[1,3600,.85],[.07,6,1,.42],null,[['verb',.6,.4,.8,.34]]),
  PP('Creak',      [.35,.9,.6,.2,.2,.9,.7,.3], [3,1400,3],[.03,6,1,.25],null,[['sat',.35,0,2,.28],['verb',.4,.5,.7,.24]]),
- PP('Glass Bow',  [.95,.3,1,.2,.6,.15,.2,.06],[2,700,1.2],[.18,6,1,1.4],[0,3,12,.9,0],[['cho',.45,.5,.5,.34],['verb',.92,.6,.95,.5]])];
+ PP('Glass Bow',  [.95,.3,1,.2,.6,.15,.2,.06],[2,700,1.2],[.18,6,1,1.4],[0,3,12,.9,0],[['phase',.45,.5,.5,.34],['verb',.92,.6,.95,.5]])];
 
 /* ---- BLOWN ---------------------------------------------------------- */
 PROCPRE.clarinet=[
@@ -10261,7 +10286,7 @@ PROCPRE.harmonica=[
  PP('Wailing',    [1,.65,.6,.4,.6,.5,.4,.26],null,[.008,6,1,.18],null,[['dly',.26,.38,3,.22],['verb',.38,.5,.68,.24]]),
  PP('Soft Folk',  [.65,.3,.3,.4,.25,0,.35,.08],[1,3000,.85],[.014,6,1,.24],null,[['verb',.5,.4,.75,.3]]),
  PP('Radio',      [1,.7,.7,.5,.35,.4,.5,.35],[3,1500,2.2],[.008,6,1,.14],null,[['sat',.5,0,5,.4],['tape',.6,.5,.5,.34]]),
- PP('Ghost Reed', [.45,.4,.4,.3,.5,.2,.5,.06],[1,1800,1.2],[.06,6,1,.9],[0,3,16,.9,0],[['cho',.4,.5,.5,.3],['verb',.9,.5,.94,.5]])];
+ PP('Ghost Reed', [.45,.4,.4,.3,.5,.2,.5,.06],[1,1800,1.2],[.06,6,1,.9],[0,3,16,.9,0],[['phase',.4,.5,.5,.3],['verb',.9,.5,.94,.5]])];
 
 PROCPRE.accordion=[
  PP('Musette',    [.85,.9,.7,.4,.35,.35,.3,.12],null,[.02,6,1,.16],null,[['verb',.36,.45,.65,.22]]),
@@ -10269,7 +10294,7 @@ PROCPRE.accordion=[
  PP('Folk Box',   [.85,.7,.5,.35,.3,.25,.3,.12],null,[.02,6,1,.16],null,[['verb',.34,.45,.62,.2]]),
  PP('Bandoneon',  [.8,.4,.45,.55,.45,.3,.4,.1],[1,3400,.9],[.03,6,1,.2],null,[['verb',.42,.4,.7,.26]]),
  PP('Dry Reeds',  [.9,.25,.55,.35,.25,0,.25,.14],null,[.014,6,1,.1],null,[['comp',.34,.5,.5,.26]]),
- PP('Wet Musette',[.85,1,.85,.45,.4,.4,.35,.12],null,[.022,6,1,.18],null,[['cho',.32,.42,.5,.24],['verb',.44,.48,.72,.26]]),
+ PP('Wet Musette',[.85,1,.85,.45,.4,.4,.35,.12],null,[.022,6,1,.18],null,[['phase',.32,.42,.5,.24],['verb',.44,.48,.72,.26]]),
  PP('Cajun',      [1,.75,.75,.4,.35,.3,.3,.2],null,[.014,6,1,.14],null,[['verb',.3,.52,.6,.2]]),
  PP('Chamber',    [.7,.5,.45,.4,.3,.25,.4,.08],null,[.04,6,1,.3],null,[['verb',.74,.42,.9,.42]]),
  PP('Fairground', [1,1,.9,.5,.5,.6,.4,.3], null,[.016,6,1,.16],[0,2,30,.8,0],[['sat',.3,0,1,.24],['tape',.55,.5,.5,.3],['verb',.4,.5,.7,.24]]),
@@ -12479,7 +12504,7 @@ const PORT_DIV={
 function portPreset(p,out){
   if(!p)return p;
   const q=JSON.parse(JSON.stringify(p));
-  const ALIAS={dist:'sat'};             // renamed since v21 files were written
+  const ALIAS={dist:'sat',cho:'phase'}; // renamed since v21 files were written
   const conv=(sl,tbl,div)=>{
     for(const k in (tbl||{})){
       const list=tbl[k](sl); if(!list)continue;
@@ -14666,6 +14691,7 @@ function renderHelp(L){
     ['⌥e','go to the ENVELOPES. a / d / s / r jump to attack, decay, sustain, release by their own letters; digits jump between envelopes; ⌫ removes one'],
     ['⌥f ⌥l ⌥k ⌥/','the same grammar for the FILTER, the LFOs, KEYTRACK and RANDOM mods — the letter takes you there, making one if the rack has none'],
     ['⌥r ⌥g ⌥s ⌥x','…and for the fx: REVERB, GRAIN, SATURATION (drive, née dist), or ⌥x for the fx rack itself. Digits jump instances, ⌫ removes, the strip edits'],
+    ['⌥p ⌥c','PHASE (chorus·flanger·phaser·trem) and COMP (comp·limit·clip) — each family is ONE effect with a `kind`, the way filt holds its filters'],
     ['slot memory','every slot remembers the param you last touched, and every JUMP back (digits, ⌥←→, the letter scopes) lands there'],
     ['rtc (PLAY rack)','the RATCHET: one note becomes a burst of itself — ×2..×8 equal sub-hits, fading if you ask. Sequenced notes divide their own footprint; a LIVE held note repeats at that division of the beat, phase from where you pressed it'],
     ['⇧o (right)','OVERDUB vs OVERWRITE. Overwrite only means anything while RECORDING — just playing over a lane no longer punches holes in it'],
