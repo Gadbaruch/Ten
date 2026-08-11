@@ -123,6 +123,7 @@
   /* the gesture readout: text in the empty space above the column, no box */
   .wlay{position:absolute;top:0;left:calc(-1 * var(--bleed));pointer-events:none;}
   .wlay path{stroke:var(--fg);stroke-width:1;opacity:.5;fill:none;}
+  .wtc path{stroke:var(--fg);stroke-width:1.2;opacity:.8;fill:none;}
   .cuet{position:absolute;left:0;width:100%;height:1px;background:var(--fg);opacity:.65;}
   .cinf{position:absolute;top:-16px;left:0;width:100%;text-align:center;
         font-size:11px;line-height:14px;color:var(--fg);opacity:.9;
@@ -244,19 +245,47 @@ const WAVES=['sin','tri','saw','sqr','nse','org','bel','vox','mtl','smp','pink',
 /* THE WAVETABLE BANK — ten starter tables as harmonic recipes, from tame to
    feral. Auditioned by ear before more are added; an editor comes later, and
    when it does it will be harmonic sliders, not freehand drawing. */
+/* THE WAVETABLE BANK, PROPERLY: each table is a STACK OF FRAMES and `pos`
+   sweeps through them — that is what a wavetable is, and what the first cut
+   missed. Frames are harmonic recipes; position interpolates neighbouring
+   frames in the harmonic domain, which is smooth by construction. */
 const WTBL=[
- ['glass',   [1,0,0.42,0,0.28,0,0.14,0,0.07,0,0.05]],
- ['woodwind',[1,0.16,0.42,0.08,0.2,0.05,0.08,0.02]],
- ['choir',   [1,0.6,0.22,0.5,0.16,0.08,0.3,0.05,0.02,0.12]],
- ['brass',   [1,0.7,0.62,0.5,0.42,0.34,0.26,0.2,0.15,0.11,0.08,0.06]],
- ['bell',    [1,0,0,0.55,0,0.4,0,0,0.32,0,0,0.2,0,0.12]],
- ['reso',    [1,0.1,0.06,0.05,0.9,0.08,0.04,0.03,0.5,0.03]],
- ['pulse3',  [1,0,0.33,0,0.2,0,0.47,0,0.11,0,0.29]],
- ['grit',    [1,0.5,0.33,0.55,0.2,0.45,0.14,0.35,0.11,0.28,0.09,0.22]],
- ['fifths',  [1,0,0.75,0,0,0.55,0,0,0.35,0,0,0.28]],
- ['digital', [1,0.9,0.1,0.85,0.08,0.7,0.5,0.06,0.6,0.04,0.45,0.4]],
+ ['basic',[ [1],[1,0,0.11,0,0.04,0,0.02],[1,0.5,0.33,0.25,0.2,0.17,0.14,0.12,0.11,0.1],
+            [1,0,0.33,0,0.2,0,0.14,0,0.11,0,0.09] ]],
+ ['glass',[ [1,0,0.1],[1,0,0.42,0,0.18],[0.8,0,0.5,0,0.4,0,0.2],
+            [0.6,0,0.3,0,0.55,0,0.35,0,0.18],[0.4,0,0.2,0,0.4,0,0.5,0,0.3,0,0.15] ]],
+ ['vox',[  [1,0.35,0.08,0.03,0.2,0.32,0.1,0.02],      // A
+           [1,0.5,0.25,0.04,0.02,0.1,0.28,0.18,0.04], // E
+           [1,0.22,0.04,0.02,0.01,0.03,0.12,0.3,0.2,0.05], // I
+           [1,0.6,0.3,0.12,0.05,0.02,0.02,0.06,0.1,0.05],  // O
+           [1,0.4,0.1,0.03,0.01,0.01,0.02,0.03,0.08,0.12,0.06] ]], // U
+ ['brass',[ [1,0.3,0.15,0.08,0.05],[1,0.5,0.3,0.18,0.12,0.08,0.05],
+            [1,0.65,0.45,0.32,0.24,0.18,0.13,0.1,0.07,0.05],
+            [1,0.75,0.6,0.5,0.42,0.35,0.29,0.24,0.2,0.17,0.14,0.11,0.09,0.07] ]],
+ ['pulse',[ [1,0,0.33,0,0.2,0,0.14,0,0.11],           // square (50%)
+            [1,0.31,0.21,0.09,0.06,0.09,0.08,0.02],   // ~35%
+            [1,0.55,0.35,0.2,0.1,0.03,0.05,0.08,0.06],// ~25%
+            [1,0.72,0.55,0.4,0.28,0.18,0.11,0.06,0.03,0.02] ]], // ~12%
+ ['metal',[ [1,0,0,0.5,0,0.3],[1,0,0,0.55,0,0.4,0,0,0.3],
+            [0.8,0,0,0.5,0,0.5,0,0,0.45,0,0,0.3],[0.6,0,0.2,0.4,0,0.5,0,0.2,0.5,0,0,0.4,0,0.25] ]],
+ ['organ',[ [1,0,0.5],[1,0,0.5,0,0,0,0,0.4],[1,0.4,0.5,0,0,0.35,0,0.4],
+            [1,0.5,0.6,0.3,0,0.4,0,0.5,0,0,0,0.3] ]],
+ ['fifths',[ [1,0,0.6],[1,0,0.7,0.35],[1,0,0.75,0.45,0,0.4],[1,0,0.7,0.5,0,0.5,0,0.35,0.3] ]],
+ ['grit',[ [1,0.3,0.2,0.25,0.12],[1,0.45,0.3,0.4,0.2,0.3,0.12,0.2],
+           [1,0.5,0.38,0.5,0.28,0.42,0.2,0.34,0.15,0.26],
+           [1,0.55,0.45,0.58,0.36,0.5,0.3,0.44,0.24,0.36,0.18,0.3] ]],
+ ['sub',[  [1],[1,0.35],[1,0.5,0.12],[1,0.3,0.2,0.08] ]],
 ];
 const WTNAMES=WTBL.map(x=>x[0]);
+/* the harmonic recipe at a position: neighbouring frames, interpolated */
+function wtHarm(ti,pos){
+  const F=WTBL[clamp(Math.round(ti),0,WTBL.length-1)][1];
+  const x=clamp(pos,0,1)*(F.length-1), i0=Math.floor(x), fr=x-i0;
+  const A=F[i0], B=F[Math.min(F.length-1,i0+1)];
+  const n=Math.max(A.length,B.length), out=new Array(n);
+  for(let k=0;k<n;k++)out[k]=(A[k]||0)*(1-fr)+(B[k]||0)*fr;
+  return out;
+}
 const NOISEW={4:'white',10:'pink',11:'brown',12:'blue',13:'dust'};
 const isNoiseW=w=>NOISEW[w]!==undefined;
 const OPMODE=['add','fm','ring','sync','pm'];
@@ -993,6 +1022,20 @@ const SP=(lbl,key,type,o={})=>({lbl,key,type,...o});
    does — the empty state at the top, reachable with ⌫ or by walking down past
    it, and an operator set to none is an operator that is not there. LEVEL comes
    before RATIO because level is the one you reach for; ratio is tuning. */
+/* the wavetable's six dials — one definition, used by the osc spec AND the
+   engine's dedicated page */
+const WTF=[
+  SP('tbl a','wta','enum',{opts:WTNAMES,get:o=>Math.round(o.wta??0),set:(o,v)=>o.wta=Math.round(v)}),
+  SP('pos a','posa','lin',{min:0,max:1,step:0.02,get:o=>o.posa??0,set:(o,v)=>o.posa=v,
+     fmt:v=>Math.round(v*100)+'%'}),
+  SP('tbl b','wtb','enum',{opts:WTNAMES,get:o=>Math.round(o.wtb??3),set:(o,v)=>o.wtb=Math.round(v)}),
+  SP('pos b','posb','lin',{min:0,max:1,step:0.02,get:o=>o.posb??0,set:(o,v)=>o.posb=v,
+     fmt:v=>Math.round(v*100)+'%'}),
+  SP('morph','mrph','lin',{min:0,max:1,step:0.02,get:o=>o.mrph??0,set:(o,v)=>o.mrph=v,
+     fmt:v=>Math.round(v*100)+'%'}),
+  SP('fold','fold','lin',{min:0,max:1,step:0.02,get:o=>o.fold??0,set:(o,v)=>o.fold=v,
+     fmt:v=>Math.round(v*100)+'%'}),
+];
 const OSC_P=sl=>[
   SP('wave','wav','enum',{opts:['none'].concat(WAVES),
      get:o=>(o.amt<=0.001?0:(o.wav|0)+1),
@@ -1004,17 +1047,7 @@ const OSC_P=sl=>[
   SP('mode','mode','enum',{opts:OPMODE}),
   SP('dest','dst','enum',{opts:DEST}),
   SP('level','amt','lin',{min:0,max:1,step:0.05}),
-  /* the wavetable's own dials, only when the wave IS the table */
-  ...(Math.round((sl&&sl.wav)||0)===14?[
-    /* defaults live in the getters: a slot that has never been touched reads
-       glass→brass at zero, not undefined→NaN */
-    SP('tbl a','wta','enum',{opts:WTNAMES,get:o=>Math.round(o.wta??0),set:(o,v)=>o.wta=Math.round(v)}),
-    SP('tbl b','wtb','enum',{opts:WTNAMES,get:o=>Math.round(o.wtb??3),set:(o,v)=>o.wtb=Math.round(v)}),
-    SP('morph','mrph','lin',{min:0,max:1,step:0.02,get:o=>o.mrph??0,set:(o,v)=>o.mrph=v}),
-    SP('fold','fold','lin',{min:0,max:1,step:0.02,get:o=>o.fold??0,set:(o,v)=>o.fold=v}),
-    SP('sym','sym','lin',{min:-1,max:1,step:0.05,get:o=>o.sym??0,set:(o,v)=>o.sym=v}),
-    SP('frac','frac','lin',{min:0,max:1,step:0.05,get:o=>o.frac??0,set:(o,v)=>o.frac=v}),
-  ]:[]),
+  ...(Math.round((sl&&sl.wav)||0)===14?WTF:[]),
   /* ONE FIELD, TWO MEANINGS, decided by the wave — the same idiom the fx rack
      already uses for dist's tone/rate. On a tonal wave it is PULSE WIDTH: the
      harmonics are re-weighted by sin(nπd), which is exactly PWM on a square
@@ -1574,7 +1607,7 @@ const destRate=(rack,key)=>
   :(rack==='mod'&&(key==='rate'||key==='amt'||key==='rdiv'))?'ctrl'
   /* the closest thing these oscillators have to a phase sweep: the wave is
      rebuilt as the width moves, on the note that is already sounding */
-  :(rack==='osc'&&(key==='pw'||key==='mrph'||key==='fold'||key==='sym'||key==='frac'))?'ctrl'
+  :(rack==='osc'&&(key==='pw'||key==='mrph'||key==='fold'||key==='posa'||key==='posb'))?'ctrl'
   /* PAN IS A BUS PARAMETER — one panner for the channel, shared by every note,
      so there is no per-voice AudioParam to hand an LFO. It rides the control
      tick instead, which is how EVERY source gets to drive it: as an audio-rate
@@ -4996,13 +5029,13 @@ class Engine{
   wtWave(op){
     const a2=clamp(Math.round(op.wta||0),0,WTBL.length-1);
     const b2=clamp(Math.round(op.wtb??3),0,WTBL.length-1);
+    const pa=clamp(op.posa||0,0,1), pb=clamp(op.posb||0,0,1);
     const m=clamp(op.mrph||0,0,1), fo=clamp(op.fold||0,0,1);
-    const sy=clamp(op.sym||0,-1,1), fr=clamp(op.frac||0,0,1);
-    const key='wt:'+a2+':'+b2+':'+Math.round(m*50)+':'+Math.round(fo*50)+':'+
-      Math.round(sy*20)+':'+Math.round(fr*20);
+    const key='wt:'+a2+':'+b2+':'+Math.round(pa*64)+':'+Math.round(pb*64)+':'+
+      Math.round(m*64)+':'+Math.round(fo*64);
     let pw=this.waveCache.get(key);
     if(pw)return pw;
-    const HA=WTBL[a2][1], HB=WTBL[b2][1], nH=Math.max(HA.length,HB.length);
+    const HA=wtHarm(a2,pa), HB=wtHarm(b2,pb), nH=Math.max(HA.length,HB.length);
     const N=1024, y=new Float32Array(N);
     for(let k=0;k<nH;k++){
       const amp=(HA[k]||0)*(1-m)+(HB[k]||0)*m;
@@ -5010,16 +5043,23 @@ class Engine{
       const w2=2*Math.PI*(k+1)/N;
       for(let n2=0;n2<N;n2++)y[n2]+=amp*Math.sin(w2*n2);
     }
+    /* NORMALIZE, FOLD GENTLY, NORMALIZE AGAIN. Folding before normalizing was
+       why morph steps lurched: every cache entry had its own loudness. Now the
+       wave enters the folder at a known level, the folder's drive is tame
+       (0..2.2 extra), and the result leaves at a known level — a fold sweep is
+       a timbre sweep, not a volume ride. */
     let mx=0; for(let n2=0;n2<N;n2++)mx=Math.max(mx,Math.abs(y[n2]));
     if(mx>0)for(let n2=0;n2<N;n2++)y[n2]/=mx;
-    const tri=x=>{x=fmod(x+3,4); return x<1?x:x<3?2-x:x-4;};   // wavefold
-    if(fo>0.001){
-      const g2=1+fo*5;
-      for(let n2=0;n2<N;n2++)y[n2]=tri(y[n2]*g2+sy*fo*1.5);
-      if(fr>0.001){const g3=1+fr*3;
-        for(let n2=0;n2<N;n2++)y[n2]=tri(y[n2]*g3);}
+    if(fo>0.005){
+      /* the identity inside [-1,1], reflecting beyond — the first cut mapped
+         +0.5 to -0.5 and "fold" was really "invert", which is why 0.3 already
+         sounded mangled */
+      const tri=x=>{let t=fmod(x+1,4); if(t<0)t+=4; return t<2?t-1:3-t;};
+      const g2=1+fo*fo*2.2;                    // squared: the first half of the dial is subtle
+      for(let n2=0;n2<N;n2++)y[n2]=tri(y[n2]*g2);
       let dc=0; for(let n2=0;n2<N;n2++)dc+=y[n2]; dc/=N;
-      for(let n2=0;n2<N;n2++)y[n2]-=dc;
+      mx=0; for(let n2=0;n2<N;n2++){y[n2]-=dc; mx=Math.max(mx,Math.abs(y[n2]));}
+      if(mx>0)for(let n2=0;n2<N;n2++)y[n2]/=mx;
     }
     const NH=64, re=new Float32Array(NH+1), im=new Float32Array(NH+1);
     for(let k=1;k<=NH;k++){
@@ -5032,6 +5072,25 @@ class Engine{
     this.waveCache.set(key,pw);
     if(this.waveCache.size>400)this.waveCache.delete(this.waveCache.keys().next().value);
     return pw;
+  }
+  /* one rendered cycle, small, for the display */
+  wtCycle(op,N){
+    N=N||96;
+    const HA=wtHarm(clamp(Math.round(op.wta||0),0,9),clamp(op.posa||0,0,1));
+    const HB=wtHarm(clamp(Math.round(op.wtb??3),0,9),clamp(op.posb||0,0,1));
+    const m=clamp(op.mrph||0,0,1), fo=clamp(op.fold||0,0,1);
+    const nH=Math.max(HA.length,HB.length), y=new Float32Array(N);
+    for(let k=0;k<nH;k++){const amp=(HA[k]||0)*(1-m)+(HB[k]||0)*m;
+      if(Math.abs(amp)<1e-4)continue;
+      for(let n2=0;n2<N;n2++)y[n2]+=amp*Math.sin(2*Math.PI*(k+1)*n2/N);}
+    let mx=0; for(let n2=0;n2<N;n2++)mx=Math.max(mx,Math.abs(y[n2]));
+    if(mx>0)for(let n2=0;n2<N;n2++)y[n2]/=mx;
+    if(fo>0.005){const tri=x=>{let t=fmod(x+1,4);if(t<0)t+=4;return t<2?t-1:3-t;};
+      const g2=1+fo*fo*2.2;
+      for(let n2=0;n2<N;n2++)y[n2]=tri(y[n2]*g2);
+      mx=0; for(let n2=0;n2<N;n2++)mx=Math.max(mx,Math.abs(y[n2]));
+      if(mx>0)for(let n2=0;n2<N;n2++)y[n2]/=mx;}
+    return y;
   }
   /* the live half: a ctrl mod or a knob under a sounding note reshapes what is
      already playing — setPeriodicWave is live, so it is one cached swap */
@@ -5336,7 +5395,7 @@ class Engine{
     if(rack==='fx')return this.fxLive(pi,si,key,v);
     if(rack==='mod'&&(key==='rate'||key==='amt'||key==='rdiv'))return this.modLive(pi,si,key,v);
     if(rack==='osc'&&key==='pw')return this.pwLive(pi,si,v);
-    if(rack==='osc'&&(key==='mrph'||key==='fold'||key==='sym'||key==='frac'))
+    if(rack==='osc'&&(key==='mrph'||key==='fold'||key==='posa'||key==='posb'))
       return this.wtLive(pi,si,key,v);
     return this.ovPut(pi,rack,si,key,v);
   }
@@ -6623,7 +6682,7 @@ function writeParam(pi,mi,si,px,v){
   const spec=paramsFor(mi,slot)[px]; if(!spec)return;
   setV(holder,mi,si,spec,v);      // layer voice-modules read fresh on the next note — no rebuild
   if(M.id==='osc'){engine.oscLive(pi,spec.key);   // …except OSC, which retunes what's sounding
-    if(['mrph','fold','sym','frac','wta','wtb'].includes(spec.key))engine.wtLive(pi,si,spec.key);}
+    if(['mrph','fold','posa','posb','wta','wtb'].includes(spec.key))engine.wtLive(pi,si,spec.key);}
   dirtySave=true;
 }
 /* value change entry point: address = (module, slot(-1=flat), param) */
@@ -8396,9 +8455,20 @@ function codeAction(d,m){
   flash('code '+spec.lbl+' = '+fmtVal(spec,pre.cp[i]));
   dirty=true; dirtySave=true;
 }
+const isWtCh=pi=>engineOf(S.presets[pi])==='wt';
+function wtAction(d,m){
+  const pre=S.presets[S.editSnd], o=pre.osc[0];
+  const spec=WTF[clamp(S.curParam,0,WTF.length-1)];
+  setV(pre,MODULES.findIndex(x=>x&&x.id==='osc'),0,spec,
+    adjust(spec,getV(pre,MODULES.findIndex(x=>x&&x.id==='osc'),0,spec),d,m));
+  engine.wtLive(S.editSnd,0,spec.key);
+  flash('wt '+spec.lbl+' = '+fmtVal(spec,getV(pre,MODULES.findIndex(x=>x&&x.id==='osc'),0,spec)));
+  dirty=true; dirtySave=true;
+}
 function audAction(d,m){
   if(isCodeCh(S.editSnd)){codeAction(d,m);return;}
   if(isGranCh(S.editSnd)){granAction(d,m);return;}
+  if(isWtCh(S.editSnd)){wtAction(d,m);return;}
   const pre=S.presets[S.editSnd], spec=AUDF[clamp(S.curParam,0,AUDF.length-1)];
   pre.au[spec.key]=adjust(spec,pre.au[spec.key]??0,d,m);
   flash('audio '+spec.lbl+' = '+fmtVal(spec,pre.au[spec.key]));
@@ -8585,14 +8655,14 @@ function flatView(mi){
      code cursor while the highlight followed the slot cursor: arrows moved the
      ▸ and ↑ rewrote whatever index the code cursor happened to hold, usually
      0, which is the waveform enum. */
-  return S.layer!==3&&M.id==='osc'&&(isCodeCh(S.editSnd)||isAudioCh(S.editSnd));
+  return S.layer!==3&&M.id==='osc'&&isPageCh(S.editSnd);
 }
 /* True when the OSC view on screen is the code/audio field list rather than the
    operator rack. Those fields are edited by codeAction/audAction against their
    OWN spec lists, so anything that resolves a param against OSC_P must refuse
    here rather than write an operator nobody can see. */
-const oscFieldView=mi=>MODULES[mi]&&MODULES[mi].id==='osc'&&S.layer!==3&&
-  (isCodeCh(S.editSnd)||isAudioCh(S.editSnd));
+const isPageCh=pi=>isCodeCh(pi)||isAudioCh(pi)||isGranCh(pi)||isWtCh(pi);
+const oscFieldView=mi=>MODULES[mi]&&MODULES[mi].id==='osc'&&S.layer!==3&&isPageCh(S.editSnd);
 /* Resolved (mi,si,px) for the focused parameter. This used to fork on
    S.layer===3, which meant layer 2 addressed slot racks with S.curParam — a
    cursor the layer-2 navigation pinned to 0. Param 0 of every slot rack is its
@@ -12402,6 +12472,7 @@ const onKeyDown=e=>{
         if(M2.id==='osc'&&isCodeCh(S.editSnd))return CODEF().length;
         if(M2.id==='osc'&&isAudioCh(S.editSnd))return AUDF.length;
         if(M2.id==='osc'&&isGranCh(S.editSnd))return GRANF.length;
+        if(M2.id==='osc'&&isWtCh(S.editSnd))return WTF.length;
         if(M2.slot){const base=paramsFor(mi2,modHolder(pre2,M2.id)[M2.id][S.curSlot]).length;
           return base+(freeSlotHere(pre2)!=null&&mi2===S.curMod?1:0);}
         return 1;
@@ -12537,7 +12608,8 @@ const onKeyDown=e=>{
     }
     if(S.layer===2&&MODULES[S.curMod].id==='osc'&&isCodeCh(S.editSnd)){
       pushUndo('code'); codeAction(d,kmult(e)); return;}
-    if(S.layer===2&&MODULES[S.curMod].id==='osc'&&isAudioCh(S.editSnd)){
+    if(S.layer===2&&MODULES[S.curMod].id==='osc'&&
+       (isAudioCh(S.editSnd)||isGranCh(S.editSnd)||isWtCh(S.editSnd))){
       pushUndo('audio'); audAction(d,kmult(e)); return;}
     if(S.layer>=2&&MODULES[S.curMod].prs){
       if(S.layer===3){                    // explorer: move + load
@@ -13636,8 +13708,9 @@ function sectionChips(pre,defs){
       /* On a procedural or audio channel the OSC rack is not nine oscillators —
          it is the one model's parameters. Nine slots offered eight things that
          do not exist. */
-      if(M.id==='osc'&&(isCodeCh(S.editSnd)||isAudioCh(S.editSnd))){
-        items.push({mi,si:0,M,label:isCodeCh(S.editSnd)?(pre.pmodel||'proc'):'clip'});
+      if(M.id==='osc'&&isPageCh(S.editSnd)){
+        items.push({mi,si:0,M,label:isCodeCh(S.editSnd)?(pre.pmodel||'proc')
+          :isGranCh(S.editSnd)?'grain':isWtCh(S.editSnd)?'table':'clip'});
         continue;
       }
       if(M.flat){ items.push({mi,si:-1,M,label:M.name.toLowerCase()}); continue; }
@@ -14742,6 +14815,30 @@ function renderSnd(L,pos){
     L.push('   '+sp('d','modal = struck bars/tines · waveguide = recursion the rack cannot express'));
     L.push('   '+sp('d','←→ pick a param · ↑↓ change it while it plays · cmd+E exports the session with the code'));
   }
+  else if(M.id==='osc'&&isWtCh(S.editSnd)){
+    /* the wavetable page: six dials, no wave/mode/dest/level noise — the
+       engine IS the table. The cycle you have dialled is drawn beside them. */
+    const o=pre.osc[0];
+    const y=engine.wtCycle(o,72);
+    let path='';
+    for(let k=0;k<y.length;k++)
+      path+=(k?'L':'M')+(k*2)+','+(14-y[k]*12).toFixed(1);
+    L.push('  '+sp('a','\u223f WAVETABLE  ')+
+      sp('d',WTNAMES[Math.round(o.wta??0)]+' \u2194 '+WTNAMES[Math.round(o.wtb??3)]));
+    rawAt.add(L.length);
+    L.push('   <svg class="wtc" width="'+(y.length*2)+'" height="28"><path d="'+path+'"/></svg>');
+    let lr='   ', vr='   ';
+    const oi2=MODULES.findIndex(x=>x&&x.id==='osc');
+    WTF.forEach((pspec,i)=>{
+      const foc=i===S.curParam;
+      const v=fmtVal(pspec,getV(pre,oi2,0,pspec));
+      lr+=(foc?spH('a','\u25b8'+pad(pspec.lbl,7),'cp',i):spH('d',' '+pad(pspec.lbl,7),'cp',i))+' ';
+      vr+=(foc?spH('i',' '+pad(v,7),'cp',i):spH('v',' '+pad(v,7),'cp',i))+' ';
+    });
+    L.push(lr); L.push(vr);
+    L.push('');
+    L.push('   '+sp('d','pos sweeps the frames INSIDE a table \u00b7 morph blends the two tables \u00b7 all four + fold are live mod destinations'));
+  }
   else if(M.id==='osc'&&isGranCh(S.editSnd)){
     const buf=engine.granBuf&&engine.granBuf[S.editSnd];
     L.push('  '+sp('a','\u2591 GRANULAR  ')+(buf
@@ -15316,7 +15413,7 @@ function renderHelp(L){
     ['audio: letters','JUMP POINTS: the clip divides into 16ths of the loop and the letters, in note order, each hold one. Held = play from that cue; released = the cycle resumes in phase. While held: ←→ nudge the cue, ↑↓ pitch, ⇧↑↓ volume, ⌥←→ pan — each cue is its own little take'],
     ['engine (PRST row)','a channel IS one of six engines — Kit · Synth · Wavetable · Procedural · Audio · Grain — cycled on the first field of the preset page. Wavetable is the synth rack with op 1 committed to the table; leaving it hands the op its old wave back'],
     ['granular (⌥-drop)','⌥-DROP an audio file onto a channel and it becomes a GRANULAR cloud: letters play it at pitch, pos/spray choose where grains come from, size/dens how much cloud, jit/shape/rev/width how loose, scan 0 = FREEZE. pos, size, dens and pitch are live mod destinations'],
-    ['wt (osc wave)','the WAVETABLE: two tables from a bank of ten, MORPH between them, then the manglers — FOLD wraps the wave, SYM pushes it off-centre into the fold, FRAC folds the fold. Morph and the manglers are live mod destinations, band-limited whatever you do'],
+    ['wavetable engine','each table is a STACK OF FRAMES and pos sweeps them; two tables, morph blends, fold wraps — gently at first, it is squared. pos a, pos b, morph and fold are live mod destinations, band-limited whatever you do. Six dials, nothing else'],
     ['audio: params','pitch has FREE (tape: speed and pitch together) and SYNC (timing kept, pitch alone via the shifter) · chan picks stereo/left/right · start/end crop · input picks mic or resample · rec obeys ⇧o overdub/overwrite'],
     ['⌥p ⌥c','PHASE (chorus·flanger·phaser·trem) and COMP (comp·limit·clip·duck) — each family is ONE effect with a `kind`, the way filt holds its filters'],
     ['⌥d (delay)','the DELAY is a family now: delay · dub · tape echo · resonator · wobble · roll — the kinds differ in what lives in the feedback loop'],
