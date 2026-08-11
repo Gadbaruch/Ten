@@ -1806,7 +1806,9 @@ let SELALL=null;               // the channel whose notes cmd+A selected, or nul
    press one and the channel you are on toggles, and while you keep holding it
    — or latch it — the digits do it to whichever channel you name. That also
    hands ⇧+digit back, which is what the channel SELECTION needs. */
-const MSCOPE={KeyS:'solo',KeyM:'mute'};
+/* ⌥- silences, ⌥= insists — the two live next to the volume keys they
+   qualify, and the letters they sat on are notes now. */
+const MSCOPE={Minus:'mute',Equal:'solo'};
 /* channels picked out for something that acts on several at once */
 const CHSEL=new Set();
 /* WHO AN ACTION IS FOR. Everything that does something to a channel asks this
@@ -2090,7 +2092,10 @@ function loopOps(e,c,lp){
        different intention wearing the same key: sometimes you want room to
        play something new into, sometimes you want the same bar twice. The copy
        moved to cmd+D, and this is now just how long the loop is. */
-    if(d>0){if(lp.count*2>256){flash('loop already at the maximum');return true;} lp.double(false);}
+    /* the notes come along. Growing the loop empty and putting the copy on
+       another key (⌘D) was a mistake in practice: the gesture people reach
+       for is "give me a second bar OF THIS", and an empty half is a surprise. */
+    if(d>0){if(lp.count*2>256){flash('loop already at the maximum');return true;} lp.double(true);}
     else lp.halve();
     if(S.layer===1)lp.auto=false;
     flash('loop '+(lp.count%1?lp.count.toFixed(2):lp.count)+'×'+UNIT_NAMES[lp.unit]);
@@ -10696,33 +10701,10 @@ const onKeyDown=e=>{
      rubber band: the thing you want to move is almost always the whole take,
      and the step it moves by is the grid this channel already snaps to — so
      the nudge lands where a played note would have. */
-  if(cmdOf(e)&&e.code==='KeyA'&&!e.repeat&&S.layer>=1){
-    e.preventDefault();
-    const ch=focusCh(), lane=curLoop();
-    if(!lane||!lane.events.length){flash('nothing on ch '+ch+' to select');return;}
-    SELALL=SELALL===ch?null:ch;
-    flash(SELALL==null?'selection cleared'
-      :lane.events.length+' notes on ch '+ch+' — ↑↓ nudges by '+gridName(gridOf(lane))+' · esc clears');
-    dirty=true; return;
-  }
   /* ⌘⌥⇧K — every modifier on the board, because folding four channels into one
      rewrites four channels and should be hard to do by accident */
   if(cmdOf(e)&&e.altKey&&e.shiftKey&&e.code==='KeyK'&&!e.repeat&&S.layer>=1){
     e.preventDefault(); mergeToKit(); return;
-  }
-  /* the copy half of what tab+↑ used to do, on its own key: the loop grows AND
-     what was in it plays twice, which is how you get a second bar to vary */
-  if(cmdOf(e)&&e.code==='KeyD'&&!e.repeat&&S.layer>=1){
-    e.preventDefault();
-    const tg=chTargets(), pat=S.patterns[S.editPat];
-    pushUndo('duplicate');
-    let n=0, last=null;
-    tg.forEach(i=>{const l=pat.lanes[i];
-      if(!l||l.count*2>256)return;
-      l.double(true); l.auto=false; last=l; n++;});
-    if(!n){flash('loop already at the maximum');return;}
-    chSay('⧉ doubled — '+(last.count%1?last.count.toFixed(2):last.count)+'×'+UNIT_NAMES[last.unit],n);
-    dirty=true; dirtySave=true; return;
   }
 
   /* ⌥m / ⌥s — mute and solo, on a letter that says which */
@@ -10941,10 +10923,39 @@ const onKeyDown=e=>{
   /* +/- add and remove a rack slot wherever you are in the rack. They were
      free: the '[ ] \\ - =' loop bindings moved onto tab+arrows a while ago and
      nothing took the keys back. */
-  if((c==='Equal'||c==='Minus')&&S.layer>=2&&!e.metaKey&&!e.ctrlKey&&!e.repeat){
+  if((c==='Equal'||c==='Minus')&&cmdOf(e)&&S.layer>=2&&!e.repeat){
     e.preventDefault();
     if(c==='Equal')addSlotHere(); else removeSlotHere();
     return;
+  }
+  /* - and = ARE THE FADER, [ and ] ARE THE PAN — everywhere, every layer, on
+     the selection when there is one. ⇧ is the coarse step; ⌥ on the brackets
+     is the fine one, and on -/= option already means mute and solo, which is
+     why volume has two step sizes where pan has three. */
+  if((c==='Equal'||c==='Minus')&&!e.metaKey&&!altOf(e)&&!HOLD.tab&&!PICK&&!DPICK){
+    e.preventDefault();
+    const d=c==='Equal'?1:-1, st=rs(e)||e.shiftKey?10:1;
+    const tg=chTargets();
+    pushUndo('volume');
+    tg.forEach(i=>{const pc=S.presets[i];
+      pc.mix.lvl=+fToVol(clamp(volToF(pc.mix.lvl)+d*st,0,100)).toFixed(4);
+      engine.refresh(i);});
+    const p0=S.presets[tg[0]];
+    chSay(p0.name+' vol '+volToF(p0.mix.lvl).toFixed(0),tg.length);
+    dirty=true; dirtySave=true; return;
+  }
+  if((c==='BracketLeft'||c==='BracketRight')&&!e.metaKey&&!PICK&&!DPICK){
+    e.preventDefault();
+    const d=c==='BracketRight'?1:-1;
+    const st=rs(e)||e.shiftKey?0.25:altOf(e)?0.01:0.05;
+    const tg=chTargets();
+    pushUndo('pan');
+    tg.forEach(i=>{const pc=S.presets[i];
+      pc.mix.pan=clamp(Math.round((pc.mix.pan+d*st)*100)/100,-1,1);
+      engine.refresh(i);});
+    const p0=S.presets[tg[0]];
+    chSay(p0.name+' pan '+panCh(p0.mix.pan).trim(),tg.length);
+    dirty=true; dirtySave=true; return;
   }
   /* R — ROUTE SOMETHING HERE. The mod rack is the right place for modulators
      to LIVE (one LFO can drive eight destinations; that does not fit under a
@@ -11004,7 +11015,7 @@ const onKeyDown=e=>{
      bar is a shape next to the notes it is opening under.
      Backslash because it was one of five keys left, and because it sits under
      the brackets that walk between the knobs. */
-  if(c==='Backslash'&&!e.repeat&&!e.metaKey&&!e.ctrlKey&&!PICK&&!DPICK){
+  if(c==='Backslash'&&!e.repeat&&!e.metaKey&&!altOf(e)&&!PICK&&!DPICK){
     e.preventDefault();
     if(S.aView!==null){S.aView=null; flash('automation hidden'); dirty=true; return;}
     const pre=S.presets[S.curPreset], ls=autoLanes(pre);
@@ -11013,13 +11024,17 @@ const onKeyDown=e=>{
                    :'automation — nothing recorded on '+pre.name+' yet');
     dirty=true; return;
   }
-  if((c==='BracketLeft'||c==='BracketRight')&&!e.metaKey&&!e.ctrlKey&&!PICK&&!DPICK){
+  /* ⌥\ walks the automated knobs — one key past the overlay toggle it
+     belongs to, forward normally and backward with ⇧, because the brackets
+     it lived on are the pan now */
+  if(c==='Backslash'&&altOf(e)&&!e.metaKey&&!PICK&&!DPICK){
     e.preventDefault();
+    if(e.repeat)return;
     if(S.aView===null){flash('\\ shows the automation first');return;}
     const pre=S.presets[S.curPreset], ls=autoLanes(pre);
     if(ls.length<2){flash(ls.length?'only one knob is automated here':'nothing recorded on '+pre.name);return;}
     const at=Math.max(0,aIndexOf(ls,S.aAddr));
-    const nx=ls[(at+(c==='BracketRight'?1:ls.length-1))%ls.length];
+    const nx=ls[(at+(rs(e)||e.shiftKey?ls.length-1:1))%ls.length];
     S.aAddr=nx.k; dirty=true;
     /* stepping between knobs also TAKES YOU THERE — the parameter you are
        looking at is the parameter your arrows are on, or the overlay is a
@@ -11072,18 +11087,15 @@ const onKeyDown=e=>{
     if(!rs(e)&&!djLatch[k]&&S.arr.state==='rec'&&T.playing)
       djRecStart[k]=posNow();                                     // record the fx move into the arrangement
     djPress(k,KM.sl); return;}
-  if(c==='Comma'||c==='Period'){
+  /* , and . — the octave, right under the note rows. ⇧ makes them the
+     keyboard's velocity instead: how hard, next to how high. */
+  if((c==='Comma'||c==='Period')&&!e.metaKey&&!altOf(e)){
     const d=c==='Period'?1:-1;
-    if(S.layer===1&&!rs(e)){          // quick channel volume in the pattern layer
-      const p=S.presets[S.curPreset];
-      p.mix.lvl=+fToVol(clamp(volToF(p.mix.lvl)+d*2,0,100)).toFixed(4);
-      engine.refresh(S.curPreset);
-      flash(p.name+' vol '+volToF(p.mix.lvl).toFixed(0));
-      dirty=true; dirtySave=true; return;
-    }
-    setBpm(T.bpm+d*(rs(e)?10:1)); return;
+    if(e.shiftKey){EXP.bump(d*0.05);
+      flash('keyboard vel '+Math.round(clamp(CFG.kvel??0.9,0.02,1)*127)); return;}
+    if(!e.repeat){S.oct=clamp(S.oct+d,-3,3); dirty=true;} return;
   }
-  if(c==='KeyB'&&ctlOf(e)&&!HOLD.q){
+  if(c==='KeyM'&&ctlOf(e)&&!HOLD.q){
     if(!e.repeat){HOLD.m=true; HOLD.mUsed=false;}
     return;}
   if(c==='KeyT'&&S.layer===0&&!e.repeat){        // t = timeline on/off (focus mode)
@@ -11681,17 +11693,13 @@ const onKeyDown=e=>{
       dirty=true; dirtySave=true; return;}
     S.oct=clamp(S.oct+d,-3,3); dirty=true; return;}
 
-  if(c==='KeyZ'&&ctlOf(e)&&!e.repeat){S.oct=clamp(S.oct-1,-3,3);dirty=true;return;}
-  if(c==='KeyX'&&ctlOf(e)&&!e.repeat){S.oct=clamp(S.oct+1,-3,3);dirty=true;return;}
   /* c / v = velocity down / up for the laptop keyboard, the way z / x move the
      octave. A real velocity source (midi, and later the hall-effect board)
      overrides this per note; this is what you play with until then. */
-  if(c==='KeyC'&&ctlOf(e)&&S.layer>0&&!e.repeat&&HOLD.dig<0){
-    e.preventDefault(); HOLD.c=true; HOLD.cUsed=false; return;}
+
   if(c==='KeyN'&&ctlOf(e)&&S.layer>0&&!e.repeat&&HOLD.dig<0){
     e.preventDefault(); HOLD.n=true; HOLD.nUsed=false; return;}
-  if(c==='KeyV'&&ctlOf(e)&&S.layer>0&&!e.repeat&&HOLD.dig<0){
-    e.preventDefault(); HOLD.v=true; HOLD.vUsed=false; return;}
+
 
   /* the master's own pads: the dj row, where you are rather than off in a
      layer you had to leave the mix to reach */
@@ -11940,7 +11948,7 @@ document.addEventListener('keyup',e=>{
       dirty=true;}
     return;
   }
-  if(c==='KeyB'&&HOLD.m){
+  if(c==='KeyM'&&HOLD.m){
     const used=HOLD.mUsed; HOLD.m=false; HOLD.mUsed=false;
     if(!used){
       if(rs(e)){                                   // right-shift+m tapped = tap tempo
@@ -14260,9 +14268,13 @@ function renderHelp(L){
 
     ['— playing —',''],
     ['every letter','a note, and nothing else — ever, in every view. FULL (the default): all 26 letters low to high, bottom row first; a scale on = one key per scale degree, so nothing repeats. PIANO: home row white keys, row above black'],
-    ['⌥z / ⌥x','keyboard register, down / up — one global octave'],
-    ['tap ⌥c / tap ⌥v','keyboard velocity down / up (⇧ = the coarse step)'],
-    ['⌥s / ⌥m','SOLO / MUTE the channel you are on, and while you hold it the digits do it to any other. Latch it and the digits keep doing it until you tap latch or press ⌥s again'],
+    [', / .','keyboard register, down / up — one global octave'],
+    ['- / =','channel VOLUME down / up (⇧ = coarse) — on the selection when there is one'],
+    ['[ / ]','channel PAN left / right (⇧ = coarse · ⌥ = fine) — same selection rule'],
+    ['⌘- / ⌘=','remove / add a rack slot (they were bare - and = before volume took those)'],
+    ['⌥\\','next automated knob (⇧⌥\\ = previous) — \\ alone shows and hides the curves'],
+    ['⇧, / ⇧.','keyboard velocity down / up — how hard, next to how high'],
+    ['⌥= / ⌥-','SOLO / INSIST and MUTE / SILENCE the channel you are on — next to the volume keys they qualify. While held, the digits do it to any other channel; latch keeps the digits doing it'],
     ['','they are plain toggles: press again for off. Asking for one withdraws the other, and the channel you touched becomes the one you are on'],
     ['⇧1-9','pick channels OUT — a selection, not a solo · ⇧←→ drags it along with the cursor · esc clears it'],
     ['','WITH A SELECTION, EVERYTHING IS BULK. ⌥s/⌥m · hold c volume and pan · hold v velocity · hold n pitch · hold ` instrument · hold q grid · hold tab loop · / rolls them all · ⌘C/⌘X/⌘V as a block · ⌘D duplicate · n+⌫ and ⇧⌫ clear · c+⌫ resets the mix. Same keys, more than one subject'],
@@ -14299,7 +14311,7 @@ function renderHelp(L){
     ['⌘⇧E','KEEP THE SET IN A FILE. Pick one once and every change is written into it as you work — the ordinary autosave only ever reaches localStorage, which belongs to the browser profile and goes when the profile does. The header shows ◆ file while it is writing. ⌘E still exports a one-off copy, and dragging a .json back in loads it'],
     ['hold ⌥q + m','MONITOR: grid or live. On grid you hear yourself snapped to the beat — the feel of the thing, but a roll faster than the grid puts two hits on one step and a mono channel can only sound one, so notes thin out. On live you hear every hit as you played it and the grid still owns what records. Play rolls on live, or give the channel a finer grid'],
     ['tap q','toggle quantize. Only the TAP toggles: choosing a grid leaves the switch alone'],
-    ['hold ⌥b','TEMPO: ↑↓ bpm (⇧ ×10) · tap ⌥b = click on/off · ⇧⌥b tap = tap tempo — b for beat, and m stays mute'],
+    ['hold ⌥m','TEMPO: ↑↓ bpm (⇧ ×10) · tap ⌥m = click on/off · ⇧⌥m tap = tap tempo'],
     ['hold c','CHANNEL: ↑↓ volume (⇧ fine) · ←→ pan · c+⌫ resets both'],
     ['hold v','VELOCITY: ↑↓ this channel’s offset · ⇧↑↓ the keyboard’s own velocity'],
     ['hold n','NOTES: ↑↓ octave · ←→ semitone — one number, ±36 semitones · n+⌫ clears the lane'],
