@@ -1791,6 +1791,21 @@ const OPTRACK={
   KeyU:{id:'ply',typ:9,name:'euc',
         seed:{p1:4,p2:16,p3:0},
         dial:{p:'p1',n:()=>16,lbl:v=>(v+1)+'/16 hits'}},
+  /* NAV SCOPES: the letter takes you to the thing (making one if the rack has
+     none) and the strip's own keys edit it — ↑↓ value, ←→ params. Digits jump
+     between the instances. The scope adds nothing the strip cannot do; it is
+     a way of ARRIVING. */
+  KeyD:{id:'fx',name:'delay',nav:1,
+        find:rk=>rk.map((x,i)=>x&&x.typ===1&&!x.off?i:-1).filter(i=>i>=0),
+        make:sl=>Object.assign(sl,{typ:1,p1:0.3,p2:0.35,p3:1,p5:0.5,mix:fToVol(40)}),
+        unmake:sl=>Object.assign(sl,{typ:0})},
+  KeyE:{id:'mod',name:'env',nav:1,
+        find:rk=>rk.map((x,i)=>x&&x.src===1&&!x.off?i:-1).filter(i=>i>=0),
+        make:(sl,i)=>Object.assign(sl,mkMod(i),{src:1,off:false}),
+        unmake:(sl,i)=>Object.assign(sl,mkMod(i)),
+        free:rk=>rk.findIndex(x=>!x||!x.src),
+        /* ⌥e + a / d / s / r — the envelope stages by their own letters */
+        jump:{KeyA:'a',KeyD:'d',KeyS:'s',KeyR:'r'}},
 };
 const ALTSUS=new Set();     // scopes riding on a held ⌥ after their letter went up
 const HOLD={tab:false,tabAt:0,tabUsed:false,tabLatch:false,m:false,mUsed:false,
@@ -5992,6 +6007,7 @@ const engine=new Engine();
 /* UI write: routes to the selected stack layer for voice modules, else the channel */
 function writeParam(pi,mi,si,px,v){
   const p=S.presets[pi], M=MODULES[mi]; if(!M||!M.id||M.prs)return;
+  PSLOT[pslotKey(pi,mi,si)]=px;          // the param you touched LAST is the slot's memory
   const holder=modHolder(p,M.id);
   if(holder===p){applyParam(pi,mi,si,px,v);return;}
   const slot=M.flat?null:holder[M.id][si];
@@ -10387,6 +10403,18 @@ const ARRP=[
 const focusCh=()=>S.mSel?0:(S.layer>=2?S.editSnd:S.curPreset);
 /* the param the cursor was on, per channel+rack+slot */
 const PSLOT={};
+const pslotKey=(pi,mi,si)=>pi+'|'+(MODULES[mi]&&MODULES[mi].id)+'|'+si;
+/* leave the current slot remembering where the cursor was, land on the next
+   one where it was LAST EDITED — every jump route goes through here so the
+   memory is one behavior, not four almost-alike ones */
+function gotoSlot(si){
+  PSLOT[pslotKey(S.editSnd,S.curMod,S.curSlot)]=S.slotParam;
+  S.curSlot=si;
+  const back=PSLOT[pslotKey(S.editSnd,S.curMod,si)];
+  const sl=modHolder(S.presets[S.editSnd],MODULES[S.curMod].id)[MODULES[S.curMod].id][si];
+  const n=paramsFor(S.curMod,sl).length;
+  if(back!=null&&back<n)S.slotParam=back;
+}
 const curHolder=()=>S.patterns[S.editPat];
 const curLoop=()=>S.patterns[S.editPat].lanes[focusCh()];
 const inEdit=()=>curHolder().state==='edit';
@@ -10778,6 +10806,29 @@ const onKeyDown=e=>{
       dirty=true; return;
     }
     const ch=focusCh(), key=optKey(ch,c), T2=OPTRACK[c];
+    if(T2.nav){
+      const pre=S.presets[ch], rk=modHolder(pre,T2.id)[T2.id];
+      let list=T2.find(rk);
+      if(!list.length){
+        const free=T2.free?T2.free(rk):rk.findIndex(x=>!x||!x.typ);
+        if(free<0){flash(T2.id.toUpperCase()+' rack is full');return;}
+        pushUndo(T2.name);
+        T2.make(rk[free],free);
+        engine.rebuildRack(ch); engine.refresh(ch);
+        list=[free];
+        flash(T2.name+' made on ch '+ch);
+      }
+      HOLD.opt={c,ch,key,nav:1}; HOLD.optUsed=false; HOLD.optLatch=KM.sl;
+      if(KM.sl)LATCH.used=true;
+      if(S.layer>=2){
+        HOLD.opt.prev={curMod:S.curMod,curSlot:S.curSlot,slotParam:S.slotParam};
+        S.editSnd=ch;
+        S.curMod=MODULES.findIndex(M2=>M2&&M2.id===T2.id);
+        gotoSlot(list[0]);
+        if(list.length>1)flash(T2.name+' — '+list.length+' of them; digits jump between');
+      }
+      dirty=true; return;
+    }
     const had=!!optSlot(ch,c,false)&&!optSlot(ch,c,false).off;
     if(!had)pushUndo(T2.name);
     if(optSet(key,true)){
@@ -10806,7 +10857,40 @@ const onKeyDown=e=>{
   }
   /* while it is held the keyboard is that rack's control surface */
   if(HOLD.opt&&!e.metaKey&&!e.ctrlKey){
-    const {c:oc,ch,key}=HOLD.opt, T2=OPTRACK[oc], sl=optSlot(ch,oc,false);
+    const {c:oc,ch,key}=HOLD.opt, T2=OPTRACK[oc];
+    if(HOLD.opt.nav){
+      const pre=S.presets[ch], rk=modHolder(pre,T2.id)[T2.id];
+      const list=T2.find(rk);
+      /* digits: the nth instance */
+      if(/^Digit\d$/.test(e.code)&&!e.repeat){
+        e.preventDefault(); HOLD.optUsed=true;
+        const n=+e.code.slice(5);
+        if(n>=1&&n<=list.length){ if(S.layer>=2)gotoSlot(list[n-1]);
+          flash(T2.name+' '+n+'/'+list.length); dirty=true; }
+        else flash(T2.name+': '+list.length+' instance'+(list.length>1?'s':''));
+        return;
+      }
+      /* the envelope stages by their own letters */
+      if(T2.jump&&T2.jump[e.code]&&!e.repeat&&S.layer>=2){
+        e.preventDefault(); HOLD.optUsed=true;
+        const sl2=rk[S.curSlot], specs=paramsFor(S.curMod,sl2);
+        const px=specs.findIndex(x=>x.key===T2.jump[e.code]);
+        if(px>=0){S.slotParam=px; flash(T2.name+' → '+specs[px].lbl+' '+fmtVal(specs[px],getV(pre,S.curMod,S.curSlot,specs[px]))); dirty=true;}
+        return;
+      }
+      if(e.code==='Backspace'&&!e.repeat&&!HOLD.optLatched){
+        e.preventDefault(); HOLD.optUsed=true;
+        const si2=(S.layer>=2&&list.includes(S.curSlot))?S.curSlot:list[0];
+        if(si2!=null&&rk[si2]){pushUndo('remove '+T2.name);
+          T2.unmake(rk[si2],si2);
+          engine.rebuildRack(ch); engine.refresh(ch);
+          flash(T2.name+' removed'); dirty=true; dirtySave=true;}
+        return;
+      }
+      /* everything else — arrows, letters, space — falls THROUGH: the cursor
+         is already on the thing, so the strip's own editing is the editor */
+    }
+    const sl=HOLD.opt.nav?null:optSlot(ch,oc,false);
     if(sl){
       const say=(w,pKey,nv)=>{HOLD.optUsed=true; e.preventDefault();
         optWrite(ch,oc,pKey,nv); flash(T2.name+' '+w);
@@ -11023,7 +11107,7 @@ const onKeyDown=e=>{
      R is the only letter in the whole instrument that was still free — every
      other one plays a note or is already bound. Spent here because this is the
      gesture that gets used a hundred times a session. */
-  if(c==='KeyR'&&ctlOf(e)&&!e.repeat&&S.layer>=2&&!PICK&&!DPICK){
+  if(c==='KeyM'&&ctlOf(e)&&!e.shiftKey&&!HOLD.q&&!e.repeat&&S.layer>=2&&!PICK&&!DPICK){
     e.preventDefault();
     const pre=S.presets[S.editSnd], M=MODULES[S.curMod];
     if(!M||!M.id||M.prs){flash('nothing to modulate here');return;}
@@ -11149,8 +11233,20 @@ const onKeyDown=e=>{
       flash('keyboard vel '+Math.round(clamp(CFG.kvel??0.9,0.02,1)*127)); return;}
     if(!e.repeat){S.oct=clamp(S.oct+d,-3,3); dirty=true;} return;
   }
-  if(c==='KeyM'&&ctlOf(e)&&!HOLD.q){
+  /* ⇧⌥ IS THE GLOBAL LAYER — both modifiers means the whole instrument.
+     ⇧⌥m: hold + ↑↓ = tempo, tap = the click. ⇧⌥b taps = tap tempo. ⌥ alone
+     stays channel business, ⇧ alone stays latch and the coarse step. */
+  if(c==='KeyM'&&ctlOf(e)&&e.shiftKey&&!HOLD.q){
     if(!e.repeat){HOLD.m=true; HOLD.mUsed=false;}
+    return;}
+  if(c==='KeyB'&&ctlOf(e)&&e.shiftKey&&!e.repeat){   // tap tempo, on repeated taps
+    const n2=performance.now();
+    taps=taps.filter(t2=>n2-t2<3000); taps.push(n2);
+    if(taps.length>=2){
+      const iv=(taps[taps.length-1]-taps[0])/(taps.length-1);
+      setBpm(Math.round(60000/iv));
+      flash('tap → '+T.bpm+'bpm ('+taps.length+')');
+    }else flash('tap…');
     return;}
   if(c==='KeyT'&&S.layer===0&&!e.repeat){        // t = timeline on/off (focus mode)
     S.arrOn=S.arrOn===false?true:false;
@@ -11432,7 +11528,7 @@ const onKeyDown=e=>{
         if(M.id==='osc')engine.oscLive(S.editSnd,'off');   // mute the operator now, not next note
         flash(M.name+' slot '+((si+1)%10)+(sl.off?' BYPASSED':' back on'));
         dirtySave=true;
-      }else S.curSlot=si;      // hold the param index, as shift+←→ does; curAddr clamps
+      }else gotoSlot(si);      // and land on the param you last edited there
     }
     dirty=true; return;
   }
@@ -11628,17 +11724,17 @@ const onKeyDown=e=>{
       }
       const pre=S.presets[S.editSnd], M=MODULES[S.curMod], hold=modHolder(pre,M.id);
       const specs=paramsFor(S.curMod,hold[M.id][S.curSlot]);   // same holder the render uses
+      PSLOT[pslotKey(S.editSnd,S.curMod,S.curSlot)]=S.slotParam;
       const np=S.slotParam+d;
       if(altOf(e)||np<0||np>=specs.length){  // ⌥, or ran off the end: next slot, same strip
-        /* WHERE YOU WERE IN THE SLOT YOU ARE LEAVING. Jumping out and back
-           used to dump you on the first param every time, so checking one
-           slot against another meant walking the row again on every trip. */
         PSLOT[S.editSnd+'|'+M.id+'|'+S.curSlot]=S.slotParam;
         S.curSlot=fmod(S.curSlot+d,10);
         const s2=paramsFor(S.curMod,hold[M.id][S.curSlot]);
         const back=PSLOT[S.editSnd+'|'+M.id+'|'+S.curSlot];
-        S.slotParam=(altOf(e)&&back!=null&&back<s2.length)
-          ? back                                   // ⌥←→ is the jump: put me back
+        /* a JUMP lands where you last edited; only FLOWING through (running
+           off the row's end) keeps the walking order, because mid-walk you are
+           reading every param in sequence, not returning to one */
+        S.slotParam=(altOf(e)&&back!=null&&back<s2.length)? back
           : ((altOf(e)||d>0)?0:s2.length-1);
       }else S.slotParam=np;
     }
@@ -12056,18 +12152,7 @@ document.addEventListener('keyup',e=>{
   }
   if(c==='KeyM'&&HOLD.m){
     const used=HOLD.mUsed; HOLD.m=false; HOLD.mUsed=false;
-    if(!used){
-      if(rs(e)){                                   // right-shift+m tapped = tap tempo
-        const n2=performance.now();
-        taps=taps.filter(t2=>n2-t2<3000); taps.push(n2);
-        if(taps.length>=2){
-          const iv=(taps[taps.length-1]-taps[0])/(taps.length-1);
-          setBpm(Math.round(60000/iv));
-          flash('tap → '+T.bpm+'bpm ('+taps.length+')');
-        }else flash('tap…');
-      }else{S.metro=!S.metro; flash('click '+(S.metro?'on':'off'));}
-      dirty=true;
-    }
+    if(!used){S.metro=!S.metro; flash('click '+(S.metro?'on':'off')); dirty=true;}
     return;
   }
   if((c==='ShiftLeft'||c==='ShiftRight')&&PICK){PICK.peek=false; dirty=true;}
@@ -14379,10 +14464,13 @@ function renderHelp(L){
     ['[ / ]','channel PAN left / right (⇧ = coarse · ⌥ = fine) — same selection rule'],
     ['⌘- / ⌘=','remove / add a rack slot (they were bare - and = before volume took those)'],
     ['⌥\\','next automated knob (⇧⌥\\ = previous) — \\ alone shows and hides the curves'],
-    ['⌥r','route a mod from the param you are on: first free slot, lfo aimed here, cursor lands on amt'],
+    ['⌥m','MOD: route one from the param you are on — first free slot, lfo aimed here, cursor lands on amt'],
     ['⌥ holds the scope','open any ⌥ scope, let the letter go with ⌥ still down, and it behaves as if the letter were held — and the LETTERS PLAY, so you dial with one hand and hear it with the other. No other ⌥ command opens until ⌥ comes up'],
     ['⌥a','the ARP: digits / ↑↓ / - = walk the rate · ←→ mode (order = the sequence you played) · , . octaves · ⌫ removes it. Opening it walks the strip to its slot; closing walks back'],
     ['⌥u','the EUC gate: sixteen 16th steps, digits / ↑↓ / - = set how many hit. It fires only on notes you are HOLDING, and each note\u2019s pattern starts where that note started'],
+    ['⌥d','go to the DELAY — made if the rack has none. The cursor lands on it, so ↑↓ and ←→ edit it directly; digits jump between several; ⌫ removes it'],
+    ['⌥e','go to the ENVELOPES. a / d / s / r jump to attack, decay, sustain, release by their own letters; digits jump between envelopes; ⌫ removes one'],
+    ['slot memory','every slot remembers the param you last touched, and every JUMP back (digits, ⌥←→, the letter scopes) lands there'],
     ['⇧, / ⇧.','keyboard velocity down / up — how hard, next to how high'],
     ['⌥= / ⌥-','SOLO / INSIST and MUTE / SILENCE the channel you are on — next to the volume keys they qualify. While held, the digits do it to any other channel; latch keeps the digits doing it'],
     ['','they are plain toggles: press again for off. Asking for one withdraws the other, and the channel you touched becomes the one you are on'],
@@ -14421,7 +14509,7 @@ function renderHelp(L){
     ['⌘⇧E','KEEP THE SET IN A FILE. Pick one once and every change is written into it as you work — the ordinary autosave only ever reaches localStorage, which belongs to the browser profile and goes when the profile does. The header shows ◆ file while it is writing. ⌘E still exports a one-off copy, and dragging a .json back in loads it'],
     ['hold ⌥q + m','MONITOR: grid or live. On grid you hear yourself snapped to the beat — the feel of the thing, but a roll faster than the grid puts two hits on one step and a mono channel can only sound one, so notes thin out. On live you hear every hit as you played it and the grid still owns what records. Play rolls on live, or give the channel a finer grid'],
     ['tap q','toggle quantize. Only the TAP toggles: choosing a grid leaves the switch alone'],
-    ['hold ⌥m','TEMPO: ↑↓ bpm (⇧ ×10) · tap ⌥m = click on/off · ⇧⌥m tap = tap tempo'],
+    ['hold ⇧⌥m','TEMPO: ↑↓ bpm · tap = click on/off · ⇧⌥b taps = tap tempo. Both modifiers = the whole instrument; ⌥ alone stays channel business'],
     ['hold c','CHANNEL: ↑↓ volume (⇧ fine) · ←→ pan · c+⌫ resets both'],
     ['hold v','VELOCITY: ↑↓ this channel’s offset · ⇧↑↓ the keyboard’s own velocity'],
     ['hold n','NOTES: ↑↓ octave · ←→ semitone — one number, ±36 semitones · n+⌫ clears the lane'],
