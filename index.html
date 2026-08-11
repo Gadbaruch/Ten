@@ -1031,6 +1031,9 @@ const WTF=[
   SP('tbl b','wtb','enum',{opts:WTNAMES,get:o=>Math.round(o.wtb??3),set:(o,v)=>o.wtb=Math.round(v)}),
   SP('pos b','posb','lin',{min:0,max:1,step:0.02,get:o=>o.posb??0,set:(o,v)=>o.posb=v,
      fmt:v=>Math.round(v*100)+'%'}),
+  SP('pitch','rat','lin',{min:-24,max:24,step:1,fmt:v=>(v>0?'+':'')+Math.round(v)+'st',
+     get:o=>Math.round(Math.log2(o.rat||1)*12),
+     set:(o,v)=>o.rat=Math.pow(2,Math.round(v)/12)}),
   SP('morph','mrph','lin',{min:0,max:1,step:0.02,get:o=>o.mrph??0,set:(o,v)=>o.mrph=v,
      fmt:v=>Math.round(v*100)+'%'}),
   SP('fold','fold','lin',{min:0,max:1,step:0.02,get:o=>o.fold??0,set:(o,v)=>o.fold=v,
@@ -1616,8 +1619,8 @@ const destRate=(rack,key)=>
   :(rack==='voice'&&key==='pan')?'ctrl'
   /* the audio channel's pitch: free mode bends the sounding sources, sync
      mode retunes the shifter — either way it answers live */
-  :(rack==='aud'&&key==='semis')?'ctrl'
-  :(rack==='grn'&&(key==='pos'||key==='size'||key==='dens'||key==='semis'))?'ctrl'
+  :(rack==='aud')?'ctrl'
+  :(rack==='grn')?'ctrl'
   /* A THIRD KIND. These have no node to write and no value to ramp — they are
      read once, when a note starts. So the modulator parks its value and the
      voice builder reads that instead of the slot; the change lands on the next
@@ -1712,6 +1715,12 @@ function modDests(pre){
 }
 function modDests_(pre){
   const out=[];
+  /* WHAT THIS ENGINE CAN ACTUALLY HEAR. A grain or audio channel builds no
+     voices, so its oscillators, filters and voice params are dead knobs — a
+     destination you can pick that then does nothing is worse than one that is
+     not offered. */
+  const eng=engineOf(pre);
+  const noVoice=eng==='gran'||eng==='audio';
   const add=(rack,slot,spec,typ)=>{
     if(!spec||spec.type==='enum')return;
     if(spec.key&&spec.key[0]==='_')return;      // '_rt', '_dest': UI, not parameters
@@ -1724,6 +1733,7 @@ function modDests_(pre){
   };
   for(let mi=0;mi<MODULES.length;mi++){
     const M=MODULES[mi]; if(!M||!M.id||M.prs)continue;
+    if(noVoice&&(M.id==='osc'||M.id==='flt'||M.id==='vox'||M.id==='ply'))continue;
     if(M.flat){for(const sp of M.flat)add(M.id,0,sp,''); continue;}
     if(!M.slot)continue;
     const rk=modHolder(pre,M.id)[M.id]||[];
@@ -1739,11 +1749,14 @@ function modDests_(pre){
     });
     for(const sp of seen.values())add(M.id,'*',sp,'all');   // one entry per param, every slot
   }
-  if((pre.cat||'')==='audio')
-    add('aud',0,SP('pitch','semis','lin',{min:-24,max:24,step:1,fmt:v=>v+'st'}),'');
-  if((pre.cat||'')==='gran')for(const sp of GRANF)
-    if(['pos','size','dens','semis'].includes(sp.key))add('grn',0,sp,'');
-  for(const sp of VOICE_P)add('voice',0,sp,'');
+  if((pre.cat||'')==='audio')for(const sp of AUDF)
+    if(['semis','gain','st','en','rate'].includes(sp.key))
+      add('aud',0,sp.key==='semis'?SP('pitch','semis','lin',{min:-24,max:24,step:1,fmt:v=>v+'st'}):sp,'');
+  if((pre.cat||'')==='gran')for(const sp of GRANF)add('grn',0,sp,'');
+  for(const sp of VOICE_P){
+    if(noVoice&&sp.key!=='pan')continue;    // pan is the bus; amp and pitch are voices
+    add('voice',0,sp,'');
+  }
   for(const sp of MIX_P)add('mix',0,sp,'');
   return out;
 }
@@ -1776,8 +1789,9 @@ function resolveDest(pre,a){
     return [{voice:true,key:a.key,spec:sp,si:0,slot:a.key==='pan'?(pre.mix||{}):{}}];
   }
   if(a.rack==='aud'){
-    const sp=SP('pitch','semis','lin',{min:-24,max:24,step:1,fmt:v=>v+'st'});
-    return (a.key==='semis'&&a.lbl===sp.lbl)?[{aud:true,key:'semis',spec:sp,si:0,slot:pre.au||{}}]:[];
+    const sp=a.key==='semis'?SP('pitch','semis','lin',{min:-24,max:24,step:1,fmt:v=>v+'st'})
+      :AUDF.find(x=>x.key===a.key&&x.lbl===a.lbl);
+    return sp?[{aud:true,key:a.key,spec:sp,si:0,slot:pre.au||{}}]:[];
   }
   if(a.rack==='grn'){
     const sp=GRANF.find(x=>x.key===a.key&&x.lbl===a.lbl);
@@ -5381,9 +5395,16 @@ class Engine{
       e.node.port.postMessage({t:'p',p:{[key]:v===undefined?(gr[key]??GDEF[key]):v}});
       return true;
     }
-    if(rack==='aud'&&key==='semis'){
-      const au=S.presets[pi].au||{};
-      engine.audPitch(pi,(v===undefined?au.semis??0:v)-(au.semis??0));
+    if(rack==='aud'){
+      if(key==='semis'){
+        const au=S.presets[pi].au||{};
+        engine.audPitch(pi,(v===undefined?au.semis??0:v)-(au.semis??0));
+        return true;
+      }
+      /* gain/start/end/rate land on an overlay the next cycle reads — the
+         clip itself keeps what you dialled */
+      this.audOv=this.audOv||{}; const ov=this.audOv[pi]=this.audOv[pi]||{};
+      if(v===undefined)delete ov[key]; else ov[key]=v;
       return true;
     }
     if(rack==='voice'&&key==='pan'){
@@ -6517,7 +6538,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
   }
   audPlay(pi,at,lenBeats,skipBeats=0,cue){
     const buf=this.audBuf[pi]; if(!buf)return;
-    const au=S.presets[pi].au||{};
+    const au=Object.assign({},S.presets[pi].au||{},(this.audOv&&this.audOv[pi])||{});
     const st=clamp(au.st??0,0,0.98), en=clamp(au.en??1,st+0.01,1);
     const off=st*buf.duration, dur=(en-st)*buf.duration, loopSec=lenBeats*spb();
     const sync=Math.round(au.pmode||0)===1;
@@ -11504,7 +11525,7 @@ const onKeyDown=e=>{
   }
 
   /* ⌥m / ⌥s — mute and solo, on a letter that says which */
-  if(MSCOPE[e.code]&&altOf(e)&&!e.repeat&&S.layer>=1&&!e.metaKey&&!e.ctrlKey&&!HOLD.q&&!ALTSUS.size){
+  if(MSCOPE[e.code]&&altOf(e)&&!e.repeat&&S.layer>=1&&!e.metaKey&&!e.ctrlKey&&!HOLD.q&&!ALTSUS.size&&!HOLD.opt){
     e.preventDefault();
     const kind=MSCOPE[e.code];
     if(HOLD.ms&&HOLD.ms.kind===kind&&HOLD.msLatched){   // the way out is the key you came in on
@@ -11615,7 +11636,20 @@ const onKeyDown=e=>{
         if(px>=0){S.slotParam=px; flash(T2.name+' → '+specs[px].lbl+' '+fmtVal(specs[px],getV(pre,S.curMod,S.curSlot,specs[px]))); dirty=true;}
         return;
       }
-      if(e.code==='Backspace'&&!e.repeat&&!HOLD.optLatched){
+      /* = grows the family while the scope is held, - and ⌫ shrink it — the
+         letter is already pointing at the rack, so the chord is one finger */
+      if(e.code==='Equal'&&!e.repeat){
+        e.preventDefault(); HOLD.optUsed=true;
+        const free=T2.free?T2.free(rk):rk.findIndex(x=>!x||!x.typ);
+        if(free<0){flash(T2.id.toUpperCase()+' rack is full');return;}
+        pushUndo('add '+T2.name);
+        T2.make(rk[free],free);
+        engine.rebuildRack(ch); engine.refresh(ch);
+        if(S.layer>=2)gotoSlot(free);
+        flash(T2.name+' '+(T2.find(rk).length)+' — added'); dirty=true; dirtySave=true;
+        return;
+      }
+      if((e.code==='Backspace'||e.code==='Minus')&&!e.repeat&&!HOLD.optLatched){
         e.preventDefault(); HOLD.optUsed=true;
         const si2=(S.layer>=2&&list.includes(S.curSlot))?S.curSlot:list[0];
         if(si2!=null&&rk[si2]){pushUndo('remove '+T2.name);
@@ -15409,6 +15443,7 @@ function renderHelp(L){
     ['⌥d','go to the DELAY — made if the rack has none. The cursor lands on it, so ↑↓ and ←→ edit it directly; digits jump between several; ⌫ removes it'],
     ['⌥e','go to the ENVELOPES. a / d / s / r jump to attack, decay, sustain, release by their own letters; digits jump between envelopes; ⌫ removes one'],
     ['⌥f ⌥l ⌥k ⌥/','the same grammar for the FILTER, the LFOs, KEYTRACK and RANDOM mods — the letter takes you there, making one if the rack has none'],
+    ['scope + = / -','while any rack letter is held, = ADDS another instance and - (or ⌫) removes the one you are on. ⌘= and ⌘- do the same from the cursor without a scope'],
     ['⌥r ⌥g ⌥s ⌥x','…and for the fx: REVERB, GRAIN, SATURATION (drive, née dist), or ⌥x for the fx rack itself. Digits jump instances, ⌫ removes, the strip edits'],
     ['audio: letters','JUMP POINTS: the clip divides into 16ths of the loop and the letters, in note order, each hold one. Held = play from that cue; released = the cycle resumes in phase. While held: ←→ nudge the cue, ↑↓ pitch, ⇧↑↓ volume, ⌥←→ pan — each cue is its own little take'],
     ['engine (PRST row)','a channel IS one of six engines — Kit · Synth · Wavetable · Procedural · Audio · Grain — cycled on the first field of the preset page. Wavetable is the synth rack with op 1 committed to the table; leaving it hands the op its old wave back'],
