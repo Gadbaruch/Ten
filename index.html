@@ -10398,7 +10398,9 @@ function retroBars(bars){
   lane.events=seg.map(n=>({t:fmod(n.t-anc,L),midi:n.midi,vel:n.vel??0.9,
     dur:n.dur||0.25,born:performance.now()}));
   markRecorded(lane);
-  retroBuf[pi]=[];
+  /* the buffer SURVIVES: that is the whole reveal — tap took one bar, tab+4
+     re-cuts the same jam four bars wide, and the bar you already had stays
+     exactly where it was because both cuts share the anchor */
   const pat=S.patterns[S.editPat];
   if(pat.state==='rec'&&!LATCH.on){pat.state='on'; finalizeCaptures(true);}
   flash(seg.length?'◉ last '+bars+' bar'+(bars>1?'s':'')+' → '+seg.length+' notes'
@@ -10406,60 +10408,54 @@ function retroBars(bars){
   dirty=true; dirtySave=true;
 }
 function retroCapture(){
+  /* THE GUESSER IS GONE. The tap used to walk the buffer back to the last
+     long silence and estimate a loop length from what it found — clever, and
+     wrong whenever you were jamming rather than phrasing. The loop length is
+     the one you SET: the tap takes exactly the last cycle of it. The buffer
+     is not consumed any more, which is what makes tab+4 afterwards a REVEAL —
+     the same jam, windowed wider, phase-stable because both takes are cut
+     against the same anchor. */
   const pi=S.layer>=2?S.editSnd:S.curPreset, lane=S.patterns[S.editPat].lanes[pi];
-  const nowB=gridNow();
-  const recent=retroBuf[pi].filter(n=>n.t>nowB-64).sort((a,b)=>a.t-b.t);
-  if(!recent.length){flash('retro: play something first, then tab');return;}
-  let seg=[recent[recent.length-1]];                 // walk back until a gap > 1 bar
-  for(let i=recent.length-2;i>=0;i--){
-    if(seg[0].t-(recent[i].t+Math.min(recent[i].dur||0.25,0.5))>4)break;
-    seg.unshift(recent[i]);
-  }
-  pushUndo('retro');
-  retroBuf[pi]=[];                                    // consume: a second tab can't re-grab the same take
-  if(!lane.auto){
-    /* A LENGTH YOU SET IS A DECISION. This used to also require the lane to
-       still have notes in it, so clearing a hand-sized loop and playing it
-       again handed the length straight back to the estimator — you got 2 or 4
-       bars where you had deliberately chosen 3. Empty or not, if the length
-       is yours the take goes INTO it; only `auto` invites a guess.
-
-       And only the LAST cycle of it. The gap-walk above collects everything
-       back to the last long silence, which against a fixed loop means a jam
-       four times round wraps onto itself four deep — every position stacked
-       with the four different things you played there. One loop's worth is
-       what you were playing when you reached for the key. */
-    const L=lane.len;
-    seg=seg.filter(n=>n.t>nowB-L-1e-9);
-    if(!seg.length){flash('nothing played in the last '+
-      (lane.count%1?lane.count.toFixed(2):lane.count)+' '+UNIT_NAMES[lane.unit]);return;}
-    for(const n of seg){
-      const t=fmod(n.t-editAnchor(),L);
-      lane.clear(ev=>ev.midi===n.midi&&Math.abs(ev.t-t)<1e-6);   // same note same spot: newest wins
-      lane.events.push({t,midi:n.midi,vel:n.vel??0.9,dur:n.dur||0.25,born:performance.now()});
-    }
-    flash('◉ retro: '+seg.length+' notes into your '+
-      (lane.count%1?lane.count.toFixed(2):lane.count)+'×'+UNIT_NAMES[lane.unit]+' loop');
-    dirty=true; dirtySave=true; return;
-  }
-  const t0=seg[0].t;
-  let last=0; for(const n of seg)last=Math.max(last,n.t-t0+Math.min(n.dur||0.25,0.5));
-  const bars=Math.max(0.25,last/4);
-  let p2=1; while(p2*1.25<bars)p2*=2; p2=Math.min(p2,8);
-  const L=p2*4;
-  lane.unit='B'; lane.count=p2; lane.auto=false; delete lane._cap;
+  if(isAudioCh(pi)){flash('audio channel — tab records the input');return;}
+  const L=lane.len||4, nowB=gridNow(), anc=editAnchor();
   const patEmpty=S.patterns[S.editPat].lanes.every(l=>l===lane||!l.events.length);
-  lane.events=seg.map(n=>({t:fmod(n.t-t0,L),midi:n.midi,vel:n.vel??0.9,dur:n.dur||0.25,born:performance.now()}));
-  if(patEmpty){                                       // first note becomes the ONE — loop plays from beat 0
+  pushUndo('retro');
+  lane.auto=false; delete lane._cap;
+  if(patEmpty&&!T.playing){
+    /* nothing running: there is no anchor to be true to, so the take aligns
+       to ITSELF — the window ends at your last note, its first note is the
+       ONE, and the transport starts there */
+    const recent=retroBuf[pi].filter(n=>n.t>nowB-64).sort((a,b)=>a.t-b.t);
+    if(!recent.length){flash('retro: play something first, then tab');return;}
+    const endT=recent[recent.length-1].t+Math.min(recent[recent.length-1].dur||0.25,0.5);
+    const seg=recent.filter(n=>n.t>endT-L-1e-9);
+    const t0=seg[0].t;
+    lane.events=seg.map(n=>({t:fmod(n.t-t0,L),midi:n.midi,vel:n.vel??0.9,
+      dur:n.dur||0.25,born:performance.now()}));
     T.startTime=AC.currentTime+0.06; T.startBeat=0; T.schedBeat=0; T.playing=true;
     acts=[{pat:S.editPat,start:-1e9,anchor:0}];
-  }else{                                              // other lanes already run: wrap from your entry phase
-    const off=fmod(t0-editAnchor(),L);
-    if(off>1e-9)for(const e of lane.events)e.t=fmod(e.t+off,L);
+    flash('◉ retro: last '+fmtLen(lane)+' · '+seg.length+' notes · first note = the 1'+
+      ' — tab+digits widens the window');
+    dirty=true; dirtySave=true; return;
   }
-  flash('◉ retro: '+p2+' bar'+(p2>1?'s':'')+' · '+seg.length+' notes'+(patEmpty?' · first note = the 1':''));
+  /* running: the last cycle of the loop as set, cut against the anchor so a
+     note played on beat 3 comes back on beat 3. The window end snaps to the
+     nearest cycle line so a slightly-late tap still gets the cycle you played. */
+  const snap=Math.min(4,L);
+  const endB=anc+Math.round((nowB-anc)/snap)*snap, from=endB-L;
+  const seg=retroBuf[pi].filter(n=>n.t>from-1e-9&&n.t<=endB+1e-9);
+  if(!seg.length){flash('nothing played in the last '+fmtLen(lane)+
+    ' — tab+digits reaches further back');return;}
+  for(const n of seg){
+    const t=fmod(n.t-anc,L);
+    lane.clear(ev=>ev.midi===n.midi&&Math.abs(ev.t-t)<1e-6);   // same note same spot: newest wins
+    lane.events.push({t,midi:n.midi,vel:n.vel??0.9,dur:n.dur||0.25,born:performance.now()});
+  }
+  markRecorded(lane);
+  flash('◉ retro: last '+fmtLen(lane)+' · '+seg.length+' notes — tab+digits widens the window');
   dirty=true; dirtySave=true;
 }
+const fmtLen=l=>(l.count%1?l.count.toFixed(2):l.count)+' '+UNIT_NAMES[l.unit];
 let helpOpen=false, dirty=true, dirtySave=false, flashMsg='', flashUntil=0;
 const flash=m=>{flashMsg=m;flashUntil=performance.now()+1800;dirty=true;};
 
@@ -12339,7 +12335,7 @@ document.addEventListener('keyup',e=>{
   if(rPend[c]){
     const r=rPend[c];
     retroBuf[r.pi].push({t:r.ts,midi:r.midi,vel:r.vel,dur:Math.max(0.05,gridNow()-r.ts)});
-    if(retroBuf[r.pi].length>96)retroBuf[r.pi].shift();
+    if(retroBuf[r.pi].length>512)retroBuf[r.pi].shift();
     delete rPend[c];
   }
   if(c==='Tab'){
@@ -14632,12 +14628,12 @@ function renderHelp(L){
 
     ['— recording —',''],
     ['tab','ONE key, and your hand says which part of it you meant: tap = retro take, hold = record while held, latch across the hold = stays on. There is no mode to pick'],
-    ['tap tab (retro)','TEN is always listening: play, then tap, and it takes what you just played — forgetting anything before a long pause — and loops it at a sensible length'],
+    ['tap tab (retro)','TEN is always listening: tap takes exactly the LAST CYCLE of the loop length you have set — no guessing. The jam stays in the buffer, so…'],
     ['empty lane + REC','the lane listens, then suggests its own length after a bar of silence'],
     ['empty pattern + REC','your FIRST hit sets the one — the transport retriggers on it'],
     ['hold a note (while REC)','replaces whatever was under it'],
     ['hold tab + ⌫','records SILENCE — the playhead erases as it passes, exactly the span you held. Needs the transport RUNNING: with nothing moving there is no span to erase, and it says so'],
-    ['tab + 1-8','loop N bars AND take the last N bars you played'],
+    ['tab + 1-8','…tab+digits REVEALS BACKWARDS: the same jam cut N bars wide, and the bar you already took stays exactly where it was, because every cut shares the anchor'],
 
     ['— the holds —',''],
     ['','every one of these is a scope: hold it and the arrows mean that one thing. Tap and release without moving does the tap action instead'],
