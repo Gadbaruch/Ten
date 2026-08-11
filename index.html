@@ -839,6 +839,12 @@ const SETTINGS=[
     are the way out. A set that never had one shows 'none' and both are inert. */
  /* short enough to FIT: a settings cell is narrow, and '6 events — PLAYING'
     rendered as '6 events —', which reads like the sentence was cut off */
+ /* THE KEYBOARD ITSELF. full is the default: every letter is one note and no
+    note repeats, which is what makes a scale or a global chord behave. */
+ {n:'keys',g:'Behavior', v:()=>kbFull()?'full':'piano',
+             a:()=>{CFG.kbd=kbFull()?'piano':'full'; saveCfg();
+                    flash(kbFull()?'full — every letter is a note, three rows, bottom lowest'
+                                  :'piano — home row white, row above black');}},
  {n:'swing',g:'Behavior',  v:()=>S.grv.amt+'%',            a:d=>S.grv.amt=clamp(S.grv.amt+d*5,0,100)},
  {n:'groove',g:'Behavior', v:()=>GROOVES[S.grv.typ].n,     a:d=>S.grv.typ=fmod(S.grv.typ+d,GROOVES.length)},
  {n:'grid',g:'Look',   v:()=>CFG.vgrid?'vertical':'lanes',a:()=>CFG.vgrid=CFG.vgrid?0:1},
@@ -1741,6 +1747,14 @@ const KM={sl:false,sr:false,srLatch:false,altLatch:false};
    are the thing that stops being playable first. */
 const rs=e=>KM.srLatch||(!!e.shiftKey&&(KM.sr||!KM.sl));
 const altOf=e=>KM.altLatch||!!e.altKey;
+/* ⌘ IS ⌘ AND ⌃ IS NOT. Control used to stand in for command so the shortcuts
+   worked on a PC, which was fine while control meant nothing on its own — it
+   is the FUNCTION LAYER now, and ⌃c has to be "hold volume", not "copy". */
+const cmdOf=e=>!!e.metaKey;
+/* the function layer: every control that used to sit on a bare letter. Letters
+   only ever play notes, in both keyboards and in every view, so nothing on
+   screen can change what a key means. */
+const ctlOf=e=>!!e.ctrlKey&&!e.metaKey;
 const LATCH={held:false,used:false,on:false};
 /* HELD KEYS SCOPE THE ARROWS. The arrows always mean "adjust"; the key you are
    holding says adjust WHAT. tab = the loop, m = tempo. `used` records whether
@@ -6182,7 +6196,7 @@ function pickKey(e){
   }
   /* the transport is not part of the dialog — you audition while you choose */
   if(c==='Space'&&!e.repeat){T.playing?stop():play(); return;}
-  if((e.metaKey||e.ctrlKey)&&c==='KeyC'&&!e.repeat){   // copy out of what you are looking at
+  if(cmdOf(e)&&c==='KeyC'&&!e.repeat){   // copy out of what you are looking at
     if(PICK.peek)copyFromPeek(); else flash('hold ⇧ to look inside first');
     return;
   }
@@ -8020,9 +8034,51 @@ function resetParam(){
 }
 
 /* ---------------- edit / erase / capture helpers --------------------- */
-const NOTEKEYS={KeyA:0,KeyW:1,KeyS:2,KeyE:3,KeyD:4,KeyF:5,KeyT:6,KeyG:7,KeyY:8,
+/* TWO KEYBOARDS.
+   PIANO is the old one: the home row is the white keys and the row above holds
+   the black ones, so the shape of the instrument is the shape of a piano.
+   FULL is every letter, three rows, bottom row lowest — one key, one note, no
+   key repeating a note another key already plays. That last part is why it
+   exists: on piano the same pitch class turns up under several fingers, and
+   with a scale on or chords running globally you get the same note back twice.
+   In full mode a row is an OCTAVE OF THE SCALE when a scale is on, and a
+   chromatic run when it is off. Either way the rows stack upward. */
+const NOTEKEYS_PIANO={KeyA:0,KeyW:1,KeyS:2,KeyE:3,KeyD:4,KeyF:5,KeyT:6,KeyG:7,KeyY:8,
                 KeyH:9,KeyU:10,KeyJ:11,KeyK:12,KeyO:13,KeyL:14,KeyP:15,Semicolon:16,Quote:17};
-const KEYFOR={}; for(const k in NOTEKEYS)KEYFOR[NOTEKEYS[k]]=k;
+/* LETTERS ONLY, and contiguous. Twenty-six keys read bottom row first, then
+   home, then top — one continuous run from low to high with nothing repeated,
+   which is the whole point: on the piano map the same pitch class turns up
+   under several fingers, and a scale or a global chord then hands you the same
+   note twice. Punctuation is not a note in either keyboard, so it stays
+   available for controls. */
+const KBSEQ=['KeyZ','KeyX','KeyC','KeyV','KeyB','KeyN','KeyM',
+             'KeyA','KeyS','KeyD','KeyF','KeyG','KeyH','KeyJ','KeyK','KeyL',
+             'KeyQ','KeyW','KeyE','KeyR','KeyT','KeyY','KeyU','KeyI','KeyO','KeyP'];
+function kbNote(code){
+  const i=KBSEQ.indexOf(code); if(i<0)return null;
+  const sc=CFG.scaleOn?SCALES[CFG.scale][1]:null;
+  if(!sc)return i;                                  // chromatic, one semitone a key
+  /* a scale DEGREE a key, so the run climbs the scale and never repeats a note */
+  return Math.floor(i/sc.length)*12+sc[i%sc.length];
+}
+const kbFull=()=>(CFG.kbd??'full')!=='piano';
+/* what a key is worth right now, or null if it is not a note key at all */
+function noteOf(code){
+  if(kbFull())return kbNote(code);
+  const v=NOTEKEYS_PIANO[code];
+  return v===undefined?null:v;
+}
+const isNoteKey=code=>noteOf(code)!=null;
+/* kept for the places that want the piano map itself */
+const NOTEKEYS=NOTEKEYS_PIANO;
+/* which key plays a given offset — rebuilt per keyboard, because full mode
+   maps a different set and the highlight has to follow */
+function keyForOffset(off){
+  if(!kbFull()){for(const k in NOTEKEYS_PIANO)if(NOTEKEYS_PIANO[k]===off)return k;return null;}
+  for(const code of KBSEQ)if(kbNote(code)===off)return code;
+  return null;
+}
+const KEYFOR=new Proxy({},{get:(_,k)=>keyForOffset(+k)});
 
 /* ---------------- expressive input ------------------------------------
    Velocity and per-note pressure, from wherever they come from. The laptop
@@ -10613,20 +10669,20 @@ const onKeyDown=e=>{
   /* cmd+⇧S is taken by the host this runs inside, so every "ask me" variant
      answers to option as well — same gesture, a modifier the page actually
      receives. */
-  if((e.metaKey||e.ctrlKey)&&e.code==='KeyS'&&!e.repeat){
+  if(cmdOf(e)&&e.code==='KeyS'&&!e.repeat){
     e.preventDefault();
     const askWhere=e.shiftKey||e.altKey||S.setSlot==null;
     if(askWhere){PEEKED=null; PICK={mode:'save',sel:S.setSlot??0,confirm:false,peek:false};}
     else saveToSlot(S.setSlot);                                // straight back to where it lives
     dirty=true; return;
   }
-  if((e.metaKey||e.ctrlKey)&&e.code==='KeyN'&&!e.repeat){
+  if(cmdOf(e)&&e.code==='KeyN'&&!e.repeat){
     e.preventDefault();
     PICK={mode:'new',sel:S.setSlot??0,confirm:true,peek:false};
     flash('start a new set? enter confirms · esc cancels');
     dirty=true; return;
   }
-  if((e.metaKey||e.ctrlKey)&&e.code==='KeyL'&&!e.repeat){
+  if(cmdOf(e)&&e.code==='KeyL'&&!e.repeat){
     e.preventDefault();
     PEEKED=null; PICK={mode:'load',sel:S.setSlot??0,confirm:false,peek:false};
     dirty=true; return;
@@ -10635,7 +10691,7 @@ const onKeyDown=e=>{
      rubber band: the thing you want to move is almost always the whole take,
      and the step it moves by is the grid this channel already snaps to — so
      the nudge lands where a played note would have. */
-  if((e.metaKey||e.ctrlKey)&&e.code==='KeyA'&&!e.repeat&&S.layer>=1){
+  if(cmdOf(e)&&e.code==='KeyA'&&!e.repeat&&S.layer>=1){
     e.preventDefault();
     const ch=focusCh(), lane=curLoop();
     if(!lane||!lane.events.length){flash('nothing on ch '+ch+' to select');return;}
@@ -10646,12 +10702,12 @@ const onKeyDown=e=>{
   }
   /* ⌘⌥⇧K — every modifier on the board, because folding four channels into one
      rewrites four channels and should be hard to do by accident */
-  if((e.metaKey||e.ctrlKey)&&e.altKey&&e.shiftKey&&e.code==='KeyK'&&!e.repeat&&S.layer>=1){
+  if(cmdOf(e)&&e.altKey&&e.shiftKey&&e.code==='KeyK'&&!e.repeat&&S.layer>=1){
     e.preventDefault(); mergeToKit(); return;
   }
   /* the copy half of what tab+↑ used to do, on its own key: the loop grows AND
      what was in it plays twice, which is how you get a second bar to vary */
-  if((e.metaKey||e.ctrlKey)&&e.code==='KeyD'&&!e.repeat&&S.layer>=1){
+  if(cmdOf(e)&&e.code==='KeyD'&&!e.repeat&&S.layer>=1){
     e.preventDefault();
     const tg=chTargets(), pat=S.patterns[S.editPat];
     pushUndo('duplicate');
@@ -10772,7 +10828,7 @@ const onKeyDown=e=>{
     return;
   }
 
-  if(e.metaKey||e.ctrlKey){
+  if(cmdOf(e)){
     if(e.code==='KeyE'){e.preventDefault();
       if(e.shiftKey)linkFile();
       else if(!e.repeat){PICK={mode:'export',sel:0}; dirty=true;}}
@@ -11022,7 +11078,7 @@ const onKeyDown=e=>{
     }
     setBpm(T.bpm+d*(rs(e)?10:1)); return;
   }
-  if(c==='KeyM'){
+  if(c==='KeyM'&&ctlOf(e)){
     if(!e.repeat){HOLD.m=true; HOLD.mUsed=false;}
     return;}
   if(c==='KeyB'&&!e.repeat){                        // tap tempo
@@ -11634,11 +11690,11 @@ const onKeyDown=e=>{
   /* c / v = velocity down / up for the laptop keyboard, the way z / x move the
      octave. A real velocity source (midi, and later the hall-effect board)
      overrides this per note; this is what you play with until then. */
-  if(c==='KeyC'&&S.layer>0&&!e.repeat&&!e.metaKey&&HOLD.dig<0){
+  if(c==='KeyC'&&ctlOf(e)&&S.layer>0&&!e.repeat&&HOLD.dig<0){
     e.preventDefault(); HOLD.c=true; HOLD.cUsed=false; return;}
-  if(c==='KeyN'&&S.layer>0&&!e.repeat&&!e.metaKey&&HOLD.dig<0){
+  if(c==='KeyN'&&ctlOf(e)&&S.layer>0&&!e.repeat&&HOLD.dig<0){
     e.preventDefault(); HOLD.n=true; HOLD.nUsed=false; return;}
-  if(c==='KeyV'&&S.layer>0&&!e.repeat&&!e.metaKey&&HOLD.dig<0){
+  if(c==='KeyV'&&ctlOf(e)&&S.layer>0&&!e.repeat&&HOLD.dig<0){
     e.preventDefault(); HOLD.v=true; HOLD.vUsed=false; return;}
 
   /* the master's own pads: the dj row, where you are rather than off in a
@@ -11650,7 +11706,7 @@ const onKeyDown=e=>{
     djPress(k,KM.sl);      // latch is the left shift, like every other momentary
     return;
   }
-  if(c in NOTEKEYS&&!e.repeat&&S.layer>0){
+  if(isNoteKey(c)&&!e.repeat&&S.layer>0){
     e.preventDefault();
     /* midi solo: the board's own keystrokes are noise — only the events EXP
        synthesises for a midi note get through, so a note can't fire twice */
@@ -11661,7 +11717,7 @@ const onKeyDown=e=>{
     if(KM.sl){noteLatch.add(c); LATCH.used=true;}
     const wasHeld=new Set(kbHeld); kbHeld.add(c);
     const pi=S.layer===1?S.curPreset:S.editSnd;
-    const midi=60+S.oct*12+NOTEKEYS[c];
+    const midi=60+S.oct*12+noteOf(c);
     const hitVel=EXP.take();          // MIDI velocity if this key came from EXP, else the c/v value
     if(isAudioCh(pi)){flash('audio channel — tab records mic, drop a file to load a clip');return;}
     const pat=S.patterns[S.editPat];
