@@ -240,7 +240,23 @@ const cycleState=h=>{h.state=h.state==='on'?'rec':h.state==='rec'?'edit':'on';};
    cymbal, brown for a floor tom or wind, blue for hats and metal, dust for
    crackle and vinyl. Appended at the end so every stored preset keeps its
    index. Anything past 'smp' is a buffer, and isNoiseW() is the one test. */
-const WAVES=['sin','tri','saw','sqr','nse','org','bel','vox','mtl','smp','pink','brwn','blue','dust'];
+const WAVES=['sin','tri','saw','sqr','nse','org','bel','vox','mtl','smp','pink','brwn','blue','dust','wt'];
+/* THE WAVETABLE BANK — ten starter tables as harmonic recipes, from tame to
+   feral. Auditioned by ear before more are added; an editor comes later, and
+   when it does it will be harmonic sliders, not freehand drawing. */
+const WTBL=[
+ ['glass',   [1,0,0.42,0,0.28,0,0.14,0,0.07,0,0.05]],
+ ['woodwind',[1,0.16,0.42,0.08,0.2,0.05,0.08,0.02]],
+ ['choir',   [1,0.6,0.22,0.5,0.16,0.08,0.3,0.05,0.02,0.12]],
+ ['brass',   [1,0.7,0.62,0.5,0.42,0.34,0.26,0.2,0.15,0.11,0.08,0.06]],
+ ['bell',    [1,0,0,0.55,0,0.4,0,0,0.32,0,0,0.2,0,0.12]],
+ ['reso',    [1,0.1,0.06,0.05,0.9,0.08,0.04,0.03,0.5,0.03]],
+ ['pulse3',  [1,0,0.33,0,0.2,0,0.47,0,0.11,0,0.29]],
+ ['grit',    [1,0.5,0.33,0.55,0.2,0.45,0.14,0.35,0.11,0.28,0.09,0.22]],
+ ['fifths',  [1,0,0.75,0,0,0.55,0,0,0.35,0,0,0.28]],
+ ['digital', [1,0.9,0.1,0.85,0.08,0.7,0.5,0.06,0.6,0.04,0.45,0.4]],
+];
+const WTNAMES=WTBL.map(x=>x[0]);
 const NOISEW={4:'white',10:'pink',11:'brown',12:'blue',13:'dust'};
 const isNoiseW=w=>NOISEW[w]!==undefined;
 const OPMODE=['add','fm','ring','sync','pm'];
@@ -986,6 +1002,15 @@ const OSC_P=sl=>[
   SP('mode','mode','enum',{opts:OPMODE}),
   SP('dest','dst','enum',{opts:DEST}),
   SP('level','amt','lin',{min:0,max:1,step:0.05}),
+  /* the wavetable's own dials, only when the wave IS the table */
+  ...(Math.round((sl&&sl.wav)||0)===14?[
+    SP('tbl a','wta','enum',{opts:WTNAMES}),
+    SP('tbl b','wtb','enum',{opts:WTNAMES}),
+    SP('morph','mrph','lin',{min:0,max:1,step:0.02}),
+    SP('fold','fold','lin',{min:0,max:1,step:0.02}),
+    SP('sym','sym','lin',{min:-1,max:1,step:0.05}),
+    SP('frac','frac','lin',{min:0,max:1,step:0.05}),
+  ]:[]),
   /* ONE FIELD, TWO MEANINGS, decided by the wave — the same idiom the fx rack
      already uses for dist's tone/rate. On a tonal wave it is PULSE WIDTH: the
      harmonics are re-weighted by sin(nπd), which is exactly PWM on a square
@@ -995,7 +1020,7 @@ const OSC_P=sl=>[
   ...((w=>{
     if(w===13)return [SP('dens','pw','lin',{min:0,max:1,step:0.05,
       fmt:v=>Math.round(4+v*v*1600)+'/s'})];
-    if(w===0||w===4||w===9||(w>=10&&w<=12))return [];
+    if(w===0||w===4||w===9||(w>=10&&w<=12)||w===14)return [];
     return [SP('width','pw','lin',{min:0.05,max:0.95,step:0.025,
       fmt:v=>Math.round(v*100)+'%'})];
   })(Math.round((sl&&sl.wav)||0))),
@@ -1545,7 +1570,7 @@ const destRate=(rack,key)=>
   :(rack==='mod'&&(key==='rate'||key==='amt'||key==='rdiv'))?'ctrl'
   /* the closest thing these oscillators have to a phase sweep: the wave is
      rebuilt as the width moves, on the note that is already sounding */
-  :(rack==='osc'&&(key==='pw'))?'ctrl'
+  :(rack==='osc'&&(key==='pw'||key==='mrph'||key==='fold'||key==='sym'||key==='frac'))?'ctrl'
   /* PAN IS A BUS PARAMETER — one panner for the channel, shared by every note,
      so there is no per-voice AudioParam to hand an LFO. It rides the control
      tick instead, which is how EVERY source gets to drive it: as an audio-rate
@@ -3709,7 +3734,8 @@ class Voice{
         src.buffer=isS?(E.opSamples.get(pi+':0')||E.noiseBuf):E.nbuf(rootW,ops[0].pw);
         src.loop=true;pitchParam=src.playbackRate;}
       else{src=ac.createOscillator();
-        E.setWave(src,rootW,ops[0].phm===1?Math.random()*360:ops[0].ph,ops[0].pw);
+        if(rootW===14)src.setPeriodicWave(E.wtWave(ops[0]));
+        else E.setWave(src,rootW,ops[0].phm===1?Math.random()*360:ops[0].ph,ops[0].pw);
         pitchParam=src.frequency;}
       /* THIS IS WHY THE NOISE SOUNDED LOW-RES. playbackRate was being set to the
          note FREQUENCY — 440 for an A — so four seconds of noise went past in
@@ -3770,7 +3796,8 @@ class Voice{
         }
         else if(sync){s2=ac.createOscillator();s2.setPeriodicWave(E.syncWave(wv,syncRatOf(ops,i)));setF(s2.frequency,mf);}
         else{s2=ac.createOscillator();
-          E.setWave(s2,wv,op.phm===1?Math.random()*360:op.ph,op.pw);
+          if(wv===14)s2.setPeriodicWave(E.wtWave(op));
+          else E.setWave(s2,wv,op.phm===1?Math.random()*360:op.ph,op.pw);
           setF(s2.frequency,fi);}
         built.push({i,s:s2,osc:!isNoiseW(wv)&&wv!==9,f:fi,op});
         (this.opNodes[i]=this.opNodes[i]||[]).push(s2);
@@ -4885,6 +4912,64 @@ class Engine{
     }
     for(const v of this.act[pi])try{v.oscRefresh(this,key);}catch(_){}
   }
+  /* MORPH THEN MANGLE. The two tables mix in the harmonic domain, the mix is
+     rendered to one cycle, the shapers work on the WAVEFORM — fold wraps it,
+     sym pushes it off-centre before the fold (the west-coast move), frac
+     folds the fold. A 64-harmonic DFT carries it back to a PeriodicWave, so
+     the result is band-limited whatever the mangling did. Cached; the cache
+     key quantizes morph and fold to 1/50, which is what makes live morphing
+     affordable — a ctrl sweep is ~50 table swaps, all cached after one pass. */
+  wtWave(op){
+    const a2=clamp(Math.round(op.wta||0),0,WTBL.length-1);
+    const b2=clamp(Math.round(op.wtb??1),0,WTBL.length-1);
+    const m=clamp(op.mrph||0,0,1), fo=clamp(op.fold||0,0,1);
+    const sy=clamp(op.sym||0,-1,1), fr=clamp(op.frac||0,0,1);
+    const key='wt:'+a2+':'+b2+':'+Math.round(m*50)+':'+Math.round(fo*50)+':'+
+      Math.round(sy*20)+':'+Math.round(fr*20);
+    let pw=this.waveCache.get(key);
+    if(pw)return pw;
+    const HA=WTBL[a2][1], HB=WTBL[b2][1], nH=Math.max(HA.length,HB.length);
+    const N=1024, y=new Float32Array(N);
+    for(let k=0;k<nH;k++){
+      const amp=(HA[k]||0)*(1-m)+(HB[k]||0)*m;
+      if(Math.abs(amp)<1e-4)continue;
+      const w2=2*Math.PI*(k+1)/N;
+      for(let n2=0;n2<N;n2++)y[n2]+=amp*Math.sin(w2*n2);
+    }
+    let mx=0; for(let n2=0;n2<N;n2++)mx=Math.max(mx,Math.abs(y[n2]));
+    if(mx>0)for(let n2=0;n2<N;n2++)y[n2]/=mx;
+    const tri=x=>{x=fmod(x+3,4); return x<1?x:x<3?2-x:x-4;};   // wavefold
+    if(fo>0.001){
+      const g2=1+fo*5;
+      for(let n2=0;n2<N;n2++)y[n2]=tri(y[n2]*g2+sy*fo*1.5);
+      if(fr>0.001){const g3=1+fr*3;
+        for(let n2=0;n2<N;n2++)y[n2]=tri(y[n2]*g3);}
+      let dc=0; for(let n2=0;n2<N;n2++)dc+=y[n2]; dc/=N;
+      for(let n2=0;n2<N;n2++)y[n2]-=dc;
+    }
+    const NH=64, re=new Float32Array(NH+1), im=new Float32Array(NH+1);
+    for(let k=1;k<=NH;k++){
+      let sr2=0, si2=0;
+      const w2=2*Math.PI*k/N;
+      for(let n2=0;n2<N;n2++){sr2+=y[n2]*Math.cos(w2*n2); si2+=y[n2]*Math.sin(w2*n2);}
+      re[k]=sr2*2/N; im[k]=si2*2/N;
+    }
+    pw=AC.createPeriodicWave(re,im,{disableNormalization:false});
+    this.waveCache.set(key,pw);
+    if(this.waveCache.size>400)this.waveCache.delete(this.waveCache.keys().next().value);
+    return pw;
+  }
+  /* the live half: a ctrl mod or a knob under a sounding note reshapes what is
+     already playing — setPeriodicWave is live, so it is one cached swap */
+  wtLive(pi,si,key,v){
+    const sl=(S.presets[pi].osc||[])[si]; if(!sl||Math.round(sl.wav)!==14)return false;
+    const eff=v===undefined?sl:Object.assign({},sl,{[key]:v});
+    const pw=this.wtWave(eff);
+    for(const vo of this.act[pi]||[])
+      for(const nd of (vo.opNodes&&vo.opNodes[si])||[])
+        if(nd.setPeriodicWave)try{nd.setPeriodicWave(pw);}catch(_){}
+    return true;
+  }
   setWave(osc,w,phDeg,width){
     if(w>=9){osc.type='sine';return;}   // 'smp' handled as a buffer source elsewhere
     const ph=fmod(phDeg||0,360);
@@ -5170,6 +5255,8 @@ class Engine{
     if(rack==='fx')return this.fxLive(pi,si,key,v);
     if(rack==='mod'&&(key==='rate'||key==='amt'||key==='rdiv'))return this.modLive(pi,si,key,v);
     if(rack==='osc'&&key==='pw')return this.pwLive(pi,si,v);
+    if(rack==='osc'&&(key==='mrph'||key==='fold'||key==='sym'||key==='frac'))
+      return this.wtLive(pi,si,key,v);
     return this.ovPut(pi,rack,si,key,v);
   }
   /* VALUES A NOTE READS ON ITS WAY OUT OF THE GATE. Nothing here can be
@@ -6394,7 +6481,8 @@ function writeParam(pi,mi,si,px,v){
   const slot=M.flat?null:holder[M.id][si];
   const spec=paramsFor(mi,slot)[px]; if(!spec)return;
   setV(holder,mi,si,spec,v);      // layer voice-modules read fresh on the next note — no rebuild
-  if(M.id==='osc')engine.oscLive(pi,spec.key);   // …except OSC, which retunes what's sounding
+  if(M.id==='osc'){engine.oscLive(pi,spec.key);   // …except OSC, which retunes what's sounding
+    if(['mrph','fold','sym','frac','wta','wtb'].includes(spec.key))engine.wtLive(pi,si,spec.key);}
   dirtySave=true;
 }
 /* value change entry point: address = (module, slot(-1=flat), param) */
@@ -15009,6 +15097,7 @@ function renderHelp(L){
     ['⌥f ⌥l ⌥k ⌥/','the same grammar for the FILTER, the LFOs, KEYTRACK and RANDOM mods — the letter takes you there, making one if the rack has none'],
     ['⌥r ⌥g ⌥s ⌥x','…and for the fx: REVERB, GRAIN, SATURATION (drive, née dist), or ⌥x for the fx rack itself. Digits jump instances, ⌫ removes, the strip edits'],
     ['audio: letters','JUMP POINTS: the clip divides into 16ths of the loop and the letters, in note order, each hold one. Held = play from that cue; released = the cycle resumes in phase. While held: ←→ nudge the cue, ↑↓ pitch, ⇧↑↓ volume, ⌥←→ pan — each cue is its own little take'],
+    ['wt (osc wave)','the WAVETABLE: two tables from a bank of ten, MORPH between them, then the manglers — FOLD wraps the wave, SYM pushes it off-centre into the fold, FRAC folds the fold. Morph and the manglers are live mod destinations, band-limited whatever you do'],
     ['audio: params','pitch has FREE (tape: speed and pitch together) and SYNC (timing kept, pitch alone via the shifter) · chan picks stereo/left/right · start/end crop · input picks mic or resample · rec obeys ⇧o overdub/overwrite'],
     ['⌥p ⌥c','PHASE (chorus·flanger·phaser·trem) and COMP (comp·limit·clip·duck) — each family is ONE effect with a `kind`, the way filt holds its filters'],
     ['⌥d (delay)','the DELAY is a family now: delay · dub · tape echo · resonator · wobble · roll — the kinds differ in what lives in the feedback loop'],
