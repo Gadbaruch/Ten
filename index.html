@@ -1751,10 +1751,15 @@ const altOf=e=>KM.altLatch||!!e.altKey;
    worked on a PC, which was fine while control meant nothing on its own — it
    is the FUNCTION LAYER now, and ⌃c has to be "hold volume", not "copy". */
 const cmdOf=e=>!!e.metaKey;
-/* the function layer: every control that used to sit on a bare letter. Letters
-   only ever play notes, in both keyboards and in every view, so nothing on
-   screen can change what a key means. */
-const ctlOf=e=>!!e.ctrlKey&&!e.metaKey;
+/* THE FUNCTION LAYER IS ⌥. It was ⌃ for a day, and control is the one
+   modifier a left hand cannot reach while it plays. ⌥S and ⌥A keep their old
+   meanings (solo, the arp grab) — they were never bare letters. The one true
+   collision was M: ⌥M is mute, so TEMPO MOVED TO B — beat, bpm, and the same
+   letter tap-tempo already lived on.
+   A scope stays open on the LETTER once ⌥ has opened it, so the thumb can
+   come off ⌥ and the arrows step normally; ⌥ held through an arrow is still
+   the fine step, same as everywhere else. */
+const ctlOf=e=>altOf(e)&&!e.metaKey&&!e.ctrlKey;
 const LATCH={held:false,used:false,on:false};
 /* HELD KEYS SCOPE THE ARROWS. The arrows always mean "adjust"; the key you are
    holding says adjust WHAT. tab = the loop, m = tempo. `used` records whether
@@ -10721,7 +10726,7 @@ const onKeyDown=e=>{
   }
 
   /* ⌥m / ⌥s — mute and solo, on a letter that says which */
-  if(MSCOPE[e.code]&&altOf(e)&&!e.repeat&&S.layer>=1&&!e.metaKey&&!e.ctrlKey){
+  if(MSCOPE[e.code]&&altOf(e)&&!e.repeat&&S.layer>=1&&!e.metaKey&&!e.ctrlKey&&!HOLD.q){
     e.preventDefault();
     const kind=MSCOPE[e.code];
     if(HOLD.ms&&HOLD.ms.kind===kind&&HOLD.msLatched){   // the way out is the key you came in on
@@ -11078,17 +11083,8 @@ const onKeyDown=e=>{
     }
     setBpm(T.bpm+d*(rs(e)?10:1)); return;
   }
-  if(c==='KeyM'&&ctlOf(e)){
+  if(c==='KeyB'&&ctlOf(e)&&!HOLD.q){
     if(!e.repeat){HOLD.m=true; HOLD.mUsed=false;}
-    return;}
-  if(c==='KeyB'&&ctlOf(e)&&!e.repeat){              // tap tempo
-    const n2=performance.now();
-    taps=taps.filter(t2=>n2-t2<3000); taps.push(n2);
-    if(taps.length>=2){
-      const iv=(taps[taps.length-1]-taps[0])/(taps.length-1);
-      setBpm(Math.round(60000/iv));
-      flash('tap → '+T.bpm+'bpm ('+taps.length+')');
-    }else flash('tap…');
     return;}
   if(c==='KeyT'&&S.layer===0&&!e.repeat){        // t = timeline on/off (focus mode)
     S.arrOn=S.arrOn===false?true:false;
@@ -11944,7 +11940,7 @@ document.addEventListener('keyup',e=>{
       dirty=true;}
     return;
   }
-  if(c==='KeyM'&&HOLD.m){
+  if(c==='KeyB'&&HOLD.m){
     const used=HOLD.mUsed; HOLD.m=false; HOLD.mUsed=false;
     if(!used){
       if(rs(e)){                                   // right-shift+m tapped = tap tempo
@@ -14263,9 +14259,9 @@ function renderHelp(L){
     ['⌘C / ⌘X / ⌘V','copy / cut / paste a WHOLE channel — its sound, its racks, its loop, its clip. On the master: all nine at once'],
 
     ['— playing —',''],
-    ['a w s e d f t g y h u j k o l p ; \'','the notes'],
-    ['z / x','keyboard register, down / up — one global octave'],
-    ['tap c / tap v','keyboard velocity down / up (⇧ = the coarse step)'],
+    ['every letter','a note, and nothing else — ever, in every view. FULL (the default): all 26 letters low to high, bottom row first; a scale on = one key per scale degree, so nothing repeats. PIANO: home row white keys, row above black'],
+    ['⌥z / ⌥x','keyboard register, down / up — one global octave'],
+    ['tap ⌥c / tap ⌥v','keyboard velocity down / up (⇧ = the coarse step)'],
     ['⌥s / ⌥m','SOLO / MUTE the channel you are on, and while you hold it the digits do it to any other. Latch it and the digits keep doing it until you tap latch or press ⌥s again'],
     ['','they are plain toggles: press again for off. Asking for one withdraws the other, and the channel you touched becomes the one you are on'],
     ['⇧1-9','pick channels OUT — a selection, not a solo · ⇧←→ drags it along with the cursor · esc clears it'],
@@ -14274,7 +14270,7 @@ function renderHelp(L){
     ['⌘⌥⇧K','fold the selected channels into ONE KIT channel: each becomes a pad on its own key, and its part moves with it. Every modifier on the board, because it rewrites several channels at once'],
     ['left shift','LATCH. A control sticks if latch was down at any point while you held it. Tapped alone it releases everything'],
     ['latch + a note','the note keeps sounding after the key comes up. Press it again, or tap latch alone, to let it go'],
-    ['q','live quantize on/off — what you hear is exactly what records'],
+    ['⌥q','live quantize on/off — what you hear is exactly what records'],
     ['⇧Q','snap the selected lane to the grid now, for a take recorded with q off'],
     [', .','channel volume −/+ on the desk · bpm elsewhere (⇧ = ±10)'],
     ['b','tap tempo'],
@@ -14296,14 +14292,14 @@ function renderHelp(L){
     ['[ ]','walk between the automated knobs on this channel — and it takes you to the parameter, so your arrows are already on the thing you are looking at'],
     ['⌥⌫ (with \\ up)','clear THIS knob’s automation. Without the overlay ⌥⌫ still clears the whole rack’s, and ⌥⇧⌫ the whole channel’s'],
     ['','a point that can no longer find its parameter — the slot was emptied, the effect changed type — is KEPT and skipped, never applied to the wrong knob. Put the slot back and the automation comes back with it'],
-    ['hold q','QUANTIZE: 1-8 set THIS channel\u2019s grid — 1 beats · 2 8ths · 3 8th triplets · 4 16ths · 5 dotted 8ths · 6 16th triplets · 7 sevenths · 8 32nds'],
-    ['hold q + 0','quantize OFF — notes land exactly where you played them. Picking a grid turns it back on, because asking for a grid is asking to be on it'],
+    ['hold ⌥q','QUANTIZE: 1-8 set THIS channel\u2019s grid — 1 beats · 2 8ths · 3 8th triplets · 4 16ths · 5 dotted 8ths · 6 16th triplets · 7 sevenths · 8 32nds'],
+    ['hold ⌥q + 0','quantize OFF — notes land exactly where you played them. Picking a grid turns it back on, because asking for a grid is asking to be on it'],
     ['⌘E','EXPORT: set · mixdown · channels. The set is a .json you can reload anywhere — develop here, export, drop it into the live one. Mixdown and channels are rendered by PLAYING the pattern once in real time, because the engine lives in one audio context and what comes out is exactly what you heard; channels gives you the master plus one wav per channel, all captured in the same pass so they line up'],
     ['⌘I','IMPORT a set file. Dragging a .json onto the window does the same thing'],
     ['⌘⇧E','KEEP THE SET IN A FILE. Pick one once and every change is written into it as you work — the ordinary autosave only ever reaches localStorage, which belongs to the browser profile and goes when the profile does. The header shows ◆ file while it is writing. ⌘E still exports a one-off copy, and dragging a .json back in loads it'],
-    ['hold q + m','MONITOR: grid or live. On grid you hear yourself snapped to the beat — the feel of the thing, but a roll faster than the grid puts two hits on one step and a mono channel can only sound one, so notes thin out. On live you hear every hit as you played it and the grid still owns what records. Play rolls on live, or give the channel a finer grid'],
+    ['hold ⌥q + m','MONITOR: grid or live. On grid you hear yourself snapped to the beat — the feel of the thing, but a roll faster than the grid puts two hits on one step and a mono channel can only sound one, so notes thin out. On live you hear every hit as you played it and the grid still owns what records. Play rolls on live, or give the channel a finer grid'],
     ['tap q','toggle quantize. Only the TAP toggles: choosing a grid leaves the switch alone'],
-    ['hold m','TEMPO: ↑↓ bpm (⇧ ×10 · ⌥ ×0.1) · tap m = click on/off · ⇧m tap = tap tempo'],
+    ['hold ⌥b','TEMPO: ↑↓ bpm (⇧ ×10) · tap ⌥b = click on/off · ⇧⌥b tap = tap tempo — b for beat, and m stays mute'],
     ['hold c','CHANNEL: ↑↓ volume (⇧ fine) · ←→ pan · c+⌫ resets both'],
     ['hold v','VELOCITY: ↑↓ this channel’s offset · ⇧↑↓ the keyboard’s own velocity'],
     ['hold n','NOTES: ↑↓ octave · ←→ semitone — one number, ±36 semitones · n+⌫ clears the lane'],
