@@ -12917,7 +12917,7 @@ const onKeyDown=e=>{
            key-up can carry the length you held across the quantize: a 40ms tap
            is a 40ms note wherever on the grid it lands. */
         livePress[c]={start:at,press:AC.currentTime};
-        if(S.layer>=1)rPend[c]={pi,ts:tr,midi,vel:hitVel};   // retro memory hears everything
+        if(S.layer>=1)rPend[c]={pi,ts:tr,midi,vel:hitVel,press:AC.currentTime};   // retro memory hears everything
         /* an active arp generates the notes — record ITS output (recPlayNote), not the held note */
         const plyOf=isKit(S.presets[pi])?(kitSlot(S.presets[pi],midi)||{ply:[]}).ply:S.presets[pi].ply;
         const arpOn=T.playing&&plyOf.some(sl=>(sl.typ===2||sl.typ===1||sl.typ===13)&&!sl.off&&Math.round(sl.p6||0)===1);
@@ -13192,7 +13192,14 @@ document.addEventListener('keyup',e=>{
     eraseHold=null;muteHold=null;clearTimeout(delHoldTimer);}
   if(rPend[c]){
     const r=rPend[c];
-    retroBuf[r.pi].push({t:r.ts,midi:r.midi,vel:r.vel,dur:Math.max(0.05,gridNow()-r.ts)});
+    /* SAME RULE AS THE RECORDER: the length is the held gesture. r.ts is the
+       QUANTIZED start — often still in the future when a staccato key comes
+       up — so gridNow()-r.ts docked every early-pressed note by the quantize
+       displacement and clamped fast taps to 0.05 stubs. Retro is how most
+       takes happen; it has to hear the same lengths live rec writes. */
+    const heldB=r.press?Math.max(0,(AC.currentTime-r.press)/spb()):0;
+    retroBuf[r.pi].push({t:r.ts,midi:r.midi,vel:r.vel,
+      dur:Math.max(0.05,heldB,gridNow()-r.ts)});
     if(retroBuf[r.pi].length>512)retroBuf[r.pi].shift();
     delete rPend[c];
   }
