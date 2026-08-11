@@ -193,7 +193,7 @@ class Looper{
   }
   halve(){this.count=Math.max(0.25,this.count/2);}
   inc(d){this.count=clamp(Math.round((this.count+d)*4)/4,0.25,256);}
-  clear(pred){this.events=pred?this.events.filter(e=>!pred(e)):[];}
+  clear(pred){this.events=pred?this.events.filter(e=>!pred(e)):[]; this._rev=(this._rev|0)+1;}
   occur(from,to,cb){
     const L=this.len; if(L<=0)return;
     for(const e of this.events){
@@ -1326,6 +1326,12 @@ function autoWhere(pre,a){
 function autoLanes(pre){
   const ml=pre&&pre.modLoop;
   if(!ml||!ml.events.length)return [];
+  /* REBUILT ONLY WHEN THE POINT SET CHANGES. The control tick reads this at
+     125Hz across ten channels and autoAddr builds spec arrays, so doing it
+     fresh every time would cost more than the automation it plays. Entries
+     hold the event objects themselves, so a value edit shows through without
+     any rebuild at all. */
+  if(ml._lc&&ml._lcRev===(ml._rev|0)&&ml._lcN===ml.events.length)return ml._lc;
   const m=new Map();
   for(const ev of ml.events){
     const a=evAddr(pre,ev); if(!a)continue;
@@ -1339,6 +1345,7 @@ function autoLanes(pre){
      predictable, and insertion order is whatever you happened to touch first */
   const rk=a=>{const j=DPICK_ORDER.indexOf(a.rack); return j<0?99:j;};
   out.sort((x,y)=>rk(x.a)-rk(y.a)||(+x.a.slot||0)-(+y.a.slot||0)||(x.a.key<y.a.key?-1:1));
+  ml._lc=out; ml._lcRev=ml._rev|0; ml._lcN=ml.events.length;
   return out;
 }
 
@@ -1420,6 +1427,40 @@ function destSpan(sp){
   const lo=sp.min!==undefined?sp.min:(sp.type==='time'?0.001:sp.type==='freq'?20:0);
   const hi=sp.max!==undefined?sp.max:(sp.type==='time'?8:sp.type==='freq'?20000:1);
   return [lo,hi];
+}
+/* the way back out of spanPos, so automation can interpolate where it is DRAWN
+   — in the parameter's own perceptual space rather than in raw units */
+function spanVal(sp,u){
+  const [lo,hi]=destSpan(sp);
+  if((sp.type==='time'||sp.type==='freq')&&lo>0&&hi>lo)
+    return lo*Math.exp(clamp(u,0,1)*Math.log(hi/lo));
+  return lo+clamp(u,0,1)*(hi-lo);
+}
+/* AUTOMATION FLOWS. A recorded move is continuous — you held the key and the
+   value slid — so playing it back as a staircase is not what you did, and the
+   ¼-beat capture grid turned every sweep into four jumps a beat. Points are
+   joined, and interpolated in spanPos space so a filter sweep travels the same
+   way it is drawn and the same way the knob moves.
+   A STEP point (st) holds until the next one. That is what parameter locks
+   want, and the only thing that should still read as a staircase. */
+function autoValueAt(spec,pts,ph,L){
+  const n=pts.length;
+  if(!n)return null;
+  if(n===1)return pts[0].v;
+  let i=-1;
+  for(let k=0;k<n;k++)if(pts[k].t<=ph+1e-9)i=k;
+  /* before the first point you are still riding the last one of the previous
+     cycle, so it wraps rather than clamping */
+  const a=i<0?pts[n-1]:pts[i];
+  const b=i<0?pts[0]:pts[(i+1)%n];
+  if(a.st)return a.v;
+  const ta=i<0?pts[n-1].t-L:a.t;
+  const tb=(i<0?pts[0].t:(i+1>=n?pts[0].t+L:b.t));
+  const span=tb-ta;
+  if(span<=1e-9)return b.v;
+  const u=clamp((ph-ta)/span,0,1);
+  const pa=spanPos(spec,a.v), pb=spanPos(spec,b.v);
+  return spanVal(spec,pa+(pb-pa)*u);
 }
 /* where a value sits in its own range, 0..1. Times and frequencies are placed
    logarithmically for the same reason they are MOVED that way — half of a
@@ -1723,6 +1764,30 @@ function optSlot(ch,c,make){
    change made while playing is a change worth keeping, so it goes through the
    same door as every other param move and lands in the mod loop when REC is
    armed. */
+/* ONE HELD KEY IS ONE GESTURE, and it overwrites the span it crosses. Writing
+   a point only where the new move happens to land on the capture grid left the
+   old points in the gaps, so re-recording a sweep interleaved with the sweep it
+   was meant to replace and the two fought on playback. Everything between the
+   last write and this one goes — computed forward, so a gesture that crosses
+   the loop point erases the right side of it rather than the whole middle. */
+const AUTOW={};
+function recAuto(pi,pre,mi,si,px,nv){
+  const ml=pre&&pre.modLoop;
+  if(!ml||ml.state!=='rec'||!T.playing)return;
+  const L=ml.len; if(L<=0)return;
+  const a=autoAddr(pre,mi,si,px); if(!a)return;
+  const t=fmod(qz(fmod(posNow(),L),0.25),L);
+  const k=pi+'|'+addrKey(a), now=performance.now(), prev=AUTOW[k];
+  const mine=ev=>sameAddr(evAddr(pre,ev),a);
+  const d=prev?fmod(t-prev.t,L):-1;
+  if(prev&&now-prev.at<400&&d>1e-9&&d<L/2)
+    ml.clear(ev=>{ if(!mine(ev))return false;
+                   const dd=fmod(ev.t-prev.t,L); return dd>1e-9&&dd<=d+1e-9; });
+  else ml.clear(ev=>mine(ev)&&Math.abs(ev.t-t)<1e-6);
+  ml.events.push({t,a,m:mi,s:si,p:px,v:nv});   // m/s/p kept for one version
+  ml._rev=(ml._rev|0)+1;
+  AUTOW[k]={t,at:now};
+}
 function optWrite(ch,c,pKey,nv){
   const T2=OPTRACK[c], pre=S.presets[ch];
   const mi=MODULES.findIndex(m=>m.id===T2.id);
@@ -1732,13 +1797,7 @@ function optWrite(ch,c,pKey,nv){
   const px=paramsFor(mi,rack[si]).findIndex(sp2=>sp2.key===pKey);
   if(px<0){rack[si][pKey]=nv; return;}
   writeParam(ch,mi,si,px,nv);
-  const ml=pre.modLoop;
-  if(ml&&ml.state==='rec'&&T.playing){
-    const t=fmod(qz(fmod(posNow(),ml.len),0.25),ml.len);
-    const a=autoAddr(pre,mi,si,px);
-    ml.clear(ev=>sameAddr(evAddr(pre,ev),a)&&Math.abs(ev.t-t)<1e-6);
-    ml.events.push({t,a,m:mi,s:si,p:px,v:nv});   // m/s/p kept for one version
-  }
+  recAuto(ch,pre,mi,si,px,nv);
 }
 function optSet(key,on){
   const [chS,c]=key.split(':'), ch=+chS;
@@ -2767,22 +2826,10 @@ function scheduleRange(from,to){
       }
     }
   }
-  for(let si=0;si<10;si++){
-    const ml=S.presets[si].modLoop;
-    if(!ml.events.length)continue;
-    const pre=S.presets[si];
-    ml.occur(from,to,(t,e)=>{
-      /* resolved through the address, so a point survives its rack being
-         renumbered. Where the address names something that is no longer there
-         the point is simply not applied — it is kept, not deleted, so putting
-         the slot back brings the automation back with it. */
-      const a=evAddr(pre,e);
-      const w=a?autoWhere(pre,a):null;
-      if(!w)return;
-      const ms=Math.max(0,(timeAt(t)-AC.currentTime)*1000);
-      setTimeout(()=>{applyParam(si,w.mi,w.si,w.px,e.v);dirty=true;},ms);
-    });
-  }
+  /* AUTOMATION IS NOT SCHEDULED HERE ANY MORE. It used to fire one setTimeout
+     per point, which made playback a staircase: the capture grid is a quarter
+     beat, so a sweep you recorded by holding a key came back as four jumps a
+     beat. It is read continuously on the control tick instead — see autoTick. */
 }
 setInterval(()=>{
   engine.procFollowers();
@@ -4547,6 +4594,38 @@ class Engine{
         try{v.setFollow(x);}catch(_){}
       }
     }
+  }
+  /* RECORDED AUTOMATION, PLAYED CONTINUOUSLY. One read per automated knob per
+     tick, interpolated between points — so a sweep arrives as a sweep and the
+     knob on screen moves the way the curve says it does. Control rate is the
+     honest rate for this: these are knob positions, not waveforms, and most of
+     them have no AudioParam to ramp anyway. */
+  autoTick(){
+    if(!T.playing)return;
+    const pos=posNow();
+    for(let pi=0;pi<10;pi++){
+      const pre=S.presets[pi], ml=pre&&pre.modLoop;
+      if(!ml||!ml.events.length)continue;
+      const L=ml.len; if(L<=0)continue;
+      const ph=fmod(pos,L);
+      for(const lane of autoLanes(pre)){
+        /* an address naming something that is gone is skipped, never applied
+           to the wrong knob — the point is kept, so putting the slot back
+           brings its automation back with it */
+        /* WRITE BEATS READ. While your hand is on a knob, playback must not
+           also be writing it — otherwise every 8ms the curve puts the value
+           back and your keypress only ever nudges one step off whatever
+           playback just wrote, so recording over existing automation records
+           the automation you were trying to replace. */
+        const wr=AUTOW[pi+'|'+lane.k];
+        if(wr&&performance.now()-wr.at<400)continue;
+        const w=autoWhere(pre,lane.a); if(!w)continue;
+        const pts=lane.pts.filter(p=>p.t<L-1e-9); if(!pts.length)continue;
+        const v=autoValueAt(w.spec,pts,ph,L);
+        if(v!=null)applyParam(pi,w.mi,w.si,w.px,v);
+      }
+    }
+    dirty=true;
   }
   modTick(){
     const now=AC.currentTime;
@@ -7707,12 +7786,7 @@ function adjustParam(d,m){
   }else{
     const nv=adjust(spec,getV(holder,mi,si,spec),d,m);
     writeParam(S.editSnd,mi,si,px,nv);
-    if(ml.state==='rec'&&T.playing&&holder===pre){
-      const t=fmod(qz(fmod(posNow(),ml.len),0.25),ml.len);
-      const a2=autoAddr(pre,mi,si,px);
-      ml.clear(ev=>sameAddr(evAddr(pre,ev),a2)&&Math.abs(ev.t-t)<1e-6);
-      ml.events.push({t,a:a2,m:mi,s:si,p:px,v:nv});
-    }
+    if(holder===pre)recAuto(S.editSnd,pre,mi,si,px,nv);
   }
   dirty=true;
 }
@@ -12784,21 +12858,34 @@ function autoCurves(pre,laneLen,anc,H,CW,frontKey){
        ITS time and ask the mod loop what it is doing there, so a 2-bar sweep
        under a 1-bar part draws the half you are actually going to hear. */
     const ph0=fmod(anc,mlen);
-    let held=pts[pts.length-1].v;                 // before the first point: last cycle's value
-    for(const p of pts)if(p.t<=ph0+1e-9)held=p.v;
-    const brk=[{ct:0,v:held}];
+    /* the top of the column is mid-ramp, not on a point, so it takes the
+       INTERPOLATED value there — reading the last point instead drew a flat
+       run into the first point that the playback does not play */
+    let heldSt=false;
+    for(const p of pts)if(p.t<=ph0+1e-9)heldSt=!!p.st;
+    const brk=[{ct:0,v:autoValueAt(w.spec,pts,ph0,mlen),st:heldSt}];
     for(let base=-ph0;base<laneLen-1e-9&&brk.length<400;base+=mlen)
       for(const p of pts){
         const t=base+p.t;
-        if(t>1e-9&&t<laneLen-1e-9)brk.push({ct:t,v:p.v});
+        if(t>1e-9&&t<laneLen-1e-9)brk.push({ct:t,v:p.v,st:!!p.st});
       }
     const front=L.k===frontKey;
+    /* JOINED, NOT STEPPED. A recorded move is continuous; drawing it as a
+       staircase showed jumps the playback no longer makes. A STEP point still
+       holds — that is what a parameter lock is — so the two shapes live in one
+       path and you can see at a glance which kind of point you are looking at. */
     let d='M'+X(brk[0].v).toFixed(1)+',0';
     for(let j=1;j<brk.length;j++){
       const y=(brk[j].ct/laneLen*H).toFixed(1);
-      d+='V'+y+'H'+X(brk[j].v).toFixed(1);        // hold, then jump — the staircase
+      if(brk[j-1].st)d+='V'+y+'H'+X(brk[j].v).toFixed(1);   // hold, then jump
+      else d+='L'+X(brk[j].v).toFixed(1)+','+y;             // ramp straight to it
     }
-    d+='V'+H.toFixed(1);
+    /* and the bottom is mid-ramp too: the curve leaves the column heading for
+       the next point, wrapping if that point is in the following cycle. A bare
+       vertical here dropped the line straight down at the last value. */
+    if(brk[brk.length-1].st)d+='V'+H.toFixed(1);
+    else d+='L'+X(autoValueAt(w.spec,pts,fmod(ph0+laneLen,mlen),mlen)).toFixed(1)
+            +','+H.toFixed(1);
     h+='<path class="acv'+(front?' af':'')+'" d="'+d+'"/>';
     if(front)for(const b of brk)
       h+='<circle class="apt" cx="'+X(b.v).toFixed(1)+'" cy="'+
@@ -13994,7 +14081,8 @@ let lastR=0, lastF=0, cpuLoad=0;
    background. Its own clock, faster than a frame and independent of one.
    It is still a main-thread clock; making it sample-accurate is what moving
    the DSP onto the audio thread buys. */
-setInterval(()=>{try{engine.modTick();}catch(_){}},8);
+setInterval(()=>{try{engine.modTick();}catch(_){}
+                 try{engine.autoTick();}catch(_){}},8);
 (function raf(t){
   requestAnimationFrame(raf);
   if(lastF){                       // main-thread load: how far frames stretch past 60fps
