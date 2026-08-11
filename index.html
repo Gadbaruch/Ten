@@ -326,7 +326,7 @@ const XDIST=XTYPES.indexOf('dist');
 const vrbSec=v=>0.05+4.45*Math.pow(clamp(v,0,1),2);
 const vrbInv=s=>clamp(Math.sqrt(Math.max(0,s-0.05)/4.45),0,1);
 const GPATS=[[1,1,1,1,0,0,0,0],[0,0,1,1,0,0,1,1],[1,0,1,0,1,0,1,0],[1,.7,.45,.3,.2,.12,.07,0],[1,0,0,1,0,0,1,0]];
-const PTYPES=['off','chord','arp','grv','prep','rev','rndp','vel','chc','euc','nudge','hmnz','flam','rpit','len'];
+const PTYPES=['off','chord','arp','grv','prep','rev','rndp','vel','chc','euc','nudge','hmnz','flam','rpit','len','rtc'];
 /* groove templates: f(16th-index) -> -1..1, scaled by amt% * half a 16th */
 const GROOVES=[
  {n:'sw16',f:i=>i%2===1?1:0},
@@ -1268,6 +1268,12 @@ const PLY_P=sl=>{
        matters is how many of the sixteen hit */
     SP('hits','p1','lin',{min:1,max:16,step:1,fmt:v=>Math.round(v)+'/16'}));
   if(sl.typ===10)return T(SP('shift','p1','lin',{min:-60,max:60,step:1,fmt:v=>(v>0?'+':'')+v+'ms'}));
+  /* RATCHET: one note becomes a burst of itself. The note keeps its pitch and
+     its footprint; it is divided into equal sub-hits, each a little softer if
+     you ask. An arpeggio with nowhere to go. */
+  if(sl.typ===15)return T(
+    SP('divs','p1','lin',{min:2,max:8,step:1,fmt:v=>'\u00d7'+Math.round(v)}),
+    SP('fade','p2','lin',{min:0,max:100,step:10,fmt:v=>v+'%'}));
   if(sl.typ===11)return T(SP('range','p1','lin',{min:0,max:80,step:1,fmt:v=>'\u00b1'+v+'ms'}));
   if(sl.typ===12)return T(
     SP('gap','p1','lin',{min:5,max:120,step:1,fmt:v=>v+'ms'}),
@@ -2948,7 +2954,7 @@ function scheduleRange(from,to){
           list=K?K.ply.filter(sl=>sl.typ&&!sl.off):[];}
         else list=chP.ply.filter(sl=>sl.typ&&!sl.off);
         const g=t=>list.find(sl=>sl.typ===t);
-        return plyCache[pc]={rev:!!g(5),rnd:g(6),vel:g(7),chc:g(8),euc:g(9),nud:g(10),hmz:g(11),flam:g(12)};
+        return plyCache[pc]={rev:!!g(5),rnd:g(6),vel:g(7),chc:g(8),euc:g(9),nud:g(10),hmz:g(11),flam:g(12),rtc:g(15)};
       };
       const laneP=plyFor(lane.events.length?lane.events[0].midi:60);
       const revS=laneP.rev, rndS=laneP.rnd, eucS=laneP.euc;   // lane-shape effects use the first note's set
@@ -2958,25 +2964,52 @@ function scheduleRange(from,to){
       if(liveMute[li]>0)continue;         // live overwrite: recorded notes yield to what you play
       const L2=lane.len, f0=s0-a.anchor, f1=s1-a.anchor;
       const h2=x=>{const v=Math.sin(x*127.1+li*311.7)*43758.5453;return v-Math.floor(v);};
+      const gmAct=gmOn();
       const emit=(t,e,cyc)=>{
         const P=plyFor(e.midi);                       // this pad's (or the channel's) effects
-        const chcS=P.chc, velS=P.vel, hmzS=P.hmz, flamS=P.flam;
+        const chcS=P.chc, velS=P.vel, hmzS=P.hmz, flamS=P.flam, rtcS=P.rtc;
         const nudB=P.nud?((P.nud.p1||0)/1000)/spb():0;
         if(chcS&&h2(e.t*7.13+cyc*3.7)>clamp(chcS.p1??100,0,100)/100)return;
-        let v=e.vel||0.9;
+        let v=e.vel||0.9, midi2=e.midi, dur2=e.dur||0.2, rt=0;
         if(velS)v=Math.max(0.05,v*(1-clamp(velS.p1??50,0,100)/100*h2(e.t*5.7+cyc*9.1)));
         let tt=t;                        // playback = exactly what you heard (post-Q is gone)
         tt+=grooveOff(li,tt+a.anchor)+nudB;
         if(hmzS){const rng=(hmzS.p1||0)/1000/spb();   // humanize: ± ms of timing jitter per hit
           tt+=(h2(e.t*13.7+cyc*4.3)*2-1)*rng;}
+        /* THE MASTER'S NOTE FX, over everything they target. Deterministic per
+           (note, cycle) — a latched scatter is a part you can learn, not
+           static. Nothing here writes a lane. */
+        for(const gi of gmAct){
+          if(!gmMatch(gi,li))continue;
+          const id=GMFX[gi].id, r=h2(e.t*31.7+cyc*7.9+gi*13.1);
+          if(id==='drop'&&r<0.33)return;
+          else if(id==='scat')tt=fmod(tt+Math.round((r*2-1)*8)*0.25,L2);
+          else if(id==='rpit'){let m2=midi2+Math.round((r*2-1)*7);
+            if(CFG.scaleOn)m2=snapToPCs(m2,pcsNow()); midi2=m2;}
+          else if(id==='octs')midi2+=r<0.33?-12:r>0.67?12:0;
+          else if(id==='chop')dur2=Math.max(0.05,dur2*0.33);
+          else if(id==='rtch')rt=Math.max(rt,3);
+          else if(id==='half'){const onBeat=Math.abs(e.t/1-Math.round(e.t/1))<1e-6;
+            if(!onBeat)v=Math.max(0.05,v*0.35);}
+        }
         if(flamS){                                    // flam/ruff: grace hits before the main note
           const gap=(flamS.p1||25)/1000/spb(), n=clamp(Math.round(flamS.p2??1),1,3), lv=flamS.p3??0.6;
           for(let g=n;g>=1;g--){
             const gt=tt-gap*g; if(timeAt(gt+a.anchor)<AC.currentTime)continue;   // don't schedule in the past
-            engine.trigger(timeAt(gt+a.anchor),li,e.midi,Math.max(0.05,v*lv),(e.dur||0.2)*0.5*spb());
+            engine.trigger(timeAt(gt+a.anchor),li,midi2,Math.max(0.05,v*lv),dur2*0.5*spb());
           }
         }
-        engine.trigger(timeAt(tt+a.anchor),li,e.midi,v,(e.dur||0.2)*spb());
+        /* RATCHET — from the channel's own slot or the master's z-row. The
+           note's footprint is divided into equal sub-hits, fading if asked. */
+        const divs=rtcS?clamp(Math.round(rtcS.p1??3),2,8):rt;
+        if(divs>=2){
+          const fade=rtcS?clamp(rtcS.p2??20,0,100)/100:0.25, step=dur2/divs;
+          for(let i2=0;i2<divs;i2++)
+            engine.trigger(timeAt(tt+i2*step+a.anchor),li,midi2,
+              Math.max(0.05,v*(1-fade*i2/divs)),step*0.9*spb());
+          return;
+        }
+        engine.trigger(timeAt(tt+a.anchor),li,midi2,v,dur2*spb());
       };
       if(revS||rndS){                                 // playhead transforms: expand by cycle
         for(const e of lane.events){
@@ -11626,6 +11659,13 @@ const onKeyDown=e=>{
   }
   if(c==='ArrowLeft'||c==='ArrowRight'){e.preventDefault();
     const d=c==='ArrowRight'?1:-1;
+    /* a held z-row note-fx owns ←→: it is choosing its target */
+    if(Object.keys(gmHeld).length&&S.mSel){
+      S.gmT=S.gmT||[];
+      for(const k of Object.keys(gmHeld)){S.gmT[k]=fmod(gmTgt(+k)+d,3);}
+      flash(Object.keys(gmHeld).map(k=>GMFX[k].n+' → '+GMTGT[gmTgt(+k)]).join(' · '));
+      dirty=true; dirtySave=true; return;
+    }
     if(inEdit()&&S.layer!==1&&!(rs(e)&&S.layer>=2)){
       /* EDIT owns the plain arrows (they walk the loop cells), but it used to
          swallow shift too — so in EDIT you could change neither slot nor param
@@ -11866,6 +11906,14 @@ const onKeyDown=e=>{
 
   /* the master's own pads: the dj row, where you are rather than off in a
      layer you had to leave the mix to reach */
+  /* z-row on the master: the global NOTE effects. ←→ while one is held
+     cycles its target — everything, drums, or melodic. */
+  if(S.mSel&&S.layer>=1&&GMCODE[c]!==undefined&&!e.repeat&&HOLD.dig<0&&!e.metaKey&&!altOf(e)){
+    e.preventDefault();
+    gmPress(GMCODE[c],KM.sl);
+    if(KM.sl)LATCH.used=true;
+    return;
+  }
   if(S.mSel&&S.layer>=1&&DJCODE[c]!==undefined&&!e.repeat&&HOLD.dig<0){
     e.preventDefault();
     const k=DJCODE[c];
@@ -11992,6 +12040,35 @@ document.addEventListener('keydown',onKeyDown);
 
 
 let djHeld={},djLatch={},djAuto={},djRecStart={};
+/* THE Z ROW ON THE MASTER: global NOTE effects, the midi mirror of the dj
+   pads above them. Hold = momentary, ⇧ = latch, and each one carries its own
+   TARGET — everything, the drums, or the melodic channels — cycled with ←→
+   while it is held. They bend what the sequencer emits; the lanes underneath
+   are never written. */
+const GMCODE={KeyZ:0,KeyX:1,KeyC:2,KeyV:3,KeyB:4,KeyN:5,KeyM:6};
+const GMKEYS=['z','x','c','v','b','n','m'];
+const GMFX=[
+ {id:'scat',n:'scatter', d:'notes jump to other grid positions'},
+ {id:'rpit',n:'r-pitch', d:'random pitch, in scale when a scale is on'},
+ {id:'chop',n:'chop',    d:'every note cut to a third of itself'},
+ {id:'octs',n:'oct dice',d:'notes leap an octave up or down at random'},
+ {id:'rtch',n:'ratchet', d:'every note becomes a burst of three'},
+ {id:'drop',n:'dropout', d:'a third of the notes go missing'},
+ {id:'half',n:'ghost',   d:'everything soft except the downbeats'},
+];
+const GMTGT=['all','drums','melodic'];
+let gmHeld={},gmLatch={};
+const gmOn=()=>{const o=[];for(let i=0;i<GMFX.length;i++)if(gmHeld[i]||gmLatch[i])o.push(i);return o;};
+const gmTgt=i=>clamp(Math.round((S.gmT&&S.gmT[i])||0),0,2);
+const gmMatch=(i,li)=>{const t=gmTgt(i); if(!t)return true;
+  const dr=isDrumCat(S.presets[li].cat); return t===1?dr:!dr;};
+function gmPress(k,shift){
+  if(shift){if(gmLatch[k])delete gmLatch[k];else gmLatch[k]=1;}
+  else if(gmLatch[k])delete gmLatch[k];
+  else gmHeld[k]=1;
+  flash('note fx: '+(gmOn().length?gmOn().map(i=>GMFX[i].n+'→'+GMTGT[gmTgt(i)]).join(' · '):'off'));
+  dirty=true;
+}
 function djPress(k,shift){        // shared pad logic: tap on a latched pad unlatches it
   if(shift){if(djLatch[k])delete djLatch[k];else djLatch[k]=1;}
   else if(djLatch[k])delete djLatch[k];
@@ -12169,6 +12246,11 @@ document.addEventListener('keyup',e=>{
     }
     LATCH.used=false; return;
   }
+  if(GMCODE[c]!==undefined&&gmHeld[GMCODE[c]]!==undefined){
+    delete gmHeld[GMCODE[c]];
+    if(!gmOn().length)flash('note fx off');
+    dirty=true;
+  }
   if(DJCODE[c]!==undefined&&djHeld[DJCODE[c]]){
     const k=DJCODE[c]; delete djHeld[k];
     if(djRecStart[k]!==undefined){                     // close the recorded automation window
@@ -12311,7 +12393,7 @@ function portPreset(p,out){
   if(Array.isArray(q.kit))q.kit=q.kit.map(k=>k?portPreset(k,out):null);
   return q;
 }
-function serialize(){return JSON.stringify({v:SAVEV,bpm:T.bpm,metro:S.metro,hum:S.hum,grv:S.grv,oct:S.oct,master:S.master,dj:S.dj,arrOn:S.arrOn!==false,
+function serialize(){return JSON.stringify({v:SAVEV,bpm:T.bpm,metro:S.metro,hum:S.hum,grv:S.grv,oct:S.oct,master:S.master,dj:S.dj,gmT:S.gmT||[],arrOn:S.arrOn!==false,
   clips:S.clips,scenes:S.scenes,clipAt:S.clipAt,sceneAt:S.sceneAt,
   arr:S.arr,
   patterns:S.patterns.map(p=>({state:p.state==='edit'?'on':p.state,sw:p.sw||0,lanes:p.lanes})),
@@ -12347,7 +12429,7 @@ function load(json){
        copy. A version bump has two halves and I only did one. */
     if(!o||o.v<1)return false;
     if(o.v>SAVEV){console.warn('save is v'+o.v+', this build reads up to v'+SAVEV);return false;}
-    T.bpm=o.bpm||120; S.metro=!!o.metro; S.hum=o.hum??0;
+    T.bpm=o.bpm||120; S.metro=!!o.metro; S.hum=o.hum??0; S.gmT=Array.isArray(o.gmT)?o.gmT:[];
     S.grv=o.grv||{typ:0,amt:0};
     S.master=Array.isArray(o.master)
       ?o.master.map((m,i)=>({typ:0,rt:0,p1:0.3,p2:0.3,p3:0.5,mix:0.3,...m}))
@@ -13165,11 +13247,7 @@ function renderArr(L,pos){
      const foc=i===(S.arrParam||0);
      pr+=(foc?sp('a','▸'+it.n):sp('d',' '+it.n))+' '+(foc?sp('i',' '+pad(it.v(),6)):sp('d',pad(it.v(),6)))+'   ';
    });
-   L.push(pr+sp('d','←→ · ↑↓')+'      '+sp('d','dj pads: '))+
-   L.push('  '+S.dj.map((d2,i)=>{
-     const on=djHeld[i]||djLatch[i]||djAuto[i];
-     return (on?sp('r',' '+DJKEYS[i]+djName(i)):sp('d',' '+DJKEYS[i]+djName(i)));
-   }).join('')+sp('d','  hold=momentary ⇧=latch · edit inside MASTER 0')); }
+   L.push(pr+sp('d','←→ · ↑↓'));  }
   L.push('');
   const arr=S.arr, cell=cellOf(arr);
   const phCell=T.playing?Math.floor(fmod(pos,arr.len)/cell):-1;
@@ -13828,6 +13906,21 @@ function renderPat(L,pos){
   /* Everything opens in the same place — above the desk, under the notes.
      Settings were the last thing that swapped the screen for another screen,
      and there was no reason for it: they are a rack like any other rack. */
+  /* the master's two performance rows, above the strip whenever the master is
+     selected: the dj pads (audio) and the z-row (notes). renderArr held these
+     once — the function nothing calls, which is why they were invisible. */
+  if(S.mSel){
+    L.push('  '+sp('d','dj pads:  ')+S.dj.map((d2,i)=>{
+      const on=djHeld[i]||djLatch[i]||djAuto[i];
+      return (on?sp('r',' '+DJKEYS[i]+djName(i)):sp('d',' '+DJKEYS[i]+djName(i)));
+    }).join('')+sp('d','   hold=momentary ⇧=latch'));
+    L.push('  '+sp('d','note fx:  ')+GMFX.map((f,i)=>{
+      const on=gmHeld[i]||gmLatch[i];
+      const lbl=' '+GMKEYS[i]+f.n+'\u2192'+GMTGT[gmTgt(i)].slice(0,4);
+      return on?sp('r',lbl):sp('d',lbl);
+    }).join('')+sp('d','   ←→ while held = target'));
+    L.push('');
+  }
   if(S.mSel&&S.layer>=2)masterRack(L);
   else if(S.layer>=2){
     L.push('');
@@ -14471,6 +14564,8 @@ function renderHelp(L){
     ['⌥d','go to the DELAY — made if the rack has none. The cursor lands on it, so ↑↓ and ←→ edit it directly; digits jump between several; ⌫ removes it'],
     ['⌥e','go to the ENVELOPES. a / d / s / r jump to attack, decay, sustain, release by their own letters; digits jump between envelopes; ⌫ removes one'],
     ['slot memory','every slot remembers the param you last touched, and every JUMP back (digits, ⌥←→, the letter scopes) lands there'],
+    ['rtc (PLAY rack)','the RATCHET: one note becomes a burst of itself — ×2..×8 equal sub-hits inside its own footprint, fading if you ask. An arpeggio with nowhere to go'],
+    ['(master) z x c v b n m','the GLOBAL NOTE FX, the midi mirror of the dj pads above them: scatter · r-pitch · chop · oct dice · ratchet · dropout · ghost. Hold = momentary, ⇧ = latch, ←→ while held picks the TARGET — everything, the drums, or the melodic channels. They bend what the sequencer emits; nothing is written to the lanes'],
     ['⇧, / ⇧.','keyboard velocity down / up — how hard, next to how high'],
     ['⌥= / ⌥-','SOLO / INSIST and MUTE / SILENCE the channel you are on — next to the volume keys they qualify. While held, the digits do it to any other channel; latch keeps the digits doing it'],
     ['','they are plain toggles: press again for off. Asking for one withdraws the other, and the channel you touched becomes the one you are on'],
