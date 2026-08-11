@@ -1582,6 +1582,7 @@ const destRate=(rack,key)=>
   /* the audio channel's pitch: free mode bends the sounding sources, sync
      mode retunes the shifter — either way it answers live */
   :(rack==='aud'&&key==='semis')?'ctrl'
+  :(rack==='grn'&&(key==='pos'||key==='size'||key==='dens'||key==='semis'))?'ctrl'
   /* A THIRD KIND. These have no node to write and no value to ramp — they are
      read once, when a note starts. So the modulator parks its value and the
      voice builder reads that instead of the slot; the change lands on the next
@@ -1705,6 +1706,8 @@ function modDests_(pre){
   }
   if((pre.cat||'')==='audio')
     add('aud',0,SP('pitch','semis','lin',{min:-24,max:24,step:1,fmt:v=>v+'st'}),'');
+  if((pre.cat||'')==='gran')for(const sp of GRANF)
+    if(['pos','size','dens','semis'].includes(sp.key))add('grn',0,sp,'');
   for(const sp of VOICE_P)add('voice',0,sp,'');
   for(const sp of MIX_P)add('mix',0,sp,'');
   return out;
@@ -1740,6 +1743,10 @@ function resolveDest(pre,a){
   if(a.rack==='aud'){
     const sp=SP('pitch','semis','lin',{min:-24,max:24,step:1,fmt:v=>v+'st'});
     return (a.key==='semis'&&a.lbl===sp.lbl)?[{aud:true,key:'semis',spec:sp,si:0,slot:pre.au||{}}]:[];
+  }
+  if(a.rack==='grn'){
+    const sp=GRANF.find(x=>x.key===a.key&&x.lbl===a.lbl);
+    return sp?[{grn:true,key:a.key,spec:sp,si:0,slot:pre.gr||{}}]:[];
   }
   if(a.rack==='mix'){
     const sp=MIX_P.find(x=>x.key===a.key&&x.lbl===a.lbl); if(!sp)return [];
@@ -3042,6 +3049,69 @@ let fxwReady=false;
       return true;
     }
   }
+  /* THE GRANULAR VOICE ENGINE. One node per channel; the sample crosses the
+     port once, notes arrive as {on,id,ratio,vel} and leave as {off,id}, and
+     every parameter is a message. Each voice sprays grains from the scan
+     position: size and density say how much cloud, spray and jitter say how
+     loose, shape bends the window from click to swell, rev flips some grains
+     tail-first, width scatters them across the pair. Scan 0 is freeze. */
+  class GR extends AudioWorkletProcessor{
+    constructor(){super();
+      this.L=null; this.R=null; this.len=0;
+      this.p={pos:0,spray:0.05,size:0.12,dens:20,semis:0,jit:0,shape:0.5,
+              rev:0.1,width:0.5,scan:1,gain:0.8};
+      this.vs=new Map(); this.grains=[]; this.scanPh=0; this.stat=0;
+      this.port.onmessage=e=>{const m=e.data||{};
+        if(m.t==='buf'){this.L=m.l; this.R=m.r||m.l; this.len=m.l.length;}
+        else if(m.t==='p')Object.assign(this.p,m.p||{});
+        else if(m.t==='on')this.vs.set(m.id,{ratio:m.ratio||1,vel:m.vel??0.9,acc:1e9});
+        else if(m.t==='off')this.vs.delete(m.id);
+        else if(m.t==='ping')this.port.postMessage({t:'stat',g:this.grains.length,v:this.vs.size,spawned:this.stat});};
+    }
+    process(I,O){
+      const out=O[0]; if(!out||!out[0])return true;
+      const N=out[0].length, oL=out[0], oR=out[1]||out[0];
+      oL.fill(0); if(out[1])oR.fill(0);
+      if(!this.len||!this.vs.size&&!this.grains.length){return true;}
+      const P=this.p, len=this.len;
+      const perSpawn=sampleRate/Math.max(0.5,P.dens);
+      this.scanPh=(this.scanPh+(P.scan*N)/len)%1;
+      for(const [id,v] of this.vs){
+        v.acc+=N;
+        if(v.acc>=perSpawn&&this.grains.length<64){
+          v.acc=0; this.stat++;
+          const base=((P.pos+this.scanPh)%1+1)%1;
+          const st=Math.max(0,Math.min(len-2,
+            (base+(Math.random()*2-1)*P.spray*0.5)*len));
+          const dur=Math.max(128,Math.round(P.size*sampleRate));
+          const step=v.ratio*Math.pow(2,(P.semis+(Math.random()*2-1)*P.jit)/12);
+          const rev=Math.random()<P.rev;
+          const pan=(Math.random()*2-1)*P.width;
+          this.grains.push({ph:rev?st+dur*step:st,step:rev?-step:step,
+            n:0,dur,vel:v.vel,pan,sh:0.3+P.shape*3});
+        }
+      }
+      for(let gi=this.grains.length-1;gi>=0;gi--){
+        const g=this.grains[gi];
+        const gl=Math.cos((g.pan*0.5-0.25)*Math.PI), gr=Math.sin((g.pan*0.5+0.25)*Math.PI+Math.PI/2);
+        for(let k=0;k<N&&g.n<g.dur;k++,g.n++){
+          const w=Math.pow(Math.sin(Math.PI*g.n/g.dur),g.sh)*g.vel*0.5;
+          let i2=g.ph; g.ph+=g.step;
+          if(i2<0)i2+=len; if(i2>=len)i2-=len;
+          const i0=i2|0, fr=i2-i0, i1=(i0+1)%len;
+          const sl=this.L[i0]+(this.L[i1]-this.L[i0])*fr;
+          const sr2=this.R[i0]+(this.R[i1]-this.R[i0])*fr;
+          oL[k]+=sl*w*(1-g.pan*0.5);
+          oR[k]+=sr2*w*(1+g.pan*0.5);
+        }
+        if(g.n>=g.dur)this.grains.splice(gi,1);
+      }
+      const gn=this.p.gain;
+      for(let k=0;k<N;k++){oL[k]*=gn; if(out[1])oR[k]*=gn;}
+      return true;
+    }
+  }
+  registerProcessor('ten-grsyn',GR);
   registerProcessor('ten-psh',PS);
   registerProcessor('ten-buf',B2);
   registerProcessor('ten-grain',G);
@@ -5243,6 +5313,13 @@ class Engine{
     /* the channel's own panner. `undefined` means the route stopped, so it
        goes back to the number on the fader rather than staying where the
        modulator happened to leave it. */
+    if(rack==='grn'){
+      const e=this.gn&&this.gn[pi]; if(!e)return false;
+      const gr=S.presets[pi].gr||{};
+      const GDEF={pos:0,size:0.12,dens:20,semis:0};
+      e.node.port.postMessage({t:'p',p:{[key]:v===undefined?(gr[key]??GDEF[key]):v}});
+      return true;
+    }
     if(rack==='aud'&&key==='semis'){
       const au=S.presets[pi].au||{};
       engine.audPitch(pi,(v===undefined?au.semis??0:v)-(au.semis??0));
@@ -6025,6 +6102,7 @@ class Engine{
   }
   noteOn(at,pi,midi,vel,padMidi){
     const p=S.presets[pi];
+    if((p.cat||'')==='gran')return this.granNote(at,pi,midi,vel,null);
     /* MONO STEAL, before anything else. This used to live below the procedural
        early-return, so proc channels never stole at all and mono stacked up
        polyphonically — the old note just kept ringing under the new one. */
@@ -6443,6 +6521,49 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
         Math.max(0.05,src._auBase*Math.pow(2,((au.semis??0)+(semis||0))/12)),AC.currentTime,0.02);
       else if(src._psh)src._psh.port.postMessage({semis:(au.semis??0)+(semis||0)});
     }
+  }
+  /* the granular channel: one worklet node per channel, notes over the port */
+  granNode(pi){
+    this.gn=this.gn||{};
+    let e=this.gn[pi];
+    if(e&&e.node)return e;
+    if(!fxwReady)return null;
+    const n=new AudioWorkletNode(AC,'ten-grsyn',{outputChannelCount:[2]});
+    n.connect(this.buses[pi].vIn);
+    e=this.gn[pi]={node:n,id:1};
+    this.granCfg(pi);
+    if(this.granBuf&&this.granBuf[pi])this.granSend(pi);
+    return e;
+  }
+  granCfg(pi){
+    const e=this.gn&&this.gn[pi]; if(!e)return;
+    const gr=S.presets[pi].gr||{};
+    e.node.port.postMessage({t:'p',p:{
+      pos:clamp(gr.pos??0,0,1), spray:clamp(gr.spray??0.05,0,1),
+      size:clamp(gr.size??0.12,0.005,1), dens:clamp(gr.dens??20,0.5,120),
+      semis:clamp(gr.semis??0,-24,24), jit:clamp(gr.jit??0,0,12),
+      shape:clamp(gr.shape??0.5,0,1), rev:clamp(gr.rev??0.1,0,1),
+      width:clamp(gr.width??0.5,0,1), scan:clamp(gr.scan??1,-4,4),
+      gain:clamp(gr.gain??0.8,0,1.5)}});
+  }
+  granSend(pi){
+    const e=this.granNode(pi), buf=this.granBuf&&this.granBuf[pi];
+    if(!e||!buf)return;
+    const l=new Float32Array(buf.getChannelData(0));
+    const r=buf.numberOfChannels>1?new Float32Array(buf.getChannelData(1)):l;
+    e.node.port.postMessage({t:'buf',l,r});
+  }
+  granNote(at,pi,midi,vel,durSec){
+    const e=this.granNode(pi);
+    if(!e){flash('granular engine still loading…');return null;}
+    const id=e.id++;
+    const ratio=Math.pow(2,(midi-60)/12);
+    const ms=Math.max(0,(at-AC.currentTime)*1000);
+    setTimeout(()=>{try{e.node.port.postMessage({t:'on',id,ratio,vel});}catch(_){}},ms);
+    const off=t=>{const ms2=Math.max(0,(t-AC.currentTime)*1000);
+      setTimeout(()=>{try{e.node.port.postMessage({t:'off',id});}catch(_){}},ms2);};
+    if(durSec!=null){off(at+durSec);return null;}
+    return {voices:[],release:t=>off(t??AC.currentTime+0.01),kill:t=>off(t??AC.currentTime)};
   }
   audRecStart(pi){
     if(this.audRec)return;
@@ -8203,6 +8324,27 @@ function prsFieldDefs(){
    listing 'type' from before the engine split. Deleted — prsFieldDefs() is the
    only source of truth, and a decoy list is how a renamer concludes it is
    finished.) */
+const GRANF=[
+ SP('pos','pos','lin',{min:0,max:1,step:0.01,fmt:v=>Math.round(v*100)+'%'}),
+ SP('spray','spray','lin',{min:0,max:1,step:0.02,fmt:v=>Math.round(v*100)+'%'}),
+ SP('size','size','lin',{min:0.005,max:1,step:0.005,fmt:v=>Math.round(v*1000)+'ms'}),
+ SP('dens','dens','lin',{min:0.5,max:120,step:0.5,fmt:v=>v+'/s'}),
+ SP('pitch','semis','lin',{min:-24,max:24,step:1,fmt:v=>v+'st'}),
+ SP('jit','jit','lin',{min:0,max:12,step:0.5,fmt:v=>'\u00b1'+v+'st'}),
+ SP('shape','shape','lin',{min:0,max:1,step:0.05}),
+ SP('rev','rev','lin',{min:0,max:1,step:0.05,fmt:v=>Math.round(v*100)+'%'}),
+ SP('width','width','lin',{min:0,max:1,step:0.05}),
+ SP('scan','scan','lin',{min:-4,max:4,step:0.05,fmt:v=>Math.abs(v)<0.001?'freeze':'\u00d7'+v}),
+ SP('gain','gain','lin',{min:0,max:1.5,step:0.05}),
+];
+function granAction(d,m){
+  const pre=S.presets[S.editSnd], spec=GRANF[clamp(S.curParam,0,GRANF.length-1)];
+  pre.gr=pre.gr||{};
+  pre.gr[spec.key]=adjust(spec,pre.gr[spec.key]??({pos:0,spray:0.05,size:0.12,dens:20,semis:0,jit:0,shape:0.5,rev:0.1,width:0.5,scan:1,gain:0.8})[spec.key],d,m);
+  engine.granCfg(S.editSnd);
+  flash('grain '+spec.lbl+' = '+fmtVal(spec,pre.gr[spec.key]));
+  dirty=true; dirtySave=true;
+}
 const AUDF=[
  SP('gain','gain','lin',{min:0,max:1,step:0.05}),
  SP('pitch','semis','lin',{min:-24,max:24,step:1,fmt:v=>v+'st'}),
@@ -8232,6 +8374,7 @@ function codeAction(d,m){
 }
 function audAction(d,m){
   if(isCodeCh(S.editSnd)){codeAction(d,m);return;}
+  if(isGranCh(S.editSnd)){granAction(d,m);return;}
   const pre=S.presets[S.editSnd], spec=AUDF[clamp(S.curParam,0,AUDF.length-1)];
   pre.au[spec.key]=adjust(spec,pre.au[spec.key]??0,d,m);
   flash('audio '+spec.lbl+' = '+fmtVal(spec,pre.au[spec.key]));
@@ -9212,6 +9355,7 @@ const rawAt=new Set();                // ...and which others are markup too
 const kbHeld=new Set();               // note keys physically down, for chord-vs-sequence
 const liveMute=Array.from({length:10},()=>0);   // >0 = a live key overrides recorded notes on this lane
 const isAudioCh=pi=>S.presets[pi].cat==='audio';
+const isGranCh=pi=>S.presets[pi].cat==='gran';
 /* ---------------- code instruments -------------------------------------
    A channel whose sound is DSP you write, compiled into an AudioWorklet.
    This exists for the sounds the rack provably cannot express — anything
@@ -12233,6 +12377,7 @@ const onKeyDown=e=>{
         if(M2.flat)return M2.flat.length;
         if(M2.id==='osc'&&isCodeCh(S.editSnd))return CODEF().length;
         if(M2.id==='osc'&&isAudioCh(S.editSnd))return AUDF.length;
+        if(M2.id==='osc'&&isGranCh(S.editSnd))return GRANF.length;
         if(M2.slot){const base=paramsFor(mi2,modHolder(pre2,M2.id)[M2.id][S.curSlot]).length;
           return base+(freeSlotHere(pre2)!=null&&mi2===S.curMod?1:0);}
         return 1;
@@ -13251,12 +13396,23 @@ function exportJSON(){
 document.addEventListener('dragover',e=>e.preventDefault());
 document.addEventListener('drop',e=>{
   e.preventDefault(); const f=e.dataTransfer.files[0]; if(!f)return;
+  const dropAlt=!!e.altKey;
   if(/audio|\.(wav|mp3|aiff?|m4a|ogg|flac)$/i.test((f.type||'')+f.name)){
     f.arrayBuffer().then(ab=>AC.decodeAudioData(ab)).then(buf=>{
       if(S.layer>=3&&MODULES[S.curMod]&&MODULES[S.curMod].id==='osc'&&!isAudioCh(S.editSnd)){
         engine.opSamples.set(S.editSnd+':'+S.curSlot,buf);
         S.presets[S.editSnd].osc[S.curSlot].wav=WAVES.indexOf('smp');
         flash('sample → op '+((S.curSlot+1)%10)+' · '+f.name.slice(0,20));
+      }else if(dropAlt){
+        /* ⌥-drop: the sample feeds the GRANULAR engine instead of the tape */
+        const pi=S.layer>=2?S.editSnd:S.curPreset;
+        pushUndo('granular drop');
+        engine.granBuf=engine.granBuf||[]; engine.granBuf[pi]=buf;
+        engine.granName=engine.granName||[]; engine.granName[pi]=f.name.slice(0,18);
+        S.presets[pi].cat='gran';
+        S.presets[pi].gr=S.presets[pi].gr||{};
+        engine.granSend(pi); engine.granCfg(pi);
+        flash('granular → channel '+pi+' · '+f.name.slice(0,20)+' — letters play the cloud');
       }else{
         const pi=S.layer>=2?S.editSnd:S.curPreset;
         pushUndo('audio drop');
@@ -14562,6 +14718,25 @@ function renderSnd(L,pos){
     L.push('   '+sp('d','modal = struck bars/tines · waveguide = recursion the rack cannot express'));
     L.push('   '+sp('d','←→ pick a param · ↑↓ change it while it plays · cmd+E exports the session with the code'));
   }
+  else if(M.id==='osc'&&isGranCh(S.editSnd)){
+    const buf=engine.granBuf&&engine.granBuf[S.editSnd];
+    L.push('  '+sp('a','\u2591 GRANULAR  ')+(buf
+      ?sp('d','sample: ')+sp('a',((engine.granName||[])[S.editSnd]||'clip')+' \u00b7 '+buf.duration.toFixed(2)+'s')
+      :sp('r','no sample — ⌥-drop an audio file onto this channel')));
+    L.push('');
+    let lr='   ', vr='   ';
+    const gr=pre.gr||{};
+    const GDEF={pos:0,spray:0.05,size:0.12,dens:20,semis:0,jit:0,shape:0.5,rev:0.1,width:0.5,scan:1,gain:0.8};
+    GRANF.forEach((pspec,i)=>{
+      const foc=i===S.curParam;
+      const v=fmtVal(pspec,gr[pspec.key]??GDEF[pspec.key]);
+      lr+=(foc?spH('a','\u25b8'+pad(pspec.lbl,7),'cp',i):spH('d',' '+pad(pspec.lbl,7),'cp',i))+' ';
+      vr+=(foc?spH('i',' '+pad(v,7),'cp',i):spH('v',' '+pad(v,7),'cp',i))+' ';
+    });
+    L.push(lr); L.push(vr);
+    L.push('');
+    L.push('   '+sp('d','letters play the cloud at pitch \u00b7 scan 0 = freeze \u00b7 pos/size/dens/pitch are mod destinations'));
+  }
   else if(M.id==='osc'&&isAudioCh(S.editSnd)){
     const buf=engine.audBuf[S.editSnd];
     L.push('  '+sp('a','≈ AUDIO CHANNEL  ')+(buf
@@ -15115,6 +15290,7 @@ function renderHelp(L){
     ['⌥f ⌥l ⌥k ⌥/','the same grammar for the FILTER, the LFOs, KEYTRACK and RANDOM mods — the letter takes you there, making one if the rack has none'],
     ['⌥r ⌥g ⌥s ⌥x','…and for the fx: REVERB, GRAIN, SATURATION (drive, née dist), or ⌥x for the fx rack itself. Digits jump instances, ⌫ removes, the strip edits'],
     ['audio: letters','JUMP POINTS: the clip divides into 16ths of the loop and the letters, in note order, each hold one. Held = play from that cue; released = the cycle resumes in phase. While held: ←→ nudge the cue, ↑↓ pitch, ⇧↑↓ volume, ⌥←→ pan — each cue is its own little take'],
+    ['granular (⌥-drop)','⌥-DROP an audio file onto a channel and it becomes a GRANULAR cloud: letters play it at pitch, pos/spray choose where grains come from, size/dens how much cloud, jit/shape/rev/width how loose, scan 0 = FREEZE. pos, size, dens and pitch are live mod destinations'],
     ['wt (osc wave)','the WAVETABLE: two tables from a bank of ten, MORPH between them, then the manglers — FOLD wraps the wave, SYM pushes it off-centre into the fold, FRAC folds the fold. Morph and the manglers are live mod destinations, band-limited whatever you do'],
     ['audio: params','pitch has FREE (tape: speed and pitch together) and SYNC (timing kept, pitch alone via the shifter) · chan picks stereo/left/right · start/end crop · input picks mic or resample · rec obeys ⇧o overdub/overwrite'],
     ['⌥p ⌥c','PHASE (chorus·flanger·phaser·trem) and COMP (comp·limit·clip·duck) — each family is ONE effect with a `kind`, the way filt holds its filters'],
