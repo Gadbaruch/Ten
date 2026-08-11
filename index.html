@@ -3854,9 +3854,21 @@ class Voice{
       else if(isN){src=ac.createBufferSource();
         src.buffer=isS?(E.opSamples.get(pi+':0')||E.noiseBuf):E.nbuf(rootW,ops[0].pw);
         src.loop=true;pitchParam=src.playbackRate;}
-      else{src=ac.createOscillator();
-        if(rootW===14)src.setPeriodicWave(E.wtWave(ops[0]));
-        else E.setWave(src,rootW,ops[0].phm===1?Math.random()*360:ops[0].ph,ops[0].pw);
+      let rootWt=null;                  // wt twin for THIS unison copy (crossfade pair)
+      if(skipOp0){}
+      else if(!isN&&rootW===14){
+        /* the root op gets the same standby-twin treatment as ops 1-9: a wt
+           change lands on the silent oscillator and crossfades in, so morph
+           sweeps and hand edits stop zipping. src stays the audible A side. */
+        src=ac.createOscillator(); src.setPeriodicWave(E.wtWave(ops[0]));
+        const oB=ac.createOscillator(); oB.setPeriodicWave(E.wtWave(ops[0]));
+        const gA=ac.createGain(), gB=ac.createGain();
+        gA.gain.value=1; gB.gain.value=0;
+        rootWt={a:src,b:oB,ga:gA,gb:gB,cur:'a'};
+        pitchParam=src.frequency;
+      }
+      else if(!isN){src=ac.createOscillator();
+        E.setWave(src,rootW,ops[0].phm===1?Math.random()*360:ops[0].ph,ops[0].pw);
         pitchParam=src.frequency;}
       /* THIS IS WHY THE NOISE SOUNDED LOW-RES. playbackRate was being set to the
          note FREQUENCY — 440 for an A — so four seconds of noise went past in
@@ -3874,6 +3886,12 @@ class Voice{
         rootMods.push(isN?src.playbackRate:src.detune);
         (this.opPitch[0]=this.opPitch[0]||[]).push({pm:pitchParam,base:target});
         (this.opDet[0]=this.opDet[0]||[]).push({pm:isN?src.playbackRate:src.detune,sc:isN?0.5:200});
+        if(rootWt){                     // twin tracks every pitch/detune mod the primary gets
+          const oB=rootWt.b; setF(oB.frequency,target);
+          rootMods.push(oB.detune);
+          this.opPitch[0].push({pm:oB.frequency,base:target,kind:'osc'});
+          this.opDet[0].push({pm:oB.detune,sc:200});
+        }
       }
       const sum=ac.createGain(); sum.gain.value=1;
       const ob0=this.opBias&&this.opBias[0]?1+this.opBias[0]:1;
@@ -3888,7 +3906,10 @@ class Voice{
          of ANY modulator keeps it. Additive-only stacks — which is where the
          waste actually is — drop it. */
       if(src){
-        src.connect(g0);
+        if(rootWt){rootWt.a.connect(rootWt.ga); rootWt.b.connect(rootWt.gb);
+          rootWt.ga.connect(g0); rootWt.gb.connect(g0);
+          ((this.opWt=this.opWt||{})[0]=this.opWt[0]||[]).push(rootWt);}
+        else src.connect(g0);
         (this.opGains[0]=this.opGains[0]||[]).push(g0);
         (this.opNodes[0]=this.opNodes[0]||[]).push(src);
         (this.opAmt[0]=this.opAmt[0]||[]).push({g:g0,sc:1});
@@ -3916,13 +3937,34 @@ class Voice{
           (this.opDet[i]=this.opDet[i]||[]).push({pm:s2.playbackRate,sc:0.5});
         }
         else if(sync){s2=ac.createOscillator();s2.setPeriodicWave(E.syncWave(wv,syncRatOf(ops,i)));setF(s2.frequency,mf);}
+        else if(wv===14){
+          /* TWO OSCILLATORS, ONE VOICE OF THE PAIR AUDIBLE. Every wt change —
+             morph under an LFO, a knob under your finger — lands its new table
+             on the STANDBY oscillator and crossfades 12ms; the swap itself is
+             never heard, so a sweep is a sweep instead of a zipper. */
+          const oA=ac.createOscillator(), oB=ac.createOscillator();
+          const gA=ac.createGain(), gB=ac.createGain(), sum2=ac.createGain();
+          const pw0=E.wtWave(op);
+          oA.setPeriodicWave(pw0); oB.setPeriodicWave(pw0);
+          gA.gain.value=1; gB.gain.value=0;
+          oA.connect(gA); oB.connect(gB); gA.connect(sum2); gB.connect(sum2);
+          setF(oA.frequency,fi); setF(oB.frequency,fi);
+          ((this.opWt=this.opWt||{})[i]=this.opWt[i]||[]).push({a:oA,b:oB,ga:gA,gb:gB,cur:'a'});
+          for(const o2 of [oA,oB]){
+            (this.opPitch[i]=this.opPitch[i]||[]).push({pm:o2.frequency,base:fi,kind:'osc'});
+            (this.opDet[i]=this.opDet[i]||[]).push({pm:o2.detune,sc:200});
+            this.nodes.push(o2);
+          }
+          s2=sum2;
+          s2.start=t=>{try{oA.start(t);}catch(_){} try{oB.start(t);}catch(_){}};
+          s2.stop=t=>{try{oA.stop(t);}catch(_){} try{oB.stop(t);}catch(_){}};
+        }
         else{s2=ac.createOscillator();
-          if(wv===14)s2.setPeriodicWave(E.wtWave(op));
-          else E.setWave(s2,wv,op.phm===1?Math.random()*360:op.ph,op.pw);
+          E.setWave(s2,wv,op.phm===1?Math.random()*360:op.ph,op.pw);
           setF(s2.frequency,fi);}
         built.push({i,s:s2,osc:!isNoiseW(wv)&&wv!==9,f:fi,op});
         (this.opNodes[i]=this.opNodes[i]||[]).push(s2);
-        if(!isNoiseW(wv)&&wv!==9){
+        if(!isNoiseW(wv)&&wv!==9&&wv!==14){
           (this.opPitch[i]=this.opPitch[i]||[]).push({pm:s2.frequency,base:fi,kind:sync?'sync':'osc'});
           (this.opDet[i]=this.opDet[i]||[]).push({pm:s2.detune,sc:200});
         }
@@ -4005,6 +4047,7 @@ class Voice{
         if(noiseRoot)src.start(at,Math.random()*src.buffer.duration);  // decorrelate unison noise voices
         else src.start(at);
         this.nodes.push(src);
+        if(rootWt){try{rootWt.b.start(at);}catch(_){} this.nodes.push(rootWt.b);}
         if(!firstSrc)firstSrc=src;
       }
     }
@@ -5111,10 +5154,17 @@ class Engine{
   wtLive(pi,si,key,v){
     const sl=(S.presets[pi].osc||[])[si]; if(!sl||Math.round(sl.wav)!==14)return false;
     const eff=v===undefined?sl:Object.assign({},sl,{[key]:v});
-    const pw=this.wtWave(eff);
-    for(const vo of this.act[pi]||[])
-      for(const nd of (vo.opNodes&&vo.opNodes[si])||[])
-        if(nd.setPeriodicWave)try{nd.setPeriodicWave(pw);}catch(_){}
+    const pw=this.wtWave(eff), n=AC.currentTime;
+    for(const vo of this.act[pi]||[]){
+      for(const w of (vo.opWt&&vo.opWt[si])||[]){    // one pair per unison copy
+        /* the standby takes the new table; the pair crossfades; roles swap */
+        const on=w.cur==='a'?{o:w.b,g:w.gb,off:w.ga}:{o:w.a,g:w.ga,off:w.gb};
+        try{on.o.setPeriodicWave(pw);}catch(_){continue;}
+        on.g.gain.setTargetAtTime(1,n,0.012);
+        on.off.gain.setTargetAtTime(0,n,0.012);
+        w.cur=w.cur==='a'?'b':'a';
+      }
+    }
     return true;
   }
   setWave(osc,w,phDeg,width){
@@ -8862,8 +8912,10 @@ function kbNote(code,chrom){
   const i=KBSEQ.indexOf(code); if(i<0)return null;
   const sc=(!chrom&&CFG.scaleOn)?SCALES[CFG.scale][1]:null;
   if(!sc)return i;                                  // chromatic, one semitone a key
-  /* a scale DEGREE a key, so the run climbs the scale and never repeats a note */
-  return Math.floor(i/sc.length)*12+sc[i%sc.length];
+  /* a scale DEGREE a key — WITH the key offset. Without it the run was always
+     C-shaped, and the snap downstream rounded two neighbouring degrees onto
+     the same note of the actual key: s and d, one pitch. */
+  return Math.floor(i/sc.length)*12+sc[i%sc.length]+(CFG.key||0);
 }
 const kbFull=()=>(CFG.kbd??'full')!=='piano';
 /* what a key is worth right now, or null if it is not a note key at all */
@@ -11054,6 +11106,7 @@ function audPlace(pi,rec,startBeat,name='mic'){
 /* tab+N: you already played it, and you know how long it was. Set the loop to
    N bars and take exactly the last N bars out of the retro buffer — no
    listening, no waiting, no inferring the length from gaps. */
+const RETRO={end:{}};        // where each channel's last take's window ended
 function retroBars(bars){
   const pi=S.layer>=2?S.editSnd:S.curPreset;
   const lane=S.patterns[S.editPat].lanes[pi];
@@ -11069,8 +11122,19 @@ function retroBars(bars){
      Where — relative to the pattern ANCHOR, never to the moment you let go.
      A note played on beat 3 has to come back on beat 3; storing it against
      `now` rotated the whole phrase by however far into the bar you were. */
-  const endB=anc+Math.round((nowB-anc)/4)*4, from=endB-L;
+  /* THE WINDOW ENDS WHERE THE TAKE ENDED, not where the clock is now. Tap
+     took a bar, you listened for a while, then asked for tab+2 — sliding the
+     window to "the last two bars from NOW" found the silence you were
+     listening in and handed back an empty loop. If nothing new has been
+     played since the take, widen around the take; the moment you play again,
+     the window follows the playing. */
+  let endB=anc+Math.round((nowB-anc)/4)*4;
+  const lastT=retroBuf[pi].length?Math.max(...retroBuf[pi].map(n=>n.t)):-1e9;
+  const stored=RETRO.end[pi];
+  if(stored!=null&&lastT<=stored+0.5)endB=stored;
+  const from=endB-L;
   const seg=retroBuf[pi].filter(n=>n.t>from-1e-9&&n.t<=endB+1e-9);
+  RETRO.end[pi]=endB;
   pushUndo('retro '+bars+'bar');
   lane.unit='B'; lane.count=bars; lane.auto=false;
   /* MAPPED FROM THE WINDOW START, not the anchor. Anchor-modular placement
@@ -11127,6 +11191,7 @@ function retroCapture(){
      nearest cycle line so a slightly-late tap still gets the cycle you played. */
   const snap=Math.min(4,L);
   const endB=anc+Math.round((nowB-anc)/snap)*snap, from=endB-L;
+  RETRO.end[pi]=endB;
   const seg=retroBuf[pi].filter(n=>n.t>from-1e-9&&n.t<=endB+1e-9);
   if(!seg.length){flash('nothing played in the last '+fmtLen(lane)+
     ' — tab+digits reaches further back');return;}
@@ -11841,9 +11906,17 @@ const onKeyDown=e=>{
      the selection when there is one. ⇧ is the coarse step; ⌥ on the brackets
      is the fine one, and on -/= option already means mute and solo, which is
      why volume has two step sizes where pan has three. */
+  /* LEFT-shift -/= edits the RACK: = adds a slot at the cursor, - removes it.
+     Right shift stays the fader's coarse step — the two shifts already mean
+     different things everywhere else. */
+  if((c==='Equal'||c==='Minus')&&e.shiftKey&&KM.sl&&!e.metaKey&&!altOf(e)&&S.layer>=2&&!e.repeat){
+    e.preventDefault(); LATCH.used=true;
+    if(c==='Equal')addSlotHere(); else removeSlotHere();
+    return;
+  }
   if((c==='Equal'||c==='Minus')&&!e.metaKey&&!altOf(e)&&!HOLD.tab&&!PICK&&!DPICK){
     e.preventDefault();
-    const d=c==='Equal'?1:-1, st=rs(e)||e.shiftKey?10:1;
+    const d=c==='Equal'?1:-1, st=rs(e)?10:1;
     const tg=chTargets();
     pushUndo('volume');
     tg.forEach(i=>{const pc=S.presets[i];
@@ -11882,6 +11955,40 @@ const onKeyDown=e=>{
     e.preventDefault();
     const pre=S.presets[S.editSnd], M=MODULES[S.curMod];
     if(!M||!M.id||M.prs){flash('nothing to modulate here');return;}
+    /* THE ENGINE PAGES ROUTE TOO. On a wt/gran/audio channel the OSC view is a
+       field list, not the slot rack — so the route reads the focused FIELD and
+       aims at the engine's own rack. */
+    if(M.id==='osc'&&(isWtCh(S.editSnd)||isGranCh(S.editSnd)||isAudioCh(S.editSnd))){
+      const page=isWtCh(S.editSnd)?{specs:WTF,rack:'osc',slot:0}
+        :isGranCh(S.editSnd)?{specs:GRANF,rack:'grn',slot:0}
+        :{specs:AUDF,rack:'aud',slot:0};
+      const spec=page.specs[clamp(S.curParam,0,page.specs.length-1)];
+      if(!spec||spec.type==='enum'){flash((spec?spec.lbl:'that')+' is a menu — modulation needs a range');return;}
+      const useKey=(page.rack==='aud'&&spec.key==='semis')?'semis':spec.key;
+      const useLbl=(page.rack==='aud'&&spec.key==='semis')?'pitch':spec.lbl;
+      if(!destRate(page.rack,useKey)){flash('nothing can drive '+spec.lbl+' yet');return;}
+      const addr={rack:page.rack,slot:page.slot,key:useKey,lbl:useLbl};
+      const hold=modHolder(pre,'mod');
+      let at=-1;
+      hold.mod.forEach((m2,i2)=>{ if(at>=0||!m2||!m2.src)return;
+        if((m2.routes||[]).some(rt=>rt.addr&&sameAddr(rt.addr,addr)))at=i2; });
+      if(at<0){
+        at=hold.mod.findIndex(m2=>!m2||!m2.src);
+        if(at<0){flash('all ten mod slots are in use');return;}
+        pushUndo('route');
+        const m2=hold.mod[at];
+        Object.assign(m2,mkMod(at),{src:2,off:false});
+        m2.routes=[{dst:0,idx:0,amt:40,ctr:0,tgt:null,addr}];
+        m2.rsel=0;
+        flash('\u25ce lfo \u2192 '+destLabel(addr)+'  (live)');
+      }else flash('\u25ce already routed \u2014 '+MSRC[hold.mod[at].src]+' \u2192 '+destLabel(addr));
+      S.curMod=MODULES.findIndex(M2=>M2&&M2.id==='mod');
+      S.curSlot=at;
+      const ms2=paramsFor(S.curMod,hold.mod[at]);
+      S.slotParam=Math.max(0,ms2.findIndex(x=>x.key==='amt'));
+      engine.refresh(S.editSnd); engine.lfoLive(S.editSnd);
+      dirty=true; dirtySave=true; return;
+    }
     const hold=modHolder(pre,'mod');
     const specs=paramsFor(S.curMod,M.flat?null:modHolder(pre,M.id)[M.id][S.curSlot]);
     const spec=specs[flatView(S.curMod)?S.curParam:S.slotParam];
@@ -15435,6 +15542,7 @@ function renderHelp(L){
     ['- / =','channel VOLUME down / up (⇧ = coarse) — on the selection when there is one'],
     ['[ / ]','channel PAN left / right (⇧ = coarse · ⌥ = fine) — same selection rule'],
     ['⌘- / ⌘=','remove / add a rack slot (they were bare - and = before volume took those)'],
+    ['⇧(left)- / ⇧(left)=','same, one hand: LEFT shift with -/= edits the rack; the RIGHT shift stays the fader’s coarse step'],
     ['⌥\\','next automated knob (⇧⌥\\ = previous) — \\ alone shows and hides the curves'],
     ['⌥m','MOD: route one from the param you are on — first free slot, lfo aimed here, cursor lands on amt'],
     ['⌥ holds the scope','open any ⌥ scope, let the letter go with ⌥ still down, and it behaves as if the letter were held — and the LETTERS PLAY, so you dial with one hand and hear it with the other. No other ⌥ command opens until ⌥ comes up'],
