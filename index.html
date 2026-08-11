@@ -5859,11 +5859,18 @@ class Engine{
          set `until` before that step arrived, so the fastest presses made no
          sound at all. An entry that has never been emitted survives its own
          release until the first step at or after where it was born. */
-      const entries=midis.map((m,i)=>({midi:m,pad:pads[i],vel,until,born:beatsAt(at),heard:false}));
+      const entries=midis.map((m,i)=>({midi:m,pad:pads[i],vel,until,
+        born:T.playing?beatsAt(at):0,heard:false}));
       this.arpPool[pi].push(...entries);
       if(durSec!=null)return null;
       return {voices:[],arp:entries,release:t=>{if(pcHandle){pcHandle();pcHandle=null;}
-        const b2=T.playing?beatsAt(t):1e9;for(const en of entries)en.until=Math.min(en.until,b2);}};
+        /* RELEASED IS RELEASED. While stopped, beatsAt is meaningless, and the
+           old '1e9' meant a key let go with the transport stopped stayed in
+           the pool as if held FOREVER — press a ratcheted note, stop, release,
+           play, and it machine-gunned with nothing down. A release with no
+           clock kills the entry outright; a key actually held through the
+           stop keeps its Infinity and rides on, which is the latch case. */
+        const b2=T.playing?beatsAt(t):-1e9;for(const en of entries)en.until=Math.min(en.until,b2);}};
     }
     /* mono & legato get note priority: a stack of what is still held, so
        releasing the newest note drops back to the one under it. Only single
