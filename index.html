@@ -1004,12 +1004,14 @@ const OSC_P=sl=>[
   SP('level','amt','lin',{min:0,max:1,step:0.05}),
   /* the wavetable's own dials, only when the wave IS the table */
   ...(Math.round((sl&&sl.wav)||0)===14?[
-    SP('tbl a','wta','enum',{opts:WTNAMES}),
-    SP('tbl b','wtb','enum',{opts:WTNAMES}),
-    SP('morph','mrph','lin',{min:0,max:1,step:0.02}),
-    SP('fold','fold','lin',{min:0,max:1,step:0.02}),
-    SP('sym','sym','lin',{min:-1,max:1,step:0.05}),
-    SP('frac','frac','lin',{min:0,max:1,step:0.05}),
+    /* defaults live in the getters: a slot that has never been touched reads
+       glass→brass at zero, not undefined→NaN */
+    SP('tbl a','wta','enum',{opts:WTNAMES,get:o=>Math.round(o.wta??0),set:(o,v)=>o.wta=Math.round(v)}),
+    SP('tbl b','wtb','enum',{opts:WTNAMES,get:o=>Math.round(o.wtb??3),set:(o,v)=>o.wtb=Math.round(v)}),
+    SP('morph','mrph','lin',{min:0,max:1,step:0.02,get:o=>o.mrph??0,set:(o,v)=>o.mrph=v}),
+    SP('fold','fold','lin',{min:0,max:1,step:0.02,get:o=>o.fold??0,set:(o,v)=>o.fold=v}),
+    SP('sym','sym','lin',{min:-1,max:1,step:0.05,get:o=>o.sym??0,set:(o,v)=>o.sym=v}),
+    SP('frac','frac','lin',{min:0,max:1,step:0.05,get:o=>o.frac??0,set:(o,v)=>o.frac=v}),
   ]:[]),
   /* ONE FIELD, TWO MEANINGS, decided by the wave — the same idiom the fx rack
      already uses for dist's tone/rate. On a tonal wave it is PULSE WIDTH: the
@@ -4921,7 +4923,7 @@ class Engine{
      affordable — a ctrl sweep is ~50 table swaps, all cached after one pass. */
   wtWave(op){
     const a2=clamp(Math.round(op.wta||0),0,WTBL.length-1);
-    const b2=clamp(Math.round(op.wtb??1),0,WTBL.length-1);
+    const b2=clamp(Math.round(op.wtb??3),0,WTBL.length-1);
     const m=clamp(op.mrph||0,0,1), fo=clamp(op.fold||0,0,1);
     const sy=clamp(op.sym||0,-1,1), fr=clamp(op.frac||0,0,1);
     const key='wt:'+a2+':'+b2+':'+Math.round(m*50)+':'+Math.round(fo*50)+':'+
@@ -6389,7 +6391,11 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     if(skipBuf>=dur-0.001)return;
     const src=AC.createBufferSource(); src.buffer=buf;
     src.playbackRate.value=Math.max(0.05,rate);
-    const g=AC.createGain(); g.gain.value=(au.gain??0.9)*(cue?cue.vol??1:1);
+    /* BORN ON A RAMP. A cue jump starts mid-waveform, and mid-waveform is a
+       click unless the first few milliseconds fade in. Deaths ramp too — see
+       audStop — so slicing is clean at any rate. */
+    const g=AC.createGain(); const gTgt=(au.gain??0.9)*(cue?cue.vol??1:1);
+    g.gain.setValueAtTime(0,at); g.gain.linearRampToValueAtTime(gTgt,at+0.005);
     let head=src;
     /* stereo | left | right — a mono buffer passes straight through */
     const chn=Math.round(au.chan||0);
@@ -6411,9 +6417,21 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     tail.connect(this.buses[pi].vIn);
     src.start(at,off+skipBuf); src.stop(at+Math.min(loopSec-skipSec,(dur-skipBuf)/rate)+0.002);
     const arr=this.audActive[pi]; arr.push(src);
-    src._auFree=!sync; src._auBase=baseRate;
+    src._auFree=!sync; src._auBase=baseRate; src._g=g;
     src.onended=()=>{const i=arr.indexOf(src);if(i>=0)arr.splice(i,1);
       try{g.disconnect();}catch(_){} try{tail.disconnect();}catch(_){}};
+  }
+  /* a fade-out then the stop, so a released cue does not click on the way out */
+  audStop(pi,at){
+    at=at??AC.currentTime+0.002;
+    for(const s2 of [...this.audActive[pi]]){
+      try{
+        if(s2._g){s2._g.gain.cancelScheduledValues(at);
+          s2._g.gain.setValueAtTime(s2._g.gain.value,at);
+          s2._g.gain.linearRampToValueAtTime(0,at+0.008);}
+        s2.stop(at+0.01);
+      }catch(_){}
+    }
   }
   /* live pitch for the mod/automation destination: free mode bends the rate of
      whatever is sounding; sync mode retunes the shifter */
@@ -6459,7 +6477,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     audPlace(r.pi,rec,r.startBeat,r.label);
   }
   chokeSeq(pi){const n=AC.currentTime;for(const v of [...this.act[pi]])if(!v.live)v.kill(n);
-    for(const s2 of [...this.audActive[pi]]){try{s2.stop(n+0.01);}catch(_){}}}
+    this.audStop(pi,n+0.002);}
   allOff(){const n=AC.currentTime;for(const a of this.act)for(const v of [...a])v.kill(n);
     for(const arr of this.audActive)for(const s2 of [...arr]){try{s2.stop(n+0.01);}catch(_){}}
     this.arpPool.forEach(p=>p.length=0);}
@@ -12042,7 +12060,7 @@ const onKeyDown=e=>{
     else{cue.o=clamp(+((cue.o||0)+d2*(e.shiftKey||rs(e)?0.25:0.0625)).toFixed(4),-4,4);
       flash('cue '+(sl+1)+' @ '+(sl*0.25+cue.o).toFixed(3)+'b');}
     /* re-audition immediately: stop and refire from the edited cue */
-    for(const s2 of [...engine.audActive[pi]]){try{s2.stop(AC.currentTime+0.004);}catch(_){}}
+    engine.audStop(pi);
     const L=S.patterns[S.editPat].lanes[pi].len;
     engine.audPlay(pi,AC.currentTime+0.006,L,clamp(sl*0.25+(cue.o||0),0,L-0.01),cue);
     dirty=true; dirtySave=true; return;
@@ -12446,7 +12464,7 @@ const onKeyDown=e=>{
       const sl=ki%nS;
       const au=S.presets[pi].au; au.cues=au.cues||{};
       const cue=au.cues[sl]=au.cues[sl]||{o:0,semis:0,vol:1,pan:0};
-      for(const s2 of [...engine.audActive[pi]]){try{s2.stop(AC.currentTime+0.005);}catch(_){}}
+      engine.audStop(pi);
       AUD.hold={c,pi,sl};
       engine.audPlay(pi,AC.currentTime+0.005,L,clamp(sl*0.25+(cue.o||0),0,L-0.01),cue);
       flash('cue '+(sl+1)+'/'+nS+(cue.semis?' '+(cue.semis>0?'+':'')+cue.semis+'st':'')+
@@ -12826,7 +12844,7 @@ document.addEventListener('keyup',e=>{
   }
   if(AUD.hold&&AUD.hold.c===c){
     const {pi}=AUD.hold; AUD.hold=null;
-    for(const s2 of [...engine.audActive[pi]]){try{s2.stop(AC.currentTime+0.004);}catch(_){}}
+    engine.audStop(pi);
     if(T.playing){                    // resume the cycle exactly in phase
       const lane=S.patterns[S.editPat].lanes[pi], L=lane.len;
       const a2=actAt(posNow());
