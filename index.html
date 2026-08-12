@@ -288,7 +288,7 @@ function wtHarm(ti,pos){
 }
 const NOISEW={4:'white',10:'pink',11:'brown',12:'blue',13:'dust'};
 const isNoiseW=w=>NOISEW[w]!==undefined;
-const OPMODE=['add','fm','ring','sync','pm'];
+const OPMODE=['add','fm','ring','sync','pm','scan'];
 const DEST=['prev','op1','op2','op3','op4','op5','op6','op7','op8','op9','op10'];
 const DTYPES=['off','soft','hard','fold','tube','fuzz','crush','sat','asym','rect'];
 const DROUTE=['ser','par'];
@@ -468,7 +468,7 @@ const ARPDIV=['1/32','1/16T','1/16','1/8T','1/16.','1/8','1/4T','1/8.','1/4','1/
       ARPDIVB=[0.125,1/6,0.25,1/3,0.375,0.5,2/3,0.75,1,1.5];
 const ARPDIV_V19=[8,9,6,5,7,3,2,4,1,0];   // old index -> new, for saves written before this
 const ARPMODE=['up','down','updn','rand','chord','order'];   // order = the sequence you played them in
-const MODE=['poly','mono','legato'];   // legato = mono, but pitch moves without retriggering
+const MODE=['poly','mono','legato','kit'];   // legato = mono without retrigger · kit = 12 pads, each its own chain
 const SWM=['sync','rstrt','wait'];
 
 /* MY REGRESSION, AND WHY IT WAS WRONG. "A new operator should arrive audible"
@@ -1475,7 +1475,14 @@ const MODULES=[
     const R=s.routes||[];const t=R[0]?(R[0].tgt?'·':MDST[R[0].dst||0]):'?';
     return MSRC[s.src]+'→'+t+(R.length>1?'+'+(R.length-1):'');}},
  {k:'5',id:'fx', name:'FX',  slot:true,params:FX_P, abbr:s=>s.typ?XTYPES[s.typ]:'···'},
- {k:'6',id:'vox',name:'VOICE',flat:[SP('mode','mode','enum',{opts:MODE}),
+ {k:'6',id:'vox',name:'VOICE',flat:[SP('mode','mode','enum',{opts:MODE,
+    /* KIT LIVES HERE NOW, not in the engine list: what a kit really is is a
+       VOICE-ALLOCATION mode — the pitch class picks which chain answers. */
+    get:o=>isKit(S.presets[S.editSnd])?3:Math.round(o.mode||0),
+    set:(o,v)=>{const pi2=S.editSnd, k2=Math.round(v);
+      if(k2===3){if(!isKit(S.presets[pi2])){setEngine(pi2,'kit');flash('kit — 12 pads, each pad its own chain');} return;}
+      if(isKit(S.presets[pi2]))setEngine(pi2,'synth');
+      o.mode=k2;}}),
     SP('glide','glide','time',{min:0,max:0.5}),
     SP('uni','uni','lin',{min:1,max:7,step:1,fmt:v=>v+'v'}),
     SP('sprd','sprd','lin',{min:0,max:50,step:2,fmt:v=>v+'c'}),
@@ -3240,6 +3247,32 @@ let fxwReady=false;
       return true;
     }
   }
+  /* SCAN: the input signal IS the playhead. ±1 maps to the ends of the
+     sample; a saw driver is playback, a sine scrubs, a square alternates
+     between two spots — and an FM'd driver is motion nothing else can draw.
+     Edge-faded reads so the extremes never click. */
+  class SC extends AudioWorkletProcessor{
+    constructor(){super(); this.L=null; this.R=null; this.len=0; this.alive=true;
+      this.port.onmessage=e=>{const m=e.data||{};
+        if(m.t==='buf'){this.L=m.l; this.R=m.r||m.l; this.len=m.l.length;}
+        else if(m.t==='stop')this.alive=false;};}
+    process(I,O){
+      if(!this.alive)return false;
+      const out=O[0]; if(!out||!out[0])return true;
+      const inp=I[0]&&I[0][0], N=out[0].length, len=this.len;
+      if(!len||!inp){out[0].fill(0); if(out[1])out[1].fill(0); return true;}
+      const ew=Math.min(256,len>>2)||1;
+      for(let k=0;k<N;k++){
+        let p=(inp[k]+1)*0.5; if(p<0)p=0; if(p>1)p=1;
+        const x=p*(len-1), i0=x|0, fr=x-i0, i1=i0+1<len?i0+1:i0;
+        const ef=Math.min(1,x/ew,(len-1-x)/ew);
+        out[0][k]=(this.L[i0]+(this.L[i1]-this.L[i0])*fr)*ef;
+        if(out[1])out[1][k]=(this.R[i0]+(this.R[i1]-this.R[i0])*fr)*ef;
+      }
+      return true;
+    }
+  }
+  registerProcessor('ten-scan',SC);
   registerProcessor('ten-grsyn',GR);
   registerProcessor('ten-psh',PS);
   registerProcessor('ten-buf',B2);
@@ -3916,7 +3949,7 @@ class Voice{
        just should not be free. A single op at full amt is untouched, so every
        drum in the library sounds exactly as it did. */
     const addAmt=ops.reduce((a2,op,i)=>
-      (op&&!op.off&&op.amt>0.001&&(i===0||op.mode===0||op.mode===3))?a2+op.amt:a2,0);
+      (op&&!op.off&&op.amt>0.001&&(i===0||op.mode===0||op.mode===3||op.mode===5))?a2+op.amt:a2,0);
     const opNorm=Math.sqrt(Math.max(1,addAmt));
     const merge=ac.createGain(); merge.gain.value=1/(Math.sqrt(uniN)*opNorm);
     const rootMods=[]; let firstSrc=null;
@@ -4018,8 +4051,23 @@ class Voice{
         const sync=op.mode===3&&wv!==4&&wv!==9;
         const mf=sync?target*syncMasterRat(ops,i):0;
         const fi=sync?mf:target*op.rat*Math.pow(2,(op.fine||0)/1200);
-        let s2;
-        if(isNoiseW(wv)){s2=ac.createBufferSource();s2.buffer=E.nbuf(wv,op.pw);s2.loop=true;
+        let s2, scanned=false;
+        if(wv===9&&Math.round(op.mode)===5&&fxwReady){
+          /* SCAN: this sample's playhead is its dst/prev op's WAVEFORM. No
+             BufferSource at all — a worklet reads wherever the driver says.
+             (the buffer crosses the port per note: audition build; a shared
+             pool is the follow-up if this earns its keep) */
+          const buf=E.opSamples.get(pi+':'+i)||E.noiseBuf;
+          const nsc=new AudioWorkletNode(ac,'ten-scan',{numberOfInputs:1,outputChannelCount:[2]});
+          const sl2=new Float32Array(buf.getChannelData(0));
+          const sr3=buf.numberOfChannels>1?new Float32Array(buf.getChannelData(1)):sl2;
+          nsc.port.postMessage({t:'buf',l:sl2,r:sr3});
+          s2=nsc; scanned=true;
+          s2.start=()=>{};
+          s2.stop=t=>{setTimeout(()=>{try{nsc.port.postMessage({t:'stop'});}catch(_){}},
+            Math.max(0,((t||AC.currentTime)-AC.currentTime)*1000)+120);};
+        }
+        else if(isNoiseW(wv)){s2=ac.createBufferSource();s2.buffer=E.nbuf(wv,op.pw);s2.loop=true;
           s2.playbackRate.value=clamp((op.rat||1)*Math.pow(2,(op.fine||0)/1200),0.05,8);}
         else if(wv===9){                              // sampler op: pitch via playbackRate
           s2=ac.createBufferSource();
@@ -4055,7 +4103,7 @@ class Voice{
         else{s2=ac.createOscillator();
           E.setWave(s2,wv,op.phm===1?Math.random()*360:op.ph,op.pw);
           setF(s2.frequency,fi);}
-        built.push({i,s:s2,osc:!isNoiseW(wv)&&wv!==9,f:fi,op});
+        built.push({i,s:s2,osc:!isNoiseW(wv)&&wv!==9&&!scanned,f:fi,op,scan:scanned});
         (this.opNodes[i]=this.opNodes[i]||[]).push(s2);
         if(!isNoiseW(wv)&&wv!==9&&wv!==14){
           (this.opPitch[i]=this.opPitch[i]||[]).push({pm:s2.frequency,base:fi,kind:sync?'sync':'osc'});
@@ -4126,6 +4174,13 @@ class Voice{
           (this.opGains[b.i]=this.opGains[b.i]||[]).push(og);
           (this.opAmt[b.i]=this.opAmt[b.i]||[]).push({g:og,sc:0.9});
         }
+      }
+      /* SCAN wiring: the driver op's raw waveform into the reader's input.
+         Runs after every op exists so a scan can read any slot, either side. */
+      for(const b of built){
+        if(!b.scan)continue;
+        const j=tgtOf(b), tb=built.find(x=>x.i===j);
+        if(tb&&tb.s&&tb.s.connect){try{tb.s.connect(b.s);}catch(_){}}
       }
       let node=sum;
       for(const k2 in outN)outN[k2].connect(sum);
@@ -6421,9 +6476,13 @@ class Engine{
        Read BEFORE the steal below, which is what releases the note we ask about. */
     const legato=this.act[pi].some(v=>v&&!v.killed&&
       (!v.released||(v.relAt??-1)>at+1e-4));   // still held, or still ringing when this one starts
-    if(((pre0.vox&&pre0.vox.mode)|0)>=1){        // mono steals only its own kit slot
+    /* kit pads are MONOPHONIC, always — a pad is a drum, and a drum that
+       stacks with itself is a mistake you notice as mud */
+    if(isKit(p)||((pre0.vox&&pre0.vox.mode)|0)>=1){  // mono steals only its own kit slot
       const killAt=Math.max(AC.currentTime+0.001,at-0.004);
-      for(const v of [...this.act[pi]])if((v._lid||'ch')===lid0)v.kill(killAt,true);
+      /* ?? not ||: pad C's lid is 0, and 0||'ch' made the one pad on the C key
+         immune to its own mono steal */
+      for(const v of [...this.act[pi]])if((v._lid??'ch')===lid0)v.kill(killAt,true);
     }
     /* A CEILING ON NATIVE VOICES. There was none — procedural channels have had
        a per-model cap for a while, but the Web Audio side would build a voice
@@ -8593,7 +8652,6 @@ const _zn=v=>NN[((Math.round(v)%12)+12)%12]+(Math.floor(Math.round(v)/12)-1);
    dials spliced into that op's params. It had its own selector entry for a
    while, but that made it LESS capable (no FM, no layering) for no gain. */
 const ENGINES=[
-  {k:'kit',   n:'Kit'},
   {k:'synth', n:'Synth'},
   {k:'proc',  n:'Procedural'},
   {k:'audio', n:'Audio'},
@@ -8808,11 +8866,11 @@ function instFields(){
      engine's — they multiply a Voice that a procedural channel does not build,
      so they were four controls that did nothing but cost you a walk past them.
      Glide and mono still mean something there; spread, width and slop do not. */
-  const proc=isCodeCh(S.editSnd);
-  const dead=new Set(['uni','sprd','wide','slop']);
+  const proc=isCodeCh(S.editSnd), kit=isKit(S.presets[S.editSnd]);
+  const dead=new Set(['uni','sprd','wide','slop']);   // proc allocates its own voices; kit pads are mono drums
   return prsFieldDefs().concat(
     (MODULES[VOXI].flat||[])
-      .filter(spec=>!(proc&&dead.has(spec.key)))
+      .filter(spec=>!((proc||kit)&&dead.has(spec.key)))
       .map(spec=>({k:spec.lbl,spec})));
 }
 function prsAction(d){
