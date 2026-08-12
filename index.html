@@ -3420,6 +3420,25 @@ function scheduleRange(from,to){
       if(isAudioCh(li)){
         if((anySolo?!lane.solo:lane.mute)||(muteHold&&muteHold.lane===li))continue;
         engine.audCycle(li,lane,a,s0,s1,fresh);
+        /* RECORDED JUMPS replay over the base cycle: at each cue event the
+           tape stops, plays from the cue for the held length, then resumes
+           the cycle exactly in phase — the same grab-and-snap-back the live
+           key does, now sequenced. Live keys still win (AUD.hold). */
+        if(lane.events.some(ev=>ev.cue!==undefined)&&!(AUD.hold&&AUD.hold.pi===li)){
+          const L2=lane.len, au2=S.presets[li].au||{};
+          const f0a=s0-a.anchor, f1a=s1-a.anchor;
+          lane.occur(f0a,f1a,(t,ev)=>{
+            if(ev.cue===undefined)return;
+            const cu=(au2.cues||{})[ev.cue]||{};
+            const atJ=timeAt(t+a.anchor);
+            const dj2=clamp(ev.dur||0.25,0.05,L2);
+            engine.audStop(li,atJ);
+            engine.audPlay(li,atJ,dj2,clamp(ev.cue*0.25+(cu.o||0),0,L2-0.01),cu);
+            const te=t+dj2, ph=fmod(te,L2);
+            engine.audStop(li,timeAt(te+a.anchor));
+            if(L2-ph>0.05)engine.audPlay(li,timeAt(te+a.anchor),L2-ph,ph);
+          });
+        }
         continue;
       }
       /* PLAY effects resolve PER NOTE: the channel rack plus (on kits) the
@@ -11485,7 +11504,9 @@ const RETRO={end:{}};        // where each channel's last take's window ended
 function retroBars(bars){
   const pi=S.layer>=2?S.editSnd:S.curPreset;
   const lane=S.patterns[S.editPat].lanes[pi];
-  if(isAudioCh(pi)){flash('audio channel — tab records the input');return;}
+  /* an audio channel CAN reveal — when what you jammed was cue jumps */
+  if(isAudioCh(pi)&&!retroBuf[pi].some(n=>n.cue!==undefined)){
+    flash('audio channel — tab records the input');return;}
   const L=bars*4, nowB=gridNow(), anc=editAnchor();
   /* Two separate questions, and conflating them is what made captures play
      back rotated: WHICH notes to take, and WHERE they sit in the loop.
@@ -11519,7 +11540,8 @@ function retroBars(bars){
      the LAST bar; within-bar positions hold because the window end snaps to a
      bar line. */
   lane.events=seg.map(n=>({t:fmod(n.t-from,L),midi:n.midi,vel:n.vel??0.9,
-    dur:n.dur||0.25,born:performance.now()}));
+    dur:n.dur||0.25,born:performance.now(),
+    ...(n.cue!==undefined?{cue:n.cue}:{})}));   // a cue jam reveals like a note jam
   markRecorded(lane);
   /* the buffer SURVIVES: that is the whole reveal — tap took one bar, tab+4
      re-cuts the same jam four bars wide, and the bar you already had stays
@@ -11539,7 +11561,8 @@ function retroCapture(){
      the same jam, windowed wider, phase-stable because both takes are cut
      against the same anchor. */
   const pi=S.layer>=2?S.editSnd:S.curPreset, lane=S.patterns[S.editPat].lanes[pi];
-  if(isAudioCh(pi)){flash('audio channel — tab records the input');return;}
+  if(isAudioCh(pi)&&!retroBuf[pi].some(n=>n.cue!==undefined)){
+    flash('audio channel — tab records the input');return;}
   const L=lane.len||4, nowB=gridNow(), anc=editAnchor();
   const patEmpty=S.patterns[S.editPat].lanes.every(l=>l===lane||!l.events.length);
   pushUndo('retro');
@@ -11554,7 +11577,8 @@ function retroCapture(){
     const seg=recent.filter(n=>n.t>endT-L-1e-9);
     const t0=seg[0].t;
     lane.events=seg.map(n=>({t:fmod(n.t-t0,L),midi:n.midi,vel:n.vel??0.9,
-      dur:n.dur||0.25,born:performance.now()}));
+      dur:n.dur||0.25,born:performance.now(),
+      ...(n.cue!==undefined?{cue:n.cue}:{})}));
     /* THE TRANSPORT IS ABOUT TO START A NEW CLOCK, with beat 0 = this take's
        first note. The buffer's history lives on the OLD clock — leave it and
        the next tab+N looks for "the last two bars" among numbers that no
@@ -11581,8 +11605,9 @@ function retroCapture(){
     ' — tab+digits reaches further back');return;}
   for(const n of seg){
     const t=fmod(n.t-from,L);
-    lane.clear(ev=>ev.midi===n.midi&&Math.abs(ev.t-t)<1e-6);   // same note same spot: newest wins
-    lane.events.push({t,midi:n.midi,vel:n.vel??0.9,dur:n.dur||0.25,born:performance.now()});
+    lane.clear(ev=>ev.midi===n.midi&&ev.cue===n.cue&&Math.abs(ev.t-t)<1e-6);   // same note same spot: newest wins
+    lane.events.push({t,midi:n.midi,vel:n.vel??0.9,dur:n.dur||0.25,born:performance.now(),
+      ...(n.cue!==undefined?{cue:n.cue}:{})});
   }
   markRecorded(lane);
   flash('◉ retro: last '+fmtLen(lane)+' · '+seg.length+' notes — tab+digits widens the window');
@@ -12264,6 +12289,11 @@ const onKeyDown=e=>{
         if(rec2){pushUndo('mic take');
           audPlace(noteCh,rec2,gridNow()-beats,'mic');}
         else flash('mic ring is empty — hold ctrl a moment first');
+      }
+      else if(S.layer>=1&&isAudioCh(noteCh)&&!engine.audRec
+              &&retroBuf[noteCh].some(n=>n.cue!==undefined)){
+        /* you were jamming the cue keys: tab takes the JAM, not a recording */
+        retroCapture();
       }
       else if(S.layer>=1&&isAudioCh(noteCh)){            // mic off: old arm/stop recording
         if(engine.audRec)engine.audRecStop();
@@ -13253,8 +13283,14 @@ const onKeyDown=e=>{
       const au=S.presets[pi].au; au.cues=au.cues||{};
       const cue=au.cues[sl]=au.cues[sl]||{o:0,semis:0,vol:1,pan:0};
       engine.audStop(pi);
-      AUD.hold={c,pi,sl};
-      engine.audPlay(pi,AC.currentTime+0.005,L,clamp(sl*0.25+(cue.o||0),0,L-0.01),cue);
+      /* the jump is a PERFORMANCE EVENT, note-shaped: quantized like a note,
+         remembered like a note (retro hears it), recorded like a note when
+         rec is on. That is what makes tab+N reveal a cue jam afterwards. */
+      const t0j=gridNow(), gj=gridOf(lane);
+      const trj=CFG.qOn?qnext(t0j,gj)*(lane.qlive??1)+t0j*(1-(lane.qlive??1)):t0j;
+      AUD.hold={c,pi,sl,press:AC.currentTime,tr:Math.max(t0j,trj)};
+      const atP=Math.max(AC.currentTime+0.005,CFG.qOn?gridTime(AUD.hold.tr):0);
+      engine.audPlay(pi,atP,L,clamp(sl*0.25+(cue.o||0),0,L-0.01),cue);
       flash('cue '+(sl+1)+'/'+nS+(cue.semis?' '+(cue.semis>0?'+':'')+cue.semis+'st':'')+
         (cue.o?' @'+(sl*0.25+cue.o).toFixed(2)+'b':''));
       dirty=true; return;
@@ -13666,10 +13702,22 @@ document.addEventListener('keyup',e=>{
     }
   }
   if(AUD.hold&&AUD.hold.c===c){
-    const {pi}=AUD.hold; AUD.hold=null;
+    const {pi,sl,press,tr}=AUD.hold; AUD.hold=null;
     engine.audStop(pi);
+    const lane=S.patterns[S.editPat].lanes[pi], L=lane.len;
+    /* the jump's length is the held gesture, like a note's */
+    const durB=Math.max(0.05,press!=null?(AC.currentTime-press)/spb():0.25);
+    if(sl!=null&&tr!=null){
+      retroBuf[pi].push({t:tr,cue:sl,dur:durB});
+      if(retroBuf[pi].length>512)retroBuf[pi].shift();
+      if(S.patterns[S.editPat].state==='rec'){
+        const qt=fmod(tr-editAnchor(),L);
+        lane.clear(ev=>ev.cue===sl&&Math.abs(ev.t-qt)<1e-6);
+        lane.events.push({t:qt,cue:sl,dur:durB,born:performance.now()});
+        dirtySave=true;
+      }
+    }
     if(T.playing){                    // resume the cycle exactly in phase
-      const lane=S.patterns[S.editPat].lanes[pi], L=lane.len;
       const a2=actAt(posNow());
       engine.audPlay(pi,AC.currentTime+0.006,L,fmod(posNow()-a2.anchor,L));
     }
