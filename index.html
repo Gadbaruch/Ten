@@ -488,6 +488,15 @@ const lfoHz=m=>{
   const d=LFODIV[clamp(Math.round(m.rdiv??4),0,LFODIV.length-1)][1];
   return clamp(1/(d*spb()),0.01,60);      // one cycle per that many beats
 };
+/* one loop cycle of a looping envelope, in seconds — same free/sync split as
+   the LFO's rate, own keys so an env can loop at 1/8 while an LFO drifts free */
+const envLoopP=m=>{
+  if(Math.round(m.lsyn||0)===1){
+    const d=LFODIV[clamp(Math.round(m.lrdiv??6),0,LFODIV.length-1)][1];
+    return clamp(d*spb(),0.025,20);
+  }
+  return clamp(1/clamp(m.lrate??2,0.05,40),0.025,20);
+};
 const modRt=m=>{m.routes=m.routes||[mkRoute()];return m.routes[clamp(Math.round(m.rsel||0),0,m.routes.length-1)];};
 const ENV2MD={1:1,2:2,3:3,4:5};   // engine env-dst → MDST (amp/pitch/filt/op)
 const LFO2MD={1:2,2:3,3:1,4:4,5:5}; // engine lfo-dst → MDST (pitch/filt/amp/pan/op)
@@ -1156,10 +1165,36 @@ const MOD_P=sl=>{                    // unified: source picks which extra fields
     SP('amt','amt','lin',{min:-200,max:200,step:5,fmt:v=>v+'%', get:m=>modRt(m).amt, set:(m,v)=>modRt(m).amt=v}),
     SP('center','ctr','lin',{min:-100,max:100,step:5,fmt:v=>(v>0?'+':'')+v+'%', get:m=>modRt(m).ctr||0, set:(m,v)=>modRt(m).ctr=v})];
   if(s===0)return base.slice(0,5);  // off: src+route+dest+slot#+amt navigate; set src to activate
-  if(s===1)return base.concat([SP('atk','a','time'),SP('dec','d','time'),
+  if(s===1)return [
+    /* TIME ×: one dial over all four stages. First in the list on purpose —
+       "this envelope, but slower" is the edit you make ten times for every
+       once you rebalance the stages themselves. */
+    SP('time','tmul','lin',{min:10,max:400,step:5,big:25,
+       fmt:v=>'×'+(v/100).toFixed(2),
+       get:m=>Math.round((m.tmul??1)*100),set:(m,v)=>m.tmul=clamp(v,10,400)/100})]
+   .concat(base,[SP('atk','a','time'),SP('dec','d','time'),
     SP('sus','s','lin',{min:0,max:1,step:0.05}),SP('rel','r','time'),
     SP('curve','crv','lin',{min:-200,max:200,step:10,big:50,
-       fmt:v=>v?(v>0?'+':'')+Math.round(v):'lin'})]);
+       fmt:v=>v?(v>0?'+':'')+Math.round(v):'lin'}),
+    /* LOOP: 0 = one shot, 1 = cycles forever, in between each repeat is
+       scaled by the loop amount — 50% halves every pass, a bounce dying out.
+       Rate and mode only exist while the loop does. */
+    SP('loop','lp','lin',{min:0,max:1,step:0.05,
+       fmt:v=>v<=0?'off':v>=0.999?'∞':Math.round(v*100)+'%',
+       get:m=>m.lp||0,set:(m,v)=>m.lp=v})],
+    +(sl.lp||0)>0?[
+      SP('lsync','lsyn','enum',{opts:['free','sync'],
+         get:m=>Math.round(m.lsyn||0),set:(m,v)=>m.lsyn=Math.round(v)}),
+      Math.round(sl.lsyn||0)===1
+        ? SP('ldiv','lrdiv','lin',{min:0,max:LFODIV.length-1,step:1,
+            fmt:v=>LFODIV[clamp(Math.round(v),0,LFODIV.length-1)][0],
+            get:m=>Math.round(m.lrdiv??6),set:(m,v)=>m.lrdiv=Math.round(v)})
+        : SP('lrate','lrate','time',{min:0.05,max:40,fmt:fHz,
+            get:m=>m.lrate??2,set:(m,v)=>m.lrate=v}),
+      /* fit compresses attack+decay into one loop period, whatever they say;
+         norm keeps their clock and the period just cuts or leaves air */
+      SP('lmode','lfit','enum',{opts:['fit','norm'],
+         get:m=>Math.round(m.lfit||0),set:(m,v)=>m.lfit=Math.round(v)})]:[]);
   if(s===2)return base.concat([SP('wave','wav','enum',{opts:LFOW}),
     /* SYNC swaps what `rate` means: free-running Hz, or a division of the bar
        that follows the tempo. One dial, because a rate in Hz and a rate in
@@ -3673,9 +3708,13 @@ class Voice{
       const me=E.ovObj(pi,'mod',mi2,m);
       for(const rt of effRoutes(m)){
         if(rt.tgt)continue;                      // learned addresses handled separately below
-        if(m.src===1&&MD2ENV[rt.dst]&&Math.abs(rt.amt)>0.5)
+        if(m.src===1&&MD2ENV[rt.dst]&&Math.abs(rt.amt)>0.5){
+          const T3=clamp(me.tmul??1,0.1,4);   // time × scales every stage at once
           envs.push({dst:MD2ENV[rt.dst],idx:rt.idx,amt:rt.amt,
-                     a:me.a,d:me.d,s:me.s,r:me.r,crv:me.crv});
+                     a:me.a*T3,d:me.d*T3,s:me.s,r:me.r*T3,crv:me.crv,
+                     lp:clamp(me.lp||0,0,1),lsyn:me.lsyn,lrate:me.lrate,
+                     lrdiv:me.lrdiv,lfit:me.lfit});
+        }
         else if(m.src===2&&MD2LFO[rt.dst]&&Math.abs(rt.amt)>0.5)
           lfoList.push({dst:MD2LFO[rt.dst],idx:rt.idx,wav:m.wav,rate:lfoHz(me),
                         amt:rt.amt,ph:m.ph,free:Math.round(m.ltr||0)===1,mi:mi2});
@@ -3751,7 +3790,13 @@ class Voice{
        point of it. Ramps and setTarget are both things cancelAndHoldAtTime
        handles correctly — it holds the exact value it had reached. */
     const shaped=Math.abs(crvN)>1&&(aA+aD)>0.006;
-    if(shaped){
+    if(ampEnv&&ampEnv.lp>0.001){
+      /* looping amp: the cycle scheduler owns the gain. oneShot is off even
+         at sustain 0 — an env that repeats forever NEEDS the release to end it */
+      this.oneShot=false;
+      this._loopEnv(vca.gain,0,aPeak,aS,ampEnv,at);
+    }
+    else if(shaped){
       const sus=aPeak*aS;
       if(aA>0.002){const NA=8;                        // power-law attack, in segments
         for(let i=1;i<=NA;i++){const x=i/NA;
@@ -3797,9 +3842,12 @@ class Voice{
         const a=Math.max(0.001,e2.a);
         for(const pm of ps){
           pm.cancelScheduledValues(at);
-          pm.setValueAtTime(base,at);
-          pm.linearRampToValueAtTime(peak,at+a);
-          pm.setTargetAtTime(base+(peak-base)*e2.s,at+a,Math.max(0.005,e2.d/3));
+          if(e2.lp>0.001)this._loopEnv(pm,base,peak,e2.s,e2,at);
+          else{
+            pm.setValueAtTime(base,at);
+            pm.linearRampToValueAtTime(peak,at+a);
+            pm.setTargetAtTime(base+(peak-base)*e2.s,at+a,Math.max(0.005,e2.d/3));
+          }
           this.fEnvs.push({node:pm,base,r:e2.r});
         }
       }
@@ -4061,6 +4109,7 @@ class Voice{
         const semis=pe.amt/100*24, peak=Math.max(tg.base*Math.pow(2,semis/12),0.01);
         const a=Math.max(0.001,pe.a);
         tg.pm.cancelScheduledValues(at);
+        if(pe.lp>0.001){this._loopEnv(tg.pm,tg.base,peak,pe.s,pe,at);continue;}
         if(a<=0.003)tg.pm.setValueAtTime(peak,at);
         else{tg.pm.setValueAtTime(tg.base,at);tg.pm.linearRampToValueAtTime(peak,at+a);}
         tg.pm.setTargetAtTime(Math.max(tg.base+(peak-tg.base)*pe.s,0.01),at+Math.max(a,0.001),Math.max(0.005,pe.d/3));
@@ -4074,6 +4123,7 @@ class Voice{
       for(const g of gls.flat()){
         const base=g.gain.value;
         const lo=w>0?base*(1-w):base, hi=w>0?base:base*(1+w);
+        if(e2.lp>0.001){this._loopEnv(g.gain,lo,hi,e2.s,e2,at);continue;}
         g.gain.setValueAtTime(lo,at);
         g.gain.linearRampToValueAtTime(hi,at+a);
         g.gain.setTargetAtTime(lo+(hi-lo)*e2.s,at+a,Math.max(0.005,e2.d/3));
@@ -4211,10 +4261,17 @@ class Voice{
         const cAmt=rp.cents?cbias*2400:cbias*(rp.range||1);
         for(const param of rp.params){
           if(m.src===1){                             // env → param
-            const base=rp.cents?0:param.value, peak=base+dep, a=Math.max(0.001,m.a);
-            param.cancelScheduledValues(at); param.setValueAtTime(base,at);
-            param.linearRampToValueAtTime(peak,at+a);
-            param.setTargetAtTime(base+(peak-base)*m.s,at+a,Math.max(0.005,m.d/3));
+            const T4=clamp(m.tmul??1,0.1,4);
+            const base=rp.cents?0:param.value, peak=base+dep, a=Math.max(0.001,m.a*T4);
+            param.cancelScheduledValues(at);
+            if((m.lp||0)>0.001){
+              this._loopEnv(param,base,peak,m.s,
+                {a:m.a*T4,d:m.d*T4,lp:m.lp,lsyn:m.lsyn,lrate:m.lrate,lrdiv:m.lrdiv,lfit:m.lfit},at);
+            }else{
+              param.setValueAtTime(base,at);
+              param.linearRampToValueAtTime(peak,at+a);
+              param.setTargetAtTime(base+(peak-base)*m.s,at+a,Math.max(0.005,m.d*T4/3));
+            }
           }else if(m.src===2){                       // lfo → param
             const lo=ac.createOscillator(), lg=ac.createGain();
             lo.type=LFOW_W[m.wav]; lo.frequency.value=m.rate; lg.gain.value=dep*0.5;
@@ -4285,6 +4342,27 @@ class Voice{
     if(g.cancelAndHoldAtTime){try{g.cancelAndHoldAtTime(t);return true;}catch(_){}}
     g.cancelScheduledValues(t); return false;
   }
+  /* A LOOPING ENVELOPE: attack up, decay down, again — each repeat scaled by
+     the loop amount (1 = forever, 0.5 = halves every pass, a bounce dying
+     out). fit squeezes A+D into one period; norm keeps their own clock and
+     the period cuts or leaves air. Scheduled ahead as plain ramps — bounded
+     by a horizon and by the decay reaching silence — and the release cancels
+     whatever is still queued. */
+  _loopEnv(pm,base,peak,sus,env,at){
+    const P=envLoopP(env), fit=Math.round(env.lfit||0)===0;
+    let A=Math.max(0.001,env.a), D=Math.max(0.01,env.d);
+    if(fit){const c=P/(A+D); A*=c; D*=c;}
+    else{A=Math.min(A,P*0.9); D=Math.min(D,Math.max(0.01,P-A));}
+    const dec=clamp(env.lp,0,1);
+    try{pm.setValueAtTime(base,at);}catch(_){return;}
+    for(let k=0;k<128;k++){
+      const tk=at+k*P; if(tk>at+16)break;               // 16s of cycles is plenty
+      const pk=dec>=0.999?1:Math.pow(dec,k); if(pk<0.003)break;
+      pm.linearRampToValueAtTime(base+(peak-base)*pk,tk+A);
+      pm.linearRampToValueAtTime(base+(peak-base)*sus*pk,tk+A+D);
+    }
+    (this._loopPs=this._loopPs||[]).push({pm,base});
+  }
   release(at){
     if(this._sib)for(const s of this._sib)s.release(at);
     if(this.released)return; this.released=true; this.relAt=at;
@@ -4297,6 +4375,13 @@ class Voice{
     if(!this._cancelAt(g,at)&&at<aEnd)
       g.setValueAtTime(this.amp*Math.max(0,at-this.startAt)/this.aA,at);
     g.setTargetAtTime(0,at,Math.max(0.005,this.rel/3));
+    /* looped envelopes have ramps queued far ahead — cancel them or the loop
+       keeps cycling straight through the release */
+    for(const lpp of this._loopPs||[]){
+      if(lpp.pm===g)continue;                        // the amp was cancelled above
+      this._cancelAt(lpp.pm,at);
+      lpp.pm.setTargetAtTime(lpp.base,at,Math.max(0.005,this.rel/3));
+    }
     for(const fe of this.fEnvs)fe.node.setTargetAtTime(fe.base,at,Math.max(0.005,fe.r/3));
     this._end(at+this.rel*4+0.1);
   }
