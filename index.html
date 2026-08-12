@@ -15814,18 +15814,29 @@ function renderSnd(L,pos){
       ?sp('d','sample: ')+sp('a',((engine.granName||[])[S.editSnd]||'clip')+' \u00b7 '+buf.duration.toFixed(2)+'s')
       :sp('r','no sample — ⌥-drop an audio file onto this channel')));
     L.push('');
-    let lr='   ', vr='   ';
     const gr=pre.gr||{};
-    const GDEF={pos:0,spray:0.05,size:0.12,dens:20,semis:0,jit:0,shape:0.5,rev:0.1,width:0.5,scan:1,gain:0.8};
-    GRANF.forEach((pspec,i)=>{
-      const foc=i===S.curParam;
-      const v=fmtVal(pspec,gr[pspec.key]??GDEF[pspec.key]);
-      lr+=(foc?spH('a','\u25b8'+pad(pspec.lbl,7),'cp',i):spH('d',' '+pad(pspec.lbl,7),'cp',i))+' ';
-      vr+=(foc?spH('i',' '+pad(v,7),'cp',i):spH('v',' '+pad(v,7),'cp',i))+' ';
-    });
-    L.push(lr); L.push(vr);
+    const GDEF={pos:0,spray:0.05,size:0.12,dens:20,semis:0,jit:0,shape:0.5,rev:0.1,
+      width:0.5,scan:1,gain:0.8,fade:0.06,flow:0.5,dif:0,live:0,frz:0,fb:0,pmode:0};
+    /* the page outgrew one row (nineteen dials): TWO label/value pairs, split
+       down the middle, and every cell reads through the spec's own get */
+    const half=Math.ceil(GRANF.length/2);
+    for(let r0=0;r0<2;r0++){
+      const seg=GRANF.slice(r0*half,(r0+1)*half);
+      if(!seg.length)break;
+      let lr='   ', vr='   ';
+      seg.forEach((pspec,j)=>{
+        const i=r0*half+j, foc=i===S.curParam;
+        const raw=pspec.get?pspec.get(gr):gr[pspec.key]??GDEF[pspec.key];
+        const v=fmtVal(pspec,raw);
+        const cw=pspec.w?15:7;
+        lr+=(foc?spH('a','\u25b8'+pad(pspec.lbl,cw),'cp',i):spH('d',' '+pad(pspec.lbl,cw),'cp',i))+' ';
+        vr+=(foc?spH('i',' '+pad(v,cw),'cp',i):spH('v',' '+pad(v,cw),'cp',i))+' ';
+      });
+      L.push(lr); L.push(vr);
+      if(r0===0)L.push('');
+    }
     L.push('');
-    L.push('   '+sp('d','letters play the cloud at pitch \u00b7 scan 0 = freeze \u00b7 pos/size/dens/pitch are mod destinations'));
+    L.push('   '+sp('d','letters play the cloud at pitch \u00b7 mode pitch = melody, timing kept \u00b7 input live = the \u2303 mic through a 4s ring \u00b7 everything here is a mod destination'));
   }
   else if(M.id==='osc'&&isAudioCh(S.editSnd)){
     const buf=engine.audBuf[S.editSnd];
