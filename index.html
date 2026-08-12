@@ -3593,14 +3593,34 @@ function scheduleRange(from,to){
         if(lane.events.some(ev=>ev.cue!==undefined)&&!(AUD.hold&&AUD.hold.pi===li)){
           const L2=lane.len, au2=S.presets[li].au||{};
           const f0a=s0-a.anchor, f1a=s1-a.anchor;
+          /* the PLAY rack works on jumps like it works on notes: chance drops
+             a grab, humanize/nudge move it, ratchet re-fires the SAME cue in
+             equal sub-hits — the tape stutter every MPC promises */
+          const plyA=S.presets[li].ply.filter(sl=>sl.typ&&!sl.off);
+          const gA=t9=>plyA.find(sl=>sl.typ===t9);
+          const chcA=gA(8), nudA=gA(10), hmzA=gA(11), rtcA=gA(15);
+          const h9=x=>{const v9=Math.sin(x*127.1+li*311.7)*43758.5453;return v9-Math.floor(v9);};
           lane.occur(f0a,f1a,(t,ev)=>{
             if(ev.cue===undefined)return;
+            const cyc=Math.round((t-ev.t)/L2);
+            if(chcA&&h9(ev.t*7.13+cyc*3.7)>clamp(chcA.p1??100,0,100)/100)return;
+            let tt=t+(nudA?((nudA.p1||0)/1000)/spb():0);
+            if(hmzA){const rng=(hmzA.p1||0)/1000/spb();
+              tt+=(h9(ev.t*13.7+cyc*4.3)*2-1)*rng;}
             const cu=(au2.cues||{})[ev.cue]||{};
-            const atJ=timeAt(t+a.anchor);
             const dj2=clamp(ev.dur||0.25,0.05,L2);
-            engine.audStop(li,atJ);
-            engine.audPlay(li,atJ,dj2,clamp(ev.cue*0.25+(cu.o||0),0,L2-0.01),cu);
-            const te=t+dj2, ph=fmod(te,L2);
+            const skp=clamp(ev.cue*0.25+(cu.o||0),0,L2-0.01);
+            const divs=rtcA?(Math.round(rtcA.p1??0)>=2?clamp(Math.round(rtcA.p1),2,16):0):0;
+            engine.audStop(li,timeAt(tt+a.anchor));
+            if(divs>=2){
+              const stepJ=dj2/divs;
+              for(let i2=0;i2<divs;i2++){
+                engine.audStop(li,timeAt(tt+i2*stepJ+a.anchor));
+                engine.audPlay(li,timeAt(tt+i2*stepJ+a.anchor),stepJ*0.95,skp,cu);
+              }
+            }
+            else engine.audPlay(li,timeAt(tt+a.anchor),dj2,skp,cu);
+            const te=tt+dj2, ph=fmod(te,L2);
             engine.audStop(li,timeAt(te+a.anchor));
             if(L2-ph>0.05)engine.audPlay(li,timeAt(te+a.anchor),L2-ph,ph);
           });
