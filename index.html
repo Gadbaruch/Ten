@@ -3229,7 +3229,9 @@ let fxwReady=false;
       this.L=null; this.R=null; this.len=0;
       this.p={pos:0,spray:0.05,size:0.12,dens:20,semis:0,jit:0,shape:0.5,
               rev:0.1,width:0.5,scan:1,gain:0.8,fade:0.06,flow:0.5,
-              dif:0,live:0,frz:0};
+              dif:0,live:0,frz:0,fb:0,pmode:0};
+      this.fbLP=0; this.prevL=null;
+      this.pW=Math.round(sampleRate*0.05);   // pitch-mode tap window, 50ms
       this.cur=null;                       // slewed copy — no parameter ever jumps
       this.vs=new Map(); this.grains=[]; this.scanPh=0; this.stat=0;
       this.norm=1; this.tick=0;
@@ -3283,9 +3285,22 @@ let fxwReady=false;
       if(live){
         const inp=I[0]&&I[0][0];
         const wTgt=P.frz>0.5?0:1;
+        /* FEEDBACK, the Clouds way: last block's output back into the ring
+           through a high-pass whose cutoff rises with the amount (lows never
+           pile up) and a soft limiter. Gated off while frozen. */
+        const fb=P.frz>0.5?0:Math.max(0,Math.min(0.95,P.fb||0));
+        const aHP=Math.min(0.5,2*Math.PI*(20+100*fb*fb)/sampleRate);
         for(let k=0;k<N;k++){
           this.wGain+=(wTgt-this.wGain)*0.002;
-          this.ring[this.rw]=this.ring[this.rw]*(1-this.wGain)+(inp?inp[k]:0)*this.wGain;
+          let f9=0;
+          if(fb>0.001&&this.prevL){
+            const x9=this.prevL[k]||0;
+            this.fbLP+=(x9-this.fbLP)*aHP;
+            const hp=x9-this.fbLP;
+            f9=(hp/(1+Math.abs(hp)))*fb*4.5;   // the grain windows eat ~3x per pass; past ~0.7 the loop can sing (the softclip is the ceiling)
+          }
+          this.ring[this.rw]=this.ring[this.rw]*(1-this.wGain)
+            +((inp?inp[k]:0)+f9)*this.wGain;
           this.rw=(this.rw+1)%this.ring.length;
         }
       }
@@ -3297,6 +3312,50 @@ let fxwReady=false;
       for(const key of ['pos','spray','size','dens','semis','jit','shape','rev','width','gain','flow','dif'])
         C[key]+=(P[key]-C[key])*kS;
       this.scanPh=(this.scanPh+(P.scan*N)/len)%1;
+      /* PITCH MODE: no grains at all — each voice is a dual-tap resampler
+         (the ten-psh idea aimed at the buffer): the read center holds the
+         position (or scans), two crossfaded taps sweep at (ratio-1), so a
+         note keeps the SOURCE'S TIMING and moves only its pitch. Melody
+         without the chipmunk. */
+      if(Math.round(P.pmode)===1){
+        const W=this.pW;
+        const cy0=live?(((this.rw-(0.05+C.pos*0.9)*len)%len)+len)%len
+                      :((C.pos+this.scanPh)%1+1)%1*len;
+        let nv=0;
+        for(const [id,v] of this.vs){ if(v.env>0)nv++; }
+        const nrm=1/Math.sqrt(Math.max(1,nv));
+        for(const [id,v] of this.vs){
+          if(v.tp===undefined)v.tp=0;
+          const ratio=v.ratio*Math.pow(2,C.semis/12), drift=1-ratio;
+          const g9=v.vel*Math.max(0,Math.min(1,v.env))*nrm*0.7;
+          for(let k=0;k<N;k++){
+            v.tp=(v.tp+drift+W)%W;
+            const p1=v.tp, p2=(v.tp+W/2)%W;
+            const f1=Math.sin(Math.PI*p1/W), f2=Math.sin(Math.PI*p2/W);
+            const rd=off9=>{const i2=(((cy0+k*(live?1:C.scan)-off9)%len)+len)%len;
+              const i0=i2|0, fr=i2-i0, i1=(i0+1)%len;
+              return [(SL[i0]+(SL[i1]-SL[i0])*fr),(SR[i0]+(SR[i1]-SR[i0])*fr)];};
+            const [l1,r1]=rd(p1), [l2,r2]=rd(p2);
+            oL[k]+=(l1*f1+l2*f2)*g9;
+            oR[k]+=(r1*f1+r2*f2)*g9;
+          }
+        }
+        this.prevL=this.prevL||new Float32Array(N); this.prevL.set(oL);
+        const gn9=C.gain, df9=C.dif;
+        for(let k=0;k<N;k++){
+          let l9=oL[k]*gn9, r9=(out[1]?oR[k]:l9)*gn9;
+          if(df9>0.005){l9=l9*(1-df9)+this.ap(this.apL,l9)*df9;
+            r9=r9*(1-df9)+this.ap(this.apR,r9)*df9;}
+          oL[k]=l9; if(out[1])oR[k]=r9;
+        }
+        /* envelopes still run so notes end */
+        const aS9=N/(sampleRate*0.005), rS9=N/(sampleRate*Math.max(0.01,P.fade));
+        for(const [id,v] of this.vs){
+          v.env+=v.rel?-rS9:aS9; if(v.env>1)v.env=1;
+          if(v.env<=0&&v.rel)this.vs.delete(id);
+        }
+        this.tick+=N; return true;
+      }
       const period=sampleRate/Math.max(0.5,C.dens);
       const aStep=N/(sampleRate*0.005), rStep=N/(sampleRate*Math.max(0.01,P.fade));
       for(const [id,v] of this.vs){
@@ -3348,6 +3407,9 @@ let fxwReady=false;
         }
         if(g.n>=g.dur)this.grains.splice(gi,1);
       }
+      /* the feedback tap is PRE-norm, pre-gain: the loop must not pay the
+         1/sqrt(N) tax twice or it can never sustain */
+      this.prevL=this.prevL||new Float32Array(N); this.prevL.set(oL);
       const gn=C.gain*this.norm, df=C.dif;
       for(let k=0;k<N;k++){
         let l9=oL[k]*gn, r9=(out[1]?oR[k]:l9)*gn;
@@ -5843,7 +5905,7 @@ class Engine{
       const e=this.gn&&this.gn[pi]; if(!e)return false;
       const gr=S.presets[pi].gr||{};
       const GDEF={pos:0,spray:0.05,size:0.12,dens:20,semis:0,jit:0,shape:0.5,
-                  rev:0.1,width:0.5,scan:1,gain:0.8,fade:0.06,flow:0.5,dif:0,live:0,frz:0};
+                  rev:0.1,width:0.5,scan:1,gain:0.8,fade:0.06,flow:0.5,dif:0,live:0,frz:0,fb:0,pmode:0};
       e.node.port.postMessage({t:'p',p:{[key]:v===undefined?(gr[key]??GDEF[key]):v}});
       return true;
     }
@@ -7088,7 +7150,8 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
       width:clamp(gr.width??0.5,0,1), scan:clamp(gr.scan??1,-4,4),
       gain:clamp(gr.gain??0.8,0,1.5), fade:clamp(gr.fade??0.06,0.005,0.5),
       flow:clamp(gr.flow??0.5,0,1), dif:clamp(gr.dif??0,0,1),
-      live:Math.round(gr.live??0), frz:Math.round(gr.frz??0)}});
+      live:Math.round(gr.live??0), frz:Math.round(gr.frz??0),
+      fb:clamp(gr.fb??0,0,0.95), pmode:Math.round(gr.pmode??0)}});
   }
   granLiveWire(pi){
     /* the mic straight into the cloud's input — only wired when asked for,
@@ -8970,6 +9033,13 @@ const GRANF=[
       if(m.live===1&&MIC.on)engine.granLiveWire(S.editSnd);}}),
  SP('freeze','frz','enum',{opts:['off','hold'],
     get:m=>Math.round(m.frz||0),set:(m,v)=>m.frz=Math.round(v)}),
+ /* mode: grain is the cloud; pitch is a dual-tap shifter per voice — the
+    source keeps its own timing and only the pitch moves. Melody mode. */
+ SP('mode','pmode','enum',{opts:['grain','pitch'],
+    get:m=>Math.round(m.pmode||0),set:(m,v)=>m.pmode=Math.round(v)}),
+ /* live-mode feedback, HP-filtered and soft-limited so it blooms, not booms */
+ SP('fb','fb','lin',{min:0,max:0.95,step:0.05,fmt:v=>Math.round(v*100)+'%',
+    get:m=>m.fb||0,set:(m,v)=>m.fb=v}),
  /* which POOL take the cloud chews on — the same list every sampler shares */
  SP('smpl','_pool','lin',{min:0,max:31,step:1,w:2,
    fmt:v=>POOL[Math.round(v)]?POOL[Math.round(v)].name:'—',
@@ -8984,7 +9054,7 @@ const GRANF=[
 function granAction(d,m){
   const pre=S.presets[S.editSnd], spec=GRANF[clamp(S.curParam,0,GRANF.length-1)];
   pre.gr=pre.gr||{};
-  const GD={pos:0,spray:0.05,size:0.12,dens:20,semis:0,jit:0,shape:0.5,rev:0.1,width:0.5,scan:1,gain:0.8,fade:0.06,flow:0.5,dif:0,live:0,frz:0};
+  const GD={pos:0,spray:0.05,size:0.12,dens:20,semis:0,jit:0,shape:0.5,rev:0.1,width:0.5,scan:1,gain:0.8,fade:0.06,flow:0.5,dif:0,live:0,frz:0,fb:0,pmode:0};
   /* through the spec's own get/set when it has them — the pool picker's set()
      IS the assignment, same lesson the kit mode field just taught */
   const cur=spec.get?spec.get(pre.gr):pre.gr[spec.key]??GD[spec.key];
