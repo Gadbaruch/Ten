@@ -241,7 +241,12 @@ const cycleState=h=>{h.state=h.state==='on'?'rec':h.state==='rec'?'edit':'on';};
    cymbal, brown for a floor tom or wind, blue for hats and metal, dust for
    crackle and vinyl. Appended at the end so every stored preset keeps its
    index. Anything past 'smp' is a buffer, and isNoiseW() is the one test. */
-const WAVES=['sin','tri','saw','sqr','nse','org','bel','vox','mtl','smp','pink','brwn','blue','dust','wt'];
+const WAVES=['sin','tri','saw','sqr','nse','org','bel','vox','mtl','smp','pink','brwn','blue','dust','wt','grn'];
+/* 'grn' (15): the op hands its note to the CHANNEL'S granular engine — one
+   cloud per channel (agreed singleton), the op's level is the note's velocity
+   into it. It sums to the bus, not through the voice's FM graph: a shared
+   node cannot be a per-voice carrier, and pretending otherwise would be a
+   silent lie. It CAN be scanned/ring-modded by tapping the bus later. */
 /* THE WAVETABLE BANK — ten starter tables as harmonic recipes, from tame to
    feral. Auditioned by ear before more are added; an editor comes later, and
    when it does it will be harmonic sliders, not freehand drawing. */
@@ -3484,7 +3489,9 @@ function scheduleRange(from,to){
           if(id==='drop'&&r<0.33)return;
           else if(id==='scat')tt=fmod(tt+Math.round((r*2-1)*8)*0.25,L2);
           else if(id==='rpit'){let m2=midi2+Math.round((r*2-1)*7);
-            if(CFG.scaleOn)m2=snapToPCs(m2,pcsNow()); midi2=m2;}
+            /* kit pads are drums: the scale never touches them, not even
+               through a master note-fx */
+            if(CFG.scaleOn&&!isDrumCat(chP.cat))m2=snapToPCs(m2,pcsNow()); midi2=m2;}
           else if(id==='octs')midi2+=r<0.33?-12:r>0.67?12:0;
           else if(id==='chop')dur2=Math.max(0.05,dur2*0.33);
           else if(id==='rtch')rt=Math.max(rt,3);
@@ -4022,6 +4029,14 @@ class Voice{
         rootWt={a:src,b:oB,ga:gA,gb:gB,cur:'a'};
         pitchParam=src.frequency;
       }
+      else if(!isN&&rootW===15){
+        src=ac.createGain(); src.start=()=>{}; src.stop=()=>{};
+        pitchParam=null;                   // the cloud owns pitch; nothing here to bend
+        if(u===0){
+          const shg=E.granNote(at,pi,midi,clamp(vel*clamp(ops[0].amt,0,1),0,1),null);
+          if(shg)(this._grnShims=this._grnShims||[]).push(shg);
+        }
+      }
       else if(!isN){src=ac.createOscillator();
         E.setWave(src,rootW,ops[0].phm===1?Math.random()*360:ops[0].ph,ops[0].pw);
         pitchParam=src.frequency;}
@@ -4033,7 +4048,7 @@ class Voice{
          has said "keep the buffer at rate 1 and track the note on the filters"
          since the day it was written; the code just never did it.
          The sampler still repitches, because that is what a sampler is. */
-      if(src){
+      if(src&&pitchParam){
         if(isS)pitchParam.setValueAtTime(target,at);
         else if(isN)pitchParam.setValueAtTime(
           clamp((ops[0].rat||1)*Math.pow(2,(ops[0].fine||0)/1200),0.05,8),at);
@@ -4129,12 +4144,22 @@ class Voice{
           s2.start=t=>{try{oA.start(t);}catch(_){} try{oB.start(t);}catch(_){}};
           s2.stop=t=>{try{oA.stop(t);}catch(_){} try{oB.stop(t);}catch(_){}};
         }
+        else if(wv===15){
+          /* GRANULAR OP: the note goes to the channel's cloud (one engine per
+             channel by design); the slot's level is the velocity into it. A
+             silent gain stands in the graph — the cloud sums at the bus. */
+          s2=ac.createGain(); s2.start=()=>{}; s2.stop=()=>{};
+          if(u===0){
+            const shg=E.granNote(at,pi,midi,clamp(vel*clamp(op.amt,0,1),0,1),null);
+            if(shg)(this._grnShims=this._grnShims||[]).push(shg);
+          }
+        }
         else{s2=ac.createOscillator();
           E.setWave(s2,wv,op.phm===1?Math.random()*360:op.ph,op.pw);
           setF(s2.frequency,fi);}
-        built.push({i,s:s2,osc:!isNoiseW(wv)&&wv!==9&&!scanned,f:fi,op,scan:scanned});
+        built.push({i,s:s2,osc:!isNoiseW(wv)&&wv!==9&&!scanned&&wv!==15,f:fi,op,scan:scanned});
         (this.opNodes[i]=this.opNodes[i]||[]).push(s2);
-        if(!isNoiseW(wv)&&wv!==9&&wv!==14){
+        if(!isNoiseW(wv)&&wv!==9&&wv!==14&&wv!==15){
           (this.opPitch[i]=this.opPitch[i]||[]).push({pm:s2.frequency,base:fi,kind:sync?'sync':'osc'});
           (this.opDet[i]=this.opDet[i]||[]).push({pm:s2.detune,sc:200});
         }
@@ -4497,7 +4522,16 @@ class Voice{
   release(at){
     if(this._sib)for(const s of this._sib)s.release(at);
     if(this.released)return; this.released=true; this.relAt=at;
+    for(const shg of this._grnShims||[])try{shg.release(at);}catch(_){}
     if(this.oneShot)return;              // percussive: the decay is the release — don't clip it
+    /* the release you HEAR is the release the slot says NOW — editing rel
+       (or time ×) while a note rings changes how it lets go */
+    {const md9=(this.p&&this.p.mod)||[];
+     for(let i9=0;i9<md9.length;i9++){const m9=md9[i9];
+       if(!m9||m9.off||m9.src!==1||!m9.routes)continue;
+       if(!effRoutes(m9).some(rt=>rt.dst===1&&Math.round(rt.idx||0)===0))continue;
+       const me9=engine.ovObj(this.pi,'mod',i9,m9);
+       this.rel=Math.max(0.005,(me9.r||0.05)*clamp(me9.tmul??1,0.1,4)); break;}}
     at=Math.max(at,this.startAt+0.005);
     const g=this.vca.gain, aEnd=this.startAt+this.aA;
     /* the hand-rebuilt attack level below only existed because the cancel used
@@ -4575,6 +4609,7 @@ class Voice{
   kill(at,fast,withSib){       // per-layer mono steal kills one voice; withSib only for whole-note stops
     if(withSib&&this._sib)for(const s of this._sib)s.kill(at,fast,true);
     if(this.killed)return; this.killed=true; this.released=true;
+    for(const shg of this._grnShims||[])try{shg.kill(at);}catch(_){}
     /* NEVER KILL A NOTE BEFORE IT HAS SOUNDED. With live quantize ON the voice
        is built now but scheduled up to a grid step into the future, so the
        steal from the next note landed BEFORE the envelope had started —
@@ -5280,6 +5315,23 @@ class Engine{
   /* An LFO edit reaches the notes that are already sounding. The depth is
      scaled rather than rebuilt, because the gain node's value already carries
      whatever the destination needed (cents, a gain, a Q). */
+  envLive(pi){
+    const n=AC.currentTime;
+    for(const v of this.act[pi]){
+      if(!v.vca||v.released||v.killed||v.oneShot)continue;
+      const md=(v.p&&v.p.mod)||[];
+      for(let i=0;i<md.length;i++){const m=md[i];
+        if(!m||m.off||m.src!==1||!m.routes)continue;
+        const rt=effRoutes(m).find(r2=>r2.dst===1&&Math.round(r2.idx||0)===0);
+        if(!rt)continue;
+        const me=this.ovObj(pi,'mod',i,m);
+        const T9=clamp(me.tmul??1,0.1,4);
+        if(n-(v.startAt||0)>(me.a||0)*T9+0.005&&me.s>0.001)
+          v.vca.gain.setTargetAtTime(v.amp*clamp(Math.abs(rt.amt)/100,0,2)*clamp(me.s,0,1),n,0.05);
+        break;
+      }
+    }
+  }
   lfoLive(pi){
     const p=S.presets[pi], md=p.mod||[];
     for(const v of this.act[pi]){
@@ -5287,7 +5339,11 @@ class Engine{
       for(const L of v.lfoN){
         const m=md[L.mi]; if(!m||m.src!==2)continue;
         const rt=(m.routes||[])[0]; if(!rt)continue;
-        if(L.osc!==false&&L.lo.frequency)L.lo.frequency.setTargetAtTime(lfoHz(m),AC.currentTime,0.02);
+        if(L.osc!==false&&L.lo.frequency){
+          L.lo.frequency.setTargetAtTime(lfoHz(m),AC.currentTime,0.02);
+          const w9=Math.round(m.wav||0);   // wave swaps live too (osc shapes only)
+          if(w9<4&&L.lo.type!==LFOW_W[w9])try{L.lo.type=LFOW_W[w9];}catch(_){}
+        }
         if(L.base)L.lg.gain.setTargetAtTime(
           L.lg.gain.value/L.base*rt.amt,AC.currentTime,0.02);
       }
@@ -7090,7 +7146,7 @@ function applyParam(pi,mi,si,px,v){
   if(M.id==='fx'&&spec.key==='typ'&&FXDEF[Math.round(v)])
     Object.assign(S.presets[pi].fx[si],FXDEF[Math.round(v)]);
   if(M.id==='fx'){ if(!engine.fxLive(pi,si,spec.key))engine.rebuildRack(pi); }
-  else if(M.id==='mix'||M.id==='mod'){engine.refresh(pi); if(M.id==='mod')engine.lfoLive(pi);}
+  else if(M.id==='mix'||M.id==='mod'){engine.refresh(pi); if(M.id==='mod'){engine.lfoLive(pi); engine.envLive(pi);}}
   if(isCodeCh(pi)&&(M.id==='flt'||M.id==='mod'||M.id==='vox'))engine.codeCfg(pi);
   else if(M.id==='flt'&&spec.key==='frq')engine.cutLive(pi,si);
   /* these three change what the filter IS, not where it sits, so the graph has
@@ -9867,6 +9923,11 @@ function poolAdd(buf,name){
 }
 const MIC={stream:null,on:false,latched:false,node:null,ring:null,w:0,sr:0,
   _down:false,_used:false,_latch:false};
+/* ⌥M just made a mod (env by default). While ⌥ is STILL down, one letter
+   re-sources it: l lfo, v velocity, k key, / random, e env again. Closed the
+   moment ⌥ comes up, so the letters go back to their scopes. */
+let MODPICK=null;
+const MODPICK_SRC={KeyE:1,KeyL:2,KeyV:3,KeyK:4,Slash:5};
 async function micOn(){
   if(MIC.on)return;
   try{
@@ -12008,6 +12069,15 @@ const onKeyDown=e=>{
     e.preventDefault(); mergeToKit(); return;
   }
 
+  /* the ⌥M source window: one letter re-sources the mod that was just made */
+  if(MODPICK&&altOf(e)&&!e.repeat&&MODPICK_SRC[e.code]!==undefined&&!e.metaKey&&!e.ctrlKey){
+    e.preventDefault();
+    const m9=MODPICK.hold.mod[MODPICK.at];
+    if(m9){m9.src=MODPICK_SRC[e.code];
+      engine.refresh(S.editSnd); engine.lfoLive(S.editSnd);
+      flash('◎ source → '+MSRC[m9.src]); dirty=true; dirtySave=true;}
+    return;
+  }
   /* ⇧; / ⇧' — mute and solo */
   if(MSCOPE[e.code]&&e.shiftKey&&!altOf(e)&&!e.repeat&&S.layer>=1&&!e.metaKey&&!e.ctrlKey&&!HOLD.q&&!ALTSUS.size&&!HOLD.opt){
     e.preventDefault();
@@ -12413,10 +12483,11 @@ const onKeyDown=e=>{
         if(at<0){flash('all ten mod slots are in use');return;}
         pushUndo('route');
         const m2=hold.mod[at];
-        Object.assign(m2,mkMod(at),{src:2,off:false});
+        Object.assign(m2,mkMod(at),{src:1,off:false});
         m2.routes=[{dst:0,idx:0,amt:40,ctr:0,tgt:null,addr}];
         m2.rsel=0;
-        flash('\u25ce lfo \u2192 '+destLabel(addr)+'  (live)');
+        MODPICK={hold,at};
+        flash('\u25ce env \u2192 '+destLabel(addr)+' \u00b7 \u2325+ l lfo · v vel · k key · / rnd');
       }else flash('\u25ce already routed \u2014 '+MSRC[hold.mod[at].src]+' \u2192 '+destLabel(addr));
       S.curMod=MODULES.findIndex(M2=>M2&&M2.id==='mod');
       S.curSlot=at;
@@ -12445,10 +12516,13 @@ const onKeyDown=e=>{
       if(at<0){flash('all ten mod slots are in use');return;}
       pushUndo('route');
       const m=hold.mod[at];
-      Object.assign(m,mkMod(at),{src:2,off:false});     // an LFO is the useful default
+      /* ENV is the default source now; while ⌥ is still down a letter picks
+         another: l lfo, v velocity, k key, / random */
+      Object.assign(m,mkMod(at),{src:1,off:false});
       m.routes=[{dst:0,idx:0,amt:40,ctr:0,tgt:null,addr}];
       m.rsel=0;
-      flash('◎ lfo → '+destLabel(addr)+'  ('+(rate==='audio'?'audio rate':rate==='ctrl'?'live':'next note')+')');
+      MODPICK={hold,at};
+      flash('◎ env → '+destLabel(addr)+' · ⌥+ l lfo · v vel · k key · / rnd');
     }else flash('◎ already routed — '+MSRC[hold.mod[at].src]+' → '+destLabel(addr));
     /* land on the new modulator's AMOUNT, because that is always the next
        thing you want and it is the one value that decides whether you can
@@ -13513,6 +13587,7 @@ document.addEventListener('keyup',e=>{
     }
   }
   if(c==='AltLeft'||c==='AltRight'||c==='ControlLeft'||c==='ControlRight'){
+    MODPICK=null;                       // the ⌥M source window closes with ⌥
     for(const k of [...ALTSUS]){ALTSUS.delete(k);
       document.dispatchEvent(new KeyboardEvent('keyup',
         {code:k,shiftKey:e.shiftKey,bubbles:true}));}
