@@ -9788,6 +9788,52 @@ const HE={
   cancelLearn(){if(this.learn){this.learn=null;flash('learn cancelled');dirty=true;return true;}return false;},
 };
 
+/* ---------------- the MIC is a mode, not a moment --------------------
+   Bare CONTROL holds the mic open (momentary; left-shift latches — decided at
+   release like every latch here). While it is on, a ring buffer hears
+   EVERYTHING, so tab on an audio channel is retro for sound: tap it and the
+   last loop-length of air is already in the lane. Ctrl+letter combos still
+   work — a chord marks the hold as modifier use and the mic closes with it.
+   (`fn` cannot reach a browser page on macOS; the code listens for it anyway
+   so a HID board that sends one just works.) */
+const MIC={stream:null,on:false,latched:false,node:null,ring:null,w:0,sr:0,
+  _down:false,_used:false,_latch:false};
+async function micOn(){
+  if(MIC.on)return;
+  try{
+    if(!MIC.stream){
+      if(!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia)){flash('no mic in this browser');return;}
+      MIC.stream=await navigator.mediaDevices.getUserMedia(
+        {audio:{echoCancellation:false,noiseSuppression:false}});
+    }
+    if(!MIC.ring){MIC.sr=AC.sampleRate;
+      MIC.ring=new Float32Array(Math.round(MIC.sr*32)); MIC.w=0;}
+    const src=AC.createMediaStreamSource(MIC.stream);
+    const sp=AC.createScriptProcessor(4096,1,1);
+    const sink=AC.createGain(); sink.gain.value=0;   // pulled, silent — no monitor, no feedback
+    sp.onaudioprocess=ev=>{const d=ev.inputBuffer.getChannelData(0);
+      for(let i=0;i<d.length;i++){MIC.ring[MIC.w]=d[i]; MIC.w=(MIC.w+1)%MIC.ring.length;}};
+    src.connect(sp); sp.connect(sink); sink.connect(AC.destination);
+    MIC.node={src,sp,sink}; MIC.on=true;
+    flash('● mic ON — the ring hears you · tab on an audio channel grabs the last loop');
+    dirty=true;
+  }catch(e2){flash('mic: '+(e2&&e2.name==='NotAllowedError'?'permission denied':'unavailable'));}
+}
+function micOff(){
+  if(!MIC.on)return;
+  const n=MIC.node; MIC.node=null; MIC.on=false; MIC.latched=false;
+  if(n){try{n.src.disconnect();n.sp.disconnect();n.sink.disconnect();}catch(_){}}
+  /* the stream stays: permission asked once, the next ctrl is instant */
+  flash('mic off'); dirty=true;
+}
+function micGrab(sec){                 // → the LAST `sec` seconds off the ring
+  if(!MIC.ring)return null;
+  const n=Math.min(MIC.ring.length,Math.max(256,Math.round(sec*MIC.sr)));
+  const out=new Float32Array(n);
+  let r=(MIC.w-n+MIC.ring.length)%MIC.ring.length;
+  for(let i=0;i<n;i++){out[i]=MIC.ring[r]; r=(r+1)%MIC.ring.length;}
+  return out;
+}
 const liveV={}, pend={}, rPend={}, nlive={};
 /* where each held key's note was scheduled and when the key actually went down,
    so the release can be pushed forward by the same amount the quantize pushed
@@ -11797,6 +11843,16 @@ let capsWas=false;
 const onKeyDown=e=>{
   syncCaps(e);
   filePerm();          // a keypress is the gesture the file handle needs
+  /* BARE CONTROL (or a board's fn) IS THE MIC. Down opens it; a ctrl+letter
+     chord marks the hold as modifier use so the mic closes on release instead
+     of latching; left-shift at the press latches (decided at release). */
+  if((e.code==='ControlLeft'||e.code==='ControlRight'||e.code==='Fn')&&!e.repeat){
+    MIC._down=true; MIC._used=false; MIC._latch=KM.sl;
+    if(KM.sl)LATCH.used=true;
+    if(MIC.latched){MIC._unlatch=true;}      // second tap on a latched mic = off at release
+    else micOn();
+  }
+  else if(e.ctrlKey&&MIC._down)MIC._used=true;
   /* THE BROWSER OWNS ITS OWN KEYS while it is open — but only the ones it
      uses. Letters still play, because hearing the channel is the whole reason
      you are choosing where to send a modulator. */
@@ -12148,7 +12204,17 @@ const onKeyDown=e=>{
          two of the three gestures were dead at any moment and the key behaved
          differently depending on a screen you were not looking at. */
       const noteCh=S.layer>=2?S.editSnd:S.curPreset;
-      if(S.layer>=1&&isAudioCh(noteCh)){                 // audio channel: tab = mic record
+      if(S.layer>=1&&isAudioCh(noteCh)&&MIC.on){
+        /* the mic is ALREADY listening — tab is retro for sound: the last
+           loop-length of air goes straight into the lane, aligned to now */
+        const lane2=S.patterns[S.editPat].lanes[noteCh];
+        const beats=lane2.auto?16:lane2.len;
+        const rec2=micGrab(beats*spb());
+        if(rec2){pushUndo('mic take');
+          audPlace(noteCh,rec2,gridNow()-beats,'mic');}
+        else flash('mic ring is empty — hold ctrl a moment first');
+      }
+      else if(S.layer>=1&&isAudioCh(noteCh)){            // mic off: old arm/stop recording
         if(engine.audRec)engine.audRecStop();
         else{pushUndo('audio take');engine.audRecStart(noteCh);}
       }
@@ -13051,7 +13117,11 @@ const onKeyDown=e=>{
        if(fd&&fd.spec){                       // voice half: an ordinary param
          pushUndo('voice');
          const pv=S.presets[S.editSnd];
-         pv.vox[fd.spec.key]=adjust(fd.spec,pv.vox[fd.spec.key],d,kmult(e));
+         /* through the spec's OWN get/set — writing vox[key] raw is how the
+            kit mode sat in the menu doing nothing: its set() is the feature */
+         const cur=fd.spec.get?fd.spec.get(pv.vox):pv.vox[fd.spec.key];
+         const nv=adjust(fd.spec,cur,d,kmult(e));
+         if(fd.spec.set)fd.spec.set(pv.vox,nv); else pv.vox[fd.spec.key]=nv;
          engine.refresh(S.editSnd); dirty=true; dirtySave=true; return;
        }}
       prsAction(d); return;
@@ -13343,6 +13413,18 @@ document.addEventListener('keyup',e=>{
   syncCaps(e);   // macOS reports caps going OFF on the keyup
   kbHeld.delete(c);
   if((e.altKey||e.ctrlKey||(KM.sr&&e.shiftKey))&&scopeHeldOn(c)){ALTSUS.add(c); return;}
+  if(c==='ControlLeft'||c==='ControlRight'||c==='Fn'){
+    /* the mic's release: chord use closes it, a clean tap latches (if the
+       left shift said so) or closes, a tap on a latched mic unlatches */
+    if(MIC._down){
+      const used=MIC._used, un=MIC._unlatch;
+      MIC._down=false; MIC._used=false; MIC._unlatch=false;
+      if(un||used)micOff();
+      else if(MIC._latch){MIC.latched=true; flash('⟳ mic latched — ctrl again turns it off');}
+      else if(!MIC.latched)micOff();
+      MIC._latch=false;
+    }
+  }
   if(c==='AltLeft'||c==='AltRight'||c==='ControlLeft'||c==='ControlRight'){
     for(const k of [...ALTSUS]){ALTSUS.delete(k);
       document.dispatchEvent(new KeyboardEvent('keyup',
@@ -15391,7 +15473,7 @@ function renderSnd(L,pos){
     let lr='   ', vr='   ';
     flds.forEach((fd,i)=>{
       const foc=i===S.curParam;
-      const v=fd.spec?fmtVal(fd.spec,pre.vox[fd.spec.key]):fd.v();
+      const v=fd.spec?fmtVal(fd.spec,fd.spec.get?fd.spec.get(pre.vox):pre.vox[fd.spec.key]):fd.v();
       lr+=(foc?spH('a',' '+pad(fd.k,w),'cp',i):spH('d',' '+pad(fd.k,w),'cp',i))+' ';
       vr+=(foc?spH('i',' '+pad(v,w),'cp',i):spH('v k',' '+pad(v,w),'cp',i))+' ';
     });
@@ -15940,6 +16022,7 @@ function renderHelp(L){
     ['left shift','LATCH. A control sticks if latch was down at any point while you held it. Tapped alone it releases everything'],
     ['latch + a note','the note keeps sounding after the key comes up. Press it again, or tap latch alone, to let it go'],
     ['⇧q (right)','TAP: live quantize on/off — what you hear is exactly what records. HOLD: the quantize scope — digits set the grid and S SNAPS the recorded notes to it (post-rec quantize), without touching the on/off. Q on = you hear the grid; Q off = you hear your fingers'],
+    ['⌃ (bare)','THE MIC. Hold = it listens (momentary); left-shift latches; ctrl+letter chords still do their thing and close it on release. While it is on a 32s ring hears everything — tab on an audio channel grabs the last loop-length of air, already aligned. fn works too on boards that send it'],
     ['⇧Q','snap the selected lane to the grid now, for a take recorded with q off'],
     [', .','channel volume −/+ on the desk · bpm elsewhere (⇧ = ±10)'],
     ['b','tap tempo'],
