@@ -3228,12 +3228,24 @@ let fxwReady=false;
     constructor(){super();
       this.L=null; this.R=null; this.len=0;
       this.p={pos:0,spray:0.05,size:0.12,dens:20,semis:0,jit:0,shape:0.5,
-              rev:0.1,width:0.5,scan:1,gain:0.8,fade:0.06,flow:0.5};
+              rev:0.1,width:0.5,scan:1,gain:0.8,fade:0.06,flow:0.5,
+              dif:0,live:0,frz:0};
       this.cur=null;                       // slewed copy — no parameter ever jumps
       this.vs=new Map(); this.grains=[]; this.scanPh=0; this.stat=0;
       this.norm=1; this.tick=0;
       this.hann=new Float32Array(1024);
       for(let i=0;i<1024;i++)this.hann[i]=0.5-0.5*Math.cos(2*Math.PI*i/1023);
+      /* LIVE MODE: the node's INPUT writes a 4s ring; freeze gates the write
+         (with a fade, so the gate never clicks) and the grains keep reading a
+         now-static loop — hold a sound out of the air and play it. */
+      this.ring=new Float32Array(Math.round(sampleRate*4));
+      this.rw=0; this.wGain=1;
+      /* the DIFFUSER (after Clouds fx/diffuser.h): four series allpasses per
+         channel, fixed delays, g=0.625 — smears grain transients into a
+         continuous sheet. Mixed in by the dif param. */
+      const mk=n=>({d:new Float32Array(n),i:0});
+      this.apL=[126,180,269,444].map(mk);
+      this.apR=[151,205,245,405].map(mk);
       this.port.onmessage=e=>{const m=e.data||{};
         if(m.t==='buf'){this.L=m.l; this.R=m.r||m.l; this.len=m.l.length;}
         else if(m.t==='p')Object.assign(this.p,m.p||{});
@@ -3254,15 +3266,35 @@ let fxwReady=false;
       const x=(sh-0.5)*2;
       return tri*(1-x)+hn*x;
     }
+    ap(bank,x){
+      for(const a of bank){
+        const z=a.d[a.i], y=z-0.625*x;
+        a.d[a.i]=x+0.625*y; a.i=(a.i+1)%a.d.length; x=y;
+      }
+      return x;
+    }
     process(I,O){
       const out=O[0]; if(!out||!out[0])return true;
       const N=out[0].length, oL=out[0], oR=out[1]||out[0];
       oL.fill(0); if(out[1])oR.fill(0);
-      if(!this.len||!this.vs.size&&!this.grains.length){this.tick+=N; return true;}
-      const P=this.p, len=this.len;
+      const P=this.p, live=P.live>0.5;
+      /* the ring hears the input whenever live mode is on; freeze fades the
+         write gain rather than slamming it */
+      if(live){
+        const inp=I[0]&&I[0][0];
+        const wTgt=P.frz>0.5?0:1;
+        for(let k=0;k<N;k++){
+          this.wGain+=(wTgt-this.wGain)*0.002;
+          this.ring[this.rw]=this.ring[this.rw]*(1-this.wGain)+(inp?inp[k]:0)*this.wGain;
+          this.rw=(this.rw+1)%this.ring.length;
+        }
+      }
+      const len=live?this.ring.length:this.len;
+      if(!len||!this.vs.size&&!this.grains.length){this.tick+=N; return true;}
+      const SL=live?this.ring:this.L, SR=live?this.ring:this.R;
       if(!this.cur)this.cur=Object.assign({},P);
       const C=this.cur, kS=Math.min(1,(N/sampleRate)/Math.max(0.005,P.fade));
-      for(const key of ['pos','spray','size','dens','semis','jit','shape','rev','width','gain','flow'])
+      for(const key of ['pos','spray','size','dens','semis','jit','shape','rev','width','gain','flow','dif'])
         C[key]+=(P[key]-C[key])*kS;
       this.scanPh=(this.scanPh+(P.scan*N)/len)%1;
       const period=sampleRate/Math.max(0.5,C.dens);
@@ -3276,7 +3308,9 @@ let fxwReady=false;
         while(v.next<this.tick+N&&this.grains.length<64){
           const pre=Math.max(0,Math.round(v.next-this.tick));
           this.stat++;
-          const base=((C.pos+this.scanPh)%1+1)%1;
+          /* live: pos 0 reads just behind the write head, 1 reaches back */
+          const base=live?(((this.rw/len)-0.05-C.pos*0.9)%1+1)%1
+                         :((C.pos+this.scanPh)%1+1)%1;
           const step0=v.ratio*Math.pow(2,(C.semis+(Math.random()*2-1)*C.jit)/12);
           /* pitch safety: the grain may not eat more than half the buffer */
           let dur=Math.max(128,Math.round(C.size*sampleRate));
@@ -3306,16 +3340,23 @@ let fxwReady=false;
           let i2=g.ph; g.ph+=g.step; g.n++;
           if(i2<0)i2+=len; if(i2>=len)i2-=len;
           const i0=i2|0, fr=i2-i0, i1=(i0+1)%len;
-          const ef=Math.min(1,i2/ew,(len-1-i2)/ew);
-          const sl=(this.L[i0]+(this.L[i1]-this.L[i0])*fr)*ef*w;
-          const sr2=(this.R[i0]+(this.R[i1]-this.R[i0])*fr)*ef*w;
+          const ef=live?1:Math.min(1,i2/ew,(len-1-i2)/ew);   // a ring has no edges
+          const sl=(SL[i0]+(SL[i1]-SL[i0])*fr)*ef*w;
+          const sr2=(SR[i0]+(SR[i1]-SR[i0])*fr)*ef*w;
           oL[k]+=sl*g.gl;
           oR[k]+=sr2*g.gr;
         }
         if(g.n>=g.dur)this.grains.splice(gi,1);
       }
-      const gn=C.gain*this.norm;
-      for(let k=0;k<N;k++){oL[k]*=gn; if(out[1])oR[k]*=gn;}
+      const gn=C.gain*this.norm, df=C.dif;
+      for(let k=0;k<N;k++){
+        let l9=oL[k]*gn, r9=(out[1]?oR[k]:l9)*gn;
+        if(df>0.005){
+          l9=l9*(1-df)+this.ap(this.apL,l9)*df;
+          r9=r9*(1-df)+this.ap(this.apR,r9)*df;
+        }
+        oL[k]=l9; if(out[1])oR[k]=r9;
+      }
       this.tick+=N;
       return true;
     }
@@ -5802,7 +5843,7 @@ class Engine{
       const e=this.gn&&this.gn[pi]; if(!e)return false;
       const gr=S.presets[pi].gr||{};
       const GDEF={pos:0,spray:0.05,size:0.12,dens:20,semis:0,jit:0,shape:0.5,
-                  rev:0.1,width:0.5,scan:1,gain:0.8,fade:0.06,flow:0.5};
+                  rev:0.1,width:0.5,scan:1,gain:0.8,fade:0.06,flow:0.5,dif:0,live:0,frz:0};
       e.node.port.postMessage({t:'p',p:{[key]:v===undefined?(gr[key]??GDEF[key]):v}});
       return true;
     }
@@ -7029,7 +7070,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     let e=this.gn[pi];
     if(e&&e.node)return e;
     if(!fxwReady)return null;
-    const n=new AudioWorkletNode(AC,'ten-grsyn',{outputChannelCount:[2]});
+    const n=new AudioWorkletNode(AC,'ten-grsyn',{numberOfInputs:1,outputChannelCount:[2]});
     n.connect(this.buses[pi].vIn);
     e=this.gn[pi]={node:n,id:1};
     this.granCfg(pi);
@@ -7046,7 +7087,14 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
       shape:clamp(gr.shape??0.5,0,1), rev:clamp(gr.rev??0.1,0,1),
       width:clamp(gr.width??0.5,0,1), scan:clamp(gr.scan??1,-4,4),
       gain:clamp(gr.gain??0.8,0,1.5), fade:clamp(gr.fade??0.06,0.005,0.5),
-      flow:clamp(gr.flow??0.5,0,1)}});
+      flow:clamp(gr.flow??0.5,0,1), dif:clamp(gr.dif??0,0,1),
+      live:Math.round(gr.live??0), frz:Math.round(gr.frz??0)}});
+  }
+  granLiveWire(pi){
+    /* the mic straight into the cloud's input — only wired when asked for,
+       only possible while the ⌃ stream exists */
+    const e=this.gn&&this.gn[pi]; if(!e||!e.node||!MIC.stream||e.liveSrc)return;
+    try{e.liveSrc=AC.createMediaStreamSource(MIC.stream); e.liveSrc.connect(e.node);}catch(_){}
   }
   granSend(pi){
     const e=this.granNode(pi), buf=this.granBuf&&this.granBuf[pi];
@@ -8912,6 +8960,16 @@ const GRANF=[
  /* the de-clicker: every continuous param slews at this speed, and it is
     also each voice's release fade */
  SP('fade','fade','lin',{min:0.005,max:0.5,step:0.005,fmt:v=>Math.round(v*1000)+'ms'}),
+ /* the Clouds diffuser: allpass smear that turns grains into a sheet */
+ SP('dif','dif','lin',{min:0,max:1,step:0.05,fmt:v=>v<0.03?'dry':Math.round(v*100)+'%'}),
+ /* live: the cloud chews the NODE'S INPUT (the mic, while ⌃ holds it open)
+    through a 4s ring instead of a pool take; freeze holds the ring still */
+ SP('input','live','enum',{opts:['take','live'],
+    get:m=>Math.round(m.live||0),
+    set:(m,v)=>{m.live=Math.round(v);
+      if(m.live===1&&MIC.on)engine.granLiveWire(S.editSnd);}}),
+ SP('freeze','frz','enum',{opts:['off','hold'],
+    get:m=>Math.round(m.frz||0),set:(m,v)=>m.frz=Math.round(v)}),
  /* which POOL take the cloud chews on — the same list every sampler shares */
  SP('smpl','_pool','lin',{min:0,max:31,step:1,w:2,
    fmt:v=>POOL[Math.round(v)]?POOL[Math.round(v)].name:'—',
@@ -8926,7 +8984,7 @@ const GRANF=[
 function granAction(d,m){
   const pre=S.presets[S.editSnd], spec=GRANF[clamp(S.curParam,0,GRANF.length-1)];
   pre.gr=pre.gr||{};
-  const GD={pos:0,spray:0.05,size:0.12,dens:20,semis:0,jit:0,shape:0.5,rev:0.1,width:0.5,scan:1,gain:0.8,fade:0.06,flow:0.5};
+  const GD={pos:0,spray:0.05,size:0.12,dens:20,semis:0,jit:0,shape:0.5,rev:0.1,width:0.5,scan:1,gain:0.8,fade:0.06,flow:0.5,dif:0,live:0,frz:0};
   /* through the spec's own get/set when it has them — the pool picker's set()
      IS the assignment, same lesson the kit mode field just taught */
   const cur=spec.get?spec.get(pre.gr):pre.gr[spec.key]??GD[spec.key];
@@ -10004,6 +10062,7 @@ async function micOn(){
       for(let i=0;i<d.length;i++){MIC.ring[MIC.w]=d[i]; MIC.w=(MIC.w+1)%MIC.ring.length;}};
     src.connect(sp); sp.connect(sink); sink.connect(AC.destination);
     MIC.node={src,sp,sink}; MIC.on=true;
+    for(let i9=1;i9<10;i9++)if((S.presets[i9].gr||{}).live)engine.granLiveWire(i9);
     flash('● mic ON — the ring hears you · tab on an audio channel grabs the last loop');
     dirty=true;
   }catch(e2){flash('mic: '+(e2&&e2.name==='NotAllowedError'?'permission denied':'unavailable'));}
