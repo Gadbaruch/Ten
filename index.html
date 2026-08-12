@@ -356,7 +356,26 @@ const MSRC=['off','env','lfo','vel','key','rnd','press','flw'];   // press = per
 const MDST=['off','amp','pitch','filt','pan','op'];   // + learned tgt address overrides this
 const MD2ENV={1:1,2:2,3:3,5:4};                        // MDST → the engine's env-dst numbering
 const MD2LFO={2:1,3:2,1:3,4:4,5:5};                    // MDST → the engine's lfo-dst numbering
-const LFOW=['sin','tri','sqr','saw'], LFOW_W=['sine','triangle','square','sawtooth'];
+const LFOW=['sin','tri','sqr','saw','s&h','drft'], LFOW_W=['sine','triangle','square','sawtooth'];
+/* the two RANDOM waves have no oscillator: a ConstantSource carries scheduled
+   values — s&h steps to a fresh one every cycle, drift ramps between them.
+   retrig = the SAME sequence every note (a frozen pattern you can learn);
+   free = reseeded per note (never the same twice). */
+function lfoSrcNode(ac,wav,rate,free,seed,at){
+  const w=Math.round(wav||0);
+  if(w<4){const lo=ac.createOscillator(); lo.type=LFOW_W[w]; lo.frequency.value=rate; return {node:lo,osc:lo};}
+  const cs=ac.createConstantSource();
+  const drift=w===5, P=1/Math.max(0.05,rate);
+  const s0=free?Math.floor(Math.random()*1e6):(seed||0)+1;
+  const h=k=>{const x=Math.sin((k+2)*127.1+s0*311.7)*43758.5453; return (x-Math.floor(x))*2-1;};
+  cs.offset.setValueAtTime(h(-1),at);
+  for(let k=0;k*P<=16&&k<640;k++){
+    const v=h(k);
+    if(drift)cs.offset.linearRampToValueAtTime(v,at+(k+1)*P);
+    else cs.offset.setValueAtTime(v,at+k*P);
+  }
+  return {node:cs,osc:null};
+}
 /* the LFO wave list in WAVES' numbering, so setWave can build a phase-shifted
    PeriodicWave for a free-running one */
 const LFOW_PW=[0,1,3,2];
@@ -1165,14 +1184,14 @@ const MOD_P=sl=>{                    // unified: source picks which extra fields
     SP('amt','amt','lin',{min:-200,max:200,step:5,fmt:v=>v+'%', get:m=>modRt(m).amt, set:(m,v)=>modRt(m).amt=v}),
     SP('center','ctr','lin',{min:-100,max:100,step:5,fmt:v=>(v>0?'+':'')+v+'%', get:m=>modRt(m).ctr||0, set:(m,v)=>modRt(m).ctr=v})];
   if(s===0)return base.slice(0,5);  // off: src+route+dest+slot#+amt navigate; set src to activate
-  if(s===1)return [
-    /* TIME ×: one dial over all four stages. First in the list on purpose —
+  if(s===1)return base.concat([
+    /* TIME ×: one dial over all four stages, right after the routing —
        "this envelope, but slower" is the edit you make ten times for every
        once you rebalance the stages themselves. */
     SP('time','tmul','lin',{min:10,max:400,step:5,big:25,
        fmt:v=>'×'+(v/100).toFixed(2),
-       get:m=>Math.round((m.tmul??1)*100),set:(m,v)=>m.tmul=clamp(v,10,400)/100})]
-   .concat(base,[SP('atk','a','time'),SP('dec','d','time'),
+       get:m=>Math.round((m.tmul??1)*100),set:(m,v)=>m.tmul=clamp(v,10,400)/100}),
+    SP('atk','a','time'),SP('dec','d','time'),
     SP('sus','s','lin',{min:0,max:1,step:0.05}),SP('rel','r','time'),
     SP('curve','crv','lin',{min:-200,max:200,step:10,big:50,
        fmt:v=>v?(v>0?'+':'')+Math.round(v):'lin'}),
@@ -1659,7 +1678,7 @@ const destRate=(rack,key)=>
      read once, when a note starts. So the modulator parks its value and the
      voice builder reads that instead of the slot; the change lands on the next
      note you play, which is the only moment it could ever mean anything. */
-  :(rack==='mod'&&/^(a|d|s|r|crv)$/.test(key))?'next'
+  :(rack==='mod'&&/^(a|d|s|r|crv|tmul|lp|lrate|lrdiv)$/.test(key))?'next'
   :(rack==='vox')?'next'
   :(rack==='ply')?'next'
   :null;
@@ -1767,7 +1786,10 @@ function modDests_(pre){
   };
   for(let mi=0;mi<MODULES.length;mi++){
     const M=MODULES[mi]; if(!M||!M.id||M.prs)continue;
-    if(noVoice&&(M.id==='osc'||M.id==='flt'||M.id==='vox'||M.id==='ply'))continue;
+    /* gran keeps VOX: unison, spread and mono/legato drive its worklet
+       voices now. audio still has no voice concept at all. */
+    if(noVoice&&(M.id==='osc'||M.id==='flt'||M.id==='ply'))continue;
+    if(eng==='audio'&&M.id==='vox')continue;
     if(M.flat){for(const sp of M.flat)add(M.id,0,sp,''); continue;}
     if(!M.slot)continue;
     const rk=modHolder(pre,M.id)[M.id]||[];
@@ -3143,13 +3165,20 @@ let fxwReady=false;
     constructor(){super();
       this.L=null; this.R=null; this.len=0;
       this.p={pos:0,spray:0.05,size:0.12,dens:20,semis:0,jit:0,shape:0.5,
-              rev:0.1,width:0.5,scan:1,gain:0.8};
+              rev:0.1,width:0.5,scan:1,gain:0.8,fade:0.06};
+      this.cur=null;                       // slewed copy — no parameter ever jumps
       this.vs=new Map(); this.grains=[]; this.scanPh=0; this.stat=0;
       this.port.onmessage=e=>{const m=e.data||{};
         if(m.t==='buf'){this.L=m.l; this.R=m.r||m.l; this.len=m.l.length;}
         else if(m.t==='p')Object.assign(this.p,m.p||{});
-        else if(m.t==='on')this.vs.set(m.id,{ratio:m.ratio||1,vel:m.vel??0.9,acc:1e9});
-        else if(m.t==='off')this.vs.delete(m.id);
+        /* voices carry an ENVELOPE now: 'off' fades over the fade time and
+           only then deletes — 'off' used to hard-drop the voice, and a lost
+           'off' left it spawning forever with no way to stop it short of a
+           reload. 'rat' retunes a live voice (legato), 'panic' clears all. */
+        else if(m.t==='on')this.vs.set(m.id,{ratio:m.ratio||1,vel:m.vel??0.9,acc:1e9,env:0,rel:0});
+        else if(m.t==='off'){const v=this.vs.get(m.id); if(v)v.rel=1;}
+        else if(m.t==='rat'){const v=this.vs.get(m.id); if(v)v.ratio=m.ratio||1;}
+        else if(m.t==='panic'){this.vs.clear(); this.grains.length=0;}
         else if(m.t==='ping')this.port.postMessage({t:'stat',g:this.grains.length,v:this.vs.size,spawned:this.stat});};
     }
     process(I,O){
@@ -3158,39 +3187,55 @@ let fxwReady=false;
       oL.fill(0); if(out[1])oR.fill(0);
       if(!this.len||!this.vs.size&&!this.grains.length){return true;}
       const P=this.p, len=this.len;
-      const perSpawn=sampleRate/Math.max(0.5,P.dens);
+      /* EVERY CONTINUOUS PARAM SLEWS toward its target, time constant = fade.
+         A position knob (or a mod) that lands somewhere new becomes a sweep
+         through the file instead of a cut — this is the de-clicker. */
+      if(!this.cur)this.cur=Object.assign({},P);
+      const C=this.cur, kS=Math.min(1,(N/sampleRate)/Math.max(0.005,P.fade));
+      for(const key of ['pos','spray','size','dens','semis','jit','shape','rev','width','gain'])
+        C[key]+=(P[key]-C[key])*kS;
+      const perSpawn=sampleRate/Math.max(0.5,C.dens);
       this.scanPh=(this.scanPh+(P.scan*N)/len)%1;
+      const aStep=N/(sampleRate*0.005);                       // 5ms voice attack
+      const rStep=N/(sampleRate*Math.max(0.01,P.fade));       // release = the fade time
       for(const [id,v] of this.vs){
+        v.env+=v.rel?-rStep:aStep;
+        if(v.env>1)v.env=1;
+        if(v.env<=0&&v.rel){this.vs.delete(id);continue;}
         v.acc+=N;
         if(v.acc>=perSpawn&&this.grains.length<64){
           v.acc=0; this.stat++;
-          const base=((P.pos+this.scanPh)%1+1)%1;
+          const base=((C.pos+this.scanPh)%1+1)%1;
           const st=Math.max(0,Math.min(len-2,
-            (base+(Math.random()*2-1)*P.spray*0.5)*len));
-          const dur=Math.max(128,Math.round(P.size*sampleRate));
-          const step=v.ratio*Math.pow(2,(P.semis+(Math.random()*2-1)*P.jit)/12);
-          const rev=Math.random()<P.rev;
-          const pan=(Math.random()*2-1)*P.width;
+            (base+(Math.random()*2-1)*C.spray*0.5)*len));
+          const dur=Math.max(128,Math.round(C.size*sampleRate));
+          const step=v.ratio*Math.pow(2,(C.semis+(Math.random()*2-1)*C.jit)/12);
+          const rev=Math.random()<C.rev;
+          const pan=(Math.random()*2-1)*C.width;
           this.grains.push({ph:rev?st+dur*step:st,step:rev?-step:step,
-            n:0,dur,vel:v.vel,pan,sh:0.3+P.shape*3});
+            n:0,dur,vel:v.vel*Math.max(0,Math.min(1,v.env)),pan,sh:0.3+C.shape*3});
         }
       }
+      /* reads fade at the buffer's EDGES (a few ms): a grain that crosses the
+         loop point used to jump from the last sample to the first mid-window —
+         the position clicks were mostly this */
+      const ew=Math.min(256,len>>2)||1;
       for(let gi=this.grains.length-1;gi>=0;gi--){
         const g=this.grains[gi];
-        const gl=Math.cos((g.pan*0.5-0.25)*Math.PI), gr=Math.sin((g.pan*0.5+0.25)*Math.PI+Math.PI/2);
         for(let k=0;k<N&&g.n<g.dur;k++,g.n++){
           const w=Math.pow(Math.sin(Math.PI*g.n/g.dur),g.sh)*g.vel*0.5;
           let i2=g.ph; g.ph+=g.step;
           if(i2<0)i2+=len; if(i2>=len)i2-=len;
           const i0=i2|0, fr=i2-i0, i1=(i0+1)%len;
-          const sl=this.L[i0]+(this.L[i1]-this.L[i0])*fr;
-          const sr2=this.R[i0]+(this.R[i1]-this.R[i0])*fr;
+          const ef=Math.min(1,i2/ew,(len-1-i2)/ew);
+          const sl=(this.L[i0]+(this.L[i1]-this.L[i0])*fr)*ef;
+          const sr2=(this.R[i0]+(this.R[i1]-this.R[i0])*fr)*ef;
           oL[k]+=sl*w*(1-g.pan*0.5);
           oR[k]+=sr2*w*(1+g.pan*0.5);
         }
         if(g.n>=g.dur)this.grains.splice(gi,1);
       }
-      const gn=this.p.gain;
+      const gn=C.gain;
       for(let k=0;k<N;k++){oL[k]*=gn; if(out[1])oR[k]*=gn;}
       return true;
     }
@@ -4139,19 +4184,21 @@ class Voice{
          voice — one panner serves the whole channel — and the control tick
          owns it now, for every source rather than just this one. */
       if(lf.dst===0||lf.dst===4||Math.abs(lf.amt)<0.5)continue;
-      const lo=ac.createOscillator(), lg=ac.createGain();
-      lo.type=LFOW_W[lf.wav]; lo.frequency.value=lf.rate;
+      const src2=lfoSrcNode(ac,lf.wav,lf.rate,lf.free,lf.mi,at);
+      const lo=src2.node, lg=ac.createGain();
       /* remembered so a rate or depth edit can be heard on the note that is
          already sounding, rather than only on the next one */
-      (this.lfoN=this.lfoN||[]).push({lo,lg,mi:lf.mi,base:lf.amt});
+      (this.lfoN=this.lfoN||[]).push({lo,lg,mi:lf.mi,base:lf.amt,osc:!!src2.osc});
       /* FREE: start the wave where a continuously-running one would be by now,
          so two notes a beat apart do not both begin at the top of the cycle.
          setWave takes a phase in degrees and bakes it into a PeriodicWave —
          an OscillatorNode has no phase offset of its own. */
-      if(lf.free){
-        const deg=fmod((lf.ph||0)+at*lf.rate*360,360);
-        E.setWave(lo,LFOW_PW[lf.wav]??0,deg);
-      }else if(lf.ph)E.setWave(lo,LFOW_PW[lf.wav]??0,lf.ph);
+      if(src2.osc){
+        if(lf.free){
+          const deg=fmod((lf.ph||0)+at*lf.rate*360,360);
+          E.setWave(lo,LFOW_PW[lf.wav]??0,deg);
+        }else if(lf.ph)E.setWave(lo,LFOW_PW[lf.wav]??0,lf.ph);
+      }
       const A=lf.amt/100;
       if(lf.dst===1){
         const ix=clamp(Math.round(lf.idx??0),0,10);
@@ -4273,8 +4320,8 @@ class Voice{
               param.setTargetAtTime(base+(peak-base)*m.s,at+a,Math.max(0.005,m.d*T4/3));
             }
           }else if(m.src===2){                       // lfo → param
-            const lo=ac.createOscillator(), lg=ac.createGain();
-            lo.type=LFOW_W[m.wav]; lo.frequency.value=m.rate; lg.gain.value=dep*0.5;
+            const sl2=lfoSrcNode(ac,m.wav,m.rate,Math.round(m.ltr||0)===1,md.indexOf(m),at);
+            const lo=sl2.node, lg=ac.createGain(); lg.gain.value=dep*0.5;
             lo.connect(lg); lg.connect(param); lo.start(at); this.nodes.push(lo);
           }else{                                     // vel / key / rnd → param (constant)
             const vv=m.src===3?clamp(vel,0,1):m.src===4?clamp((midi-60)/24,-2,2):(Math.random()*2-1);
@@ -4306,9 +4353,9 @@ class Voice{
         if(!a||rt.dst||a.rack!=='voice'||a.key!=='pan')continue;
         if(Math.abs(rt.amt||0)<0.5)continue;
         pvPan=pvPan||ac.createStereoPanner();
-        const lo=ac.createOscillator(), lg=ac.createGain();
-        lo.type=LFOW_W[m.wav]; lo.frequency.value=lfoHz(me3);
-        if(m.ph)E.setWave(lo,LFOW_PW[m.wav]??0,m.ph);
+        const sp2=lfoSrcNode(ac,m.wav,lfoHz(me3),false,mi3,at);
+        const lo=sp2.node, lg=ac.createGain();
+        if(sp2.osc&&m.ph)E.setWave(lo,LFOW_PW[m.wav]??0,m.ph);
         lg.gain.value=clamp((rt.amt||0)/100,-1,1);       // amt 100 = the full field
         const cb=(rt.ctr||0)/100; if(cb)pvPan.pan.value=clamp(cb,-1,1);
         lo.connect(lg); lg.connect(pvPan.pan); lo.start(at); this.nodes.push(lo);
@@ -5156,7 +5203,7 @@ class Engine{
       for(const L of v.lfoN){
         const m=md[L.mi]; if(!m||m.src!==2)continue;
         const rt=(m.routes||[])[0]; if(!rt)continue;
-        L.lo.frequency.setTargetAtTime(lfoHz(m),AC.currentTime,0.02);
+        if(L.osc!==false&&L.lo.frequency)L.lo.frequency.setTargetAtTime(lfoHz(m),AC.currentTime,0.02);
         if(L.base)L.lg.gain.setTargetAtTime(
           L.lg.gain.value/L.base*rt.amt,AC.currentTime,0.02);
       }
@@ -5556,7 +5603,8 @@ class Engine{
     if(rack==='grn'){
       const e=this.gn&&this.gn[pi]; if(!e)return false;
       const gr=S.presets[pi].gr||{};
-      const GDEF={pos:0,size:0.12,dens:20,semis:0};
+      const GDEF={pos:0,spray:0.05,size:0.12,dens:20,semis:0,jit:0,shape:0.5,
+                  rev:0.1,width:0.5,scan:1,gain:0.8,fade:0.06};
       e.node.port.postMessage({t:'p',p:{[key]:v===undefined?(gr[key]??GDEF[key]):v}});
       return true;
     }
@@ -5653,8 +5701,15 @@ class Engine{
   _modSrc(m,pi,now,si){
     const s=Math.round(m.src||0);
     if(s===2){                                          // lfo, free-running
-      const ph=fmod((now*lfoHz(m))+((m.ph||0)/360),1);
+      const st=(now*lfoHz(m))+((m.ph||0)/360);
+      const ph=fmod(st,1);
       const w=Math.round(m.wav||0);
+      if(w>=4){                                      // s&h / drift: hashed steps
+        const k=Math.floor(st);
+        const h=n=>{const x=Math.sin((n+2)*127.1+(si+1)*311.7)*43758.5453;
+          return (x-Math.floor(x))*2-1;};
+        return w===4?h(k):h(k)+(h(k+1)-h(k))*ph;     // step, or ramp between
+      }
       return w===1?(1-4*Math.abs(ph-0.5))            // tri
             :w===2?(ph<0.5?1:-1)                     // sqr
             :w===3?(2*ph-1)                          // saw
@@ -6791,7 +6846,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
       semis:clamp(gr.semis??0,-24,24), jit:clamp(gr.jit??0,0,12),
       shape:clamp(gr.shape??0.5,0,1), rev:clamp(gr.rev??0.1,0,1),
       width:clamp(gr.width??0.5,0,1), scan:clamp(gr.scan??1,-4,4),
-      gain:clamp(gr.gain??0.8,0,1.5)}});
+      gain:clamp(gr.gain??0.8,0,1.5), fade:clamp(gr.fade??0.06,0.005,0.5)}});
   }
   granSend(pi){
     const e=this.granNode(pi), buf=this.granBuf&&this.granBuf[pi];
@@ -6803,14 +6858,55 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
   granNote(at,pi,midi,vel,durSec){
     const e=this.granNode(pi);
     if(!e){flash('granular engine still loading…');return null;}
-    const id=e.id++;
+    const p=S.presets[pi], VX=this.ovObj(pi,'vox',0,p.vox||{});
+    const uniN=clamp(Math.round(VX.uni||1),1,7), sprd=VX.sprd||0;
+    const mode=((p.vox&&p.vox.mode)|0);
     const ratio=Math.pow(2,(midi-60)/12);
+    /* LEGATO: retune the voice that is already singing — a new 'on' would
+       restart its grains, which is exactly what legato promises not to do */
+    if(mode===2&&durSec==null){
+      const sh0=this.act[pi].find(v=>v&&v._grn&&!v.released);
+      if(sh0){
+        for(let u=0;u<sh0._ids.length;u++){
+          try{e.node.port.postMessage({t:'rat',id:sh0._ids[u],
+            ratio:ratio*Math.pow(2,(sh0._offs[u]||0)/1200)});}catch(_){}}
+        sh0.midi=midi; return sh0;
+      }
+    }
+    /* MONO STEAL. The gran early-return in noteOn skips the voice-rack steal,
+       so it happens here — the old shim fades on the worklet's own envelope */
+    if(mode>=1)for(const v of [...this.act[pi]])
+      if(v&&v._grn)v.kill(Math.max(AC.currentTime,at-0.004));
+    /* UNISON: one worklet voice per copy, detuned across the vox spread */
+    const ids=[],offs=[],vAdj=vel/Math.sqrt(uniN);
     const ms=Math.max(0,(at-AC.currentTime)*1000);
-    setTimeout(()=>{try{e.node.port.postMessage({t:'on',id,ratio,vel});}catch(_){}},ms);
-    const off=t=>{const ms2=Math.max(0,(t-AC.currentTime)*1000);
-      setTimeout(()=>{try{e.node.port.postMessage({t:'off',id});}catch(_){}},ms2);};
-    if(durSec!=null){off(at+durSec);return null;}
-    return {voices:[],release:t=>off(t??AC.currentTime+0.01),kill:t=>off(t??AC.currentTime)};
+    for(let u=0;u<uniN;u++){
+      const off=uniN===1?0:((u/(uniN-1))*2-1)*(sprd||0);
+      const id=e.id++;
+      offs.push(off); ids.push(id);
+      setTimeout(()=>{try{e.node.port.postMessage({t:'on',id,
+        ratio:ratio*Math.pow(2,off/1200),vel:vAdj});}catch(_){}},ms);
+    }
+    const offAll=t=>{const ms2=Math.max(0,(t-AC.currentTime)*1000);
+      setTimeout(()=>{for(const id of ids){
+        try{e.node.port.postMessage({t:'off',id});}catch(_){}}},ms2);};
+    if(durSec!=null){offAll(at+durSec);return null;}
+    /* the shim REGISTERS in act like every other voice, so mono can steal it,
+       choke can end it and a lost keyup has something the panic can find */
+    const E=this;
+    const sh={_grn:1,_ids:ids,_offs:offs,midi,pad:midi,released:false,killed:false,
+      press:0,pressN:[],nodes:[],p,_lid:'ch',
+      release(t){if(this.released)return; this.released=true;
+        this.relAt=t||AC.currentTime; offAll(this.relAt); this._later();},
+      kill(t){this.killed=true; this.released=true;
+        offAll(Math.max(AC.currentTime,t||AC.currentTime)); this._later();},
+      setPressure(){}};
+    const drop=()=>{const a=E.act[pi],i=a.indexOf(sh); if(i>=0)a.splice(i,1);};
+    sh._later=()=>{clearTimeout(sh._dt); sh._dt=setTimeout(drop,1500);};
+    sh._dt=setTimeout(drop,60000);
+    this.act[pi].push(sh);
+    if(this.act[pi].length>24){const old=this.act[pi].shift(); old&&old.kill&&old.kill(AC.currentTime);}
+    return sh;
   }
   audRecStart(pi){
     if(this.audRec)return;
@@ -6845,6 +6941,11 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     audPlace(r.pi,rec,r.startBeat,r.label);
   }
   chokeSeq(pi){const n=AC.currentTime;for(const v of [...this.act[pi]])if(!v.live)v.kill(n);
+    /* granular: the worklet may hold voices whose 'off' was lost — a choke is
+       the moment to be sure nothing survives it */
+    const gch=this.gn&&this.gn[pi];
+    if(gch&&gch.node&&!this.act[pi].some(v=>v&&v._grn&&v.live&&!v.released)){
+      try{gch.node.port.postMessage({t:'panic'});}catch(_){}}
     this.audStop(pi,n+0.002);}
   allOff(){const n=AC.currentTime;for(const a of this.act)for(const v of [...a])v.kill(n);
     for(const arr of this.audActive)for(const s2 of [...arr]){try{s2.stop(n+0.01);}catch(_){}}
@@ -8606,11 +8707,14 @@ const GRANF=[
  SP('width','width','lin',{min:0,max:1,step:0.05}),
  SP('scan','scan','lin',{min:-4,max:4,step:0.05,fmt:v=>Math.abs(v)<0.001?'freeze':'\u00d7'+v}),
  SP('gain','gain','lin',{min:0,max:1.5,step:0.05}),
+ /* the de-clicker: every continuous param slews at this speed, and it is
+    also each voice's release fade */
+ SP('fade','fade','lin',{min:0.005,max:0.5,step:0.005,fmt:v=>Math.round(v*1000)+'ms'}),
 ];
 function granAction(d,m){
   const pre=S.presets[S.editSnd], spec=GRANF[clamp(S.curParam,0,GRANF.length-1)];
   pre.gr=pre.gr||{};
-  pre.gr[spec.key]=adjust(spec,pre.gr[spec.key]??({pos:0,spray:0.05,size:0.12,dens:20,semis:0,jit:0,shape:0.5,rev:0.1,width:0.5,scan:1,gain:0.8})[spec.key],d,m);
+  pre.gr[spec.key]=adjust(spec,pre.gr[spec.key]??({pos:0,spray:0.05,size:0.12,dens:20,semis:0,jit:0,shape:0.5,rev:0.1,width:0.5,scan:1,gain:0.8,fade:0.06})[spec.key],d,m);
   engine.granCfg(S.editSnd);
   flash('grain '+spec.lbl+' = '+fmtVal(spec,pre.gr[spec.key]));
   dirty=true; dirtySave=true;
@@ -14114,32 +14218,87 @@ function rackParams(L,pre,specs){
   const free=freeSlotHere(pre);
   const extra=free!=null?1:0;
   S.slotParam=clamp(S.slotParam|0,0,Math.max(0,specs.length-1+extra));
-  /* CELLS ARE NOT ALL THE SAME SIZE ANY MORE. Every column was one tenth of
-     the row, which is fine for '5.0Hz' and hopeless for an address — a
-     destination reading `fx1·color` had nowhere to be. A spec can ask for more
-     with `w`, and the rest share what is left. */
-  const wts=specs.map(sp=>sp.w||1); if(extra)wts.push(1);
-  const tot=wts.reduce((a,b)=>a+b,0)||1;
-  const unit=clamp(Math.floor(88/tot),6,11);
-  const wAt=i=>clamp(unit*(wts[i]||1)-1,5,26);
-  const w=wAt(wts.length-1);
-  let lr='   ', vr='   ';
-  specs.forEach((pspec,i)=>{
-    const foc=i===S.slotParam, cw=wAt(i);
-    const pd=prepDisp(pre,S.curMod,S.curSlot,pspec);
-    const v=(pd.dot?'•':'')+fmtVal(pspec,pd.v);
-    const mk=paramMarks(pre,S.curMod,S.curSlot,pspec);
-    const lbl=pad(pspec.lbl+(mk?' '+mk:''),cw);
-    lr+=(foc?spH('a',' '+lbl,'slot',i):spH('d',' '+lbl,'slot',i))+' ';
-    vr+=(foc?spH('i',' '+pad(v,cw),'slot',i)
-           :(pd.dot?spH('r k',' '+pad(v,cw),'slot',i):spH('v k',' '+pad(v,cw),'slot',i)))+' ';
-  });
-  if(extra){
-    const i=specs.length, foc=i===S.slotParam;
-    lr+=sp('d',' '+pad('new',w))+' ';
-    vr+=spH(foc?'i':'d k',' '+pad('+',w),'slot',i)+' ';
+  /* CELLS ARE NOT ALL THE SAME SIZE ANY MORE. A spec can ask for more width
+     with `w`, and the rest share what is left. And a slot can now have more
+     params than one row holds (a looping envelope) — it WRAPS to a second
+     label/value pair instead of crushing every cell to nothing. */
+  const items=specs.map((sp2,i)=>({sp:sp2,i}));
+  if(extra)items.push({plus:true,i:specs.length});
+  const totW=items.reduce((a,b)=>a+(b.sp?(b.sp.w||1):1),0)||1;
+  const nRows=totW*8>92?2:1;
+  const per=Math.ceil(items.length/nRows);
+  for(let r0=0;r0<nRows;r0++){
+    const seg=items.slice(r0*per,(r0+1)*per);
+    if(!seg.length)break;
+    const wts=seg.map(b=>b.sp?(b.sp.w||1):1);
+    const tot=wts.reduce((a,b)=>a+b,0)||1;
+    const unit=clamp(Math.floor(88/tot),6,11);
+    const wAt=j=>clamp(unit*(wts[j]||1)-1,5,26);
+    let lr='   ', vr='   ';
+    seg.forEach((it,j)=>{
+      const i=it.i, foc=i===S.slotParam, cw=wAt(j);
+      if(it.plus){
+        lr+=sp('d',' '+pad('new',cw))+' ';
+        vr+=spH(foc?'i':'d k',' '+pad('+',cw),'slot',i)+' ';
+        return;
+      }
+      const pspec=it.sp;
+      const pd=prepDisp(pre,S.curMod,S.curSlot,pspec);
+      const v=(pd.dot?'•':'')+fmtVal(pspec,pd.v);
+      const mk=paramMarks(pre,S.curMod,S.curSlot,pspec);
+      const lbl=pad(pspec.lbl+(mk?' '+mk:''),cw);
+      lr+=(foc?spH('a',' '+lbl,'slot',i):spH('d',' '+lbl,'slot',i))+' ';
+      vr+=(foc?spH('i',' '+pad(v,cw),'slot',i)
+             :(pd.dot?spH('r k',' '+pad(v,cw),'slot',i):spH('v k',' '+pad(v,cw),'slot',i)))+' ';
+    });
+    L.push(lr); L.push(vr);
   }
-  L.push(lr); L.push(vr);
+  /* DEV VISUALIZER: the shape an env or lfo slot describes, as one quiet row.
+     Cheap to render, honest about loop/tmul/random waves — may not ship. */
+  const M=MODULES[S.curMod];
+  if(M&&M.id==='mod'){
+    const sl=modHolder(pre,'mod').mod[S.curSlot];
+    const s3=Math.round((sl&&sl.src)||0);
+    if(s3===1||s3===2)L.push('   '+sp('d',modShapeRow(sl,84)));
+  }
+}
+/* 84 columns of ▁▂▃▄▅▆▇█: an env draws attack→decay→sustain→release (or three
+   loop cycles when looping); an lfo draws two cycles, hashed steps included. */
+function modShapeRow(m,W){
+  const s=Math.round(m.src||0), BL='▁▂▃▄▅▆▇█', out=[];
+  if(s===1){
+    const T3=clamp(m.tmul??1,0.1,4), a=Math.max(0.001,(m.a||0)*T3), d=Math.max(0.01,(m.d||0.1)*T3);
+    const sus=clamp(m.s??0,0,1), r=Math.max(0.01,(m.r||0.05)*T3), lp=clamp(m.lp||0,0,1);
+    if(lp>0.001){
+      const P=envLoopP(m), fit=Math.round(m.lfit||0)===0;
+      let A=a,D=d;
+      if(fit){const c=P/(A+D);A*=c;D*=c;}
+      else{A=Math.min(A,P*0.9);D=Math.min(D,Math.max(0.01,P-A));}
+      for(let i=0;i<W;i++){
+        const t=i/W*P*3, k=Math.floor(t/P), u=t-k*P;
+        const pk=lp>=0.999?1:Math.pow(lp,k);
+        const v=u<A?u/A:u<A+D?1-(1-sus)*((u-A)/D):sus;
+        out.push(v*pk);
+      }
+    }else{
+      const hold=(a+d)*0.25+0.05, T=a+d+hold+r;
+      for(let i=0;i<W;i++){const t=i/W*T;
+        out.push(t<a?t/a:t<a+d?1-(1-sus)*((t-a)/d)
+          :t<a+d+hold?sus:Math.max(0,sus*(1-(t-a-d-hold)/r)));}
+    }
+  }else{
+    const w=Math.round(m.wav||0);
+    const h=n=>{const x=Math.sin((n+2)*127.1+(S.curSlot+1)*311.7)*43758.5453;
+      return (x-Math.floor(x))*2-1;};
+    const cyc=w>=4?6:2;                  // random waves need room to look random
+    for(let i=0;i<W;i++){
+      const st=i/W*cyc+(m.ph||0)/360, ph=fmod(st,1), k=Math.floor(st);
+      const v=w===1?(1-4*Math.abs(ph-0.5)):w===2?(ph<0.5?1:-1):w===3?(2*ph-1)
+        :w===4?h(k):w===5?h(k)+(h(k+1)-h(k))*ph:Math.sin(2*Math.PI*ph);
+      out.push((v+1)/2);
+    }
+  }
+  return out.map(v=>BL[clamp(Math.round(v*7),0,7)]).join('');
 }
 /* Turn the '+' into a real slot: the first free one in this rack, selected,
    with the cursor on its type so the next keypress says what it becomes. */
