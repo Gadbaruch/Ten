@@ -1006,6 +1006,26 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
 /* THREE SECTIONS. Sets and Record held nothing and one thing respectively, and
    Feel/Scale were the same question — how the instrument behaves — split
    across two headings you had to remember the difference between. */
+/* WHICH BUILD AM I LOOKING AT. A single file served by a CDN means a reload
+   can hand you yesterday's copy and nothing on screen says so — you end up
+   testing a fix that is not there. Stamped by tools/stamp.sh at every commit,
+   shown on the `build` row, and that row also ASKS the server: it fetches the
+   page with no-store, compares this string, and reloads past the cache if the
+   answer is newer. */
+const BUILD='2026-08-13.1600';
+function checkUpdate(){
+  const bare=location.href.split('?')[0].split('#')[0];
+  flash('checking the server…');
+  fetch(bare+'?v='+Date.now(),{cache:'no-store'}).then(r=>r.text()).then(t=>{
+    /* matched WITHOUT the word const, so the stamper's own pattern — which
+       anchors on a line starting `const BUILD=` — can never rewrite this line */
+    const m=t.match(/BUILD\s*=\s*'([^']+)'/);
+    if(!m){flash('server copy has no build stamp');return;}
+    if(m[1]===BUILD){flash('◎ this IS the latest — build '+BUILD);return;}
+    flash('new build '+m[1]+' — reloading (your set is saved)');
+    setTimeout(()=>location.replace(bare+'?v='+Date.now()),600);
+  }).catch(()=>flash('could not reach the server — offline?'));
+}
 const SETSECT=['Behavior','Look','Input'];
 /* the live velocity range: which pair of ends the active estimator maps through */
 const heEnds=()=>{const C=HE.cfg(), win=Math.round(C.est||0)===1;
@@ -1025,6 +1045,8 @@ const SETTINGS=[
              a:()=>{CFG.kbd=kbFull()?'piano':'full'; saveCfg();
                     flash(kbFull()?'full — every letter is a note, three rows, bottom lowest'
                                   :'piano — home row white, row above black');}},
+ /* ↑ on this row asks the server whether you are current, and reloads if not */
+ {n:'build',g:'Behavior',  v:()=>BUILD,                    a:()=>checkUpdate()},
  {n:'swing',g:'Behavior',  v:()=>S.grv.amt+'%',            a:d=>S.grv.amt=clamp(S.grv.amt+d*5,0,100)},
  {n:'groove',g:'Behavior', v:()=>GROOVES[S.grv.typ].n,     a:d=>S.grv.typ=fmod(S.grv.typ+d,GROOVES.length)},
  {n:'grid',g:'Look',   v:()=>CFG.vgrid?'vertical':'lanes',a:()=>CFG.vgrid=CFG.vgrid?0:1},
@@ -12850,10 +12872,14 @@ const ARROWALIAS={Comma:'ArrowLeft',Period:'ArrowRight',Minus:'ArrowDown',Equal:
    fn is here in hope only: macOS eats it in hardware and no browser ever sees
    it, so remap that key to F13 (or right-win) in the board's own software and
    this picks it up. */
-const RIGHTARROW={AltRight:'ArrowLeft',
-  Fn:'ArrowRight',F13:'ArrowRight',F14:'ArrowRight',F15:'ArrowRight',
-  F16:'ArrowRight',MetaRight:'ArrowRight',
-  ContextMenu:'ArrowUp',ControlRight:'ArrowDown'};
+/* F13-F16 are the ESCAPE HATCH, and the better route: macOS assigns them
+   nothing and no app claims them globally, so remapping the four bottom-right
+   keys to F13-F16 in the board's own software beats every conflict at once —
+   including right alt, which another app's global hotkey can swallow before
+   any web page is allowed to see it. */
+const RIGHTARROW={AltRight:'ArrowLeft',ContextMenu:'ArrowUp',ControlRight:'ArrowDown',
+  Fn:'ArrowRight',MetaRight:'ArrowRight',
+  F13:'ArrowLeft',F14:'ArrowRight',F15:'ArrowUp',F16:'ArrowDown'};
 const ARROWMODE=['real',', . - =','right cluster'];
 /* what the learned fn slot does — right arrow first, because that is the one
    the right cluster cannot fill from a keycode */
