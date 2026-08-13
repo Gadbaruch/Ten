@@ -7843,7 +7843,7 @@ function libNos(){
   }
   return libNoCache=m;
 }
-const LIBV=21;   // bump BOTH: libStore writes it, libAll checks it
+const LIBV=22;   // bump BOTH: libStore writes it, libAll checks it
 function libStore(a){libMigrated=true; libCache=null; libNoCache=null;
   const out=(a||[]).map(en=>en&&en.data?{...en,data:portPreset(en.data,true)}:en);
   try{localStorage.setItem(LIBKEY,JSON.stringify({v:LIBV,items:out}));}catch(_){} if(typeof prepCache!=='undefined')prepCache.clear();}
@@ -7909,6 +7909,9 @@ function setPresetData(pi,name,cat,data){   // same, no undo — for composite g
     p._folded=false; foldMod(p);
   }
   if(Array.isArray(data.kit))p.kit=data.kit.map(k=>k?modToRoutes(foldMod(k)):null);
+  if(data.au)p.au=Object.assign({},p.au||{},data.au);   // the tape's settings travel with the sound
+  if(data.gr)p.gr=Object.assign({},data.gr);            // ...and so do the cloud's
+  if(p.cat==='gran'){p.cat='audio'; (p.au=p.au||{}).amode=1;}   // v<22 spelling
   modToRoutes(p);      // v13 library entries carry flat mod slots → routes
   p.mod.forEach(m=>{if(m.routes)m.routes=JSON.parse(JSON.stringify(m.routes));});  // no aliasing with the library
   /* TRANSPOSE AND VELOCITY OFFSET ARE THE CHANNEL'S, not the sound's — the
@@ -14374,7 +14377,9 @@ window.addEventListener('blur',()=>{
 
 /* ---------------- persistence + migration ---------------------------- */
 const LS='ten-v1';
-const SAVEV=21;                       // bump BOTH: serialize writes it, load checks it
+const SAVEV=22;                       // bump BOTH: serialize writes it, load checks it
+/* v22: granular is the audio channel's MODE (au.amode), never a cat — old
+   'gran' spellings are normalized on the way in */
 /* WHAT A SAVE SAYS vs WHAT THE RUNTIME USES.
    In memory a waveform is an index into WAVES, because every read site is then
    an array lookup and some of them are warm. In the FILE it is the word "saw",
@@ -14517,6 +14522,9 @@ function load(json){
         p.code=sp.code||null; p.pmodel=resolveModel(sp.pmodel)||null; p.psel=sp.psel|0;
         p.cp=Array.isArray(sp.cp)?sp.cp.slice(0,8):[1,1,1,0.5,0,0,0.5,0.3];
         p.au=Object.assign({gain:0.9,semis:0,rate:1,st:0,en:1,fit:0,src:0,pmode:0,chan:0,cues:{}},sp.au||{});
+        if(sp.gr)p.gr=Object.assign({},sp.gr);   // the cloud's dials were being dropped on load
+        /* v<22 spelled granular as an ENGINE; it is the audio channel's mode */
+        if(p.cat==='gran'){p.cat='audio'; p.au.amode=1;}
         /* MIX AND VOF ARE NOT RACKS ANY MORE, so the MODULES walk above no
            longer carries them and every reload flattened all nine channels to
            80% and centre. serialize() was writing them the whole time — the
