@@ -1007,6 +1007,10 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    Feel/Scale were the same question — how the instrument behaves — split
    across two headings you had to remember the difference between. */
 const SETSECT=['Behavior','Look','Input'];
+/* the live velocity range: which pair of ends the active estimator maps through */
+const heEnds=()=>{const C=HE.cfg(), win=Math.round(C.est||0)===1;
+  return {win,soft:win?C.wSoft:C.soft,hard:win?C.wHard:C.hard,
+          sK:win?'wSoft':'soft',hK:win?'wHard':'hard'};};
 const SETTINGS=[
  /* THE OLD GLOBAL TIMELINE. The master lane is the arrangement now, but sets
     made before that carry an S.arr — and its every control lived on an ARRANGE
@@ -1051,6 +1055,22 @@ const SETTINGS=[
  {n:'hid keys',g:'Input',v:()=>HE.learn?(HE.learn.i+'/'+HE.learn.order.length):(HE.map?String(Object.keys(HE.map).length):'—'),
               a:()=>HE.startLearn()},
  {n:'hid trig',g:'Input',v:()=>Math.round(HE.cfg().trig*100)+'%', a:d=>HE.set('trig',clamp(HE.cfg().trig+d*0.01,0.05,0.6))},
+ /* WHICH QUESTION THE BOARD IS ASKED. peak: how fast was the fastest frame —
+    right on a board that samples on a clock. window: how far did the key get
+    in `wait` ms — right on a board that reports per unit of travel, where a
+    single frame's slope is mostly arrival jitter. */
+ /* a 60% board has no arrow cluster, and the arrows are how this instrument
+    moves and edits — so lend them four keys */
+ {n:'arrows',g:'Input', v:()=>CFG.hidArrows?', . - =':'real',
+              a:()=>{CFG.hidArrows=CFG.hidArrows?0:1; saveCfg();
+                     flash(CFG.hidArrows?', . = ←→ · - = = ↓↑ · ⇧ as always · octave moves to ⌃, ⌃.'
+                                        :'arrows are the arrow keys · , . octave · - = volume');}},
+ {n:'hid vel',g:'Input', v:()=>Math.round(HE.cfg().est||0)===1?'window':'peak',
+              a:()=>{const e2=Math.round(HE.cfg().est||0)===1?0:1; HE.set('est',e2);
+                     flash(e2?'window — velocity is how deep it got in '+HE.cfg().wait+'ms'
+                             :'peak — velocity is the steepest frame of the stroke');}},
+ {n:'hid wait',g:'Input',v:()=>(+(HE.cfg().wait||4).toFixed(1))+'ms',
+              a:d=>HE.set('wait',clamp((HE.cfg().wait||4)+d*0.5,0.5,20))},
  {n:'hid curve',g:'Input',v:()=>HE.cfg().gamma.toFixed(2), a:d=>HE.set('gamma',clamp(HE.cfg().gamma+d*0.05,0.2,2))},
  {n:'hid floor',g:'Input',v:()=>Math.round(HE.cfg().floor*127)+'', a:d=>HE.set('floor',clamp(HE.cfg().floor+d*0.02,0,0.5))},
  /* Switching to auto starts learning from wherever the fixed range currently
@@ -1061,8 +1081,12 @@ const SETTINGS=[
               a:()=>{const C=HE.cfg();
                      if(!C.auto){HE.set('aSoft',C.soft); HE.set('aHard',C.hard);}
                      HE.set('auto',C.auto?0:1);}},
- {n:'hid hard',g:'Input',v:()=>HE.cfg().hard.toFixed(3), a:d=>HE.set('hard',clamp(HE.cfg().hard+d*0.005,0.02,HE_MAX_SLOPE))},
- {n:'hid soft',g:'Input',v:()=>HE.cfg().soft.toFixed(3), a:d=>HE.set('soft',clamp(HE.cfg().soft+d*0.001,0.0005,0.08))},
+ /* these two edit the range of whichever estimator is live — one row pair, and
+    it always means the number actually mapping your hits */
+ {n:'hid hard',g:'Input',v:()=>heEnds().hard.toFixed(3),
+              a:d=>{const w=heEnds(); HE.set(w.hK,clamp(w.hard+d*(w.win?0.002:0.005),0.005,HE_MAX_SLOPE));}},
+ {n:'hid soft',g:'Input',v:()=>heEnds().soft.toFixed(4),
+              a:d=>{const w=heEnds(); HE.set(w.sK,clamp(w.soft+d*(w.win?0.0005:0.001),0.0002,0.08));}},
 ];
 function basePreset(name){return{
   name, cat:'misc', tr:0, trs:0, prep:null,
@@ -10180,7 +10204,12 @@ const EXP={
    worse until it converges, and every velocity complaint so far has traced back
    to a learned end rather than to the slope maths. `hid range` turns it on.
    floor is 1/127 so the quietest hit is velocity 1, matching the tool exactly. */
-const HEDEF={rest:0.03,trig:0.15,look:1,gamma:0.5,soft:0.005,hard:0.130,floor:1/127,auto:0};
+/* est 0 = peak slope (a clock-sampled board's answer), 1 = window (how far the
+   key got in `wait` ms — a travel-triggered board's answer). The two measures
+   are on different scales, so each keeps ITS OWN range: sharing storage between
+   two mechanisms is the bug this file has already been bitten by twice. */
+const HEDEF={rest:0.03,trig:0.15,look:1,gamma:0.5,soft:0.005,hard:0.130,floor:1/127,auto:0,
+             est:0,wait:4,wSoft:0.002,wHard:0.05};
 /* Fastest slope a finger can actually produce, in travel/ms. Full key travel in
    2ms is already superhuman; anything above this is a measurement artifact. */
 const HE_MAX_SLOPE=0.5;
@@ -10484,23 +10513,48 @@ const HE={
     const dt=clamp(t-k.pt,Math.max(0.5,P*0.4),Math.max(P*3.5,12)), slope=(v-k.pv)/dt;
     /* claim the key while it is off rest, so its typed keystroke is ignored and
        the laptop keyboard's identical keystroke is not */
-    if(v>C.rest&&this.map){const mc=this.map[id]; if(mc)this.recent[mc]=t;}
+    /* claim only what the board is allowed to speak for: a NOTE key's own
+       keystroke is the duplicate we suppress, but esc and tab and the digits
+       must go on arriving normally */
+    if(v>C.rest&&this.map){const mc=this.map[id]; if(mc&&isNoteKey(mc))this.recent[mc]=t;}
     if(this.probe&&v>0.25&&(!this.probeBest||v>this.probeBest.v))this.probeBest={id,v};
     if(k.st===0){                                    // resting
       if(v<=C.rest){k.pv=v; k.pt=t; return;}
       k.st=1; k.peak=Math.max(0,slope); k.top=v; k.wait=0;
+      /* WINDOW MODE STARTS AT THE FIRST TOUCH, not at the trigger depth: the
+         question is how far the key travels in a known slice of time, and the
+         earliest movement is the honest start of that slice. It also buys the
+         whole depth of the key to measure across instead of the sliver above
+         the trigger. */
+      if(Math.round(C.est||0)===1&&!this.learn){
+        k.st=3; k.wV=v; k.wT=t;
+        const w=Math.max(0.5,C.wait||4);
+        k._tmr=setTimeout(()=>this.winClose(id),w);
+        k.pv=v; k.pt=t; return;
+      }
       /* fall straight through to the trigger test: a slam crosses rest and
          bottoms out on the SAME frame, and waiting for the next one is 4ms
          of latency on exactly the hits that need it least */
     }
     if(k.st===1){                                    // downstroke, not yet spoken
-      k.peak=Math.max(k.peak,slope); k.top=Math.max(k.top,v);
+      /* in window mode the speed was already measured over the window — a
+         later jitter spike must not be allowed to raise it */
+      if(Math.round(C.est||0)!==1)k.peak=Math.max(k.peak,slope);
+      k.top=Math.max(k.top,v);
       if(v<=C.rest){k.st=0;}                         // a nudge that never got there
       else if(v>=C.trig){
         // bottomed out, or learning (which only needs identity): no point waiting
         if(k.wait>=C.look||v>0.97||this.learn){this.fire(id,k,v,t);}
         else k.wait++;
       }
+    }else if(k.st===3){                              // window open: how far did it get?
+      k.top=Math.max(k.top,v);
+      if(v<=C.rest){                                 // lifted before we could look
+        if(k._tmr){clearTimeout(k._tmr); k._tmr=null;}
+        k.st=0; k.pv=v; k.pt=t; return;
+      }
+      if(t-k.wT>=Math.max(0.5,C.wait||4)||v>0.985)this.winClose(id,v,t);
+      k.pv=v; k.pt=t; return;
     }else if(k.st===2){                              // sounding
       if(v<C.rest*0.8){this.release(id);}
       /* Re-attack. A key resting past the trigger — fingers parked, a high
@@ -10542,6 +10596,13 @@ const HE={
     k.fireV=v; k.fireT=t||k.pt; k.calm=0; k.moveT=t||k.pt;   // re-attack baseline
     this.lastId=id;
     if(!code)return;
+    /* ONLY THE LETTERS PLAY. The matrix maps every key on the board — esc,
+       tab, caps, the modifiers, the digits — and for those the browser is
+       already delivering a perfectly good keystroke. Synthesising a second one
+       off the analog stream made every press happen TWICE: one tap of esc
+       opened settings and closed it again. Analog is how hard you played a
+       note; everything else is a switch, and a switch is on or off. */
+    if(!isNoteKey(code))return;
     const vel=this.vel(k.peak,C);
     this.lastVel=vel;
     if(EXP.keyDown(code,vel)){
@@ -10551,8 +10612,29 @@ const HE={
       EXP.keyPress(code,C.trig<0.99?clamp(((v??C.trig)-C.trig)/(1-C.trig),0,1):(v??0));
     }
   },
+  /* the window closed: whatever travel happened inside it IS the speed. Fired
+     by the timer as often as by a sample, because a key that bottomed out
+     stops reporting entirely — nothing moves, nothing is sent. */
+  winClose(id,v,t){
+    const k=this.keys[id]; if(!k||k.st!==3)return;
+    if(k._tmr){clearTimeout(k._tmr); k._tmr=null;}
+    const C=this.cfg();
+    if(v===undefined)v=k.pv;
+    if(t===undefined)t=performance.now();
+    const el=Math.max(0.25,t-k.wT);
+    k.peak=Math.max(0,v-k.wV)/el;        // travel per ms — the units the range speaks
+    if(v<=C.rest){k.st=0; return;}       // it went back up: nothing was played
+    /* A SLOW PRESS IS NOT A QUIET ONE YET. If the key still has not reached the
+       trigger when the clock runs out, the measurement stands but the note does
+       not: go back to the downstroke and speak when it actually gets there,
+       carrying the speed we measured. Otherwise resting a finger on a key would
+       sound a note at velocity nothing. */
+    if(v<C.trig){k.st=1; k.wait=0; k.top=Math.max(k.top,v); return;}
+    this.fire(id,k,v,t);
+  },
   release(id){
     const k=this.keys[id]; if(!k)return;
+    if(k._tmr){clearTimeout(k._tmr); k._tmr=null;}
     if(k.st===2&&k.code)EXP.keyUp(k.code);
     k.st=0; k.code=null; k.peak=0; k.top=0;
   },
@@ -10591,7 +10673,8 @@ const HE={
         if(((this._save=(this._save|0)+1)&31)===0)saveCfg();
       }
     }
-    const S=C.auto?C.aSoft:C.soft, H=C.auto?C.aHard:C.hard;
+    const win=Math.round(C.est||0)===1;
+    const S=C.auto?C.aSoft:(win?C.wSoft:C.soft), H=C.auto?C.aHard:(win?C.wHard:C.hard);
     const lo=Math.min(S,H*0.5), hi=Math.max(H,lo*1.5);
     const n=clamp((slope-lo)/(hi-lo),0,1);
     return clamp(C.floor+(1-C.floor)*Math.pow(n,C.gamma),1/127,1);
@@ -12716,9 +12799,26 @@ function syncCaps(e){
   dirty=true;
 }
 let capsWas=false;
+/* THE BOARD HAS NO ARROW KEYS, and the arrows are how you move and how you
+   change every value — a 60% keyboard cannot play this instrument without
+   them. So four keys stand in: , . are left/right, - = are down/up. Bare and
+   with shift only, because ⇧↑↓ is already the channel volume — which is what
+   - = used to do, so it lands under the same fingers. ⌥ ⌘ and tab forms keep
+   what they meant (rack slots, pattern length), and the octave moves to ⌃, /
+   ⌃. — the one thing that had to give way. */
+const ARROWALIAS={Comma:'ArrowLeft',Period:'ArrowRight',Minus:'ArrowDown',Equal:'ArrowUp'};
+const arrowAlias=(e,kind)=>{
+  const a=ARROWALIAS[e.code];
+  if(!CFG.hidArrows||!a||e.metaKey||altOf(e)||e.ctrlKey||HOLD.tab)return false;
+  e.preventDefault();
+  document.dispatchEvent(new KeyboardEvent(kind,{code:a,key:a,bubbles:true,
+    shiftKey:e.shiftKey,repeat:e.repeat}));
+  return true;
+};
 const onKeyDown=e=>{
   syncCaps(e);
   filePerm();          // a keypress is the gesture the file handle needs
+  if(arrowAlias(e,'keydown'))return;   // , . - = ARE the arrows on a board without any
   /* BARE CONTROL (or a board's fn) IS THE MIC. Down opens it; a ctrl+letter
      chord marks the hold as modifier use so the mic closes on release instead
      of latching; left-shift at the press latches (decided at release). */
@@ -14360,6 +14460,7 @@ const scopeHeldOn=c=>
   (HOLD.ms&&c===HOLD.ms.c&&!HOLD.msLatched);
 const onKeyUp=e=>{
   const c=e.code;
+  if(arrowAlias(e,'keyup'))return;      // the release half — arrow key-ups end automation writes
   /* the release half of the same rule: the panel owns only the keys it
      navigates with, and every other key-up is the desk's */
   if(S.layer===-1&&!(c==='Escape'||c==='Enter'||c==='Slash'||c.startsWith('Arrow'))){
@@ -16970,7 +17071,8 @@ function settingsRack(L){
   {const C=HE.cfg();
    if(HE.on)L.push('   '+sp('a','   '+HE.srcName)+sp('d','  frames ')+sp(HE.fps<125?'r':'a',HE.fps+'Hz')+
      sp('d','  last vel ')+sp('a',String(Math.round(HE.lastVel*127)))+
-     sp('d','  slope '+C.soft.toFixed(3)+'…'+C.hard.toFixed(3)+(C.auto?' (auto)':'')));
+     sp('d','  '+(heEnds().win?'window '+(+(C.wait||4).toFixed(1))+'ms ':'peak ')
+       +heEnds().soft.toFixed(4)+'…'+heEnds().hard.toFixed(3)+(C.auto?' (auto)':'')));
    /* CONNECTED IS NOT STREAMING. A board that opened and never spoke reads the
       same as a board playing into a slot nothing is mapped to, so say which:
       reports in, the last slot that moved, and whether that slot has a key. */
