@@ -1012,7 +1012,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-13.1625';
+const BUILD='2026-08-13.1649';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1027,6 +1027,12 @@ function checkUpdate(){
   }).catch(()=>flash('could not reach the server — offline?'));
 }
 const SETSECT=['Behavior','Look','Input'];
+/* A SETTING YOU CANNOT USE IS NOISE. The Input section grew to sixteen rows,
+   most of them about a keyboard that is not plugged in and half of those about
+   an estimator that is not selected — so you scan a wall to reach the two
+   knobs that matter. Rows can now declare when they are relevant, and both the
+   render and the arrows walk the visible ones only. */
+const setVis=()=>SETTINGS.filter(x=>!(x.h&&x.h()));
 /* the live velocity range: which pair of ends the active estimator maps through */
 const heEnds=()=>{const C=HE.cfg(), win=Math.round(C.est||0)===1;
   return {win,soft:win?C.wSoft:C.soft,hard:win?C.wHard:C.hard,
@@ -1074,18 +1080,18 @@ const SETTINGS=[
  {n:'midi in',g:'Input',v:()=>EXP.midiOn?['off','solo','+kbd'][CFG.midiIn|0]:'off', a:d=>EXP.cycleMidi(d)},
  {n:'hid',g:'Input',    v:()=>HE.on?(HE.srcName||'on').slice(0,8):'off',
               a:()=>{if(HE.on)HE.disconnect(); else HE.connect();}},
- {n:'hid keys',g:'Input',v:()=>HE.learn?(HE.learn.i+'/'+HE.learn.order.length):(HE.map?String(Object.keys(HE.map).length):'—'),
+ {n:'hid keys',g:'Input',h:()=>!HE.on||(!HE.learn&&HE.map&&Object.keys(HE.map).length>=20),v:()=>HE.learn?(HE.learn.i+'/'+HE.learn.order.length):(HE.map?String(Object.keys(HE.map).length):'—'),
               a:()=>HE.startLearn()},
  /* fn sends no keycode on this board — it is a firmware layer switch. Its
     magnet still moves, so learn the SLOT and it becomes a usable key. */
  /* BIND ANY KEY BY ITS SENSOR, not by the keycode it sends — the portable
     version of the fn trick. `board key` picks what you are binding, `learn`
     takes the next key you press for it (↓ forgets it). */
- {n:'board key',g:'Input',v:()=>{const a=FNACT[(CFG.he&&CFG.he.fnAct)|0];
+ {n:'board key',g:'Input',h:()=>!HE.on,v:()=>{const a=FNACT[(CFG.he&&CFG.he.fnAct)|0];
               const sl=(CFG.he&&CFG.he.slots)||{}, at=Object.keys(sl).find(k=>sl[k]===a);
               return actName(a)+(at?' #'+at:'');},
               a:d=>HE.set('fnAct',fmod(((CFG.he&&CFG.he.fnAct)|0)+d,FNACT.length))},
- {n:'learn',g:'Input', v:()=>HE.learnFn?'press it':String(Object.keys((CFG.he&&CFG.he.slots)||{}).length),
+ {n:'learn',g:'Input', h:()=>!HE.on,v:()=>HE.learnFn?'press it':String(Object.keys((CFG.he&&CFG.he.slots)||{}).length),
               a:d=>{if(!HE.on){flash('connect the board first');return;}
                     const act=FNACT[(CFG.he&&CFG.he.fnAct)|0];
                     if(d<0){const sl=Object.assign({},(CFG.he&&CFG.he.slots)||{});
@@ -1093,7 +1099,7 @@ const SETTINGS=[
                       HE.set('slots',sl); flash(actName(act)+' unbound'); return;}
                     HE.learnFn=act;
                     flash('press the key you want for '+actName(act)+' — we are watching the sensor, not the keycode');}},
- {n:'hid trig',g:'Input',v:()=>Math.round(HE.cfg().trig*100)+'%', a:d=>HE.set('trig',clamp(HE.cfg().trig+d*0.01,0.05,0.6))},
+ {n:'hid trig',g:'Input',h:()=>!HE.on,v:()=>Math.round(HE.cfg().trig*100)+'%', a:d=>HE.set('trig',clamp(HE.cfg().trig+d*0.01,0.05,0.6))},
  /* WHICH QUESTION THE BOARD IS ASKED. peak: how fast was the fastest frame —
     right on a board that samples on a clock. window: how far did the key get
     in `wait` ms — right on a board that reports per unit of travel, where a
@@ -1113,33 +1119,33 @@ const SETTINGS=[
  {n:'menu key',g:'Input',v:()=>SPARE[CFG.kMenu|0],
               a:d=>{CFG.kMenu=fmod((CFG.kMenu|0)+d,SPARE.length); saveCfg();
                     flash('menu → '+SPARE[CFG.kMenu|0]);}},
- {n:'hid vel',g:'Input', v:()=>Math.round(HE.cfg().est||0)===1?'window':'peak',
+ {n:'hid vel',g:'Input', h:()=>!HE.on,v:()=>Math.round(HE.cfg().est||0)===1?'window':'peak',
               a:()=>{const e2=Math.round(HE.cfg().est||0)===1?0:1; HE.set('est',e2);
                      flash(e2?'window — velocity is how deep it got in '+HE.cfg().wait+'ms'
                              :'peak — velocity is the steepest frame of the stroke');}},
- {n:'hid wait',g:'Input',v:()=>(+(HE.cfg().wait||4).toFixed(1))+'ms',
+ {n:'hid wait',g:'Input',h:()=>!HE.on||Math.round(HE.cfg().est||0)!==1,v:()=>(+(HE.cfg().wait||4).toFixed(1))+'ms',
               a:d=>HE.set('wait',clamp((HE.cfg().wait||4)+d*0.5,0.5,20))},
  /* off: a note ends only when the finger leaves the key, and the travel in
     between is pressure. on: pushing deeper after a pause plays it again. */
- {n:'hid retrig',g:'Input',v:()=>Math.round(HE.cfg().retrig||0)===1?'on':'off',
+ {n:'hid retrig',g:'Input',h:()=>!HE.on,v:()=>Math.round(HE.cfg().retrig||0)===1?'on':'off',
               a:()=>{const r2=Math.round(HE.cfg().retrig||0)===1?0:1; HE.set('retrig',r2);
                      flash(r2?'re-attack ON — pressing deeper replays the note'
                             :'re-attack OFF — the note ends when you lift · depth is pressure');}},
- {n:'hid curve',g:'Input',v:()=>HE.cfg().gamma.toFixed(2), a:d=>HE.set('gamma',clamp(HE.cfg().gamma+d*0.05,0.2,2))},
- {n:'hid floor',g:'Input',v:()=>Math.round(HE.cfg().floor*127)+'', a:d=>HE.set('floor',clamp(HE.cfg().floor+d*0.02,0,0.5))},
+ {n:'hid curve',g:'Input',h:()=>!HE.on,v:()=>HE.cfg().gamma.toFixed(2), a:d=>HE.set('gamma',clamp(HE.cfg().gamma+d*0.05,0.2,2))},
+ {n:'hid floor',g:'Input',h:()=>!HE.on,v:()=>Math.round(HE.cfg().floor*127)+'', a:d=>HE.set('floor',clamp(HE.cfg().floor+d*0.02,0,0.5))},
  /* Switching to auto starts learning from wherever the fixed range currently
     sits. Switching back to fixed leaves the fixed range alone — it used to
     overwrite it with the generic HEDEF numbers, which planted the wrong ceiling
     on whichever board was plugged in. */
- {n:'hid range',g:'Input',v:()=>HE.cfg().auto?'auto':'fixed',
+ {n:'hid range',g:'Input',h:()=>!HE.on,v:()=>HE.cfg().auto?'auto':'fixed',
               a:()=>{const C=HE.cfg();
                      if(!C.auto){HE.set('aSoft',C.soft); HE.set('aHard',C.hard);}
                      HE.set('auto',C.auto?0:1);}},
  /* these two edit the range of whichever estimator is live — one row pair, and
     it always means the number actually mapping your hits */
- {n:'hid hard',g:'Input',v:()=>heEnds().hard.toFixed(3),
+ {n:'hid hard',g:'Input',h:()=>!HE.on,v:()=>heEnds().hard.toFixed(3),
               a:d=>{const w=heEnds(); HE.set(w.hK,clamp(w.hard+d*(w.win?0.002:0.005),0.005,HE_MAX_SLOPE));}},
- {n:'hid soft',g:'Input',v:()=>heEnds().soft.toFixed(4),
+ {n:'hid soft',g:'Input',h:()=>!HE.on,v:()=>heEnds().soft.toFixed(4),
               a:d=>{const w=heEnds(); HE.set(w.sK,clamp(w.soft+d*(w.win?0.0005:0.001),0.0002,0.08));}},
 ];
 function basePreset(name){return{
@@ -13343,15 +13349,22 @@ const onKeyDown=e=>{
     else if(c==='Enter'&&!e.repeat){S.layer=1; dirty=true;}   // the way in is the way out
     else if(c==='ArrowLeft'||c==='ArrowRight'){
       const d2=c==='ArrowRight'?1:-1;
-      const cur2=SETTINGS[S.setSel||0]||SETTINGS[0];
+      const vis=setVis();
+      const cur2=SETTINGS[S.setSel||0]||vis[0];
       if(rs(e)){                                  // ⇧←→ jumps section, like ⇧←→ jumps rack
         const gi=SETSECT.indexOf(cur2.g||SETSECT[0]);
-        const first=SETTINGS.findIndex(x=>x.g===SETSECT[fmod(gi+d2,SETSECT.length)]);
-        if(first>=0)S.setSel=first;
+        /* a section whose every row is hidden is not a place you can stand */
+        for(let n9=1;n9<=SETSECT.length;n9++){
+          const g9=SETSECT[fmod(gi+d2*n9,SETSECT.length)];
+          const first=vis.find(x=>x.g===g9);
+          if(first){S.setSel=SETTINGS.indexOf(first); break;}
+        }
       }else{                                      // ←→ stays inside the section you are in
-        const here=SETTINGS.filter(x=>x.g===cur2.g);
-        const at=here.indexOf(cur2);
-        S.setSel=SETTINGS.indexOf(here[fmod(at+d2,here.length)]);
+        const here=vis.filter(x=>x.g===cur2.g);
+        if(here.length){
+          const at=Math.max(0,here.indexOf(cur2));
+          S.setSel=SETTINGS.indexOf(here[fmod(at+d2,here.length)]);
+        }
       }
       dirty=true;}
     else if(c==='ArrowUp'||c==='ArrowDown')
@@ -17242,7 +17255,7 @@ function settingsRack(L){
      group like any other, because a saved set is just another thing this
      screen holds. */
   const cur=SETTINGS[S.setSel||0]||SETTINGS[0];
-  const groups=SETSECT.map(n=>({n,items:SETTINGS.filter(x=>x.g===n)})).filter(g=>g.items.length);
+  const groups=SETSECT.map(n=>({n,items:setVis().filter(x=>x.g===n)})).filter(g=>g.items.length);
   {const RW=Math.max(10,Math.floor(92/(groups.length+1)));
    let lab='   ', cells='   ';
    for(const g of groups){
@@ -17252,7 +17265,7 @@ function settingsRack(L){
    }
    L.push(lab); L.push(cells);}
   L.push('');
-  {const here=SETTINGS.filter(x=>x.g===cur.g);
+  {const here=setVis().filter(x=>x.g===cur.g);
    const w=clamp(Math.floor(88/Math.max(1,here.length))-1,5,10);
    let lr='   ', vr='   ';
    here.forEach(it=>{
