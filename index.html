@@ -441,7 +441,7 @@ const XDIST=XTYPES.indexOf('sat');
 const vrbSec=v=>0.05+4.45*Math.pow(clamp(v,0,1),2);
 const vrbInv=s=>clamp(Math.sqrt(Math.max(0,s-0.05)/4.45),0,1);
 const GPATS=[[1,1,1,1,0,0,0,0],[0,0,1,1,0,0,1,1],[1,0,1,0,1,0,1,0],[1,.7,.45,.3,.2,.12,.07,0],[1,0,0,1,0,0,1,0]];
-const PTYPES=['off','chord','arp','grv','prep','rev','rndp','vel','chc','euc','nudge','hmnz','flam','rpit','len','rtc'];
+const PTYPES=['off','chord','arp','grv','prep','rev','rndp','vel','chc','euc','nudge','hmnz','flam','rpit','len','rtc','cyc','spry'];
 /* groove templates: f(16th-index) -> -1..1, scaled by amt% * half a 16th */
 const GROOVES=[
  {n:'sw16',f:i=>i%2===1?1:0},
@@ -488,6 +488,25 @@ const mkMaster=()=>Array.from({length:10},(_,i)=>
   i===9?{typ:15,rt:0,p1:0.95,p2:0.3,p3:0.5,mix:0}:    // slot 0: transparent safety limiter (~-1.5dB)
   {typ:0,rt:0,p1:0.3,p2:0.3,p3:0.5,mix:0.3});
 const CHORDS=[['oct',[0,12]],['5th',[0,7]],['maj',[0,4,7]],['min',[0,3,7]],['ma7',[0,4,7,11]],['mi7',[0,3,7,10]],['su4',[0,5,7]],['9th',[0,4,7,14]]];
+const CHEXT=[['—',[]],['7',[10]],['M7',[11]],['9',[10,14]],['11',[10,14,17]],['13',[10,14,21]]];
+/* the ChordMaster treatment: base triad + extensions, then VOICING — invert
+   (rotate tones through the octave), spread (open the voicing by lifting
+   alternate tones), and a bass root underneath. One chord definition, played
+   from any key. */
+function chordShape(sl){
+  const base=CHORDS[clamp(Math.round(sl.p1),0,CHORDS.length-1)][1].slice();
+  const ext=CHEXT[clamp(Math.round(sl.p4||0),0,CHEXT.length-1)][1];
+  let iv=[...new Set(base.concat(ext))].sort((a,b)=>a-b);
+  const inv=clamp(Math.round(sl.p5||0),-3,3);
+  for(let k=0;k<Math.abs(inv);k++){
+    if(inv>0){iv.push(iv.shift()+12);} else {iv.unshift(iv.pop()-12);}
+    iv.sort((a,b)=>a-b);
+  }
+  const sprd=clamp(Math.round(sl.p7||0),0,2);
+  if(sprd)iv=iv.map((o,i)=>o+(i%2?12*sprd:0));
+  if(Math.round(sl.p8||0)===1)iv.unshift(Math.min(...iv)-12);
+  return [...new Set(iv)].sort((a,b)=>a-b);
+}
 /* SORTED BY HOW LONG THEY ACTUALLY ARE, fastest first. The old order was
    grouped by note name, so 1/4. sat next to 1/4 while being half again as
    long and 1/8T was slower than the 1/16. that followed it — turning the dial
@@ -1467,6 +1486,10 @@ const PLY_P=sl=>{
   const T=(...a)=>base.concat(a,PLY_SCOPE);
   if(sl.typ===1)return T(
     SP('chord','p1','enum',{opts:CHORDS.map(c=>c[0])}),
+    SP('ext','p4','enum',{opts:CHEXT.map(c=>c[0])}),
+    SP('inv','p5','lin',{min:-3,max:3,step:1,fmt:v=>v?(v>0?'+':'')+Math.round(v):'—'}),
+    SP('sprd','p7','lin',{min:0,max:2,step:1,fmt:v=>['tight','open','wide'][clamp(Math.round(v),0,2)]}),
+    SP('bass','p8','enum',{opts:['off','on']}),
     SP('strum','p2','lin',{min:-0.06,max:0.06,step:0.005,fmt:v=>Math.round(v*1000)+'ms'}),
     SP('role','p3','enum',{opts:['local','global'],
       get:o=>o.p3===undefined?1:o.p3, set:(o,v)=>{o.p3=v;}}));
@@ -1503,12 +1526,26 @@ const PLY_P=sl=>{
   if(sl.typ===15)return T(
     SP('divs','p1','lin',{min:0,max:16,step:1,fmt:v=>Math.round(v)<2?'off':'\u00d7'+Math.round(v)}),
     SP('fade','p2','lin',{min:-100,max:100,step:10,
-       fmt:v=>v?(v>0?'-':'+')+Math.abs(Math.round(v))+'%':'flat'}));
+       fmt:v=>v?(v>0?'-':'+')+Math.abs(Math.round(v))+'%':'flat'}),
+    /* the BOUNCE: hits pack toward one end like a dropped ball — + starts
+       fast and settles, − winds up. 0 keeps the even grid. */
+    SP('bnce','p3','lin',{min:-100,max:100,step:10,
+       fmt:v=>v?(v>0?'drop ':'wind ')+Math.abs(Math.round(v))+'%':'even'}));
   if(sl.typ===11)return T(SP('range','p1','lin',{min:0,max:80,step:1,fmt:v=>'\u00b1'+v+'ms'}));
   if(sl.typ===12)return T(
     SP('gap','p1','lin',{min:5,max:120,step:1,fmt:v=>v+'ms'}),
     SP('hits','p2','lin',{min:1,max:3,step:1,fmt:v=>'+'+Math.round(v)}),
     SP('level','p3','lin',{min:0,max:1,step:0.05,fmt:v=>Math.round(v*100)+'%'}));
+  if(sl.typ===16)return T(                       // cyc: your own timing, looped
+    SP('gate','p1','lin',{min:10,max:100,step:5,get:o=>o.p1??85,set:(o,v)=>o.p1=v,
+       fmt:v=>Math.round(v)+'%'}));
+  if(sl.typ===17)return T(                       // spray: a cloud of notes around the held one
+    SP('dens','p1','lin',{min:0.5,max:24,step:0.5,get:o=>o.p1??6,set:(o,v)=>o.p1=v,fmt:v=>v+'/s'}),
+    SP('sprd','p2','lin',{min:0,max:24,step:1,get:o=>o.p2??7,set:(o,v)=>o.p2=v,fmt:v=>'\u00b1'+Math.round(v)+'st'}),
+    SP('chaos','p3','lin',{min:0,max:100,step:5,get:o=>o.p3??50,set:(o,v)=>o.p3=v,fmt:v=>Math.round(v)+'%'}),
+    SP('rico','p4','lin',{min:-100,max:100,step:5,get:o=>o.p4??0,set:(o,v)=>o.p4=v,
+       fmt:v=>v?(v>0?'in ':'out ')+Math.abs(Math.round(v))+'%':'—'}),
+    SP('snap','p5','enum',{opts:['free','scale'],get:o=>Math.round(o.p5??1),set:(o,v)=>o.p5=v}));
   if(sl.typ===13)return T(                       // random pitch, re-rolled per note
     SP('cents','p1','lin',{min:0,max:200,step:5,fmt:v=>'\u00b1'+v+'c'}),
     SP('semis','p2','lin',{min:0,max:24,step:1,fmt:v=>'\u00b1'+v}),
@@ -1736,7 +1773,7 @@ const destRate=(rack,key)=>
      read once, when a note starts. So the modulator parks its value and the
      voice builder reads that instead of the slot; the change lands on the next
      note you play, which is the only moment it could ever mean anything. */
-  :(rack==='mod'&&/^(a|d|s|r|crv|tmul|lp|lrate|lrdiv|skw)$/.test(key))?'next'
+  :(rack==='mod'&&/^(a|d|s|r|crv|tmul|lp|lrate|lrdiv|skw|ph)$/.test(key))?'next'
   :(rack==='vox')?'next'
   :(rack==='ply')?'next'
   :null;
@@ -3729,11 +3766,26 @@ function scheduleRange(from,to){
         const divs=rtcS?(Math.round(rtcS.p1??0)>=2?clamp(Math.round(rtcS.p1),2,16):0):rt;   // 0 and 1 = off
         if(divs>=2){
           /* negative fade is a crescendo: the burst grows into the beat
-             instead of dying out of it */
-          const fade=rtcS?clamp(rtcS.p2??20,-100,100)/100:0.25, step=dur2/divs;
+             instead of dying out of it. bnce packs the hits toward one end
+             like a dropped ball: + starts fast and settles, − winds up. */
+          const fade=rtcS?clamp(rtcS.p2??20,-100,100)/100:0.25;
+          const bn=rtcS?clamp(rtcS.p3??0,-100,100)/100:0;
+          const times=[];
+          if(Math.abs(bn)<0.02){const st9=dur2/divs;
+            for(let i2=0;i2<divs;i2++)times.push([i2*st9,st9]);}
+          else{
+            /* geometric spacing: ratio r per interval; +bn -> r>1 (gaps grow:
+               fast start, slow end — the ball drops), −bn mirrors it */
+            const r=1+Math.abs(bn)*0.9;
+            let sum=0; const iv=[];
+            for(let i2=0;i2<divs;i2++){const g2=Math.pow(r,i2); iv.push(g2); sum+=g2;}
+            if(bn<0)iv.reverse();
+            let acc=0;
+            for(let i2=0;i2<divs;i2++){times.push([acc*dur2/sum,iv[i2]*dur2/sum]); acc+=iv[i2];}
+          }
           for(let i2=0;i2<divs;i2++)
-            engine.trigger(timeAt(tt+i2*step+a.anchor),li,midi2,
-              clamp(v*(1-fade*i2/divs),0.05,1),step*0.9*spb());
+            engine.trigger(timeAt(tt+times[i2][0]+a.anchor),li,midi2,
+              clamp(v*(1-fade*i2/divs),0.05,1),times[i2][1]*0.85*spb());
           return;
         }
         engine.trigger(timeAt(tt+a.anchor),li,midi2,v,dur2*spb());
@@ -4050,7 +4102,7 @@ class Voice{
         }
         else if(m.src===2&&MD2LFO[rt.dst]&&Math.abs(rt.amt)>0.5)
           lfoList.push({dst:MD2LFO[rt.dst],idx:rt.idx,wav:m.wav,rate:lfoHz(me),skw:me.skw||0,
-                        amt:rt.amt,ph:m.ph,free:Math.round(m.ltr||0)===1,mi:mi2});
+                        amt:rt.amt,ph:me.ph??m.ph,free:Math.round(m.ltr||0)===1,mi:mi2});
       }
     }
     /* amp-target mods (vel/key/rnd/center) scale the envelope PEAK — never a DC
@@ -6932,7 +6984,7 @@ class Engine{
       const sl=p.ply[i2];
       if(sl.typ===1&&!sl.off&&(arpIdx<0||i2<arpIdx)){
         if(Math.round(sl.p6||0)===1&&durSec!=null)continue;   // already in the lane
-        const ch=CHORDS[clamp(Math.round(sl.p1),0,CHORDS.length-1)][1];
+        const ch=chordShape(sl);
         midis=midis.flatMap(m=>ch.map(o=>m+o));
         pads=pads.flatMap(m=>ch.map(o=>m+o)); strum=sl.p2||0;   // a chord on a kit still spans pads
         if(Math.round(sl.p6||0)===1)chordPre=true;   // stage=pre: record the chord, not the root
@@ -6961,7 +7013,9 @@ class Engine{
        are already subdivided at emit time, and both would be twice */
     const rtcLive=(!arp&&!eucLive&&durSec==null)
       ?rack0.find(sl=>sl.typ===15&&!sl.off&&Math.round(sl.p1??0)>=2):null;
-    if(arp||eucLive||rtcLive){
+    const cycLive=(!arp&&durSec==null)?rack0.find(sl=>sl.typ===16&&!sl.off):null;
+    const spryLive=(!arp&&durSec==null)?rack0.find(sl=>sl.typ===17&&!sl.off):null;
+    if(arp||eucLive||rtcLive||cycLive||spryLive){
       const until=durSec!=null?beatsAt(at)+durSec/spb():Infinity;
       /* born + heard: a tap shorter than the gap to the next arp step used to
          set `until` before that step arrived, so the fastest presses made no
@@ -7034,6 +7088,81 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
         this.arpPool[pi]=pool.filter(n2=>n2.until>nw2-8);
         continue;
       }
+      const cyc=!arp?rack.find(sl=>sl.typ===16&&!sl.off):null;
+      if(cyc){
+        /* YOUR OWN TIMING, LOOPED. The gaps between when you pressed the held
+           notes ARE the sequence: two notes alternate at the gap you played
+           them; a third adds its own gap; the wrap reuses the first. One note
+           has no relation to anything, so it plays once and does not repeat. */
+        const ent=pool.filter(n2=>n2.until>from||!n2.heard).sort((a,b)=>(a.born??0)-(b.born??0));
+        const gate=clamp((cyc.p1??85)/100,0.1,1);
+        if(ent.length===1){
+          const en=ent[0];
+          if(!en.heard&&(en.born??-1e9)<=to){
+            en.heard=true;
+            const v=this.noteOn(gridTime(en.born),pi,en.midi,en.vel,en.pad??en.midi);
+            v&&v.release&&v.release(gridTime(Math.min(en.until,en.born+8)));
+          }
+        }else if(ent.length>1){
+          const offs=[0]; const gaps=[];
+          for(let i=1;i<ent.length;i++){
+            const g=Math.max(0.05,(ent[i].born??0)-(ent[i-1].born??0));
+            gaps.push(g); offs.push(offs[i-1]+g);
+          }
+          const wrap=gaps[0]||0.25;
+          const cl=offs[offs.length-1]+wrap;
+          const anc0=ent[0].born??0;
+          for(let k=Math.floor((from-anc0)/cl)-1;anc0+k*cl<to;k++){
+            for(let i=0;i<ent.length;i++){
+              const t=anc0+k*cl+offs[i];
+              if(t<from-1e-9||t>=to-1e-9)continue;
+              const en=ent[i];
+              if(!(en.until>t||(!en.heard&&(en.born??-1e9)<=t+1e-9)))continue;
+              en.heard=true;
+              const gp=i<gaps.length?gaps[i]:wrap;
+              const bg=t+grooveOff(pi,t);
+              const v=this.noteOn(gridTime(bg),pi,en.midi,en.vel,en.pad??en.midi);
+              v&&v.release&&v.release(gridTime(bg+gp*gate));
+            }
+          }
+        }
+        const nwC=gridNow();
+        this.arpPool[pi]=pool.filter(n2=>n2.until>nwC-8);
+        continue;
+      }
+      const spry=!arp?rack.find(sl=>sl.typ===17&&!sl.off):null;
+      if(spry){
+        /* THE SPRAY: while a note is held, random notes fall around it —
+           density says how many, spread how far in pitch, chaos how loose the
+           timing, rico bends the intervals shorter (in) or longer (out) as it
+           runs. Deterministic per (note, index): the same hold replays the
+           same cloud when the scheduler re-visits a window. */
+        const dens=clamp(spry.p1??6,0.5,24), sprd=clamp(Math.round(spry.p2??7),0,24);
+        const chaos=clamp(spry.p3??50,0,100)/100, ric=clamp(spry.p4??0,-100,100)/100;
+        const snapS=Math.round(spry.p5??1)===1&&CFG.scaleOn;
+        const h8=(a,b)=>{const x=Math.sin(a*127.1+b*311.7+pi*17.7)*43758.5453;return x-Math.floor(x);};
+        const base=1/(dens*spb());
+        for(const en of pool){
+          let t=en.born??0, k=0;
+          while(k<400){
+            const iv=base*(1+(h8(en.born??0,k)*2-1)*chaos)*Math.pow(1-ric*0.3,k);
+            t+=Math.max(0.02,iv); k++;
+            if(t>=to)break;
+            if(t<from-1e-9)continue;
+            if(!(en.until>t||(!en.heard&&(en.born??-1e9)<=t+1e-9)))continue;
+            en.heard=true;
+            let m2=en.midi+Math.round((h8(en.born??0,k*7+3)*2-1)*sprd);
+            if(snapS)m2=snapToPCs(m2,pcsNow());
+            const bg=t+grooveOff(pi,t);
+            const vv=clamp(en.vel*(1-Math.abs(ric)*0.4*Math.min(1,k/24)),0.05,1);
+            const v=this.noteOn(gridTime(bg),pi,m2,vv,en.pad??en.midi);
+            v&&v.release&&v.release(gridTime(bg+Math.max(0.05,base*0.8)));
+          }
+        }
+        const nwS=gridNow();
+        this.arpPool[pi]=pool.filter(n2=>n2.until>nwS-8);
+        continue;
+      }
       if(euc){
         const hits=clamp(Math.round(euc.p1??4),1,16), div=0.25;
         for(let b=Math.ceil(from/div-1e-9)*div;b<to-1e-9;b+=div){
@@ -7086,7 +7215,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
         for(const pick of picks){
         let hits=[pick.midi];          // chord slots placed AFTER the arp chord every step
         for(const cs of postChords){
-          const ch=CHORDS[clamp(Math.round(cs.p1),0,CHORDS.length-1)][1];
+          const ch=chordShape(cs);
           hits=hits.flatMap(m=>ch.map(o=>m+o));
         }
         const rpA=rack.find(sl=>sl.typ===13&&!sl.off);
@@ -8289,6 +8418,37 @@ function randGran(pi,w){
     pmode:Math.random()<0.3?1:0,
   });
   engine.granCfg(pi);
+}
+/* ⌥/ — the dice for the SLOT UNDER THE CURSOR: every numeric param rerolls
+   inside its own range; what the slot IS (type, source, wave) stays yours. */
+function rollSlot(){
+  const pi=S.editSnd, pre=S.presets[pi], M=MODULES[S.curMod];
+  if(M&&M.id==='osc'&&isGranCh(pi)){
+    pushUndo('roll cloud'); randGran(pi,clamp(CFG.wild??35,0,100));
+    flash('🎲 cloud rolled'); dirty=true; dirtySave=true; return;}
+  if(!M||!M.id||M.prs){flash('nothing to roll here');return;}
+  pushUndo('roll slot');
+  const roll1=(specs,si)=>{let n=0;
+    for(const sp of specs){
+      if(!sp||sp.type==='enum'||(sp.key&&sp.key[0]==='_'))continue;
+      if(['typ','src','wav','mode','dst'].includes(sp.key))continue;
+      const span=destSpan(sp), lo=span[0], hi=span[1];
+      if(!(hi>lo))continue;
+      let v=lo+Math.random()*(hi-lo);
+      if(sp.step)v=Math.round(v/sp.step)*sp.step;
+      setV(pre,S.curMod,si,sp,clamp(v,lo,hi)); n++;
+    }
+    return n;};
+  let n=0;
+  if(M.flat)n=roll1(M.flat,0);
+  else{
+    const sl=modHolder(pre,M.id)[M.id][S.curSlot];
+    if(!sl||(M.abbr&&M.abbr(sl)==='···')){flash('empty slot — nothing to roll');return;}
+    n=roll1(paramsFor(S.curMod,sl),S.curSlot);
+  }
+  engine.rebuildRack(pi); engine.refresh(pi);
+  flash('🎲 rolled '+M.name.toLowerCase()+(M.flat?'':' slot '+((S.curSlot+1)%10))+' — '+n+' params');
+  dirty=true; dirtySave=true;
 }
 function randomizeSound(pi,mode){
   const p=S.presets[pi];
@@ -12391,6 +12551,10 @@ const onKeyDown=e=>{
      reason the clip branch is: the letters it uses are already spoken for
      further down, and while one is held the digits and arrows belong to it
      rather than to mute, the step cursor or the channel row. */
+  if(e.code==='Slash'&&altOf(e)&&!e.repeat&&S.layer>=2&&!e.metaKey&&!e.ctrlKey
+     &&!ALTSUS.size&&!HOLD.opt&&!MODPICK){
+    e.preventDefault(); rollSlot(); return;
+  }
   if(OPTRACK[e.code]&&altOf(e)&&!e.repeat&&S.layer>=1&&!e.metaKey&&!e.ctrlKey&&!ALTSUS.size){
     e.preventDefault();
     const c=e.code;
