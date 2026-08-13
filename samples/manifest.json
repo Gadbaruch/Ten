@@ -1,0 +1,42 @@
+[
+ {
+  "name": "sweep",
+  "file": "sweep.wav"
+ },
+ {
+  "name": "riser",
+  "file": "riser.wav"
+ },
+ {
+  "name": "drone",
+  "file": "drone.wav"
+ },
+ {
+  "name": "vowel",
+  "file": "vowel.wav"
+ },
+ {
+  "name": "bell",
+  "file": "bell.wav"
+ },
+ {
+  "name": "pluck",
+  "file": "pluck.wav"
+ },
+ {
+  "name": "kick",
+  "file": "kick.wav"
+ },
+ {
+  "name": "snare",
+  "file": "snare.wav"
+ },
+ {
+  "name": "rain",
+  "file": "rain.wav"
+ },
+ {
+  "name": "choirpad",
+  "file": "choirpad.wav"
+ }
+]
