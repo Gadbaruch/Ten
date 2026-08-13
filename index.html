@@ -1012,7 +1012,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-13.1600';
+const BUILD='2026-08-13.1609';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1109,6 +1109,12 @@ const SETTINGS=[
                              :'peak — velocity is the steepest frame of the stroke');}},
  {n:'hid wait',g:'Input',v:()=>(+(HE.cfg().wait||4).toFixed(1))+'ms',
               a:d=>HE.set('wait',clamp((HE.cfg().wait||4)+d*0.5,0.5,20))},
+ /* off: a note ends only when the finger leaves the key, and the travel in
+    between is pressure. on: pushing deeper after a pause plays it again. */
+ {n:'hid retrig',g:'Input',v:()=>Math.round(HE.cfg().retrig||0)===1?'on':'off',
+              a:()=>{const r2=Math.round(HE.cfg().retrig||0)===1?0:1; HE.set('retrig',r2);
+                     flash(r2?'re-attack ON — pressing deeper replays the note'
+                            :'re-attack OFF — the note ends when you lift · depth is pressure');}},
  {n:'hid curve',g:'Input',v:()=>HE.cfg().gamma.toFixed(2), a:d=>HE.set('gamma',clamp(HE.cfg().gamma+d*0.05,0.2,2))},
  {n:'hid floor',g:'Input',v:()=>Math.round(HE.cfg().floor*127)+'', a:d=>HE.set('floor',clamp(HE.cfg().floor+d*0.02,0,0.5))},
  /* Switching to auto starts learning from wherever the fixed range currently
@@ -10247,7 +10253,7 @@ const EXP={
    are on different scales, so each keeps ITS OWN range: sharing storage between
    two mechanisms is the bug this file has already been bitten by twice. */
 const HEDEF={rest:0.03,trig:0.15,look:1,gamma:0.5,soft:0.005,hard:0.130,floor:1/127,auto:0,
-             est:0,wait:4,wSoft:0.002,wHard:0.05};
+             est:0,wait:4,wSoft:0.002,wHard:0.05,retrig:0};
 /* Fastest slope a finger can actually produce, in travel/ms. Full key travel in
    2ms is already superhuman; anything above this is a measurement artifact. */
 const HE_MAX_SLOPE=0.5;
@@ -10301,7 +10307,18 @@ const HE={
   /* Is this keystroke the analog board's, rather than the laptop's? Refreshed
      for as long as the key is off its rest position, so a held key (and its
      auto-repeat) stays suppressed, and released 200ms after it comes back up. */
-  owns(code){return this.on&&(performance.now()-(this.recent[code]||-1e9))<200;},
+  /* WHILE IT IS SOUNDING, IT OWNS IT — no clock involved. "Seen in the last
+     200ms" was the whole test, and on a board that only reports while a key is
+     MOVING, a held note goes quiet on the wire and ownership expires under it.
+     The board's own rapid-trigger then sends a real key-up the instant your
+     finger eases off, and that key-up ended the note — which is why the sound
+     stopped every time the press changed direction. */
+  owns(code){
+    if(!this.on)return false;
+    for(const id in this.keys){const k=this.keys[id];
+      if(k&&k.st===2&&k.code===code)return true;}
+    return (performance.now()-(this.recent[code]||-1e9))<200;
+  },
   map:null,                                         // keyId -> TEN key code
   fps:0, period:0, _fN:0, _fT:0, _fL:0, _fD:[], lastVel:0, lastId:null,
   learn:null, dump:0, dumped:[], probe:0, probeBest:null,
@@ -10605,7 +10622,15 @@ const HE={
          second note — which is the double-hit this was meant to avoid. A finger
          that has come to rest and then drives down is unambiguous; a single
          continuous downstroke never stops moving. */
-      else if(k.calm&&slope>=0.02&&v>k.fireV+0.08&&t-k.fireT>40){
+      /* …AND IT COSTS THE REST OF THE STROKE. Every push deeper after a pause
+         reads as a new attack, so the note ends the moment the press changes
+         direction — which is exactly the travel you want as PRESSURE. A key
+         cannot be both an aftertouch surface and a repeat trigger, so this is
+         a choice: `hid retrig` off (default) means a note ends only when the
+         finger comes all the way back off the key, and everything between the
+         trigger and the bottom is expression. */
+      else if(Math.round(C.retrig||0)===1
+              &&k.calm&&slope>=0.02&&v>k.fireV+0.08&&t-k.fireT>40){
         this.release(id);
         k.st=1; k.peak=Math.max(0,slope); k.top=v; k.wait=0;
         this.fire(id,k,v,t);
@@ -14827,6 +14852,12 @@ const onKeyUp=e=>{
     }
     dirty=true;
   }
+  /* THE ANALOG STREAM DECIDES WHEN AN ANALOG NOTE ENDS. The board keeps
+     sending ordinary key-ups of its own — rapid trigger fires one every time
+     the key crosses its actuation point on the way back up — and letting those
+     through cut the note off mid-hold. A note the sensor is sounding ends when
+     the sensor says the finger left, and only then. */
+  if(EXP.muted(c)&&!EXP.synth)return;
   endNote(c);
 };
 document.addEventListener('keyup',onKeyUp);
