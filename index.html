@@ -1144,7 +1144,13 @@ const OSC_P=sl=>[
      set:(o,v)=>{const e2=POOL[clamp(Math.round(v),0,Math.max(0,POOL.length-1))];
        if(!e2){flash('pool is empty — record (⌃+tab) or drop audio first');return;}
        engine.opSamples.set(S.editSnd+':'+S.curSlot,e2.buf);
-       engine.rebuildRack(S.editSnd);}})]:[]),
+       engine.rebuildRack(S.editSnd);}}),
+   /* the CLIP half: crop the take per slot, loop it or fire it once */
+   SP('start','sst','lin',{min:0,max:0.98,step:0.01,get:o=>o.sst??0,set:(o,v)=>o.sst=v,
+      fmt:v=>Math.round(v*100)+'%'}),
+   SP('end','sen','lin',{min:0.02,max:1,step:0.01,get:o=>o.sen??1,set:(o,v)=>o.sen=v,
+      fmt:v=>Math.round(v*100)+'%'}),
+   SP('play','lps','enum',{opts:['loop','once'],get:o=>Math.round(o.lps||0),set:(o,v)=>o.lps=v})]:[]),
   /* ONE FIELD, TWO MEANINGS, decided by the wave — the same idiom the fx rack
      already uses for dist's tone/rate. On a tonal wave it is PULSE WIDTH: the
      harmonics are re-weighted by sin(nπd), which is exactly PWM on a square
@@ -4289,7 +4295,11 @@ class Voice{
       if(skipOp0){}                     // silent and unreachable: never built at all
       else if(isN){src=ac.createBufferSource();
         src.buffer=isS?(E.opSamples.get(pi+':0')||E.noiseBuf):E.nbuf(rootW,ops[0].pw);
-        src.loop=true;pitchParam=src.playbackRate;}
+        src.loop=true;pitchParam=src.playbackRate;
+        if(isS){const d9=src.buffer.duration;
+          const st9=clamp(ops[0].sst??0,0,0.98)*d9, en9=clamp(ops[0].sen??1,0.02,1)*d9;
+          if(en9>st9+0.005){src.loopStart=st9; src.loopEnd=en9; src._off=st9;}
+          if(Math.round(ops[0].lps||0)===1)src.loop=false;}}
       let rootWt=null;                  // wt twin for THIS unison copy (crossfade pair)
       if(skipOp0){}
       else if(!isN&&rootW===14){
@@ -4390,6 +4400,10 @@ class Voice{
         else if(wv===9){                              // sampler op: pitch via playbackRate
           s2=ac.createBufferSource();
           s2.buffer=E.opSamples.get(pi+':'+i)||E.noiseBuf; s2.loop=true;
+          {const d9=s2.buffer.duration;
+           const st9=clamp(op.sst??0,0,0.98)*d9, en9=clamp(op.sen??1,0.02,1)*d9;
+           if(en9>st9+0.005){s2.loopStart=st9; s2.loopEnd=en9; s2._off=st9;}
+           if(Math.round(op.lps||0)===1)s2.loop=false;}
           const ratio=Math.pow(2,(midi-60)/12)*op.rat*Math.pow(2,(op.fine||0)/1200);
           s2.playbackRate.value=ratio;
           (this.opPitch[i]=this.opPitch[i]||[]).push({pm:s2.playbackRate,base:ratio,kind:'smp'});
@@ -4438,7 +4452,7 @@ class Voice{
           (this.opDet[i]=this.opDet[i]||[]).push({pm:s2.detune,sc:200});
         }
         if(isNoiseW(wv))s2.start(at,Math.random()*s2.buffer.duration);  // decorrelated noise per uni voice
-        else s2.start(at);
+        else s2.start(at,s2._off||0);
         this.nodes.push(s2);
       }
       const outN=skipOp0?{}:{0:g0};
@@ -4521,7 +4535,7 @@ class Voice{
       node.connect(merge);
       if(src){
         if(noiseRoot)src.start(at,Math.random()*src.buffer.duration);  // decorrelate unison noise voices
-        else src.start(at);
+        else src.start(at,src._off||0);
         this.nodes.push(src);
         if(rootWt){try{rootWt.b.start(at);}catch(_){} this.nodes.push(rootWt.b);}
         if(!firstSrc)firstSrc=src;
