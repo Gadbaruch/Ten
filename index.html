@@ -2910,11 +2910,15 @@ const S={
   presets:PRESETS0().slice(0,10),
 };
 function demoContent(){
+  /* first visit: the nine, and a bar that uses the first three of them. The
+     old demo wrote its beat onto lanes 0-2 — lane 0 is the MASTER — so the
+     kick pattern played through whatever channel 1 happened to be. */
+  defaultKit();
   const p=S.patterns[0];
-  for(let b=0;b<4;b++)p.lanes[0].events.push({t:b,midi:36,vel:0.95,dur:0.2});
-  for(let b=0;b<4;b++)p.lanes[2].events.push({t:b+0.5,midi:60,vel:0.5,dur:0.1});
-  p.lanes[1].events.push({t:1,midi:60,vel:0.85,dur:0.15});
-  p.lanes[1].events.push({t:3,midi:60,vel:0.85,dur:0.15});
+  for(let b=0;b<4;b++)p.lanes[1].events.push({t:b,midi:36,vel:0.95,dur:0.2});
+  for(let b=0;b<4;b++)p.lanes[3].events.push({t:b+0.5,midi:60,vel:0.5,dur:0.1});
+  p.lanes[2].events.push({t:1,midi:60,vel:0.85,dur:0.15});
+  p.lanes[2].events.push({t:3,midi:60,vel:0.85,dur:0.15});
   for(const l of p.lanes)if(l.events.length)l.auto=false;
 }
 
@@ -7820,6 +7824,23 @@ function bakPush(why,force){
 }
 const bakAge=t=>{const s2=Math.max(0,Math.round((Date.now()-t)/1000));
   return s2<60?s2+'s':s2<3600?Math.round(s2/60)+'m':Math.round(s2/3600)+'h';};
+/* THE NINE. Every hardware groovebox powers on with a kit under your fingers;
+   this one powered on with whatever the last set happened to leave behind, so
+   a clean start meant nine channels of somebody else's sound design. One role
+   per channel, in the order sortChannels already ranks them, generated TAME —
+   these are meant to be recognisable rather than interesting, the bed you jam
+   on top of. */
+const SETROLES=[['kik','Kick'],['snr','Snare'],['hh','Hats'],['perc','Perc'],
+  ['bass','Bass'],['chord','Chords'],['keys','Keys'],['lead','Lead'],['plk','Pluck']];
+function defaultKit(){
+  SETROLES.forEach(([cat,name],i)=>{
+    const pi=i+CH_LOW; if(pi>9)return;
+    const np=genPreset(cat,Math.random,0.12);
+    setPresetData(pi,name,cat,presetData(np));
+    mixChannel(pi);
+    engine.rebuildRack(pi); engine.refresh(pi);
+  });
+}
 function newSet(){
   bakPush('before new set',true);          // the state you are about to lose
   pushUndo('new set');
@@ -7833,8 +7854,9 @@ function newSet(){
      arrangement still switching between them every eight bars. */
   S.arr.events=[]; S.arrOn=true;
   S.curPreset=CH_LOW; S.editSnd=CH_LOW; S.mSel=false;
+  defaultKit();
   engine.rebuildMaster();
-  flash('new set — tempo, key and settings kept');
+  flash('new set — kick · snare · hats · perc · bass · chords · keys · lead · pluck');
   dirty=true; dirtySave=true;
 }
 function pickKey(e){
