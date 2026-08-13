@@ -3317,7 +3317,7 @@ let fxwReady=false;
       this.p={pos:0,spray:0.05,size:0.12,dens:20,semis:0,jit:0,shape:0.5,
               rev:0.1,width:0.5,scan:1,gain:0.8,fade:0.06,flow:0.5,
               dif:0,live:0,frz:0,fb:0,pmode:0};
-      this.fbLP=0; this.prevL=null;
+      this.fbLP=0; this.prevL=null; this._rl=0; this._rr=0;
       this.pW=Math.round(sampleRate*0.05);   // pitch-mode tap window, 50ms
       this.cur=null;                       // slewed copy — no parameter ever jumps
       this.vs=new Map(); this.grains=[]; this.scanPh=0; this.stat=0;
@@ -3365,12 +3365,23 @@ let fxwReady=false;
         else if(m.t==='rat'){const v=this.vs.get(m.id);
           if(v&&Number.isFinite(m.ratio))v.ratio=Math.min(64,Math.max(1/64,m.ratio));}
         else if(m.t==='tape'){if(this.tv.size<12)this.tv.set(m.id,{fr:m.frame,c:m.pos,
-          rate:m.rate,end:m.end,gain:m.gain??1,life:m.durF||1e12,n:0,env:0,rel:0});}
+          rate:m.rate,rTgt:m.rate,base:m.base||m.rate,free:m.free?1:0,
+          sh:Number.isFinite(m.sh)&&m.sh>0?m.sh:1,ch:m.ch|0,
+          gl:Number.isFinite(m.gl)?m.gl:1,gr:Number.isFinite(m.gr)?m.gr:1,
+          end:m.end,gain:m.gain??1,life:m.durF||1e12,n:0,env:0,rel:0,relAt:0,tp:0});}
         else if(m.t==='toff'){const v=this.tv.get(m.id); if(v)v.rel=1;}
-        else if(m.t==='tclr'){for(const [id,v] of this.tv)v.rel=1;}
+        /* a stop can be SCHEDULED: the sequenced cue lane stops at a beat that
+           has not happened yet, so carry the frame and let the voice die there */
+        else if(m.t==='tclr'){const fa=m.frame||0;
+          for(const [id,v] of this.tv){if(fa>currentFrame+1)v.relAt=fa; else v.rel=1;}}
+        /* the pitch bend destination: free voices move their rate (tape), sync
+           voices move only the shifter (the clock is not for sale) */
+        else if(m.t==='tpb'){const s9=Number.isFinite(m.semis)?m.semis:0, f9=Math.pow(2,s9/12);
+          for(const [id,v] of this.tv){
+            if(v.free)v.rTgt=Math.max(0.01,v.base*f9); else v.sh=f9;}}
         else if(m.t==='panic'){this.vs.clear(); this.grains.length=0; this.tv.clear();}
         else if(m.t==='ping'){const L9=(this.p.live>0.5?this.ring.length:this.len)||1;
-          this.port.postMessage({t:'stat',g:this.grains.length,v:this.vs.size,spawned:this.stat,
+          this.port.postMessage({t:'stat',g:this.grains.length,v:this.vs.size,tv:this.tv.size,spawned:this.stat,
             pos:this.grains.slice(0,24).map(g9=>Math.max(0,Math.min(1,g9.ph/L9)))});}};
     }
     env(t,sh){          // t 0..1 through the grain, sh = slewed shape
@@ -3382,6 +3393,54 @@ let fxwReady=false;
       const hn=this.hann[(t*1023)|0];
       const x=(sh-0.5)*2;
       return tri*(1-x)+hn*x;
+    }
+    /* THE TAPE VOICES, rendered AFTER the cloud's gain and diffuser: the tape
+       carries its own gain dial and must not be taxed by the grain one — with
+       the flag on, the same clip has to come out at the same level it always
+       did. Reads the BUFFER always; the live ring belongs to the cloud. */
+    tape(oL,oR,N,st){
+      if(!this.tv.size||!this.len)return;
+      const TL=this.L, TR=this.R, f0=currentFrame, LN=this.len, W=this.pW;
+      const aT=1/(sampleRate*0.005), rT=1/(sampleRate*0.004), sT=1/(sampleRate*0.02);
+      for(const [id,v] of this.tv){
+        for(let k=0;k<N;k++){
+          const fr=f0+k;
+          if(fr<v.fr)continue;
+          if(v.relAt&&fr>=v.relAt)v.rel=1;
+          v.env+= (v.rel||v.n>=v.life)? -rT : aT;
+          if(v.env>1)v.env=1;
+          if(v.env<=0&&(v.rel||v.n>=v.life)){this.tv.delete(id);break;}
+          if(v.c>=v.end-1){v.rel=1;continue;}
+          if(v.rate!==v.rTgt)v.rate+=(v.rTgt-v.rate)*sT;   // a bend glides, it does not step
+          let l9,r9;
+          if(v.sh!==1){
+            /* SYNC PITCH, inside the cursor: the head keeps the source's
+               timing and two crossfaded taps drift away from it at (1-ratio)
+               — the trick ten-psh played on the output, aimed at the buffer,
+               so no node is needed to hold it. */
+            v.tp=(v.tp+(1-v.sh)*v.rate+W)%W;
+            const p1=v.tp, p2=(v.tp+W*0.5)%W;
+            const w1=Math.sin(Math.PI*p1/W), w2=Math.sin(Math.PI*p2/W);
+            this.tRd(v.c-p1,TL,TR,LN); const a1=this._rl, b1=this._rr;
+            this.tRd(v.c-p2,TL,TR,LN); const a2=this._rl, b2=this._rr;
+            l9=a1*w1+a2*w2; r9=b1*w1+b2*w2;
+          }else{
+            this.tRd(v.c,TL,TR,LN); l9=this._rl; r9=this._rr;
+          }
+          if(v.ch===1)r9=l9; else if(v.ch===2)l9=r9;   // stereo | left | right
+          const g9=v.env*v.gain;
+          oL[k]+=l9*g9*v.gl; if(st)oR[k]+=r9*g9*v.gr;
+          v.c+=v.rate; v.n++;
+        }
+      }
+    }
+    /* one interpolated tape read into a scratch pair — a returned array here
+       would allocate once per sample and hand the GC the audio thread */
+    tRd(x,TL,TR,LN){
+      let i2=x; if(!(i2>0))i2=0; else if(i2>LN-2)i2=LN-2;
+      const i0=i2|0, fx=i2-i0, i1=i0+1;
+      this._rl=TL[i0]+(TL[i1]-TL[i0])*fx;
+      this._rr=TR[i0]+(TR[i1]-TR[i0])*fx;
     }
     ap(bank,x){
       for(const a of bank){
@@ -3421,26 +3480,10 @@ let fxwReady=false;
       }
       const len=live?this.ring.length:this.len;
       if(!len||!this.vs.size&&!this.grains.length&&!this.tv.size){this.tick+=N; return true;}
+      /* nothing but tape running: skip the cloud entirely */
+      if(!this.vs.size&&!this.grains.length){
+        this.tape(oL,oR,N,!!out[1]); this.tick+=N; return true;}
       const SL=live?this.ring:this.L, SR=live?this.ring:this.R;
-      if(this.tv.size&&this.len){
-        /* tape reads the BUFFER always — the live ring belongs to the cloud */
-        const TL=this.L, TR=this.R, f0=currentFrame;
-        const aT=1/(sampleRate*0.005), rT=1/(sampleRate*0.004);
-        for(const [id,v] of this.tv){
-          for(let k=0;k<N;k++){
-            const fr=f0+k;
-            if(fr<v.fr)continue;
-            v.env+= (v.rel||v.n>=v.life)? -rT : aT;
-            if(v.env>1)v.env=1;
-            if(v.env<=0&&(v.rel||v.n>=v.life)){this.tv.delete(id);break;}
-            if(v.c>=v.end-1){v.rel=1;continue;}
-            const i0=v.c|0, fx=v.c-i0, i1=Math.min(i0+1,this.len-1);
-            oL[k]+=(TL[i0]+(TL[i1]-TL[i0])*fx)*v.env*v.gain;
-            oR[k]+=(TR[i0]+(TR[i1]-TR[i0])*fx)*v.env*v.gain;
-            v.c+=v.rate; v.n++;
-          }
-        }
-      }
       if(!this.cur)this.cur=Object.assign({},P);
       const C=this.cur, kS=Math.min(1,(N/sampleRate)/Math.max(0.005,P.fade));
       for(const key of ['pos','spray','size','dens','semis','jit','shape','rev','width','gain','flow','dif']){
@@ -3498,6 +3541,7 @@ let fxwReady=false;
           v.env+=v.rel?-rS9:aS9; if(v.env>1)v.env=1;
           if(v.env<=0&&v.rel)this.vs.delete(id);
         }
+        this.tape(oL,oR,N,!!out[1]);
         this.tick+=N; return true;
       }
       const period=sampleRate/Math.max(0.5,C.dens);
@@ -3563,6 +3607,7 @@ let fxwReady=false;
         }
         oL[k]=l9; if(out[1])oR[k]=r9;
       }
+      this.tape(oL,oR,N,!!out[1]);
       this.tick+=N;
       return true;
     }
@@ -7323,9 +7368,9 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     if(t<s0-1e-6)t+=L;
     for(;t<s1-1e-9;t+=L)this.audPlay(li,timeAt(t),L);
   }
-  /* the ONE-CURSOR flag: CFG.tape2 routes clean tape plays through the gran
-     worklet as tape voices. Sync-pitch, channel-select and cue pans still take
-     the legacy path — they come across in stage two. */
+  /* the ONE-CURSOR flag: CFG.tape2 routes tape plays through the gran worklet
+     as tape voices. Stage two: sync-pitch, channel-select and cue pans travel
+     WITH the cursor, so every play the tape can make the cursor can make. */
   audPlay2(pi,at,lenBeats,skipBeats,cue,P9){
     const e=this.granNode(pi); if(!e)return false;
     if((this.granBuf||[])[pi]!==this.audBuf[pi]){
@@ -7335,7 +7380,8 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     }
     const id='t'+(e.id++);
     e.node.port.postMessage({t:'tape',id,frame:Math.round(at*AC.sampleRate),
-      pos:P9.pos,end:P9.end,rate:P9.rate,gain:P9.gain,
+      pos:P9.pos,end:P9.end,rate:P9.rate,base:P9.base,free:P9.free?1:0,sh:P9.sh,
+      ch:P9.ch,gl:P9.gl,gr:P9.gr,gain:P9.gain,
       durF:Math.round(P9.durSec*AC.sampleRate)});
     return true;
   }
@@ -7352,13 +7398,20 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     const rate=sync?baseRate:baseRate*Math.pow(2,semis/12);
     const skipSec=skipBeats*spb(), skipBuf=skipSec*rate;
     if(skipBuf>=dur-0.001)return;
-    if(CFG.tape2&&!(sync&&Math.abs(semis)>0.01)&&!Math.round(au.chan||0)
-       &&!(cue&&Math.abs(cue.pan||0)>0.01)){
-      const sr9=buf.sampleRate, len9=buf.length;
+    if(CFG.tape2){
+      const sr9=buf.sampleRate, len9=buf.length, k9=sr9/AC.sampleRate;
+      /* pan as constant power around the cursor — the cue's own little take
+         keeps its place in the field without a node to hold it */
+      const pn9=cue?clamp(cue.pan||0,-1,1):0, th9=(pn9+1)*Math.PI/4;
       if(this.audPlay2(pi,at,lenBeats,skipBeats,cue,{
-        pos:(off+skipBuf)*sr9*(len9/(buf.duration*sr9)),
+        pos:(off+skipBuf)*sr9,
         end:en*len9,
-        rate:Math.max(0.05,rate)*(sr9/AC.sampleRate),
+        rate:Math.max(0.05,rate)*k9,
+        base:baseRate*k9,
+        free:!sync,
+        sh:sync?Math.pow(2,semis/12):1,
+        ch:buf.numberOfChannels>1?Math.round(au.chan||0):0,
+        gl:Math.SQRT2*Math.cos(th9), gr:Math.SQRT2*Math.sin(th9),
         gain:(au.gain??0.9)*(cue?cue.vol??1:1),
         durSec:Math.min(loopSec-skipSec,(dur-skipBuf)/rate)}))return;
     }
@@ -7396,9 +7449,10 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
   }
   /* a fade-out then the stop, so a released cue does not click on the way out */
   audStop(pi,at){
-    if(CFG.tape2){const e9=this.gn&&this.gn[pi];
-      if(e9&&e9.node){try{e9.node.port.postMessage({t:'tclr'});}catch(_){}}}
     at=at??AC.currentTime+0.002;
+    if(CFG.tape2){const e9=this.gn&&this.gn[pi];
+      if(e9&&e9.node){try{e9.node.port.postMessage(
+        {t:'tclr',frame:Math.round(at*AC.sampleRate)});}catch(_){}}}
     for(const s2 of [...this.audActive[pi]]){
       try{
         if(s2._g){s2._g.gain.cancelScheduledValues(at);
@@ -7413,6 +7467,11 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
   audPitch(pi,semis){
     this.audPB=this.audPB||{}; this.audPB[pi]=semis||0;
     const au=S.presets[pi].au||{};
+    /* the pitch keys, as a cursor op: one message retunes every live cursor —
+       free ones glide their rate, sync ones move their shifter */
+    const e9=this.gn&&this.gn[pi];
+    if(e9&&e9.node){try{e9.node.port.postMessage(
+      {t:'tpb',semis:(au.semis??0)+(semis||0)});}catch(_){}}
     for(const src of this.audActive[pi]||[]){
       if(src._auFree)src.playbackRate.setTargetAtTime(
         Math.max(0.05,src._auBase*Math.pow(2,((au.semis??0)+(semis||0))/12)),AC.currentTime,0.02);
@@ -7572,6 +7631,8 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     this.audStop(pi,n+0.002);}
   allOff(){const n=AC.currentTime;for(const a of this.act)for(const v of [...a])v.kill(n);
     for(const arr of this.audActive)for(const s2 of [...arr]){try{s2.stop(n+0.01);}catch(_){}}
+    for(const k9 in (this.gn||{})){const e9=this.gn[k9];        // cursors live in the worklet: silence has to reach them too
+      if(e9&&e9.node){try{e9.node.port.postMessage({t:'tclr'});}catch(_){}}}
     this.arpPool.forEach(p=>p.length=0);}
   click(at,accent){
     const o=AC.createOscillator(),g=AC.createGain();
@@ -12981,6 +13042,16 @@ const onKeyDown=e=>{
     }
     return;
   }
+  /* …AND EVERY OTHER KEY IS THE DESK'S. Letters played in settings sounded,
+     but they were second-class: nothing recorded them, retro never heard them,
+     the z-row and the dj pads went dead — the panel was a mode after all. So
+     run the rest of the handler AS IF the panel were closed and put the layer
+     back on the way out (unless the key itself moved us somewhere). */
+  if(S.layer===-1){
+    S.layer=1;
+    try{onKeyDown(e);}finally{if(S.layer===1)S.layer=-1;}
+    return;
+  }
 
   if(c==='Space'){e.preventDefault(); if(!e.repeat)T.playing?stop():play(); return;}
   if(c==='Tab'){e.preventDefault();
@@ -14255,8 +14326,15 @@ const scopeHeldOn=c=>
   (c==='KeyV'&&HOLD.v)||(c==='KeyC'&&HOLD.c)||(c==='KeyS'&&HOLD.sc)||
   (HOLD.opt&&c===HOLD.opt.c&&!HOLD.optLatched)||
   (HOLD.ms&&c===HOLD.ms.c&&!HOLD.msLatched);
-document.addEventListener('keyup',e=>{
+const onKeyUp=e=>{
   const c=e.code;
+  /* the release half of the same rule: the panel owns only the keys it
+     navigates with, and every other key-up is the desk's */
+  if(S.layer===-1&&!(c==='Escape'||c==='Enter'||c==='Slash'||c.startsWith('Arrow'))){
+    S.layer=1;
+    try{onKeyUp(e);}finally{if(S.layer===1)S.layer=-1;}
+    return;
+  }
   syncCaps(e);   // macOS reports caps going OFF on the keyup
   kbHeld.delete(c);
   if((e.altKey||e.ctrlKey||(KM.sr&&e.shiftKey))&&scopeHeldOn(c)){ALTSUS.add(c); return;}
@@ -14506,7 +14584,8 @@ document.addEventListener('keyup',e=>{
     dirty=true;
   }
   endNote(c);
-});
+};
+document.addEventListener('keyup',onKeyUp);
 window.addEventListener('blur',()=>{
   /* a lost keyup must not leave a HOT MIC or a recorder eating memory —
      cmd-tab away with tab-rec armed grew the chunk list until the tab died */
