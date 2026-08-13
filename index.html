@@ -1012,7 +1012,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-13.1609';
+const BUILD='2026-08-13.1625';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1078,11 +1078,21 @@ const SETTINGS=[
               a:()=>HE.startLearn()},
  /* fn sends no keycode on this board — it is a firmware layer switch. Its
     magnet still moves, so learn the SLOT and it becomes a usable key. */
- {n:'fn slot',g:'Input', v:()=>HE.learnFn?'press fn':(CFG.he&&CFG.he.fnSlot!=null?'#'+CFG.he.fnSlot:'—'),
-              a:()=>{if(!HE.on){flash('connect the board first');return;}
-                     HE.learnFn=1; flash('press fn on the keyboard now · it sends no keycode, we are watching the sensor');}},
- {n:'fn does',g:'Input', v:()=>FNACT[(CFG.he&&CFG.he.fnAct)|0].replace('Arrow','').toLowerCase(),
+ /* BIND ANY KEY BY ITS SENSOR, not by the keycode it sends — the portable
+    version of the fn trick. `board key` picks what you are binding, `learn`
+    takes the next key you press for it (↓ forgets it). */
+ {n:'board key',g:'Input',v:()=>{const a=FNACT[(CFG.he&&CFG.he.fnAct)|0];
+              const sl=(CFG.he&&CFG.he.slots)||{}, at=Object.keys(sl).find(k=>sl[k]===a);
+              return actName(a)+(at?' #'+at:'');},
               a:d=>HE.set('fnAct',fmod(((CFG.he&&CFG.he.fnAct)|0)+d,FNACT.length))},
+ {n:'learn',g:'Input', v:()=>HE.learnFn?'press it':String(Object.keys((CFG.he&&CFG.he.slots)||{}).length),
+              a:d=>{if(!HE.on){flash('connect the board first');return;}
+                    const act=FNACT[(CFG.he&&CFG.he.fnAct)|0];
+                    if(d<0){const sl=Object.assign({},(CFG.he&&CFG.he.slots)||{});
+                      for(const k9 in sl)if(sl[k9]===act)delete sl[k9];
+                      HE.set('slots',sl); flash(actName(act)+' unbound'); return;}
+                    HE.learnFn=act;
+                    flash('press the key you want for '+actName(act)+' — we are watching the sensor, not the keycode');}},
  {n:'hid trig',g:'Input',v:()=>Math.round(HE.cfg().trig*100)+'%', a:d=>HE.set('trig',clamp(HE.cfg().trig+d*0.01,0.05,0.6))},
  /* WHICH QUESTION THE BOARD IS ASKED. peak: how fast was the fastest frame —
     right on a board that samples on a clock. window: how far did the key get
@@ -10315,8 +10325,19 @@ const HE={
      stopped every time the press changed direction. */
   owns(code){
     if(!this.on)return false;
+    /* …but only while the SENSOR still says the key is down. Trusting the
+       state machine alone was a dead letter waiting to happen: a lift whose
+       last sample lands a hair above the release line leaves the key stuck
+       sounding, and a stuck sounding key would then swallow that letter's
+       ordinary keystrokes forever. The sensor is the authority in both
+       directions — if it reads at rest, we do not own the key, whatever the
+       state machine believes. */
+    /* ownership ends at the REST line, release at 0.8 of it: the gap is
+       deliberate. A key parked in that band is a finger that has gone, and the
+       letter has to keep typing even though the note has not been swept yet. */
+    const r=this.cfg().rest;
     for(const id in this.keys){const k=this.keys[id];
-      if(k&&k.st===2&&k.code===code)return true;}
+      if(k&&k.st===2&&k.code===code&&k.pv>r)return true;}
     return (performance.now()-(this.recent[code]||-1e9))<200;
   },
   map:null,                                         // keyId -> TEN key code
@@ -10345,6 +10366,13 @@ const HE={
         delete c.soft; delete c.hard; delete c.aSoft; delete c.aHard;
         c.rv=HE_RANGE_VER; CFG.he=c; saveCfg();
       }
+    }
+    /* the single fn binding became a TABLE — carry the one you already learned
+       across rather than making you press the key again */
+    if(CFG.he&&CFG.he.fnSlot!=null&&!CFG.he.slots){
+      const c9=Object.assign({},CFG.he);
+      c9.slots={[c9.fnSlot]:FNACT[c9.fnAct|0]||'ArrowRight'};
+      delete c9.fnSlot; CFG.he=c9; saveCfg();
     }
     const d=this.kind?Object.assign({},HEDEF,{hard:HE_HARD[this.kind]||HEDEF.hard,
                                               soft:HE_SOFT[this.kind]||HEDEF.soft}):HEDEF;
@@ -10472,7 +10500,22 @@ const HE={
   tick(){                                            // watchdog: the board went quiet
     if(!this.on)return;
     if(this.kind===1&&this.ready&&performance.now()-(this._reqAt||0)>60)this.kcRequest();
+    /* AND THE OTHER QUIET: a key stuck sounding. Release needs a sample below
+       the rest line, and this board only reports while a key MOVES — so a lift
+       whose final sample lands just above that line never gets another report
+       and the note hangs. Sweep them: sounding, not sampled lately, and the
+       sensor says it is not pressed. */
+    const now=performance.now(), C=this.cfg();
+    for(const id in this.keys){
+      const k=this.keys[id];
+      if(!k||k.st!==2)continue;
+      if(now-(k.pt||0)<900)continue;                  // just played, or held and silent on the wire
+      if(k.pv>=C.trig)continue;                       // genuinely down: leave it alone
+      this.release(id);
+    }
   },
+  /* everything up, everything forgotten — for blur and panic */
+  reset(){for(const id in this.keys)this.release(id); this.keys={}; this.recent={};},
   report(e){
     /* e.data is a DataView over the report WITHOUT the report id. Taking
        .buffer alone ignores byteOffset/byteLength and can shift every byte. */
@@ -10666,16 +10709,25 @@ const HE={
        as a keystroke and perfectly visible as a slot. Learn it once and it is
        a key like any other. */
     if(this.learnFn){
+      const act=this.learnFn;   // the action this learn was armed for
       this.learnFn=0;
       if(code&&isNoteKey(code)){flash('that slot is '+code+' — a note key. try again');return;}
-      this.set('fnSlot',id); flash('◎ fn = slot '+id+' → '+FNACT[CFG.he&&CFG.he.fnAct|0]);
+      const sl=Object.assign({},(CFG.he&&CFG.he.slots)||{});
+      for(const k9 in sl)if(sl[k9]===act)delete sl[k9];   // one key per action
+      sl[id]=act; this.set('slots',sl);
+      flash('◎ slot '+id+' → '+act.replace('Arrow','')+'  ('+Object.keys(sl).length+' board keys)');
       dirty=true; return;
     }
-    const fs=CFG.he&&CFG.he.fnSlot;
-    if(fs!=null&&id===fs){
-      const a9=FNACT[(CFG.he&&CFG.he.fnAct)|0];
-      if(a9!=='off')for(const kind of ['keydown','keyup'])
-        document.dispatchEvent(new KeyboardEvent(kind,{code:a9,key:a9,bubbles:true}));
+    /* THE BOARD'S OWN KEYS, read as sensors. This started as a way to reach fn
+       — which sends no keycode at all — and it turns out to be the portable
+       answer for every special key: bind by MATRIX SLOT and the mapping lives
+       here rather than in each keyboard's firmware, so a board that cannot be
+       remapped, or one you have not remapped yet, still plays. */
+    const slots=(CFG.he&&CFG.he.slots)||{};
+    const act9=slots[id];
+    if(act9&&act9!=='off'){
+      for(const kind of ['keydown','keyup'])
+        document.dispatchEvent(new KeyboardEvent(kind,{code:act9,key:act9,bubbles:true}));
       return;
     }
     if(!code)return;
@@ -12908,7 +12960,10 @@ const RIGHTARROW={AltRight:'ArrowLeft',ContextMenu:'ArrowUp',ControlRight:'Arrow
 const ARROWMODE=['real',', . - =','right cluster'];
 /* what the learned fn slot does — right arrow first, because that is the one
    the right cluster cannot fill from a keycode */
-const FNACT=['ArrowRight','ArrowLeft','ArrowUp','ArrowDown','Tab','Escape','Backslash','off'];
+const FNACT=['ArrowRight','ArrowLeft','ArrowUp','ArrowDown','Tab','Escape','Backslash','Space',
+             'Enter','Backquote','Slash','off'];
+const actName=a=>a.replace('Arrow','').replace('Backquote','` scope').replace('Slash','/ roll')
+                  .replace('Backslash','\\ dice').toLowerCase();
 /* THE SPARE KEYS. A 60% board's bottom row carries win and menu, which do
    nothing for this instrument and something unwanted for the OS. A page can
    only take a key while it is focused — which is the right scope — and both of
@@ -14869,6 +14924,7 @@ window.addEventListener('blur',()=>{
   if(engine.audRec)engine.audRecStop();
   KM.sl=false; KM.sr=false; LATCH.used=false; HOLD.tab=false; HOLD.m=false; kbHeld.clear();
   SUS.clear(); noteLatch.clear();
+  HE.reset();          // analog keys too: a stroke interrupted by a blur owns nothing
   HOLD.c=false; HOLD.n=false; HOLD.r=false; HOLD.i=false; HOLD.v=false; HOLD.q=false; HOLD.sc=false; HOLD.dig=-1;
   HOLD.opt=null; HOLD.optUsed=false; HOLD.optLatch=false; HOLD.optLatched=false;
   HOLD.ms=null; HOLD.msLatch=false; HOLD.msLatched=false;
