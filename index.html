@@ -1012,7 +1012,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-13.1832';
+const BUILD='2026-08-13.1915';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -14688,6 +14688,12 @@ const onKeyDown=e=>{
         }
       }
     }
+    /* NEVER OVERWRITE A SOUNDING VOICE. Two attacks on one key with no release
+       in between — a lost key-up, a mash — used to drop the first handle on the
+       floor, and a voice nobody holds a reference to is a voice nobody can ever
+       release. That is the hang that outlived every fix aimed at key-ups,
+       because it is not a key-up problem at all. */
+    if(liveV[c]&&liveV[c].release){try{liveV[c].release(AC.currentTime+0.002);}catch(_){}}
     liveV[c]=engine.trigger(at,pi,midi,hitVel);
     if(S.layer>=2)S.prepFocus=engine.lastMidi[pi];   // last played note = per-note focus (any channel)
     dirty=true; return;
@@ -15089,6 +15095,28 @@ document.addEventListener('keyup',onKeyUp);
    a note nobody is holding is a note that should not be sounding. Cheap, runs
    whether or not an analog board is connected, and cannot touch a latched note
    or one with a finger still on it. */
+/* …and the same question asked where the voices are. A handle can be lost
+   without any key-up going missing, and then nothing in the key layer knows
+   the voice exists. So ask the engine: a LIVE voice (one whose end is a
+   release, not a schedule) that nothing references and that has been sounding
+   for over a second and a half cannot be ended by anyone. End it. */
+function sweepOrphanVoices(){
+  const ref=new Set();
+  const take=h=>{if(h&&h.voices)for(const v of h.voices)ref.add(v);};
+  for(const c in liveV)take(liveV[c]);
+  for(const k in (EXP.held||{})){const h=EXP.held[k]; take(h&&h.h);
+    if(h&&h.code)take(liveV[h.code]);}
+  if(AUD&&AUD.hold)take(AUD.hold.gsh);
+  const now=AC.currentTime;
+  for(let pi=0;pi<(engine.act||[]).length;pi++){
+    for(const v of [...(engine.act[pi]||[])]){
+      if(!v||!v.live||v.released||v.killed)continue;
+      if(ref.has(v))continue;
+      if(now-(v.startAt||0)<1.5)continue;      // young enough that a handle may still be on its way
+      try{v.release(now+0.002);}catch(_){}
+    }
+  }
+}
 function sweepStuckNotes(){
   for(const c in liveV){
     if(!liveV[c])continue;
@@ -15097,7 +15125,7 @@ function sweepStuckNotes(){
     endNote(c); dirty=true;
   }
 }
-setInterval(sweepStuckNotes,400);
+setInterval(()=>{sweepStuckNotes(); sweepOrphanVoices();},400);
 window.addEventListener('blur',()=>{
   /* a lost keyup must not leave a HOT MIC or a recorder eating memory —
      cmd-tab away with tab-rec armed grew the chunk list until the tab died */
