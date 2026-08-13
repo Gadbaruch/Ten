@@ -1012,7 +1012,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-13.1705';
+const BUILD='2026-08-13.1730';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1099,7 +1099,7 @@ const SETTINGS=[
                       HE.set('slots',sl); flash(actName(act)+' unbound'); return;}
                     HE.learnFn=act;
                     flash('press the key you want for '+actName(act)+' — we are watching the sensor, not the keycode');}},
- {n:'h trig',g:'Input',h:()=>!HE.on,v:()=>Math.round(HE.cfg().trig*100)+'%', a:d=>HE.set('trig',clamp(HE.cfg().trig+d*0.01,0.05,0.6))},
+ {n:'h trig',g:'Input',h:()=>!HE.on,v:()=>Math.round(HE.cfg().trig*100)+'%', a:d=>HE.set('trig',clamp(HE.cfg().trig+d*0.01,0.02,1))},
  /* WHICH QUESTION THE BOARD IS ASKED. peak: how fast was the fastest frame —
     right on a board that samples on a clock. window: how far did the key get
     in `wait` ms — right on a board that reports per unit of travel, where a
@@ -1125,12 +1125,6 @@ const SETTINGS=[
                              :'peak — velocity is the steepest frame of the stroke');}},
  {n:'h wait',g:'Input',h:()=>!HE.on||Math.round(HE.cfg().est||0)!==1,v:()=>(+(HE.cfg().wait||4).toFixed(1))+'ms',
               a:d=>HE.set('wait',clamp((HE.cfg().wait||4)+d*0.5,0.5,20))},
- /* off: a note ends only when the finger leaves the key, and the travel in
-    between is pressure. on: pushing deeper after a pause plays it again. */
- {n:'h retrig',g:'Input',h:()=>!HE.on,v:()=>Math.round(HE.cfg().retrig||0)===1?'on':'off',
-              a:()=>{const r2=Math.round(HE.cfg().retrig||0)===1?0:1; HE.set('retrig',r2);
-                     flash(r2?'re-attack ON — pressing deeper replays the note'
-                            :'re-attack OFF — the note ends when you lift · depth is pressure');}},
  {n:'h curve',g:'Input',h:()=>!HE.on,v:()=>HE.cfg().gamma.toFixed(2), a:d=>HE.set('gamma',clamp(HE.cfg().gamma+d*0.05,0.2,2))},
  {n:'h floor',g:'Input',h:()=>!HE.on,v:()=>Math.round(HE.cfg().floor*127)+'', a:d=>HE.set('floor',clamp(HE.cfg().floor+d*0.02,0,0.5))},
  /* Switching to auto starts learning from wherever the fixed range currently
@@ -10103,14 +10097,23 @@ const NOTEKEYS_PIANO={KeyA:0,KeyW:1,KeyS:2,KeyE:3,KeyD:4,KeyF:5,KeyT:6,KeyG:7,Ke
 const KBSEQ=['KeyZ','KeyX','KeyC','KeyV','KeyB','KeyN','KeyM',
              'KeyA','KeyS','KeyD','KeyF','KeyG','KeyH','KeyJ','KeyK','KeyL',
              'KeyQ','KeyW','KeyE','KeyR','KeyT','KeyY','KeyU','KeyI','KeyO','KeyP'];
+/* THE HOME ROW IS HOME. The full keyboard ran z=0, which put middle C on the
+   bottom row and every octave of real playing above it — your hands sit on
+   asdf, so that is where the reference belongs. a is 0 now and the z row is
+   the seven steps below it, which is what a keyboard player reaches for
+   without thinking. */
+const KBHOME=KBSEQ.indexOf('KeyA');
 function kbNote(code,chrom){
-  const i=KBSEQ.indexOf(code); if(i<0)return null;
+  const raw=KBSEQ.indexOf(code); if(raw<0)return null;
+  const i=raw-KBHOME;
   const sc=(!chrom&&CFG.scaleOn)?SCALES[CFG.scale][1]:null;
   if(!sc)return i;                                  // chromatic, one semitone a key
   /* a scale DEGREE a key — WITH the key offset. Without it the run was always
      C-shaped, and the snap downstream rounded two neighbouring degrees onto
      the same note of the actual key: s and d, one pitch. */
-  return Math.floor(i/sc.length)*12+sc[i%sc.length]+(CFG.key||0);
+  /* fmod, not %, now that the z row is NEGATIVE degrees: -1 has to mean the
+     last degree an octave down, and % would hand back a negative index */
+  return Math.floor(i/sc.length)*12+sc[fmod(i,sc.length)]+(CFG.key||0);
 }
 const kbFull=()=>(CFG.kbd??'full')!=='piano';
 /* what a key is worth right now, or null if it is not a note key at all */
@@ -10282,7 +10285,7 @@ const EXP={
    are on different scales, so each keeps ITS OWN range: sharing storage between
    two mechanisms is the bug this file has already been bitten by twice. */
 const HEDEF={rest:0.03,trig:0.15,look:1,gamma:0.5,soft:0.005,hard:0.130,floor:1/127,auto:0,
-             est:0,wait:4,wSoft:0.002,wHard:0.05,retrig:0};
+             est:0,wait:4,wSoft:0.002,wHard:0.05};
 /* Fastest slope a finger can actually produce, in travel/ms. Full key travel in
    2ms is already superhuman; anything above this is a measurement artifact. */
 const HE_MAX_SLOPE=0.5;
@@ -10296,13 +10299,13 @@ const HE_RANGE_VER=3;
    samples, topping out near half the slope. 0.130 is the FUN60 figure, measured
    on hardware; the Keychron entry is separate so tuning one cannot move the
    other. */
-const HE_HARD={1:0.250,2:0.090};
+const HE_HARD={1:0.250,2:0.130};   // 2 = measured on Gad's FUN60, 26 labelled hard hits (p88)
 /* The soft end matters as much: set it at 0 and the quietest real taps still
    land near a third of full velocity, because the curve has nowhere to put
    them. Both ends below are fitted from 37 labelled hits on a FUN60 — 19 soft,
    18 hard — using the same 12th/88th percentile rule the MIDI tool's wizard
    applies, so they are measurements rather than taste. */
-const HE_SOFT={1:0.005,2:0.012};
+const HE_SOFT={1:0.005,2:0.005};   // 2 = same pass, 29 soft hits (p12)
 /* A saved end outside these bounds cannot have come from playing — it is the
    residue of a bug, and version stamps are not enough to catch it: a stamp
    written by a build that failed to clear the value marks the bad value as
@@ -10407,17 +10410,32 @@ const HE={
      what came back. Filtering per-kind meant the arrow you pressed silently
      decided which keyboards were even offered: press the wrong one and a
      perfectly good keyboard just isn't in the chooser, with nothing to say why. */
-  async connect(){
+  /* IT ALREADY HAS PERMISSION. WebHID keeps a grant per origin, and
+     getDevices() hands back what was granted with no prompt and no gesture —
+     so a reload should not mean setting the keyboard up again. Runs at boot
+     when the last session ended connected, and quietly does nothing if the
+     board is unplugged. */
+  async reconnect(){
+    if(!navigator.hid||!(CFG.he&&CFG.he.autoOn))return false;
+    let devs=[]; try{devs=await navigator.hid.getDevices();}catch(_){return false;}
+    if(!devs.length)return false;
+    const VID=[0x3151,0x3434,0x362D,0x31E3,0x1532,0x19f5,0x352D,0x373b,0x372E];
+    if(!devs.some(d=>VID.includes(d.vendorId)))return false;
+    return this.connect(devs);
+  },
+  async connect(pre){
     if(!navigator.hid){flash('no WebHID here — use Chrome or Edge');return false;}
     const filters=[{vendorId:0x3151},                    // RongYuan: MonsGeek/Akko/Attack Shark
                    {vendorId:0x3434},{vendorId:0x362D},  // Keychron HE, Lemokey
                    {vendorId:0x31E3},{vendorId:0x1532},  // Wooting, Razer
                    {vendorId:0x19f5},{vendorId:0x352D},  // NuPhy, DrunkDeer
                    {vendorId:0x373b},{vendorId:0x372E}]; // Madlions, Bytech
-    let devs;
-    try{devs=await navigator.hid.requestDevice({filters});}
-    catch(err){flash('hid: '+(err&&err.message||err));return false;}
-    if(!devs||!devs.length){flash('no device chosen');return false;}
+    let devs=pre||null;
+    if(!devs){
+      try{devs=await navigator.hid.requestDevice({filters});}
+      catch(err){flash('hid: '+(err&&err.message||err));return false;}
+      if(!devs||!devs.length){flash('no device chosen');return false;}
+    }
 
     /* Gather every interface of the chosen board, including granted siblings the
        chooser did not hand back, then pick by COLLECTION rather than by array
@@ -10480,10 +10498,12 @@ const HE={
     this.on=true;
     if(kind===2)await this.ryEnable(); else this.kcProbe();
     this.watch=setInterval(()=>this.tick(),60);
-    flash('hid: '+this.srcName+(this.map?'':' — run `hid keys` to map the keys'));
+    this.set('autoOn',1);      // a reload should find the board already here
+    flash('hid: '+this.srcName+(this.map?'':' — run `h keys` to map the keys'));
     dirty=true; return true;
   },
   disconnect(){
+    this.set('autoOn',0);      // turned off on purpose: stay off through a reload
     this.on=false; clearInterval(this.watch); this.recent={};
     for(const id in this.keys)this.release(id);
     if(this.dev){try{this.dev.oninputreport=null;}catch(_){} try{this.dev.close();}catch(_){}}
@@ -10528,11 +10548,25 @@ const HE={
     for(const id in this.keys){
       const k=this.keys[id];
       if(!k||k.st!==2)continue;
+      /* THE HARD-HIT HANG. A slam bottoms the key out, and if the lift's
+         samples are missed the state sits at nine tenths of travel forever —
+         above the trigger, so the sweep below never touched it. The note hangs
+         and the letter stays owned, which is why j stopped working after one.
+         The corroborating witness is the BOARD'S OWN key-up: we ignore it for
+         note-off (rapid trigger fires one every time a finger eases back), but
+         if it arrives and then no analog movement follows, the finger really
+         has gone and the sensor simply missed it. */
+      if(k.osUp&&now-k.osUp>180&&now-(k.pt||0)>180){this.release(id); continue;}
       if(now-(k.pt||0)<900)continue;                  // just played, or held and silent on the wire
       if(k.pv>=C.trig)continue;                       // genuinely down: leave it alone
       this.release(id);
     }
   },
+  /* the board's own key-up, remembered rather than obeyed: it is not proof a
+     note ended (rapid trigger sends one on any upward move) but it IS the
+     witness the watchdog needs when the analog stream misses a lift */
+  osUp(code){for(const id in this.keys){const k=this.keys[id];
+    if(k&&k.st===2&&k.code===code)k.osUp=performance.now();}},
   /* everything up, everything forgotten — for blur and panic */
   reset(){for(const id in this.keys)this.release(id); this.keys={}; this.recent={};},
   report(e){
@@ -10673,6 +10707,7 @@ const HE={
       if(t-k.wT>=Math.max(0.5,C.wait||4)||v>0.985)this.winClose(id,v,t);
       k.pv=v; k.pt=t; return;
     }else if(k.st===2){                              // sounding
+      if(v>C.rest)k.osUp=0;      // it moved: the finger is still there, forget the key-up
       if(v<C.rest*0.8){this.release(id);}
       /* Re-attack. A key resting past the trigger — fingers parked, a high
          zero, a press that stopped short — sits here, and from there a
@@ -10684,19 +10719,11 @@ const HE={
          second note — which is the double-hit this was meant to avoid. A finger
          that has come to rest and then drives down is unambiguous; a single
          continuous downstroke never stops moving. */
-      /* …AND IT COSTS THE REST OF THE STROKE. Every push deeper after a pause
-         reads as a new attack, so the note ends the moment the press changes
-         direction — which is exactly the travel you want as PRESSURE. A key
-         cannot be both an aftertouch surface and a repeat trigger, so this is
-         a choice: `hid retrig` off (default) means a note ends only when the
-         finger comes all the way back off the key, and everything between the
-         trigger and the bottom is expression. */
-      else if(Math.round(C.retrig||0)===1
-              &&k.calm&&slope>=0.02&&v>k.fireV+0.08&&t-k.fireT>40){
-        this.release(id);
-        k.st=1; k.peak=Math.max(0,slope); k.top=v; k.wait=0;
-        this.fire(id,k,v,t);
-      }
+      /* NO RE-ATTACK, EVER. Pressing deeper after a pause used to replay the
+         note — useful on a gaming board, wrong on an instrument, because that
+         travel is the PRESSURE and a key cannot be an aftertouch surface and a
+         repeat trigger at once. A note ends when the finger leaves the key and
+         at no other moment; to play it again, lift and hit it again. */
       else{
         /* "calm" must be ELAPSED stillness, never one unchanged sample. The
            Keychron path re-steps all 96 keys every frame and the RongYuan one
@@ -10746,7 +10773,8 @@ const HE={
     const act9=slots[id];
     if(act9&&act9!=='off'){
       for(const kind of ['keydown','keyup'])
-        document.dispatchEvent(new KeyboardEvent(kind,{code:act9,key:act9,bubbles:true}));
+        document.dispatchEvent(new KeyboardEvent(kind,
+          Object.assign({code:act9,key:act9,bubbles:true},modsOf())));
       return;
     }
     if(!code)return;
@@ -12960,6 +12988,13 @@ let capsWas=false;
    - = used to do, so it lands under the same fingers. ⌥ ⌘ and tab forms keep
    what they meant (rack slots, pattern length), and the octave moves to ⌃, /
    ⌃. — the one thing that had to give way. */
+/* WHAT THE HANDS ARE HOLDING. A key we synthesise — from a sensor slot, from a
+   spare key — has no modifier state of its own, so ⇧ plus a sensor-bound arrow
+   arrived as a bare arrow: left and down moved between racks because they are
+   real keys, right did nothing because it is not. Snapshot the modifiers from
+   trusted events and dress the synthetic ones in them. */
+const MODS={shift:false,alt:false,ctrl:false,meta:false};
+const modsOf=()=>({shiftKey:MODS.shift,altKey:MODS.alt,ctrlKey:MODS.ctrl,metaKey:MODS.meta});
 const ARROWALIAS={Comma:'ArrowLeft',Period:'ArrowRight',Minus:'ArrowDown',Equal:'ArrowUp'};
 /* THE RIGHT CLUSTER, which is the better answer: the four keys under your right
    hand that this instrument never used become the arrow cluster, and , . - =
@@ -12991,7 +13026,8 @@ const actName=a=>a.replace('Arrow','').replace('Backquote','` scope').replace('S
 const SPARE=['off','oct −','oct +','play','rec','settings','dice'];
 const spareKey=(name)=>{
   const synth=code=>{for(const kind of ['keydown','keyup'])
-    document.dispatchEvent(new KeyboardEvent(kind,{code,key:code,bubbles:true}));};
+    document.dispatchEvent(new KeyboardEvent(kind,
+      Object.assign({code,key:code,bubbles:true},modsOf())));};
   if(name==='oct −'||name==='oct +'){
     S.oct=clamp(S.oct+(name==='oct +'?1:-1),-3,3); flash('oct '+S.oct); dirty=true; return;}
   if(name==='play'){T.playing?stop():play(); return;}
@@ -13014,6 +13050,7 @@ const arrowAlias=(e,kind)=>{
   return true;
 };
 const onKeyDown=e=>{
+  if(e.isTrusted){MODS.shift=e.shiftKey; MODS.alt=e.altKey; MODS.ctrl=e.ctrlKey; MODS.meta=e.metaKey;}
   syncCaps(e);
   filePerm();          // a keypress is the gesture the file handle needs
   if(arrowAlias(e,'keydown'))return;   // , . - = ARE the arrows on a board without any
@@ -14672,6 +14709,7 @@ const scopeHeldOn=c=>
   (HOLD.opt&&c===HOLD.opt.c&&!HOLD.optLatched)||
   (HOLD.ms&&c===HOLD.ms.c&&!HOLD.msLatched);
 const onKeyUp=e=>{
+  if(e.isTrusted){MODS.shift=e.shiftKey; MODS.alt=e.altKey; MODS.ctrl=e.ctrlKey; MODS.meta=e.metaKey;}
   const c=e.code;
   if(arrowAlias(e,'keyup'))return;      // the release half — arrow key-ups end automation writes
   if(c==='MetaLeft'||c==='MetaRight'){
@@ -14938,7 +14976,7 @@ const onKeyUp=e=>{
      the key crosses its actuation point on the way back up — and letting those
      through cut the note off mid-hold. A note the sensor is sounding ends when
      the sensor says the finger left, and only then. */
-  if(EXP.muted(c)&&!EXP.synth)return;
+  if(EXP.muted(c)&&!EXP.synth){HE.osUp(c); return;}
   endNote(c);
 };
 document.addEventListener('keyup',onKeyUp);
@@ -15395,6 +15433,9 @@ document.addEventListener('drop',e=>{
  }else setTimeout(()=>bakPush('opened',true),400);   // the ring starts full, not empty
 }
 libInit();
+/* the analog board, if this origin was already granted one — silent when there
+   is nothing plugged in, so it costs an unplugged session nothing */
+setTimeout(()=>{try{HE.reconnect();}catch(_){}},600);
 if(CFG.midiIn|0)EXP.connect(true);   // reconnect silently if midi in was left on
 
 /* ---------------- render --------------------------------------------- */
