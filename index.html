@@ -10112,7 +10112,9 @@ const EXP={
   muted(code){return this.solo()||HE.owns(code);},
   /* key-level entry points shared by hid and by in-range midi notes */
   keyDown(code,vel){
-    if(liveV[code]||S.layer<1)return false;
+    /* settings is a panel, not a mode — the analog board plays through it for
+       the same reason the laptop keyboard does */
+    if(liveV[code]||(S.layer<1&&S.layer!==-1))return false;
     this.pend=vel; this.synth=true;
     try{document.dispatchEvent(new KeyboardEvent('keydown',{code,key:code,bubbles:true}));}
     finally{this.synth=false; this.pend=null;}
@@ -10372,9 +10374,15 @@ const HE={
     if(this.dump>0){this.dump--; this.dumped.push([...d].slice(0,20).map(x=>x.toString(16).padStart(2,'0')).join(' '));
       if(!this.dump)console.log('HID dump:\n'+this.dumped.join('\n'));}
     const t=performance.now();
+    /* ARRIVING AT ALL is the first question hardware asks. A board that opened
+       but never speaks and one that streams beautifully into an unmapped slot
+       look identical from the desk, so count what comes in and remember the
+       last slot and depth — the readout answers it without a console. */
+    this.rx=(this.rx|0)+1;
     if(this.kind===2){                               // [0x1B, lo, hi, keyId]
       if(d[0]!==0x1B)return;
       const raw=d[1]|(d[2]<<8), id=d[3];
+      this.rxId=id; this.rxV=raw; this.rxAt=t;
       /* Seed the full-travel count and let it grow. 350 is right: a capture
          that actually bottomed keys out reports every value as an exact integer
          over 365, with full presses at 340-363, matching the published Attack
@@ -10405,6 +10413,8 @@ const HE={
     if(c>=4)return;                                  // surplus report: ignore, don't wrap
     for(let i=0;i<30;i++){
       const v=d[2+i]; if(v===undefined)break;
+      if(v>5&&(this.rxV===undefined||v>this.rxV||t-(this.rxAt||0)>250)){
+        this.rxId=c*30+i; this.rxV=v; this.rxAt=t;}
       this.sample(c*30+i,Math.max(0,v-5)/230,t);     // 5/235 is the library's dead zone
     }
     this.chunk=c+1;
@@ -16939,6 +16949,14 @@ function settingsRack(L){
    if(HE.on)L.push('   '+sp('a','   '+HE.srcName)+sp('d','  frames ')+sp(HE.fps<125?'r':'a',HE.fps+'Hz')+
      sp('d','  last vel ')+sp('a',String(Math.round(HE.lastVel*127)))+
      sp('d','  slope '+C.soft.toFixed(3)+'…'+C.hard.toFixed(3)+(C.auto?' (auto)':'')));
+   /* CONNECTED IS NOT STREAMING. A board that opened and never spoke reads the
+      same as a board playing into a slot nothing is mapped to, so say which:
+      reports in, the last slot that moved, and whether that slot has a key. */
+   if(HE.on)L.push('   '+sp('d','   '+['?','keychron','rongyuan'][HE.kind]+'  reports ')+
+     sp(HE.rx?'a':'r',String(HE.rx||0))+
+     (HE.rxId===undefined?sp('r','  — nothing analog yet: press a key')
+       :sp('d','  slot ')+sp('a',String(HE.rxId))+sp('d',' depth '+HE.rxV)+
+        sp((HE.map&&HE.map[HE.rxId])?'a':'r','  '+((HE.map&&HE.map[HE.rxId])||'UNMAPPED'))));
    if(HE.learn)L.push('   '+sp('ri',' LEARN ')+sp('a',' press '+HE.learn.order[HE.learn.i]+' on the keyboard')+
      sp('d','   esc cancels'));}
 }
