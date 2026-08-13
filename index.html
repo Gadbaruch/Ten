@@ -7395,6 +7395,14 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
       live:Math.round(gr.live??0), frz:Math.round(gr.frz??0),
       fb:clamp(gr.fb??0,0,0.95), pmode:Math.round(gr.pmode??0)}});
   }
+  /* ONE CLIP PER CHANNEL: the tape and the cloud chew the same take. Every
+     picker and drop goes through here so neither face is ever left behind. */
+  setChanBuf(pi,buf,name){
+    this.audBuf[pi]=buf; this.audName[pi]=name;
+    this.granBuf=this.granBuf||[]; this.granBuf[pi]=buf;
+    this.granName=this.granName||[]; this.granName[pi]=name;
+    if(this.gn&&this.gn[pi]&&this.gn[pi].node)this.granSend(pi);
+  }
   granLiveWire(pi){
     /* the mic straight into the cloud's input — only wired when asked for,
        only possible while the ⌃ stream exists */
@@ -9372,9 +9380,7 @@ const GRANF=[
    get:()=>{const i=POOL.findIndex(p2=>p2.buf===(engine.granBuf||[])[S.editSnd]); return i<0?0:i;},
    set:(o,v)=>{const pi=S.editSnd, e2=POOL[clamp(Math.round(v),0,Math.max(0,POOL.length-1))];
      if(!e2){flash('pool is empty — record (\u2303+tab) or drop audio first');return;}
-     engine.granBuf=engine.granBuf||[]; engine.granBuf[pi]=e2.buf;
-     engine.granName=engine.granName||[]; engine.granName[pi]=e2.name;
-     engine.granNode(pi); engine.granSend(pi);}}),
+     engine.granNode(pi); engine.setChanBuf(pi,e2.buf,e2.name);}}),
 ];
 function granAction(d,m){
   const pre=S.presets[S.editSnd], spec=GRANF[clamp(S.curParam,0,GRANF.length-1)];
@@ -9404,7 +9410,7 @@ const AUDF=[
    get:()=>{const i=POOL.findIndex(p2=>p2.buf===engine.audBuf[S.editSnd]); return i<0?0:i;},
    set:(o,v)=>{const pi=S.editSnd, e2=POOL[clamp(Math.round(v),0,Math.max(0,POOL.length-1))];
      if(!e2){flash('pool is empty — record (\u2303+tab) or drop audio first');return;}
-     engine.audBuf[pi]=e2.buf; engine.audName[pi]=e2.name;}}),
+     engine.setChanBuf(pi,e2.buf,e2.name);}}),
 ];
 
 const CODEF=()=>Array.from({length:8},(_,i)=>{
@@ -14865,17 +14871,17 @@ document.addEventListener('drop',e=>{
         /* ⌥-drop: the sample feeds the GRANULAR engine instead of the tape */
         const pi=S.layer>=2?S.editSnd:S.curPreset;
         pushUndo('granular drop');
-        engine.granBuf=engine.granBuf||[]; engine.granBuf[pi]=buf;
-        engine.granName=engine.granName||[]; engine.granName[pi]=f.name.slice(0,18);
-        S.presets[pi].cat='gran';
+        setEngine(pi,'gran');
         S.presets[pi].gr=S.presets[pi].gr||{};
-        engine.granSend(pi); engine.granCfg(pi);
+        engine.granNode(pi);
+        engine.setChanBuf(pi,buf,f.name.slice(0,18));
+        engine.granCfg(pi);
         flash('granular → channel '+pi+' · '+f.name.slice(0,20)+' — letters play the cloud');
       }else{
         const pi=S.layer>=2?S.editSnd:S.curPreset;
         pushUndo('audio drop');
-        engine.audBuf[pi]=buf; engine.audName[pi]=f.name.slice(0,18);
         S.presets[pi].cat='audio';
+        engine.setChanBuf(pi,buf,f.name.slice(0,18));
         flash('audio → channel '+pi+' · '+f.name.slice(0,20)+' ('+buf.duration.toFixed(1)+'s)');
       }
       dirty=true; dirtySave=true;
