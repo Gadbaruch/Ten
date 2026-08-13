@@ -1065,6 +1065,13 @@ const SETTINGS=[
               a:()=>{CFG.hidArrows=CFG.hidArrows?0:1; saveCfg();
                      flash(CFG.hidArrows?', . = ←→ · - = = ↓↑ · ⇧ as always · octave moves to ⌃, ⌃.'
                                         :'arrows are the arrow keys · , . octave · - = volume');}},
+ /* the bottom-row keys a 60% board has and this instrument never used */
+ {n:'win key',g:'Input', v:()=>SPARE[CFG.kWin|0],
+              a:d=>{CFG.kWin=fmod((CFG.kWin|0)+d,SPARE.length); saveCfg();
+                    flash('win tap → '+SPARE[CFG.kWin|0]+' · held it is still ⌘');}},
+ {n:'menu key',g:'Input',v:()=>SPARE[CFG.kMenu|0],
+              a:d=>{CFG.kMenu=fmod((CFG.kMenu|0)+d,SPARE.length); saveCfg();
+                    flash('menu → '+SPARE[CFG.kMenu|0]);}},
  {n:'hid vel',g:'Input', v:()=>Math.round(HE.cfg().est||0)===1?'window':'peak',
               a:()=>{const e2=Math.round(HE.cfg().est||0)===1?0:1; HE.set('est',e2);
                      flash(e2?'window — velocity is how deep it got in '+HE.cfg().wait+'ms'
@@ -12807,6 +12814,23 @@ let capsWas=false;
    what they meant (rack slots, pattern length), and the octave moves to ⌃, /
    ⌃. — the one thing that had to give way. */
 const ARROWALIAS={Comma:'ArrowLeft',Period:'ArrowRight',Minus:'ArrowDown',Equal:'ArrowUp'};
+/* THE SPARE KEYS. A 60% board's bottom row carries win and menu, which do
+   nothing for this instrument and something unwanted for the OS. A page can
+   only take a key while it is focused — which is the right scope — and both of
+   these arrive untouched, unlike ⌘Tab and ⌘Space, which macOS eats first.
+   win is claimed on the TAP only: held, it is still the ⌘ that saves a set. */
+const SPARE=['off','oct −','oct +','play','rec','settings','dice'];
+const spareKey=(name)=>{
+  const synth=code=>{for(const kind of ['keydown','keyup'])
+    document.dispatchEvent(new KeyboardEvent(kind,{code,key:code,bubbles:true}));};
+  if(name==='oct −'||name==='oct +'){
+    S.oct=clamp(S.oct+(name==='oct +'?1:-1),-3,3); flash('oct '+S.oct); dirty=true; return;}
+  if(name==='play'){T.playing?stop():play(); return;}
+  if(name==='rec')return synth('Tab');
+  if(name==='settings')return synth('Escape');
+  if(name==='dice')return synth('Backslash');
+};
+const MK={win:false,winUsed:false};
 const arrowAlias=(e,kind)=>{
   const a=ARROWALIAS[e.code];
   if(!CFG.hidArrows||!a||e.metaKey||altOf(e)||e.ctrlKey||HOLD.tab)return false;
@@ -12819,6 +12843,14 @@ const onKeyDown=e=>{
   syncCaps(e);
   filePerm();          // a keypress is the gesture the file handle needs
   if(arrowAlias(e,'keydown'))return;   // , . - = ARE the arrows on a board without any
+  /* the menu key is unambiguous — nothing else uses it, so it acts on the press */
+  if(e.code==='ContextMenu'&&!e.repeat&&SPARE[CFG.kMenu|0]!=='off'){
+    e.preventDefault(); spareKey(SPARE[CFG.kMenu|0]); return;}
+  /* win/⌘ is a TAP, decided at release: held it is still the modifier that
+     saves a set, and a chord with anything marks it used */
+  if(e.code==='MetaLeft'||e.code==='MetaRight'){
+    if(!e.repeat){MK.win=true; MK.winUsed=false;}
+  }else if(MK.win)MK.winUsed=true;
   /* BARE CONTROL (or a board's fn) IS THE MIC. Down opens it; a ctrl+letter
      chord marks the hold as modifier use so the mic closes on release instead
      of latching; left-shift at the press latches (decided at release). */
@@ -14461,6 +14493,10 @@ const scopeHeldOn=c=>
 const onKeyUp=e=>{
   const c=e.code;
   if(arrowAlias(e,'keyup'))return;      // the release half — arrow key-ups end automation writes
+  if(c==='MetaLeft'||c==='MetaRight'){
+    const used=MK.winUsed; MK.win=false; MK.winUsed=false;
+    if(!used&&SPARE[CFG.kWin|0]!=='off'){e.preventDefault(); spareKey(SPARE[CFG.kWin|0]); return;}
+  }
   /* the release half of the same rule: the panel owns only the keys it
      navigates with, and every other key-up is the desk's */
   if(S.layer===-1&&!(c==='Escape'||c==='Enter'||c==='Slash'||c.startsWith('Arrow'))){
