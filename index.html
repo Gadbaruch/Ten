@@ -1012,7 +1012,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-13.2027';
+const BUILD='2026-08-13.2038';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -10549,6 +10549,8 @@ const HE={
   tick(){                                            // watchdog: the board went quiet
     if(!this.on)return;
     if(this.kind===1&&this.ready&&performance.now()-(this._reqAt||0)>60)this.kcRequest();
+    /* a streaming board's silence is a note-off, so this loop is now part of
+       playing rather than housekeeping */
     /* AND THE OTHER QUIET: a key stuck sounding. Release needs a sample below
        the rest line, and this board only reports while a key MOVES — so a lift
        whose final sample lands just above that line never gets another report
@@ -10575,7 +10577,11 @@ const HE={
          nobody has touched is not a performance, and a note held for ever is
          worse than a drone cut after twenty seconds. */
       if(k.pv>=C.trig){
-        if(now-(k.pt||0)>20000)this.release(id);
+        /* on a streaming board, quiet IS the lift — 90ms is thirty report
+           intervals at the rate this one runs, so it cannot be mistaken for a
+           gap in play. On a change-only board we are back to the ceiling. */
+        if(this.streams&&now-(k.pt||0)>90)this.release(id);
+        else if(now-(k.pt||0)>20000)this.release(id);
         continue;
       }
       this.release(id);
@@ -10684,7 +10690,20 @@ const HE={
   sample(id,v,t){
     const C=this.cfg();
     let k=this.keys[id];
-    if(!k)k=this.keys[id]={st:0,pv:0,pt:t,peak:0,top:0,code:null,fireV:0,fireT:0};
+    if(!k)k=this.keys[id]={st:0,pv:0,pt:t,peak:0,top:0,code:null,fireV:0,fireT:0,zero:v};
+    /* EVERY KEY HAS ITS OWN ZERO, and this is the whole hanging-note story.
+       Magnet gaps differ across a board: Gad's stuck key RESTED at 0.044 while
+       the code called anything under 0.03 "at rest", so that key could never
+       come home. Its note was never released, its letter stayed owned, and it
+       looked random because it depended on which key you hit. Learn the floor
+       from what each key actually reports and measure everything from there.
+       Falls to a new floor fast (a lower reading is always a truer zero) and
+       creeps up only while resting, so a slow drift is followed and a held key
+       can never drag its own zero along behind it. */
+    if(k.zero===undefined)k.zero=v;
+    if(v<k.zero)k.zero+=(v-k.zero)*0.5;
+    else if(k.st===0&&v-k.zero<0.02)k.zero+=Math.min(0.0004,(v-k.zero)*0.02);
+    v=Math.max(0,v-k.zero);
     /* Clamp dt to a sane window around the measured frame period. Two reports
        delivered back to back after a stalled event loop would otherwise read as
        an enormous slope and fire a pianissimo note at 127. */
@@ -10755,6 +10774,14 @@ const HE={
       if(t-k.wT>=Math.max(0.5,C.wait||4)||v>0.985)this.winClose(id,v,t);
       k.pv=v; k.pt=t; return;
     }else if(k.st===2){                              // sounding
+      /* DOES THIS BOARD STREAM, OR ONLY REPORT CHANGES? Everything here has
+         assumed the second — reports come per unit of travel, so a still
+         finger is silent and silence proves nothing. If a board ALSO reports a
+         key that is not moving, then silence about a sounding key means the
+         finger is gone, and the lift needs no lucky final sample. Boards
+         differ, so let the board answer: a report with no movement is the
+         proof, and one is enough. */
+      if(Math.abs(v-k.pv)<0.002)this.streams=1;
       if(v>C.rest)k.osUp=0;      // it moved: the finger is still there, forget the key-up
       if(v<C.rest*0.8){this.release(id);}
       /* Re-attack. A key resting past the trigger — fingers parked, a high
@@ -15187,7 +15214,8 @@ function stuckReport(){
           let d='';
           for(const id in HE.keys){const k9=HE.keys[id];
             if(k9&&k9.st===2&&k9.code===c){
-              d=' pv'+(+k9.pv).toFixed(3)+' quiet'+((performance.now()-(k9.pt||0))/1000).toFixed(1)+'s'
+              d=' pv'+(+k9.pv).toFixed(3)+' zero'+(+(k9.zero||0)).toFixed(3)
+                +' quiet'+((performance.now()-(k9.pt||0))/1000).toFixed(1)+'s'
                 +(k9.osUp?' osUp':'');
               break;}}
           why=' sensor('+c+')'+d;
@@ -17589,7 +17617,8 @@ function settingsRack(L){
    /* CONNECTED IS NOT STREAMING. A board that opened and never spoke reads the
       same as a board playing into a slot nothing is mapped to, so say which:
       reports in, the last slot that moved, and whether that slot has a key. */
-   if(HE.on)L.push('   '+sp('d','   '+['?','keychron','rongyuan'][HE.kind]+'  reports ')+
+   if(HE.on)L.push('   '+sp('d','   '+['?','keychron','rongyuan'][HE.kind]
+     +(HE.streams?' streaming':' on-change')+'  reports ')+
      sp(HE.rx?'a':'r',String(HE.rx||0))+
      (HE.rxId===undefined?sp('r','  — nothing analog yet: press a key')
        :sp('d','  slot ')+sp('a',String(HE.rxId))+sp('d',' depth '+HE.rxV)+
