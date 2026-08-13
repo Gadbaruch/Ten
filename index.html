@@ -242,12 +242,10 @@ const cycleState=h=>{h.state=h.state==='on'?'rec':h.state==='rec'?'edit':'on';};
    cymbal, brown for a floor tom or wind, blue for hats and metal, dust for
    crackle and vinyl. Appended at the end so every stored preset keeps its
    index. Anything past 'smp' is a buffer, and isNoiseW() is the one test. */
-const WAVES=['sin','tri','saw','sqr','nse','org','bel','vox','mtl','smp','pink','brwn','blue','dust','wt','grn'];
-/* 'grn' (15): the op hands its note to the CHANNEL'S granular engine — one
-   cloud per channel (agreed singleton), the op's level is the note's velocity
-   into it. It sums to the bus, not through the voice's FM graph: a shared
-   node cannot be a per-voice carrier, and pretending otherwise would be a
-   silent lie. It CAN be scanned/ring-modded by tapping the bus later. */
+const WAVES=['sin','tri','saw','sqr','nse','org','bel','vox','mtl','smp','pink','brwn','blue','dust','wt'];
+/* the granular CLOUD is not an op wave: it lives on the audio channel as its
+   gran mode. The synth keeps the plain sampler (smp), which crops and loops
+   per slot — the clip op. A legacy op saved as wave 15 falls back to sine. */
 /* THE WAVETABLE BANK — ten starter tables as harmonic recipes, from tame to
    feral. Auditioned by ear before more are added; an editor comes later, and
    when it does it will be harmonic sliders, not freehand drawing. */
@@ -1126,15 +1124,6 @@ const OSC_P=sl=>[
   SP('dest','dst','enum',{opts:DEST}),
   SP('level','amt','lin',{min:0,max:1,step:0.05}),
   ...(Math.round((sl&&sl.wav)||0)===14?WTF:[]),
-  /* a grn op feeds the CHANNEL'S cloud — pick its take right on the slot */
-  ...(Math.round((sl&&sl.wav)||0)===15?[SP('smpl','_pool','lin',{min:0,max:31,step:1,w:2,
-     fmt:v=>POOL[Math.round(v)]?POOL[Math.round(v)].name:'—',
-     get:()=>{const i=POOL.findIndex(p2=>p2.buf===(engine.granBuf||[])[S.editSnd]); return i<0?0:i;},
-     set:(o,v)=>{const e2=POOL[clamp(Math.round(v),0,Math.max(0,POOL.length-1))];
-       if(!e2){flash('pool is empty — record (⌃+tab) or drop audio first');return;}
-       engine.granBuf=engine.granBuf||[]; engine.granBuf[S.editSnd]=e2.buf;
-       engine.granName=engine.granName||[]; engine.granName[S.editSnd]=e2.name;
-       engine.granNode(S.editSnd); engine.granSend(S.editSnd); engine.granCfg(S.editSnd);}})]:[]),
   /* a smp op picks its buffer from the POOL — drop still works, the pool is
      how one take feeds many mouths */
   ...(Math.round((sl&&sl.wav)||0)===9?[SP('smpl','_pool','lin',{min:0,max:31,step:1,w:2,
@@ -4313,14 +4302,6 @@ class Voice{
         rootWt={a:src,b:oB,ga:gA,gb:gB,cur:'a'};
         pitchParam=src.frequency;
       }
-      else if(!isN&&rootW===15){
-        src=ac.createGain(); src.start=()=>{}; src.stop=()=>{};
-        pitchParam=null;                   // the cloud owns pitch; nothing here to bend
-        if(u===0){
-          const shg=E.granNote(at,pi,midi,clamp(vel*clamp(ops[0].amt,0,1),0,1),null);
-          if(shg)(this._grnShims=this._grnShims||[]).push(shg);
-        }
-      }
       else if(!isN){src=ac.createOscillator();
         E.setWave(src,rootW,ops[0].phm===1?Math.random()*360:ops[0].ph,ops[0].pw);
         pitchParam=src.frequency;}
@@ -4432,22 +4413,12 @@ class Voice{
           s2.start=t=>{try{oA.start(t);}catch(_){} try{oB.start(t);}catch(_){}};
           s2.stop=t=>{try{oA.stop(t);}catch(_){} try{oB.stop(t);}catch(_){}};
         }
-        else if(wv===15){
-          /* GRANULAR OP: the note goes to the channel's cloud (one engine per
-             channel by design); the slot's level is the velocity into it. A
-             silent gain stands in the graph — the cloud sums at the bus. */
-          s2=ac.createGain(); s2.start=()=>{}; s2.stop=()=>{};
-          if(u===0){
-            const shg=E.granNote(at,pi,midi,clamp(vel*clamp(op.amt,0,1),0,1),null);
-            if(shg)(this._grnShims=this._grnShims||[]).push(shg);
-          }
-        }
         else{s2=ac.createOscillator();
           E.setWave(s2,wv,op.phm===1?Math.random()*360:op.ph,op.pw);
           setF(s2.frequency,fi);}
-        built.push({i,s:s2,osc:!isNoiseW(wv)&&wv!==9&&!scanned&&wv!==15,f:fi,op,scan:scanned});
+        built.push({i,s:s2,osc:!isNoiseW(wv)&&wv!==9&&!scanned,f:fi,op,scan:scanned});
         (this.opNodes[i]=this.opNodes[i]||[]).push(s2);
-        if(!isNoiseW(wv)&&wv!==9&&wv!==14&&wv!==15){
+        if(!isNoiseW(wv)&&wv!==9&&wv!==14){
           (this.opPitch[i]=this.opPitch[i]||[]).push({pm:s2.frequency,base:fi,kind:sync?'sync':'osc'});
           (this.opDet[i]=this.opDet[i]||[]).push({pm:s2.detune,sc:200});
         }
@@ -14709,19 +14680,9 @@ document.addEventListener('drop',e=>{
     f.arrayBuffer().then(ab=>AC.decodeAudioData(ab)).then(buf=>{
       poolAdd(buf,f.name.replace(/\.[^.]+$/,''));
       if(S.layer>=3&&MODULES[S.curMod]&&MODULES[S.curMod].id==='osc'&&!isAudioCh(S.editSnd)){
-        const opD=S.presets[S.editSnd].osc[S.curSlot];
-        if(Math.round(opD.wav)===15){
-          /* the focused op is a grn: the drop feeds the channel's CLOUD and
-             the channel stays a synth */
-          engine.granBuf=engine.granBuf||[]; engine.granBuf[S.editSnd]=buf;
-          engine.granName=engine.granName||[]; engine.granName[S.editSnd]=f.name.slice(0,18);
-          engine.granNode(S.editSnd); engine.granSend(S.editSnd); engine.granCfg(S.editSnd);
-          flash('sample → the cloud (op '+((S.curSlot+1)%10)+' grn) · '+f.name.slice(0,20));
-        }else{
-          engine.opSamples.set(S.editSnd+':'+S.curSlot,buf);
-          opD.wav=WAVES.indexOf('smp');
-          flash('sample → op '+((S.curSlot+1)%10)+' · '+f.name.slice(0,20));
-        }
+        engine.opSamples.set(S.editSnd+':'+S.curSlot,buf);
+        S.presets[S.editSnd].osc[S.curSlot].wav=WAVES.indexOf('smp');
+        flash('sample → op '+((S.curSlot+1)%10)+' · '+f.name.slice(0,20));
       }else if(dropAlt||isGranCh(S.layer>=2?S.editSnd:S.curPreset)){
         /* ⌥-drop: the sample feeds the GRANULAR engine instead of the tape */
         const pi=S.layer>=2?S.editSnd:S.curPreset;
