@@ -492,6 +492,27 @@ const CHEXT=[['—',[]],['7',[10]],['M7',[11]],['9',[10,14]],['11',[10,14,17]],[
    (rotate tones through the octave), spread (open the voicing by lifting
    alternate tones), and a bass root underneath. One chord definition, played
    from any key. */
+/* THE PER-KEY CHORD MAP (the ChordMaster idea): with map on, every PITCH
+   CLASS holds its own chord definition — play a key to select it, edit the
+   voicing params, replay to hear it. Keys you never touched fall back to the
+   LAYOUT: 'key' builds the diatonic triad of the played degree from the
+   global scale; 'free' plays the slot's own chord. rt shifts a key's root. */
+function chordShapeFor(sl,midi){
+  if(Math.round(sl.map||0)!==1)return {iv:chordShape(sl),rt:0};
+  const pc=pcOf(midi);
+  const d=(sl.cmap||{})[pc];
+  if(d&&(d.p1!==undefined||d.p4!==undefined||d.p5!==undefined||d.p7!==undefined||d.p8!==undefined||d.rt!==undefined))
+    return {iv:chordShape({p1:d.p1??sl.p1??2,p4:d.p4??sl.p4??0,p5:d.p5??sl.p5??0,
+      p7:d.p7??sl.p7??0,p8:d.p8??sl.p8??0}),rt:Math.round(d.rt||0)};
+  if(Math.round(sl.lay||0)===1&&CFG.scaleOn){
+    const sc=SCALES[CFG.scale][1], rel=((pc-(CFG.key||0))%12+12)%12, ix=sc.indexOf(rel);
+    if(ix>=0){
+      const st=n=>sc[(ix+n)%sc.length]+12*Math.floor((ix+n)/sc.length)-sc[ix];
+      return {iv:[0,st(2),st(4)],rt:0};
+    }
+  }
+  return {iv:chordShape(sl),rt:0};
+}
 function chordShape(sl){
   const base=CHORDS[clamp(Math.round(sl.p1),0,CHORDS.length-1)][1].slice();
   const ext=CHEXT[clamp(Math.round(sl.p4||0),0,CHEXT.length-1)][1];
@@ -1480,15 +1501,36 @@ const PLY_SCOPE=[SP('stage','p6','enum',{opts:['post','pre']})];   // pre = the 
 const PLY_P=sl=>{
   const base=[SP('type','typ','enum',{opts:PTYPES})];
   const T=(...a)=>base.concat(a,PLY_SCOPE);
-  if(sl.typ===1)return T(
-    SP('chord','p1','enum',{opts:CHORDS.map(c=>c[0])}),
-    SP('ext','p4','enum',{opts:CHEXT.map(c=>c[0])}),
-    SP('inv','p5','lin',{min:-3,max:3,step:1,fmt:v=>v?(v>0?'+':'')+Math.round(v):'—'}),
-    SP('sprd','p7','lin',{min:0,max:2,step:1,fmt:v=>['tight','open','wide'][clamp(Math.round(v),0,2)]}),
-    SP('bass','p8','enum',{opts:['off','on']}),
+  if(sl.typ===1){
+    const mapOn=Math.round(sl.map||0)===1;
+    /* with the MAP on, the voicing params read and write the FOCUSED key's
+       own definition — play a key (or dial the key field) to pick it */
+    const mget=(k,dflt)=>o=>{const m=(o.cmap||{})[o._foc??0]||{};
+      return m[k]??(o[k]??dflt);};
+    const mset=k=>(o,v)=>{o.cmap=o.cmap||{};const f=o._foc??0;
+      (o.cmap[f]=o.cmap[f]||{})[k]=v;};
+    const V=(lbl,key,type,opts,dflt)=>SP(lbl,key,type,
+      mapOn?{...opts,get:mget(key,dflt),set:mset(key)}:opts);
+    return T(
+    SP('map','map','enum',{opts:['off','on'],
+      get:o=>Math.round(o.map||0),set:(o,v)=>o.map=Math.round(v)}),
+    ...(mapOn?[
+      SP('lay','lay','enum',{opts:['free','key'],
+        get:o=>Math.round(o.lay||0),set:(o,v)=>o.lay=Math.round(v)}),
+      SP('key','_foc','lin',{min:0,max:11,step:1,
+        get:o=>o._foc??0,set:(o,v)=>o._foc=((Math.round(v)%12)+12)%12,
+        fmt:v=>NN[((Math.round(v)%12)+12)%12]}),
+      V('root','rt','lin',{min:-12,max:12,step:1,
+        fmt:v=>v?(v>0?'+':'')+Math.round(v):'—'},0)]:[]),
+    V('chord','p1','enum',{opts:CHORDS.map(c=>c[0])},2),
+    V('ext','p4','enum',{opts:CHEXT.map(c=>c[0])},0),
+    V('inv','p5','lin',{min:-3,max:3,step:1,fmt:v=>v?(v>0?'+':'')+Math.round(v):'—'},0),
+    V('sprd','p7','lin',{min:0,max:2,step:1,fmt:v=>['tight','open','wide'][clamp(Math.round(v),0,2)]},0),
+    V('bass','p8','enum',{opts:['off','on']},0),
     SP('strum','p2','lin',{min:-0.06,max:0.06,step:0.005,fmt:v=>Math.round(v*1000)+'ms'}),
     SP('role','p3','enum',{opts:['local','global'],
       get:o=>o.p3===undefined?1:o.p3, set:(o,v)=>{o.p3=v;}}));
+  }
   /* LENGTH. Every other play effect changes WHICH notes happen or WHEN; this
      one changes how long each one is held, which is the difference between a
      stab and a pad on the same part. Scale first so it stays musical across
@@ -6994,9 +7036,9 @@ class Engine{
       const sl=p.ply[i2];
       if(sl.typ===1&&!sl.off&&(arpIdx<0||i2<arpIdx)){
         if(Math.round(sl.p6||0)===1&&durSec!=null)continue;   // already in the lane
-        const ch=chordShape(sl);
-        midis=midis.flatMap(m=>ch.map(o=>m+o));
-        pads=pads.flatMap(m=>ch.map(o=>m+o)); strum=sl.p2||0;   // a chord on a kit still spans pads
+        midis=midis.flatMap(m=>{const q=chordShapeFor(sl,m);return q.iv.map(o=>m+q.rt+o);});
+        pads=pads.flatMap(m=>{const q=chordShapeFor(sl,m);return q.iv.map(o=>m+q.rt+o);});
+        strum=sl.p2||0;   // a chord on a kit still spans pads
         if(Math.round(sl.p6||0)===1)chordPre=true;   // stage=pre: record the chord, not the root
       }
     }
@@ -7225,8 +7267,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
         for(const pick of picks){
         let hits=[pick.midi];          // chord slots placed AFTER the arp chord every step
         for(const cs of postChords){
-          const ch=chordShape(cs);
-          hits=hits.flatMap(m=>ch.map(o=>m+o));
+          hits=hits.flatMap(m=>{const q=chordShapeFor(cs,m);return q.iv.map(o=>m+q.rt+o);});
         }
         const rpA=rack.find(sl=>sl.typ===13&&!sl.off);
         for(const m of hits){
@@ -7477,6 +7518,18 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
   }
 }
 const engine=new Engine();
+/* FACTORY SAMPLES: anything listed in samples/manifest.json joins the pool at
+   boot — the shelf tools/gen_samples.py fills with Stable Audio. Absent
+   manifest = silence; this app must boot from a bare file:// clone too. */
+fetch('samples/manifest.json').then(r=>r.ok?r.json():null).then(man=>{
+  if(!Array.isArray(man))return;
+  for(const en of man.slice(0,24)){
+    fetch('samples/'+en.file).then(r=>r.ok?r.arrayBuffer():null)
+      .then(ab=>ab&&AC.decodeAudioData(ab))
+      .then(buf=>{if(buf)poolAdd(buf,en.name||en.file.replace(/\.\w+$/,''));})
+      .catch(()=>{});
+  }
+}).catch(()=>{});
 setInterval(()=>{
   const pi=S.layer>=2?S.editSnd:S.curPreset;
   if(!isGranCh(pi))return;
@@ -13872,6 +13925,12 @@ const onKeyDown=e=>{
     const pi=S.layer>=2?S.editSnd:S.curPreset;
     const midi=60+S.oct*12+noteOf(c,pi);
     const hitVel=EXP.take();          // MIDI velocity if this key came from EXP, else the c/v value
+    /* CHORD MAP EDITING: while a map-on chord slot is under the cursor, the
+       key you play is the key you edit — replay it to hear the change */
+    if(S.layer>=2&&MODULES[S.curMod]&&MODULES[S.curMod].id==='ply'){
+      const slC=modHolder(S.presets[pi],'ply').ply[S.curSlot];
+      if(slC&&slC.typ===1&&Math.round(slC.map||0)===1){slC._foc=pcOf(midi);dirty=true;}
+    }
     if(isAudioCh(pi)&&!isGranCh(pi)){
       /* THE KEYBOARD IS A SET OF JUMP POINTS. The clip divides into 16ths of
          the loop — one bar is sixteen slices, two bars thirty-two — and the
