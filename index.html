@@ -3321,6 +3321,10 @@ let fxwReady=false;
       this.pW=Math.round(sampleRate*0.05);   // pitch-mode tap window, 50ms
       this.cur=null;                       // slewed copy — no parameter ever jumps
       this.vs=new Map(); this.grains=[]; this.scanPh=0; this.stat=0;
+      /* TAPE VOICES: the cursor made literal — a continuous read head with a
+         start frame, a rate and a bounded life. Stage one of the one-cursor
+         engine: the clean tape is just a voice whose grain never ends. */
+      this.tv=new Map();
       this.norm=1; this.tick=0;
       this.hann=new Float32Array(1024);
       for(let i=0;i<1024;i++)this.hann[i]=0.5-0.5*Math.cos(2*Math.PI*i/1023);
@@ -3360,7 +3364,11 @@ let fxwReady=false;
         else if(m.t==='off'){const v=this.vs.get(m.id); if(v)v.rel=1;}
         else if(m.t==='rat'){const v=this.vs.get(m.id);
           if(v&&Number.isFinite(m.ratio))v.ratio=Math.min(64,Math.max(1/64,m.ratio));}
-        else if(m.t==='panic'){this.vs.clear(); this.grains.length=0;}
+        else if(m.t==='tape'){if(this.tv.size<12)this.tv.set(m.id,{fr:m.frame,c:m.pos,
+          rate:m.rate,end:m.end,gain:m.gain??1,life:m.durF||1e12,n:0,env:0,rel:0});}
+        else if(m.t==='toff'){const v=this.tv.get(m.id); if(v)v.rel=1;}
+        else if(m.t==='tclr'){for(const [id,v] of this.tv)v.rel=1;}
+        else if(m.t==='panic'){this.vs.clear(); this.grains.length=0; this.tv.clear();}
         else if(m.t==='ping'){const L9=(this.p.live>0.5?this.ring.length:this.len)||1;
           this.port.postMessage({t:'stat',g:this.grains.length,v:this.vs.size,spawned:this.stat,
             pos:this.grains.slice(0,24).map(g9=>Math.max(0,Math.min(1,g9.ph/L9)))});}};
@@ -3412,8 +3420,27 @@ let fxwReady=false;
         }
       }
       const len=live?this.ring.length:this.len;
-      if(!len||!this.vs.size&&!this.grains.length){this.tick+=N; return true;}
+      if(!len||!this.vs.size&&!this.grains.length&&!this.tv.size){this.tick+=N; return true;}
       const SL=live?this.ring:this.L, SR=live?this.ring:this.R;
+      if(this.tv.size&&this.len){
+        /* tape reads the BUFFER always — the live ring belongs to the cloud */
+        const TL=this.L, TR=this.R, f0=currentFrame;
+        const aT=1/(sampleRate*0.005), rT=1/(sampleRate*0.004);
+        for(const [id,v] of this.tv){
+          for(let k=0;k<N;k++){
+            const fr=f0+k;
+            if(fr<v.fr)continue;
+            v.env+= (v.rel||v.n>=v.life)? -rT : aT;
+            if(v.env>1)v.env=1;
+            if(v.env<=0&&(v.rel||v.n>=v.life)){this.tv.delete(id);break;}
+            if(v.c>=v.end-1){v.rel=1;continue;}
+            const i0=v.c|0, fx=v.c-i0, i1=Math.min(i0+1,this.len-1);
+            oL[k]+=(TL[i0]+(TL[i1]-TL[i0])*fx)*v.env*v.gain;
+            oR[k]+=(TR[i0]+(TR[i1]-TR[i0])*fx)*v.env*v.gain;
+            v.c+=v.rate; v.n++;
+          }
+        }
+      }
       if(!this.cur)this.cur=Object.assign({},P);
       const C=this.cur, kS=Math.min(1,(N/sampleRate)/Math.max(0.005,P.fade));
       for(const key of ['pos','spray','size','dens','semis','jit','shape','rev','width','gain','flow','dif']){
@@ -7296,6 +7323,22 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     if(t<s0-1e-6)t+=L;
     for(;t<s1-1e-9;t+=L)this.audPlay(li,timeAt(t),L);
   }
+  /* the ONE-CURSOR flag: CFG.tape2 routes clean tape plays through the gran
+     worklet as tape voices. Sync-pitch, channel-select and cue pans still take
+     the legacy path — they come across in stage two. */
+  audPlay2(pi,at,lenBeats,skipBeats,cue,P9){
+    const e=this.granNode(pi); if(!e)return false;
+    if((this.granBuf||[])[pi]!==this.audBuf[pi]){
+      this.granBuf=this.granBuf||[]; this.granBuf[pi]=this.audBuf[pi];
+      this.granName=this.granName||[]; this.granName[pi]=this.audName[pi];
+      this.granSend(pi);
+    }
+    const id='t'+(e.id++);
+    e.node.port.postMessage({t:'tape',id,frame:Math.round(at*AC.sampleRate),
+      pos:P9.pos,end:P9.end,rate:P9.rate,gain:P9.gain,
+      durF:Math.round(P9.durSec*AC.sampleRate)});
+    return true;
+  }
   audPlay(pi,at,lenBeats,skipBeats=0,cue){
     const buf=this.audBuf[pi]; if(!buf)return;
     const au=Object.assign({},S.presets[pi].au||{},(this.audOv&&this.audOv[pi])||{});
@@ -7309,6 +7352,16 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     const rate=sync?baseRate:baseRate*Math.pow(2,semis/12);
     const skipSec=skipBeats*spb(), skipBuf=skipSec*rate;
     if(skipBuf>=dur-0.001)return;
+    if(CFG.tape2&&!(sync&&Math.abs(semis)>0.01)&&!Math.round(au.chan||0)
+       &&!(cue&&Math.abs(cue.pan||0)>0.01)){
+      const sr9=buf.sampleRate, len9=buf.length;
+      if(this.audPlay2(pi,at,lenBeats,skipBeats,cue,{
+        pos:(off+skipBuf)*sr9*(len9/(buf.duration*sr9)),
+        end:en*len9,
+        rate:Math.max(0.05,rate)*(sr9/AC.sampleRate),
+        gain:(au.gain??0.9)*(cue?cue.vol??1:1),
+        durSec:Math.min(loopSec-skipSec,(dur-skipBuf)/rate)}))return;
+    }
     const src=AC.createBufferSource(); src.buffer=buf;
     src.playbackRate.value=Math.max(0.05,rate);
     /* BORN ON A RAMP. A cue jump starts mid-waveform, and mid-waveform is a
@@ -7343,6 +7396,8 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
   }
   /* a fade-out then the stop, so a released cue does not click on the way out */
   audStop(pi,at){
+    if(CFG.tape2){const e9=this.gn&&this.gn[pi];
+      if(e9&&e9.node){try{e9.node.port.postMessage({t:'tclr'});}catch(_){}}}
     at=at??AC.currentTime+0.002;
     for(const s2 of [...this.audActive[pi]]){
       try{
