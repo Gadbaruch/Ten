@@ -1012,7 +1012,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-13.1825';
+const BUILD='2026-08-13.1832';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -10577,6 +10577,11 @@ const HE={
   /* the board's own key-up, remembered rather than obeyed: it is not proof a
      note ended (rapid trigger sends one on any upward move) but it IS the
      witness the watchdog needs when the analog stream misses a lift */
+  /* is the sensor itself still holding this code down? */
+  holds(code){const r=this.cfg().rest;
+    for(const id in this.keys){const k=this.keys[id];
+      if(k&&k.st===2&&k.code===code&&k.pv>r)return true;}
+    return false;},
   osUp(code){for(const id in this.keys){const k=this.keys[id];
     if(k&&k.st===2&&k.code===code)k.osUp=performance.now();}},
   /* everything up, everything forgotten — for blur and panic */
@@ -14802,7 +14807,7 @@ const onKeyUp=e=>{
      hangs: there the modified letter never became a note in the first place.
      A latched note is the one exception; latch means the release is not the
      end, and the normal path knows how to hold it. */
-  if(EXP.synth&&liveV[c]&&!noteLatch.has(c)){endNote(c); dirty=true; return;}
+  if(EXP.synth&&liveV[c]&&!noteLatch.has(c)){kbHeld.delete(c); endNote(c); dirty=true; return;}
   if(arrowAlias(e,'keyup'))return;      // the release half — arrow key-ups end automation writes
   if(c==='MetaLeft'||c==='MetaRight'){
     const used=MK.winUsed; MK.win=false; MK.winUsed=false;
@@ -15068,10 +15073,31 @@ const onKeyUp=e=>{
      the key crosses its actuation point on the way back up — and letting those
      through cut the note off mid-hold. A note the sensor is sounding ends when
      the sensor says the finger left, and only then. */
-  if(EXP.muted(c)&&!EXP.synth){HE.osUp(c); return;}
+  /* Swallow a real key-up ONLY when the sensor is the one sounding this note.
+     A note the KEYBOARD started — because ownership had lapsed for a moment,
+     which mashing does constantly — used to have its release eaten here too,
+     and then nothing on earth was going to end it. */
+  if(EXP.muted(c)&&!EXP.synth&&HE.sounded&&HE.sounded[c]!==undefined){HE.osUp(c); return;}
   endNote(c);
 };
 document.addEventListener('keyup',onKeyUp);
+/* NOTHING SOUNDS THAT NOBODY IS HOLDING. Live keyboard notes end when their
+   key-up arrives, and a key-up can be lost in more ways than I can enumerate:
+   swallowed by a control branch, never sent because the board and the sensor
+   disagreed about who owned the key, dropped while the tab was busy. Every one
+   of those is the same symptom, so stop diagnosing paths and sweep the result:
+   a note nobody is holding is a note that should not be sounding. Cheap, runs
+   whether or not an analog board is connected, and cannot touch a latched note
+   or one with a finger still on it. */
+function sweepStuckNotes(){
+  for(const c in liveV){
+    if(!liveV[c])continue;
+    if(kbHeld.has(c)||noteLatch.has(c)||SUS.has(c))continue;   // a finger, or a latch
+    if(HE.on&&HE.holds(c))continue;                            // the sensor still reads it down
+    endNote(c); dirty=true;
+  }
+}
+setInterval(sweepStuckNotes,400);
 window.addEventListener('blur',()=>{
   /* a lost keyup must not leave a HOT MIC or a recorder eating memory —
      cmd-tab away with tab-rec armed grew the chunk list until the tab died */
