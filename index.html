@@ -9237,8 +9237,11 @@ const ENGINES=[
 const SYNTHCATS=CATS.filter(c=>c!=='kit'&&c!=='audio'&&c!=='proc');
 const engineOf=p=>p.cat==='kit'?'kit':p.cat==='audio'?(engineGranP(p)?'gran':'audio'):p.cat==='proc'?'proc'
   :p.cat==='gran'?'gran':'synth';
-const engineName=p=>(ENGINES.find(e=>e.k===engineOf(p))||{}).n||'Synth';
-const engShort=p=>({kit:'Kit',synth:'Synth',proc:'Proc',audio:'Audio',gran:'Grain',wt:'Wtab'})[engineOf(p)]||'Synth';
+/* gran mode is a FACE of audio: every label says Audio; 'gran' the internal
+   read never leaks into UI (it used to fall through to 'Synth') */
+const engineName=p=>{const e=engineOf(p);
+  return (ENGINES.find(x=>x.k===(e==='gran'?'audio':e))||{}).n||'Synth';};
+const engShort=p=>({kit:'Kit',synth:'Synth',proc:'Proc',audio:'Audio',gran:'Audio',wt:'Wtab'})[engineOf(p)]||'Synth';
 /* One line for what a channel IS. Engine and category had a row each, which
    spent two thirds of the strip's height on facts you glance at once a session
    — and the useful half of each was already implied by the name. So the KIND
@@ -9314,13 +9317,10 @@ function prsFieldDefs(){
     ];
   }
   if(engineGranP(p))return [
-    /* the cloud's SETUP lives here — identity, not sound design: what the
-       letters do, which take, which voice mode, where the audio comes from */
+    /* the cloud's SETUP — identity, not sound design. ONE letters field says
+       what the keyboard does; 'gran' is simply its fourth answer. */
     chEng,
-    {k:'keys', v:()=>['cues','gran'][p.cat==='gran'?1:Math.round((p.au||{}).amode||0)]},
-    {k:'smpl', v:()=>engine.granBuf&&engine.granBuf[S.editSnd]
-      ?((engine.granName||[])[S.editSnd]||'take')
-      :'\u2014 (drop / pool)'},
+    {k:'letters',v:()=>'gran'},
     {k:'gmode',v:()=>['grain','pitch'][Math.round((p.gr||{}).pmode||0)]},
     {k:'input',v:()=>['take','live'][Math.round((p.gr||{}).live||0)]},
     {k:'freeze',v:()=>['off','hold'][Math.round((p.gr||{}).frz||0)]},
@@ -9328,9 +9328,7 @@ function prsFieldDefs(){
   if(p.cat==='audio')return [
     /* the tape's SETUP: identity, not sound design */
     chEng,
-    {k:'keys',  v:()=>['cues','gran'][Math.round((p.au||{}).amode||0)]},
     {k:'letters',v:()=>['cue','pitch','frz'][clamp(Math.round((p.au||{}).kmode||0),0,2)]},
-    {k:'smpl',  v:()=>engine.audBuf[S.editSnd]?(engine.audName[S.editSnd]||'clip'):'\u2014 (drop / pool / \u2303+tab)'},
     {k:'input', v:()=>['mic','mstr'][Math.round((p.au||{}).src||0)]},
     {k:'chan',  v:()=>['stereo','left','right'][clamp(Math.round((p.au||{}).chan||0),0,2)]},
     {k:'fit',   v:()=>['off','on'][Math.round((p.au||{}).fit||0)]},
@@ -9369,6 +9367,14 @@ const GRANF=[
  SP('dif','dif','lin',{min:0,max:1,step:0.05,fmt:v=>v<0.03?'dry':Math.round(v*100)+'%'}),
  SP('fb','fb','lin',{min:0,max:0.95,step:0.05,fmt:v=>Math.round(v*100)+'%',
     get:m=>m.fb||0,set:(m,v)=>m.fb=v}),
+ SP('smpl','_pool','lin',{min:0,max:31,step:1,w:2,
+   fmt:v=>POOL[Math.round(v)]?POOL[Math.round(v)].name:'\u2014',
+   get:()=>{const i=POOL.findIndex(p2=>p2.buf===(engine.granBuf||[])[S.editSnd]); return i<0?0:i;},
+   set:(o,v)=>{const pi=S.editSnd, e2=POOL[clamp(Math.round(v),0,Math.max(0,POOL.length-1))];
+     if(!e2){flash('pool is empty — record (\u2303+tab) or drop audio first');return;}
+     engine.granBuf=engine.granBuf||[]; engine.granBuf[pi]=e2.buf;
+     engine.granName=engine.granName||[]; engine.granName[pi]=e2.name;
+     engine.granNode(pi); engine.granSend(pi);}}),
 ];
 function granAction(d,m){
   const pre=S.presets[S.editSnd], spec=GRANF[clamp(S.curParam,0,GRANF.length-1)];
@@ -9393,6 +9399,12 @@ const AUDF=[
  SP('rate','rate','lin',{min:0.25,max:4,step:0.05,fmt:v=>'\u00d7'+v}),
  SP('start','st','lin',{min:0,max:0.98,step:0.01,fmt:v=>Math.round(v*100)+'%'}),
  SP('end','en','lin',{min:0.02,max:1,step:0.01,fmt:v=>Math.round(v*100)+'%'}),
+ SP('smpl','_pool','lin',{min:0,max:31,step:1,w:2,
+   fmt:v=>POOL[Math.round(v)]?POOL[Math.round(v)].name:'\u2014',
+   get:()=>{const i=POOL.findIndex(p2=>p2.buf===engine.audBuf[S.editSnd]); return i<0?0:i;},
+   set:(o,v)=>{const pi=S.editSnd, e2=POOL[clamp(Math.round(v),0,Math.max(0,POOL.length-1))];
+     if(!e2){flash('pool is empty — record (\u2303+tab) or drop audio first');return;}
+     engine.audBuf[pi]=e2.buf; engine.audName[pi]=e2.name;}}),
 ];
 
 const CODEF=()=>Array.from({length:8},(_,i)=>{
@@ -9547,21 +9559,21 @@ function _prsAction(d){
     engine.rebuildRack(pi); dirty=true; dirtySave=true; return;
   }
   if(p.cat==='audio'&&!engineGranP(p)
-     &&['keys','letters','smpl','input','chan','fit','gain'].includes(f)){
+     &&['letters','input','chan','fit','gain'].includes(f)){
     pushUndo('audio setup');
     p.au=p.au||{};
-    if(f==='keys'){p.au.amode=1;
-      engine.granNode(pi); engine.granBuf=engine.granBuf||[];
-      if(!engine.granBuf[pi]&&engine.audBuf[pi]){engine.granBuf[pi]=engine.audBuf[pi];engine.granSend(pi);}
-      engine.granCfg(pi); flash('keys → gran');}
-    else if(f==='letters'){p.au.kmode=fmod(Math.round(p.au.kmode||0)+(d>0?1:-1),3);
-      flash('letters → '+['cue jumps','pitch bends','freeze grabs'][p.au.kmode]);}
-    else if(f==='smpl'){
-      if(!POOL.length){flash('pool is empty — record (\u2303+tab) or drop audio first');return;}
-      const cur=POOL.findIndex(e2=>e2.buf===engine.audBuf[pi]);
-      const nx=POOL[fmod(cur+(d>0?1:-1),POOL.length)];
-      engine.audBuf[pi]=nx.buf; engine.audName[pi]=nx.name;
-      flash('tape → '+nx.name);}
+    if(f==='letters'){
+      /* one wheel: cue → pitch → frz → gran → cue. gran is just what the
+         letters do, not a different engine. */
+      const cur9=Math.round(p.au.kmode||0);
+      const nx9=fmod(cur9+(d>0?1:-1),4);
+      if(nx9===3){p.au.amode=1;
+        engine.granNode(pi); engine.granBuf=engine.granBuf||[];
+        if(!engine.granBuf[pi]&&engine.audBuf[pi]){engine.granBuf[pi]=engine.audBuf[pi];engine.granSend(pi);}
+        engine.granCfg(pi); flash('letters → gran (the cloud)');}
+      else{p.au.kmode=nx9;
+        flash('letters → '+['cue jumps','pitch bends','freeze grabs'][nx9]);}
+    }
     else if(f==='input'){p.au.src=Math.round(p.au.src||0)?0:1;
       flash('input → '+['mic','resample the master'][p.au.src]);}
     else if(f==='chan'){p.au.chan=fmod(Math.round(p.au.chan||0)+(d>0?1:-1),3);
@@ -9571,24 +9583,17 @@ function _prsAction(d){
     else if(f==='gain')p.au.gain=clamp((p.au.gain??0.9)+d*0.05,0,1);
     dirty=true; dirtySave=true; return;
   }
-  if(engineGranP(p)&&['keys','smpl','gmode','input','freeze','gain'].includes(f)){
+  if(engineGranP(p)&&['letters','gmode','input','freeze','gain'].includes(f)){
     pushUndo('gran setup');
     p.gr=p.gr||{}; p.au=p.au||{};
-    if(f==='keys'){
+    if(f==='letters'){
+      /* the wheel continues: from gran, forward wraps to cue, back to frz */
       if(p.cat==='gran')p.cat='audio';
-      p.au.amode=Math.round(p.au.amode||0)?0:1;
-      if(p.au.amode===0&&!engine.audBuf[pi]&&(engine.granBuf||[])[pi])
+      p.au.amode=0;
+      p.au.kmode=d>0?0:2;
+      if(!engine.audBuf[pi]&&(engine.granBuf||[])[pi])
         engine.audBuf[pi]=engine.granBuf[pi];
-      flash('keys → '+['cues','gran'][p.au.amode]);
-    }
-    else if(f==='smpl'){
-      if(!POOL.length){flash('pool is empty — record (⌃+tab) or drop audio first');return;}
-      const cur=POOL.findIndex(e2=>e2.buf===(engine.granBuf||[])[pi]);
-      const nx=POOL[fmod(cur+(d>0?1:-1),POOL.length)];
-      engine.granBuf=engine.granBuf||[]; engine.granBuf[pi]=nx.buf;
-      engine.granName=engine.granName||[]; engine.granName[pi]=nx.name;
-      engine.granNode(pi); engine.granSend(pi);
-      flash('cloud → '+nx.name);
+      flash('letters → '+['cue jumps','pitch bends','freeze grabs'][p.au.kmode]);
     }
     else if(f==='gmode'){p.gr.pmode=Math.round(p.gr.pmode||0)?0:1;
       flash('mode → '+['grain','pitch'][p.gr.pmode]);}
@@ -9605,7 +9610,8 @@ function _prsAction(d){
     /* Sampler and Grain are listed so the shape of the thing is visible, but
        cycling steps OVER them — landing on an engine that does nothing is a
        worse experience than not seeing it yet. */
-    const cur=Math.max(0,ENGINES.findIndex(e=>e.k===engineOf(p)));
+    const eNow=engineOf(p)==='gran'?'audio':engineOf(p);
+    const cur=Math.max(0,ENGINES.findIndex(e=>e.k===eNow));
     let i=cur, guard=0;
     do{ i=fmod(i+(d<0?-1:1),ENGINES.length); guard++; }
     while(ENGINES[i].soon&&guard<ENGINES.length);
