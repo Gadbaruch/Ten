@@ -1012,7 +1012,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-13.1810';
+const BUILD='2026-08-13.1825';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -10812,6 +10812,13 @@ const HE={
        opened settings and closed it again. Analog is how hard you played a
        note; everything else is a switch, and a switch is on or off. */
     if(!isNoteKey(code))return;
+    /* A MODIFIED LETTER IS NEVER A NOTE. That is this instrument's own rule and
+       the keyboard path has always obeyed it — but the analog stream cannot
+       see modifiers at all, so it played a note under ⇧q while the real ⇧q
+       opened the quantize hold. ⌃ ⌥ ⌘ and the right-shift function layer make
+       a letter a control; the LEFT shift is the latch, which is played WITH
+       notes, so it passes. */
+    if(MODS.ctrl||MODS.alt||MODS.meta||(KM.sr&&MODS.shift))return;
     const vel=this.vel(k.peak,C);
     this.lastVel=vel;
     if(this.cal)this.calibHit(k.peak);      // the pass listens to real playing, and you hear every hit
@@ -14787,6 +14794,15 @@ const scopeHeldOn=c=>
 const onKeyUp=e=>{
   if(e.isTrusted){MODS.shift=e.shiftKey; MODS.alt=e.altKey; MODS.ctrl=e.ctrlKey; MODS.meta=e.metaKey;}
   const c=e.code;
+  /* A KEY-UP THE SENSOR GENERATED MEANS EXACTLY ONE THING: end that note. It
+     must not be eaten on the way there by a control branch — ⇧q opens the
+     quantize hold, and that hold's release returns before endNote, so a note
+     the analog stream had started was left with nothing to end it. THAT is
+     the hang, and it is why the same mashing on the laptop keyboard never
+     hangs: there the modified letter never became a note in the first place.
+     A latched note is the one exception; latch means the release is not the
+     end, and the normal path knows how to hold it. */
+  if(EXP.synth&&liveV[c]&&!noteLatch.has(c)){endNote(c); dirty=true; return;}
   if(arrowAlias(e,'keyup'))return;      // the release half — arrow key-ups end automation writes
   if(c==='MetaLeft'||c==='MetaRight'){
     const used=MK.winUsed; MK.win=false; MK.winUsed=false;
