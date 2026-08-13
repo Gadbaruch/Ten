@@ -1054,6 +1054,13 @@ const SETTINGS=[
               a:()=>{if(HE.on)HE.disconnect(); else HE.connect();}},
  {n:'hid keys',g:'Input',v:()=>HE.learn?(HE.learn.i+'/'+HE.learn.order.length):(HE.map?String(Object.keys(HE.map).length):'—'),
               a:()=>HE.startLearn()},
+ /* fn sends no keycode on this board — it is a firmware layer switch. Its
+    magnet still moves, so learn the SLOT and it becomes a usable key. */
+ {n:'fn slot',g:'Input', v:()=>HE.learnFn?'press fn':(CFG.he&&CFG.he.fnSlot!=null?'#'+CFG.he.fnSlot:'—'),
+              a:()=>{if(!HE.on){flash('connect the board first');return;}
+                     HE.learnFn=1; flash('press fn on the keyboard now · it sends no keycode, we are watching the sensor');}},
+ {n:'fn does',g:'Input', v:()=>FNACT[(CFG.he&&CFG.he.fnAct)|0].replace('Arrow','').toLowerCase(),
+              a:d=>HE.set('fnAct',fmod(((CFG.he&&CFG.he.fnAct)|0)+d,FNACT.length))},
  {n:'hid trig',g:'Input',v:()=>Math.round(HE.cfg().trig*100)+'%', a:d=>HE.set('trig',clamp(HE.cfg().trig+d*0.01,0.05,0.6))},
  /* WHICH QUESTION THE BOARD IS ASKED. peak: how fast was the fastest frame —
     right on a board that samples on a clock. window: how far did the key get
@@ -10604,6 +10611,26 @@ const HE={
     k.st=2; k.code=null;
     k.fireV=v; k.fireT=t||k.pt; k.calm=0; k.moveT=t||k.pt;   // re-attack baseline
     this.lastId=id;
+    /* THE fn KEY, WHICH SENDS NOTHING. On this board fn is a firmware layer
+       switch: the MCU handles it and no USB keycode is ever transmitted, so
+       this is not macOS eating it — the press never leaves the keyboard. But
+       the switch under it is still a magnet over a sensor, and the analog
+       stream reports MATRIX POSITIONS rather than keycodes. So fn is invisible
+       as a keystroke and perfectly visible as a slot. Learn it once and it is
+       a key like any other. */
+    if(this.learnFn){
+      this.learnFn=0;
+      if(code&&isNoteKey(code)){flash('that slot is '+code+' — a note key. try again');return;}
+      this.set('fnSlot',id); flash('◎ fn = slot '+id+' → '+FNACT[CFG.he&&CFG.he.fnAct|0]);
+      dirty=true; return;
+    }
+    const fs=CFG.he&&CFG.he.fnSlot;
+    if(fs!=null&&id===fs){
+      const a9=FNACT[(CFG.he&&CFG.he.fnAct)|0];
+      if(a9!=='off')for(const kind of ['keydown','keyup'])
+        document.dispatchEvent(new KeyboardEvent(kind,{code:a9,key:a9,bubbles:true}));
+      return;
+    }
     if(!code)return;
     /* ONLY THE LETTERS PLAY. The matrix maps every key on the board — esc,
        tab, caps, the modifiers, the digits — and for those the browser is
@@ -12828,6 +12855,9 @@ const RIGHTARROW={AltRight:'ArrowLeft',
   F16:'ArrowRight',MetaRight:'ArrowRight',
   ContextMenu:'ArrowUp',ControlRight:'ArrowDown'};
 const ARROWMODE=['real',', . - =','right cluster'];
+/* what the learned fn slot does — right arrow first, because that is the one
+   the right cluster cannot fill from a keycode */
+const FNACT=['ArrowRight','ArrowLeft','ArrowUp','ArrowDown','Tab','Escape','Backslash','off'];
 /* THE SPARE KEYS. A 60% board's bottom row carries win and menu, which do
    nothing for this instrument and something unwanted for the OS. A page can
    only take a key while it is focused — which is the right scope — and both of
