@@ -1061,10 +1061,12 @@ const SETTINGS=[
     single frame's slope is mostly arrival jitter. */
  /* a 60% board has no arrow cluster, and the arrows are how this instrument
     moves and edits — so lend them four keys */
- {n:'arrows',g:'Input', v:()=>CFG.hidArrows?', . - =':'real',
-              a:()=>{CFG.hidArrows=CFG.hidArrows?0:1; saveCfg();
-                     flash(CFG.hidArrows?', . = ←→ · - = = ↓↑ · ⇧ as always · octave moves to ⌃, ⌃.'
-                                        :'arrows are the arrow keys · , . octave · - = volume');}},
+ {n:'arrows',g:'Input', v:()=>ARROWMODE[CFG.hidArrows|0],
+              a:d=>{CFG.hidArrows=fmod((CFG.hidArrows|0)+d,ARROWMODE.length); saveCfg();
+                    flash(['arrows are the arrow keys · , . octave · - = volume',
+                           ', . = ←→ · - = = ↓↑ · ⇧ as always · octave moves to ⌃, ⌃.',
+                           'right alt ← · fn/F13 → · menu ↑ · right ctrl ↓ · , . - = back to normal'
+                          ][CFG.hidArrows|0]);}},
  /* the bottom-row keys a 60% board has and this instrument never used */
  {n:'win key',g:'Input', v:()=>SPARE[CFG.kWin|0],
               a:d=>{CFG.kWin=fmod((CFG.kWin|0)+d,SPARE.length); saveCfg();
@@ -12814,6 +12816,18 @@ let capsWas=false;
    what they meant (rack slots, pattern length), and the octave moves to ⌃, /
    ⌃. — the one thing that had to give way. */
 const ARROWALIAS={Comma:'ArrowLeft',Period:'ArrowRight',Minus:'ArrowDown',Equal:'ArrowUp'};
+/* THE RIGHT CLUSTER, which is the better answer: the four keys under your right
+   hand that this instrument never used become the arrow cluster, and , . - =
+   go back to being the octave and the volume. LEFT alt and LEFT control keep
+   every meaning they had — separating the two sides is the whole trick.
+   fn is here in hope only: macOS eats it in hardware and no browser ever sees
+   it, so remap that key to F13 (or right-win) in the board's own software and
+   this picks it up. */
+const RIGHTARROW={AltRight:'ArrowLeft',
+  Fn:'ArrowRight',F13:'ArrowRight',F14:'ArrowRight',F15:'ArrowRight',
+  F16:'ArrowRight',MetaRight:'ArrowRight',
+  ContextMenu:'ArrowUp',ControlRight:'ArrowDown'};
+const ARROWMODE=['real',', . - =','right cluster'];
 /* THE SPARE KEYS. A 60% board's bottom row carries win and menu, which do
    nothing for this instrument and something unwanted for the OS. A page can
    only take a key while it is focused — which is the right scope — and both of
@@ -12832,9 +12846,14 @@ const spareKey=(name)=>{
 };
 const MK={win:false,winUsed:false};
 const arrowAlias=(e,kind)=>{
-  const a=ARROWALIAS[e.code];
-  if(!CFG.hidArrows||!a||e.metaKey||altOf(e)||e.ctrlKey||HOLD.tab)return false;
+  const m=CFG.hidArrows|0;
+  let a=null;
+  if(m===1)a=(e.metaKey||altOf(e)||e.ctrlKey||HOLD.tab)?null:ARROWALIAS[e.code];
+  else if(m===2)a=RIGHTARROW[e.code];
+  if(!a)return false;
   e.preventDefault();
+  /* the modifier a right-cluster key IS must not ride along — right alt is the
+     LEFT arrow here, not ⌥←. Only shift travels, because ⇧← is its own thing. */
   document.dispatchEvent(new KeyboardEvent(kind,{code:a,key:a,bubbles:true,
     shiftKey:e.shiftKey,repeat:e.repeat}));
   return true;
