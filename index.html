@@ -3258,7 +3258,8 @@ let fxwReady=false;
       this.apL=[126,180,269,444].map(mk);
       this.apR=[151,205,245,405].map(mk);
       this.port.onmessage=e=>{const m=e.data||{};
-        if(m.t==='buf'){this.L=m.l; this.R=m.r||m.l; this.len=m.l.length;}
+        if(m.t==='buf'){this.L=m.l; this.R=m.r||m.l; this.len=m.l.length;
+          this.grains.length=0;}   // in-flight phases belong to the OLD buffer
         else if(m.t==='p'){
           /* the port is a FIREHOSE of modulated values and nothing upstream
              promises they are finite or in range — one NaN through the slew
@@ -3353,7 +3354,7 @@ let fxwReady=false;
         for(const [id,v] of this.vs){ if(v.env>0)nv++; }
         const nrm=1/Math.sqrt(Math.max(1,nv));
         for(const [id,v] of this.vs){
-          if(v.tp===undefined)v.tp=0;
+          if(v.tp===undefined||!Number.isFinite(v.tp))v.tp=0;
           const ratio=v.ratio*Math.pow(2,C.semis/12), drift=1-ratio;
           const g9=v.vel*Math.max(0,Math.min(1,v.env))*nrm*0.7;
           for(let k=0;k<N;k++){
@@ -3368,14 +3369,15 @@ let fxwReady=false;
             oR[k]+=(r1*f1+r2*f2)*g9;
           }
         }
-        if(!Number.isFinite(oL[0])){oL.fill(0); if(out[1])oR.fill(0);
+        if(!Number.isFinite(oL[0]+oL[N-1])){oL.fill(0); if(out[1])oR.fill(0);
           this.cur=null; this.fbLP=0;
           for(const a2 of this.apL)a2.d.fill(0);
           for(const a2 of this.apR)a2.d.fill(0);
           this.ring.fill(0);
           for(const [id9,v9] of this.vs)v9.tp=0;
         }
-        this.prevL=this.prevL||new Float32Array(N); this.prevL.set(oL);
+        if(!this.prevL||this.prevL.length!==N)this.prevL=new Float32Array(N);
+        this.prevL.set(oL);
         const gn9=C.gain, df9=C.dif;
         for(let k=0;k<N;k++){
           let l9=oL[k]*gn9, r9=(out[1]?oR[k]:l9)*gn9;
@@ -3440,7 +3442,7 @@ let fxwReady=false;
           oL[k]+=sl*g.gl;
           oR[k]+=sr2*g.gr;
         }
-        if(g.n>=g.dur)this.grains.splice(gi,1);
+        if(!(g.n<g.dur))this.grains.splice(gi,1);   // !(a<b) also culls a NaN dur — an immortal silent grain would jam the pool
       }
       /* the feedback tap is PRE-norm, pre-gain: the loop must not pay the
          1/sqrt(N) tax twice or it can never sustain */
@@ -3465,7 +3467,8 @@ let fxwReady=false;
   class SC extends AudioWorkletProcessor{
     constructor(){super(); this.L=null; this.R=null; this.len=0; this.alive=true;
       this.port.onmessage=e=>{const m=e.data||{};
-        if(m.t==='buf'){this.L=m.l; this.R=m.r||m.l; this.len=m.l.length;}
+        if(m.t==='buf'){this.L=m.l; this.R=m.r||m.l; this.len=m.l.length;
+          this.grains.length=0;}   // in-flight phases belong to the OLD buffer
         else if(m.t==='stop')this.alive=false;};}
     process(I,O){
       if(!this.alive)return false;
@@ -7285,7 +7288,9 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
       const sp3=AC.createScriptProcessor(4096,1,1);
       const sink=AC.createGain(); sink.gain.value=0;
       const chunks=[];
-      sp3.onaudioprocess=ev=>chunks.push(new Float32Array(ev.inputBuffer.getChannelData(0)));
+      sp3.onaudioprocess=ev=>{chunks.push(new Float32Array(ev.inputBuffer.getChannelData(0)));
+        if(chunks.length*4096>AC.sampleRate*120){flash('recording capped at 120s — takes belong in loops');
+          try{engine.audRecStop();}catch(_){}}};
       srcNode.connect(sp3); sp3.connect(sink); sink.connect(AC.destination);
       this.audRec={pi,stm,src:srcNode,sp3,sink,chunks,startBeat:gridNow(),label};
       flash('● recording '+label+'… (tab again to stop)'); dirty=true;
@@ -10200,7 +10205,8 @@ const MIC={stream:null,on:false,latched:false,node:null,ring:null,w:0,sr:0,
 let MODPICK=null;
 const MODPICK_SRC={KeyE:1,KeyL:2,KeyV:3,KeyK:4,Slash:5};
 async function micOn(){
-  if(MIC.on)return;
+  if(MIC.on||MIC._pending)return;   // a second ⌃ during the permission prompt must not build a second graph
+  MIC._pending=true;
   try{
     if(!MIC.stream){
       if(!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia)){flash('no mic in this browser');return;}
@@ -10220,11 +10226,16 @@ async function micOn(){
     flash('● mic ON — the ring hears you · tab on an audio channel grabs the last loop');
     dirty=true;
   }catch(e2){flash('mic: '+(e2&&e2.name==='NotAllowedError'?'permission denied':'unavailable'));}
+  finally{MIC._pending=false;}
 }
 function micOff(){
   if(!MIC.on)return;
   const n=MIC.node; MIC.node=null; MIC.on=false; MIC.latched=false;
   if(n){try{n.src.disconnect();n.sp.disconnect();n.sink.disconnect();}catch(_){}}
+  /* the live wires into gran channels are part of the mic being ON — leaving
+     them connected was a hot mic behind an 'off' light */
+  if(engine.gn)for(const k9 in engine.gn){const e9=engine.gn[k9];
+    if(e9&&e9.liveSrc){try{e9.liveSrc.disconnect();}catch(_){} e9.liveSrc=null;}}
   /* the stream stays: permission asked once, the next ctrl is instant */
   flash('mic off'); dirty=true;
 }
@@ -14073,6 +14084,11 @@ document.addEventListener('keyup',e=>{
   endNote(c);
 });
 window.addEventListener('blur',()=>{
+  /* a lost keyup must not leave a HOT MIC or a recorder eating memory —
+     cmd-tab away with tab-rec armed grew the chunk list until the tab died */
+  MIC._down=false; MIC._used=false; MIC._latch=false; MIC._unlatch=false;
+  if(MIC.on&&!MIC.latched)micOff();
+  if(engine.audRec)engine.audRecStop();
   KM.sl=false; KM.sr=false; LATCH.used=false; HOLD.tab=false; HOLD.m=false; kbHeld.clear();
   SUS.clear(); noteLatch.clear();
   HOLD.c=false; HOLD.n=false; HOLD.r=false; HOLD.i=false; HOLD.v=false; HOLD.q=false; HOLD.sc=false; HOLD.dig=-1;
