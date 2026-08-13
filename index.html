@@ -1012,7 +1012,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-13.1730';
+const BUILD='2026-08-13.1810';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1125,6 +1125,9 @@ const SETTINGS=[
                              :'peak — velocity is the steepest frame of the stroke');}},
  {n:'h wait',g:'Input',h:()=>!HE.on||Math.round(HE.cfg().est||0)!==1,v:()=>(+(HE.cfg().wait||4).toFixed(1))+'ms',
               a:d=>HE.set('wait',clamp((HE.cfg().wait||4)+d*0.5,0.5,20))},
+ {n:'h calib',g:'Input',h:()=>!HE.on,
+              v:()=>HE.cal?(HE.cal.phase+' '+HE.cal[HE.cal.phase].length+'/10'):'ready',
+              a:()=>HE.startCalib()},
  {n:'h curve',g:'Input',h:()=>!HE.on,v:()=>HE.cfg().gamma.toFixed(2), a:d=>HE.set('gamma',clamp(HE.cfg().gamma+d*0.05,0.2,2))},
  {n:'h floor',g:'Input',h:()=>!HE.on,v:()=>Math.round(HE.cfg().floor*127)+'', a:d=>HE.set('floor',clamp(HE.cfg().floor+d*0.02,0,0.5))},
  /* Switching to auto starts learning from wherever the fixed range currently
@@ -10561,6 +10564,15 @@ const HE={
       if(k.pv>=C.trig)continue;                       // genuinely down: leave it alone
       this.release(id);
     }
+    /* THE LAST LINE OF DEFENCE. Whatever the state machine believes, a note
+       this stream started and no longer holds must not be left sounding — a
+       hanging note takes its letter down with it. */
+    for(const code in (this.sounded||{})){
+      const k2=this.keys[this.sounded[code]];
+      if(k2&&k2.st===2&&k2.code===code)continue;
+      delete this.sounded[code];
+      if(liveV[code])EXP.keyUp(code);
+    }
   },
   /* the board's own key-up, remembered rather than obeyed: it is not proof a
      note ended (rapid trigger sends one on any upward move) but it IS the
@@ -10568,7 +10580,7 @@ const HE={
   osUp(code){for(const id in this.keys){const k=this.keys[id];
     if(k&&k.st===2&&k.code===code)k.osUp=performance.now();}},
   /* everything up, everything forgotten — for blur and panic */
-  reset(){for(const id in this.keys)this.release(id); this.keys={}; this.recent={};},
+  reset(){for(const id in this.keys)this.release(id); this.keys={}; this.recent={}; this.sounded={};},
   report(e){
     /* e.data is a DataView over the report WITHOUT the report id. Taking
        .buffer alone ignores byteOffset/byteLength and can shift every byte. */
@@ -10669,9 +10681,24 @@ const HE={
        must go on arriving normally */
     if(v>C.rest&&this.map){const mc=this.map[id]; if(mc&&isNoteKey(mc))this.recent[mc]=t;}
     if(this.probe&&v>0.25&&(!this.probeBest||v>this.probeBest.v))this.probeBest={id,v};
+    /* PEAK OVER A SPAN, NOT OVER ONE GAP. Reports arrive in bursts — nearly a
+       quarter of them land in the same event-loop turn as the one before — so
+       a single pair 0.2ms apart used to BE the velocity, which is a whispered
+       note reading fortissimo, and one stalled gap in a hard stroke read as a
+       soft one. Measured across three gaps neither can dominate, and nothing
+       is lost: this board reports per unit of TRAVEL, so every stroke, hard or
+       soft, is about thirty-six samples long. */
+    const SPAN=3;
+    if(k.st<=1){
+      (k.h=k.h||[]).push([v,t]);
+      while(k.h.length>SPAN+1)k.h.shift();
+    }
+    const span=(k.h&&k.h.length>SPAN)
+      ? (v-k.h[0][0])/Math.max(0.5,t-k.h[0][1])
+      : slope;
     if(k.st===0){                                    // resting
       if(v<=C.rest){k.pv=v; k.pt=t; return;}
-      k.st=1; k.peak=Math.max(0,slope); k.top=v; k.wait=0;
+      k.st=1; k.h=[[k.pv,k.pt],[v,t]]; k.peak=Math.max(0,slope); k.top=v; k.wait=0;
       /* WINDOW MODE STARTS AT THE FIRST TOUCH, not at the trigger depth: the
          question is how far the key travels in a known slice of time, and the
          earliest movement is the honest start of that slice. It also buys the
@@ -10690,7 +10717,7 @@ const HE={
     if(k.st===1){                                    // downstroke, not yet spoken
       /* in window mode the speed was already measured over the window — a
          later jitter spike must not be allowed to raise it */
-      if(Math.round(C.est||0)!==1)k.peak=Math.max(k.peak,slope);
+      if(Math.round(C.est||0)!==1)k.peak=Math.max(k.peak,span);
       k.top=Math.max(k.top,v);
       if(v<=C.rest){k.st=0;}                         // a nudge that never got there
       else if(v>=C.trig){
@@ -10787,8 +10814,19 @@ const HE={
     if(!isNoteKey(code))return;
     const vel=this.vel(k.peak,C);
     this.lastVel=vel;
-    if(EXP.keyDown(code,vel)){
-      k.code=code;                                   // only track it if it actually spoke
+    if(this.cal)this.calibHit(k.peak);      // the pass listens to real playing, and you hear every hit
+    /* AN ORPHAN IS WHAT HANGS. keyDown REFUSES a key that already has a live
+       voice, so a second attack arriving before the first note-off — which is
+       what mashing does, and what a lost lift does — returned false, the new
+       stroke never recorded which code it owned, and its release then spoke
+       for nobody. The first note sustained forever, and the letter went dead
+       because pressing it only toggled the orphan. So: end what is sounding
+       BEFORE re-attacking, and remember the code either way. */
+    if(liveV[code])EXP.keyUp(code);
+    const spoke=EXP.keyDown(code,vel);
+    k.code=code;                                     // release must always have someone to speak for
+    if(spoke){
+      this.sounded=this.sounded||{}; this.sounded[code]=id;
       /* seed pressure from the depth we fired at, so a swell patch speaks now
          rather than on the next frame */
       EXP.keyPress(code,C.trig<0.99?clamp(((v??C.trig)-C.trig)/(1-C.trig),0,1):(v??0));
@@ -10817,6 +10855,7 @@ const HE={
   release(id){
     const k=this.keys[id]; if(!k)return;
     if(k._tmr){clearTimeout(k._tmr); k._tmr=null;}
+    if(k.code&&this.sounded&&this.sounded[k.code]===id)delete this.sounded[k.code];
     if(k.st===2&&k.code)EXP.keyUp(k.code);
     k.st=0; k.code=null; k.peak=0; k.top=0;
   },
@@ -10862,6 +10901,42 @@ const HE={
     return clamp(C.floor+(1-C.floor)*Math.pow(n,C.gamma),1/127,1);
   },
 
+  /* ---- velocity calibration: play soft, play hard, keep the numbers ----
+     Every constant in this file started life as somebody else's hand on
+     somebody else's board, and each time that showed up it showed up as "the
+     quiet notes do nothing" or "everything is loud". The ends are a property
+     of YOUR hand on YOUR keyboard, so measure them: ten soft hits, ten hard
+     ones, take the 12th and 88th percentile the way the sibling MIDI tool's
+     wizard does, and write them in. Thirty seconds, and it survives any change
+     to how the stroke is measured. */
+  startCalib(){
+    if(!this.on){flash('connect the board first');return;}
+    this.cal={phase:'soft',soft:[],hard:[]};
+    flash('CALIBRATE — play 10 SOFT hits, as quiet as you would ever want to hear · esc cancels');
+    dirty=true;
+  },
+  calibHit(peak){
+    const c=this.cal; if(!c||!(peak>0))return;
+    c[c.phase].push(peak);
+    const n=c[c.phase].length;
+    if(c.phase==='soft'){
+      if(n<10){flash('soft '+n+'/10');return;}
+      c.phase='hard';
+      flash('now 10 HARD hits — full force');
+      return;
+    }
+    if(n<10){flash('hard '+n+'/10');return;}
+    const pct=(a,r)=>{const x=a.slice().sort((p,q)=>p-q);
+      return x[Math.min(x.length-1,Math.max(0,Math.round(r*(x.length-1))))];};
+    const lo=pct(c.soft,0.12), hi=pct(c.hard,0.88);
+    this.cal=null;
+    if(!(hi>lo*1.5)){flash('those two passes look the same — try again, further apart');dirty=true;return;}
+    const w=heEnds();
+    this.set(w.sK,+lo.toFixed(5)); this.set(w.hK,+hi.toFixed(4));
+    flash('◎ calibrated — soft '+lo.toFixed(4)+'  hard '+hi.toFixed(3));
+    dirty=true;
+  },
+  cancelCalib(){if(this.cal){this.cal=null;flash('calibration cancelled');dirty=true;return true;}return false;},
   /* ---- key learn: press each playing key in turn, we record which slot moved ---- */
   startLearn(){
     if(!this.on){flash('connect a hid keyboard first');return;}
@@ -13677,6 +13752,7 @@ const onKeyDown=e=>{
   }
   if(c==='Enter'){e.preventDefault(); if(!e.repeat)diveIn(); return;}
   if(c==='Escape'){e.preventDefault();
+    if(HE.cancelCalib())return;
     if(HE.cancelLearn())return;
     if(CHSEL.size){CHSEL.clear(); flash('channel selection cleared'); dirty=true; return;}
     if(SELALL!=null){SELALL=null; flash('note selection cleared'); dirty=true; return;}
