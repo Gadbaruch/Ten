@@ -1012,7 +1012,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-13.1649';
+const BUILD='2026-08-13.1705';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1080,7 +1080,7 @@ const SETTINGS=[
  {n:'midi in',g:'Input',v:()=>EXP.midiOn?['off','solo','+kbd'][CFG.midiIn|0]:'off', a:d=>EXP.cycleMidi(d)},
  {n:'hid',g:'Input',    v:()=>HE.on?(HE.srcName||'on').slice(0,8):'off',
               a:()=>{if(HE.on)HE.disconnect(); else HE.connect();}},
- {n:'hid keys',g:'Input',h:()=>!HE.on||(!HE.learn&&HE.map&&Object.keys(HE.map).length>=20),v:()=>HE.learn?(HE.learn.i+'/'+HE.learn.order.length):(HE.map?String(Object.keys(HE.map).length):'—'),
+ {n:'h keys',g:'Input',h:()=>!HE.on||(!HE.learn&&HE.map&&Object.keys(HE.map).length>=20),v:()=>HE.learn?(HE.learn.i+'/'+HE.learn.order.length):(HE.map?String(Object.keys(HE.map).length):'—'),
               a:()=>HE.startLearn()},
  /* fn sends no keycode on this board — it is a firmware layer switch. Its
     magnet still moves, so learn the SLOT and it becomes a usable key. */
@@ -1099,7 +1099,7 @@ const SETTINGS=[
                       HE.set('slots',sl); flash(actName(act)+' unbound'); return;}
                     HE.learnFn=act;
                     flash('press the key you want for '+actName(act)+' — we are watching the sensor, not the keycode');}},
- {n:'hid trig',g:'Input',h:()=>!HE.on,v:()=>Math.round(HE.cfg().trig*100)+'%', a:d=>HE.set('trig',clamp(HE.cfg().trig+d*0.01,0.05,0.6))},
+ {n:'h trig',g:'Input',h:()=>!HE.on,v:()=>Math.round(HE.cfg().trig*100)+'%', a:d=>HE.set('trig',clamp(HE.cfg().trig+d*0.01,0.05,0.6))},
  /* WHICH QUESTION THE BOARD IS ASKED. peak: how fast was the fastest frame —
     right on a board that samples on a clock. window: how far did the key get
     in `wait` ms — right on a board that reports per unit of travel, where a
@@ -1119,33 +1119,33 @@ const SETTINGS=[
  {n:'menu key',g:'Input',v:()=>SPARE[CFG.kMenu|0],
               a:d=>{CFG.kMenu=fmod((CFG.kMenu|0)+d,SPARE.length); saveCfg();
                     flash('menu → '+SPARE[CFG.kMenu|0]);}},
- {n:'hid vel',g:'Input', h:()=>!HE.on,v:()=>Math.round(HE.cfg().est||0)===1?'window':'peak',
+ {n:'h vel',g:'Input', h:()=>!HE.on,v:()=>Math.round(HE.cfg().est||0)===1?'window':'peak',
               a:()=>{const e2=Math.round(HE.cfg().est||0)===1?0:1; HE.set('est',e2);
                      flash(e2?'window — velocity is how deep it got in '+HE.cfg().wait+'ms'
                              :'peak — velocity is the steepest frame of the stroke');}},
- {n:'hid wait',g:'Input',h:()=>!HE.on||Math.round(HE.cfg().est||0)!==1,v:()=>(+(HE.cfg().wait||4).toFixed(1))+'ms',
+ {n:'h wait',g:'Input',h:()=>!HE.on||Math.round(HE.cfg().est||0)!==1,v:()=>(+(HE.cfg().wait||4).toFixed(1))+'ms',
               a:d=>HE.set('wait',clamp((HE.cfg().wait||4)+d*0.5,0.5,20))},
  /* off: a note ends only when the finger leaves the key, and the travel in
     between is pressure. on: pushing deeper after a pause plays it again. */
- {n:'hid retrig',g:'Input',h:()=>!HE.on,v:()=>Math.round(HE.cfg().retrig||0)===1?'on':'off',
+ {n:'h retrig',g:'Input',h:()=>!HE.on,v:()=>Math.round(HE.cfg().retrig||0)===1?'on':'off',
               a:()=>{const r2=Math.round(HE.cfg().retrig||0)===1?0:1; HE.set('retrig',r2);
                      flash(r2?'re-attack ON — pressing deeper replays the note'
                             :'re-attack OFF — the note ends when you lift · depth is pressure');}},
- {n:'hid curve',g:'Input',h:()=>!HE.on,v:()=>HE.cfg().gamma.toFixed(2), a:d=>HE.set('gamma',clamp(HE.cfg().gamma+d*0.05,0.2,2))},
- {n:'hid floor',g:'Input',h:()=>!HE.on,v:()=>Math.round(HE.cfg().floor*127)+'', a:d=>HE.set('floor',clamp(HE.cfg().floor+d*0.02,0,0.5))},
+ {n:'h curve',g:'Input',h:()=>!HE.on,v:()=>HE.cfg().gamma.toFixed(2), a:d=>HE.set('gamma',clamp(HE.cfg().gamma+d*0.05,0.2,2))},
+ {n:'h floor',g:'Input',h:()=>!HE.on,v:()=>Math.round(HE.cfg().floor*127)+'', a:d=>HE.set('floor',clamp(HE.cfg().floor+d*0.02,0,0.5))},
  /* Switching to auto starts learning from wherever the fixed range currently
     sits. Switching back to fixed leaves the fixed range alone — it used to
     overwrite it with the generic HEDEF numbers, which planted the wrong ceiling
     on whichever board was plugged in. */
- {n:'hid range',g:'Input',h:()=>!HE.on,v:()=>HE.cfg().auto?'auto':'fixed',
+ {n:'h range',g:'Input',h:()=>!HE.on,v:()=>HE.cfg().auto?'auto':'fixed',
               a:()=>{const C=HE.cfg();
                      if(!C.auto){HE.set('aSoft',C.soft); HE.set('aHard',C.hard);}
                      HE.set('auto',C.auto?0:1);}},
  /* these two edit the range of whichever estimator is live — one row pair, and
     it always means the number actually mapping your hits */
- {n:'hid hard',g:'Input',h:()=>!HE.on,v:()=>heEnds().hard.toFixed(3),
+ {n:'h hard',g:'Input',h:()=>!HE.on,v:()=>heEnds().hard.toFixed(3),
               a:d=>{const w=heEnds(); HE.set(w.hK,clamp(w.hard+d*(w.win?0.002:0.005),0.005,HE_MAX_SLOPE));}},
- {n:'hid soft',g:'Input',h:()=>!HE.on,v:()=>heEnds().soft.toFixed(4),
+ {n:'h soft',g:'Input',h:()=>!HE.on,v:()=>heEnds().soft.toFixed(4),
               a:d=>{const w=heEnds(); HE.set(w.sK,clamp(w.soft+d*(w.win?0.0005:0.001),0.0002,0.08));}},
 ];
 function basePreset(name){return{
@@ -1413,8 +1413,17 @@ const MOD_P=sl=>{                    // unified: source picks which extra fields
     SP('rel','fr','time',{min:0.01,max:2,get:m=>m.fr??0.15,set:(m,v)=>m.fr=v}),
     SP('gain','fg','lin',{min:0.5,max:12,step:0.5,fmt:v=>'×'+v,
        get:m=>m.fg??4, set:(m,v)=>m.fg=v})]);
-  if(s===6)return base.concat([SP('glide','pg','time',{min:0.005,max:0.5,fmt:fT,
-    get:m=>m.pg??0.03, set:(m,v)=>m.pg=v})]);   // pressure smoothing
+  /* PRESSURE HAS TWO KINDS OF SENSITIVITY, and amount is neither of them.
+     glide is how fast it FOLLOWS your finger — the smoothing. curve is how the
+     depth is SHAPED: above 1 the first half of the travel does almost nothing
+     and the response gathers late, which is what a key wants when 1:1 feels
+     twitchy; below 1 it leaps early. */
+  if(s===6)return base.concat([
+    SP('glide','pg','time',{min:0.005,max:1.5,fmt:fT,
+       get:m=>m.pg??0.03, set:(m,v)=>m.pg=v}),
+    SP('curve','pc','lin',{min:0.25,max:4,step:0.05,
+       fmt:v=>v.toFixed(2)+(v>1.05?' late':v<0.95?' early':' lin'),
+       get:m=>m.pc??1, set:(m,v)=>m.pc=v})]);
   return base;                       // vel / key: target + amount + range
 };
 function tgtLabel(t){return (t.mod||'?')+((t.s??-1)>=0?(t.s+1):'')+'·'+(t.key||'?');}
@@ -4132,7 +4141,10 @@ class Voice{
   /* live per-note pressure, 0..1 — what the 'press' MOD source follows */
   setPressure(x){
     if(this.killed||!this.pressN||!this.pressN.length)return;
-    this.press=clamp(x,0,1);
+    /* the shaping happens HERE, before the glide, so curve decides where the
+       response lives and glide decides how quickly it gets there */
+    const g=this.pressCurve||1;
+    this.press=g===1?clamp(x,0,1):Math.pow(clamp(x,0,1),g);
     const t=AC.currentTime;
     for(const n of this.pressN)
       try{n.p.setTargetAtTime((n.base||0)+this.press*n.sc,t,this.pressGlide);}catch(_){}
@@ -4845,7 +4857,8 @@ class Voice{
       const FL=m.src===7;
       const bag=FL?(this.flwN=this.flwN||[]):this.pressN;
       if(FL)this.flwMi=(this.flwMi===undefined?md.indexOf(m):this.flwMi);
-      else this.pressGlide=Math.max(0.005,m.pg??0.03);
+      else {this.pressGlide=Math.max(0.005,m.pg??0.03);
+            this.pressCurve=Math.max(0.2,m.pc??1);}
       for(const rt of effRoutes(m)){
         if(!rt.dst)continue;
         const A=(rt.amt||0)/100;
@@ -17265,15 +17278,23 @@ function settingsRack(L){
    }
    L.push(lab); L.push(cells);}
   L.push('');
+  /* WRAPPED, so the names can be words. Sixteen rows across one line left ten
+     characters between them for the label AND the value, which is how `hid
+     curve` became `hid c` — a column too narrow to say what it is. Eight per
+     line and every name reads. */
   {const here=setVis().filter(x=>x.g===cur.g);
-   const w=clamp(Math.floor(88/Math.max(1,here.length))-1,5,10);
-   let lr='   ', vr='   ';
-   here.forEach(it=>{
-     const i=SETTINGS.indexOf(it), foc=i===(S.setSel||0);
-     lr+=(foc?spH('a',' '+pad(it.n,w),'set',i):spH('d',' '+pad(it.n,w),'set',i))+' ';
-     vr+=(foc?spH('i',' '+pad(it.v(),w),'set',i):spH('v k',' '+pad(it.v(),w),'set',i))+' ';
-   });
-   L.push(lr); L.push(vr);}
+   const PER=8, rows=[];
+   for(let i9=0;i9<here.length;i9+=PER)rows.push(here.slice(i9,i9+PER));
+   for(const row of rows){
+     const w=clamp(Math.floor(88/Math.max(1,row.length))-1,5,12);
+     let lr='   ', vr='   ';
+     row.forEach(it=>{
+       const i=SETTINGS.indexOf(it), foc=i===(S.setSel||0);
+       lr+=(foc?spH('a',' '+pad(it.n,w),'set',i):spH('d',' '+pad(it.n,w),'set',i))+' ';
+       vr+=(foc?spH('i',' '+pad(it.v(),w),'set',i):spH('v k',' '+pad(it.v(),w),'set',i))+' ';
+     });
+     L.push(lr); L.push(vr);
+   }}
   /* The row of set slots that used to sit here, with its own digit-picks /
      ⇧digit-saves rules, is gone: sets have ⌘S and ⌘L and a picker of their
      own, and two ways to do the same thing is one too many. The key hints went
