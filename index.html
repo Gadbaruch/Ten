@@ -1012,7 +1012,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-13.2004';
+const BUILD='2026-08-13.2019';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -13139,7 +13139,15 @@ const arrowAlias=(e,kind)=>{
   return true;
 };
 const onKeyDown=e=>{
-  if(e.isTrusted){MODS.shift=e.shiftKey; MODS.alt=e.altKey; MODS.ctrl=e.ctrlKey; MODS.meta=e.metaKey;}
+  if(e.isTrusted){MODS.shift=e.shiftKey; MODS.alt=e.altKey; MODS.ctrl=e.ctrlKey; MODS.meta=e.metaKey;
+    /* A LOST SHIFT KEY-UP LATCHES EVERYTHING YOU PLAY. Left shift is the latch,
+       and its state was believed until a matching key-up arrived — but mashing
+       is exactly when a key-up goes missing, and a stuck KM.sl means every
+       note afterwards latches and sustains "forever". That is the hang: not a
+       lost note-off, a latch nobody asked for, which is why pressing the key
+       again always cleared it — the way out of a latch IS the key you came in
+       on. Every trusted event carries the truth about shift; believe it. */
+    if(!e.shiftKey&&e.code!=='ShiftLeft'&&e.code!=='ShiftRight'){KM.sl=false; KM.sr=false;}}
   syncCaps(e);
   filePerm();          // a keypress is the gesture the file handle needs
   if(arrowAlias(e,'keydown'))return;   // , . - = ARE the arrows on a board without any
@@ -14805,7 +14813,8 @@ const scopeHeldOn=c=>
   (HOLD.opt&&c===HOLD.opt.c&&!HOLD.optLatched)||
   (HOLD.ms&&c===HOLD.ms.c&&!HOLD.msLatched);
 const onKeyUp=e=>{
-  if(e.isTrusted){MODS.shift=e.shiftKey; MODS.alt=e.altKey; MODS.ctrl=e.ctrlKey; MODS.meta=e.metaKey;}
+  if(e.isTrusted){MODS.shift=e.shiftKey; MODS.alt=e.altKey; MODS.ctrl=e.ctrlKey; MODS.meta=e.metaKey;
+    if(!e.shiftKey){KM.sl=false; KM.sr=false;}}
   const c=e.code;
   /* A KEY-UP THE SENSOR GENERATED MEANS EXACTLY ONE THING: end that note. It
      must not be eaten on the way there by a control branch — ⇧q opens the
@@ -15148,8 +15157,14 @@ function stuckReport(){
   (engine.act||[]).forEach((arr,pi)=>{for(const v of (arr||[])){
     if(!v||v.killed)continue;
     let g=null; try{g=+v.vca.gain.value.toFixed(4);}catch(_){}
+    let why='';
+    for(const c in liveV){const h=liveV[c];
+      if(h&&h.voices&&h.voices.includes(v)){
+        why=SUS.has(c)?' LATCHED('+c+')':noteLatch.has(c)?' latch-armed('+c+')'
+           :kbHeld.has(c)?' key-down('+c+')':HE.on&&HE.holds(c)?' sensor('+c+')':' handle('+c+')';
+        break;}}
     rows.push('ch'+pi+' m'+v.midi+' '+(v.live?'live':'seq')
-      +(v.released?' rel':' HELD')+(ref.has(v)?' ref':' ORPHAN')
+      +(v.released?' rel':' HELD')+(ref.has(v)?' ref':' ORPHAN')+why
       +(v.oneShot?' 1shot':'')+' age'+(now-(v.startAt||0)).toFixed(1)+'s gain'+g);
   }});
   console.log('STUCK REPORT\n'+(rows.join('\n')||'nothing sounding'));
