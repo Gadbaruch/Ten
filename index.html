@@ -1012,7 +1012,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-13.2024';
+const BUILD='2026-08-13.2027';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -10568,7 +10568,16 @@ const HE={
          has gone and the sensor simply missed it. */
       if(k.osUp&&now-k.osUp>180&&now-(k.pt||0)>180){this.release(id); continue;}
       if(now-(k.pt||0)<900)continue;                  // just played, or held and silent on the wire
-      if(k.pv>=C.trig)continue;                       // genuinely down: leave it alone
+      /* A HOLD THIS BOARD NEVER MENTIONS AGAIN. It reports per unit of travel,
+         so a still finger is silent on the wire, and silence alone cannot tell
+         "held" from "lifted, and the lift went missing" — which is why a key
+         reading above the trigger is spared. But twenty seconds of a note
+         nobody has touched is not a performance, and a note held for ever is
+         worse than a drone cut after twenty seconds. */
+      if(k.pv>=C.trig){
+        if(now-(k.pt||0)>20000)this.release(id);
+        continue;
+      }
       this.release(id);
     }
     /* THE LAST LINE OF DEFENCE. Whatever the state machine believes, a note
@@ -15168,8 +15177,22 @@ function stuckReport(){
     let why='';
     for(const c in liveV){const h=liveV[c];
       if(h&&h.voices&&h.voices.includes(v)){
-        why=SUS.has(c)?' LATCHED('+c+')':noteLatch.has(c)?' latch-armed('+c+')'
-           :kbHeld.has(c)?' key-down('+c+')':HE.on&&HE.holds(c)?' sensor('+c+')':' handle('+c+')';
+        if(SUS.has(c))why=' LATCHED('+c+')';
+        else if(noteLatch.has(c))why=' latch-armed('+c+')';
+        else if(kbHeld.has(c))why=' key-down('+c+')';
+        else if(HE.on&&HE.holds(c)){
+          /* the sensor's OWN numbers, because "the sensor says it is down" is
+             where this stopped being explicable: how deep does it read, and
+             how long since the board last said anything about that key */
+          let d='';
+          for(const id in HE.keys){const k9=HE.keys[id];
+            if(k9&&k9.st===2&&k9.code===c){
+              d=' pv'+(+k9.pv).toFixed(3)+' quiet'+((performance.now()-(k9.pt||0))/1000).toFixed(1)+'s'
+                +(k9.osUp?' osUp':'');
+              break;}}
+          why=' sensor('+c+')'+d;
+        }
+        else why=' handle('+c+')';
         break;}}
     rows.push('ch'+pi+' m'+v.midi+' '+(v.live?'live':'seq')
       +(v.released?' rel':' HELD')+(ref.has(v)?' ref':' ORPHAN')+why
