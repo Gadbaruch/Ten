@@ -122,6 +122,7 @@
   .adot.dead{background:none;box-shadow:inset 0 0 0 1px var(--fg);opacity:.4;}
   /* the gesture readout: text in the empty space above the column, no box */
   .wlay{position:absolute;top:0;left:calc(-1 * var(--bleed));pointer-events:none;}
+  .gviz circle{fill:#fff;opacity:.85;}
   .wlay path{stroke:var(--fg);stroke-width:1;opacity:.5;fill:none;}
   .wtc path{stroke:var(--fg);stroke-width:1.2;opacity:.8;fill:none;}
   .cuet{position:absolute;left:0;width:100%;height:1px;background:var(--fg);opacity:.65;}
@@ -1903,7 +1904,7 @@ function modDests_(pre){
   if((pre.cat||'')==='audio')for(const sp of AUDF)
     if(['semis','gain','st','en','rate'].includes(sp.key))
       add('aud',0,sp.key==='semis'?SP('pitch','semis','lin',{min:-24,max:24,step:1,fmt:v=>v+'st'}):sp,'');
-  if((pre.cat||'')==='gran')for(const sp of GRANF)add('grn',0,sp,'');
+  if(engineGranP(pre))for(const sp of GRANF)add('grn',0,sp,'');
   for(const sp of VOICE_P){
     if(noVoice&&sp.key!=='pan')continue;    // pan is the bus; amp and pitch are voices
     add('voice',0,sp,'');
@@ -2327,7 +2328,7 @@ function optSet(key,on){
 function reviveLane(n){
   if(!T.playing)return;
   const lane=S.patterns[S.editPat].lanes[n];
-  if(!lane||!lane.events.length||lane.len<=0||isAudioCh(n))return;
+  if(!lane||!lane.events.length||lane.len<=0||(isAudioCh(n)&&!isGranCh(n)))return;
   const L=lane.len, t=fmod(posNow()-editAnchor(),L);
   for(const e of lane.events){
     if(e.t>=L-1e-9)continue;
@@ -3320,7 +3321,9 @@ let fxwReady=false;
         else if(m.t==='rat'){const v=this.vs.get(m.id);
           if(v&&Number.isFinite(m.ratio))v.ratio=Math.min(64,Math.max(1/64,m.ratio));}
         else if(m.t==='panic'){this.vs.clear(); this.grains.length=0;}
-        else if(m.t==='ping')this.port.postMessage({t:'stat',g:this.grains.length,v:this.vs.size,spawned:this.stat});};
+        else if(m.t==='ping'){const L9=(this.p.live>0.5?this.ring.length:this.len)||1;
+          this.port.postMessage({t:'stat',g:this.grains.length,v:this.vs.size,spawned:this.stat,
+            pos:this.grains.slice(0,24).map(g9=>Math.max(0,Math.min(1,g9.ph/L9)))});}};
     }
     env(t,sh){          // t 0..1 through the grain, sh = slewed shape
       if(sh<0.5){       // trapezoid: slope opens from steep (boxcar-ish) to triangle
@@ -3658,7 +3661,7 @@ function scheduleRange(from,to){
     const anySolo=pat.lanes.some(l=>l.solo);
     for(let li=1;li<10;li++){      // lane 0 is the master's own timeline
       const lane=pat.lanes[li];
-      if(isAudioCh(li)){
+      if(isAudioCh(li)&&!isGranCh(li)){
         if((anySolo?!lane.solo:lane.mute)||(muteHold&&muteHold.lane===li))continue;
         engine.audCycle(li,lane,a,s0,s1,fresh);
         /* RECORDED JUMPS replay over the base cycle: at each cue event the
@@ -6812,7 +6815,7 @@ class Engine{
   }
   noteOn(at,pi,midi,vel,padMidi){
     const p=S.presets[pi];
-    if((p.cat||'')==='gran')return this.granNote(at,pi,midi,vel,null);
+    if(engineGranP(p))return this.granNote(at,pi,midi,vel,null);
     /* MONO STEAL, before anything else. This used to live below the procedural
        early-return, so proc channels never stole at all and mono stacked up
        polyphonically — the old note just kept ringing under the new one. */
@@ -7322,6 +7325,10 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     const n=new AudioWorkletNode(AC,'ten-grsyn',{numberOfInputs:1,outputChannelCount:[2]});
     n.connect(this.buses[pi].vIn);
     e=this.gn[pi]={node:n,id:1};
+    this.granViz=this.granViz||[];
+    n.port.onmessage=ev=>{const d9=ev.data;
+      if(d9&&d9.t==='stat'){e.stat=d9;
+        if(d9.pos){this.granViz[pi]=d9.pos; dirty=true;}}};
     this.granCfg(pi);
     if(this.granBuf&&this.granBuf[pi])this.granSend(pi);
     return e;
@@ -7463,6 +7470,12 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
   }
 }
 const engine=new Engine();
+setInterval(()=>{
+  const pi=S.layer>=2?S.editSnd:S.curPreset;
+  if(!isGranCh(pi))return;
+  const e=engine.gn&&engine.gn[pi]; if(!e||!e.node)return;
+  try{e.node.port.postMessage({t:'ping'});}catch(_){}
+},150);
 
 /* UI write: routes to the selected stack layer for voice modules, else the channel */
 function writeParam(pi,mi,si,px,v){
@@ -9156,11 +9169,10 @@ const ENGINES=[
   {k:'synth', n:'Synth'},
   {k:'proc',  n:'Procedural'},
   {k:'audio', n:'Audio'},
-  {k:'gran',  n:'Grain'},
 ];
 /* the categories a Synth channel can be — the engine names are not among them */
 const SYNTHCATS=CATS.filter(c=>c!=='kit'&&c!=='audio'&&c!=='proc');
-const engineOf=p=>p.cat==='kit'?'kit':p.cat==='audio'?'audio':p.cat==='proc'?'proc'
+const engineOf=p=>p.cat==='kit'?'kit':p.cat==='audio'?(engineGranP(p)?'gran':'audio'):p.cat==='proc'?'proc'
   :p.cat==='gran'?'gran':'synth';
 const engineName=p=>(ENGINES.find(e=>e.k===engineOf(p))||{}).n||'Synth';
 const engShort=p=>({kit:'Kit',synth:'Synth',proc:'Proc',audio:'Audio',gran:'Grain',wt:'Wtab'})[engineOf(p)]||'Synth';
@@ -9196,10 +9208,15 @@ function setEngine(pi,key){
   if(key===was)return false;
   if(was==='synth')p._scat=p.cat;          // remember the category to come back to
   if(key==='kit'){p.cat='kit'; p.kit=null;}
-  else if(key==='audio')p.cat='audio';
+  else if(key==='audio'){p.cat='audio'; (p.au=p.au||{}).amode=0;}
   else if(key==='gran'){
-    p.cat='gran'; p.gr=p.gr||{};
+    /* 'gran' is a MODE of audio now — this spelling stays for old callers */
+    p.cat='audio'; (p.au=p.au||{}).amode=1; p.gr=p.gr||{};
     engine.granNode(pi);
+    if(!(engine.granBuf||[])[pi]&&engine.audBuf[pi]){
+      engine.granBuf=engine.granBuf||[]; engine.granBuf[pi]=engine.audBuf[pi];
+      engine.granSend(pi);
+    }
   }
   else if(key==='proc'){
     p.cat='proc'; p.pmodel=p.pmodel||PROCNAMES[0]; p.psel=p.psel|0;
@@ -9236,7 +9253,7 @@ function prsFieldDefs(){
   if(p.cat==='audio')return [
     chEng,
     {k:'ainfo',v:()=>engine.audBuf[S.editSnd]?'clip loaded':'drop a file'}];
-  if(p.cat==='gran')return [
+  if(engineGranP(p))return [
     chEng,
     {k:'ginfo',v:()=>engine.granBuf&&engine.granBuf[S.editSnd]
       ?((engine.granName||[])[S.editSnd]||'sample')
@@ -9289,6 +9306,15 @@ const GRANF=[
  /* live-mode feedback, HP-filtered and soft-limited so it blooms, not booms */
  SP('fb','fb','lin',{min:0,max:0.95,step:0.05,fmt:v=>Math.round(v*100)+'%',
     get:m=>m.fb||0,set:(m,v)=>m.fb=v}),
+ SP('keys','amode','enum',{opts:['cues','gran'],
+    get:()=>{const p2=S.presets[S.editSnd];
+      return p2.cat==='gran'?1:Math.round((p2.au||{}).amode||0);},
+    set:(o,v)=>{const pi=S.editSnd,p2=S.presets[pi]; p2.au=p2.au||{};
+      if(p2.cat==='gran')p2.cat='audio';
+      p2.au.amode=Math.round(v);
+      if(p2.au.amode===0&&!engine.audBuf[pi]&&(engine.granBuf||[])[pi])
+        engine.audBuf[pi]=engine.granBuf[pi];   // the tape inherits the cloud's take
+      dirty=true;}}),
  /* which POOL take the cloud chews on — the same list every sampler shares */
  SP('smpl','_pool','lin',{min:0,max:31,step:1,w:2,
    fmt:v=>POOL[Math.round(v)]?POOL[Math.round(v)].name:'—',
@@ -9326,6 +9352,16 @@ const AUDF=[
  SP('end','en','lin',{min:0.02,max:1,step:0.01,fmt:v=>Math.round(v*100)+'%'}),
  SP('fit','fit','enum',{opts:['off','on']}),
  SP('input','src','enum',{opts:['mic','mstr']}),
+ /* the channel's SECOND FACE: cues = the tape and its jump points; gran =
+    the letters play the cloud, chewing this same clip */
+ SP('keys','amode','enum',{opts:['cues','gran'],
+    get:o=>Math.round(o.amode||0),
+    set:(o,v)=>{o.amode=Math.round(v);
+      const pi=S.editSnd;
+      if(o.amode===1){engine.granNode(pi);
+        engine.granBuf=engine.granBuf||[];
+        if(!engine.granBuf[pi]&&engine.audBuf[pi]){engine.granBuf[pi]=engine.audBuf[pi];engine.granSend(pi);}
+        engine.granCfg(pi);}}}),
  SP('smpl','_pool','lin',{min:0,max:31,step:1,w:2,
    fmt:v=>POOL[Math.round(v)]?POOL[Math.round(v)].name:'—',
    get:()=>{const pi=S.editSnd;
@@ -10419,7 +10455,10 @@ const rawAt=new Set();                // ...and which others are markup too
 const kbHeld=new Set();               // note keys physically down, for chord-vs-sequence
 const liveMute=Array.from({length:10},()=>0);   // >0 = a live key overrides recorded notes on this lane
 const isAudioCh=pi=>S.presets[pi].cat==='audio';
-const isGranCh=pi=>S.presets[pi].cat==='gran';
+/* GRAN IS A MODE OF THE AUDIO CHANNEL now (au.amode 1); cat 'gran' survives
+   as the legacy spelling so old saves keep singing */
+const engineGranP=p=>!!p&&(p.cat==='gran'||(p.cat==='audio'&&Math.round((p.au||{}).amode||0)===1));
+const isGranCh=pi=>engineGranP(S.presets[pi]);
 /* ---------------- code instruments -------------------------------------
    A channel whose sound is DSP you write, compiled into an AudioWorklet.
    This exists for the sounds the rack provably cannot express — anything
@@ -11997,6 +12036,8 @@ function audPlace(pi,rec,startBeat,name='mic'){
   }
   engine.audBuf[pi]=cv; engine.audName[pi]=name;
   poolAdd(cv,name+' ch'+pi);
+  if(engineGranP(S.presets[pi])){engine.granBuf=engine.granBuf||[];
+    engine.granBuf[pi]=cv; engine.granSend(pi);}
   S.presets[pi].cat='audio';
   flash('◉ audio: '+(L/4)+' bar loop ('+['overwrite','overdub','smart'][mode]+')');
   dirty=true; dirtySave=true;
@@ -13789,7 +13830,7 @@ const onKeyDown=e=>{
     const pi=S.layer>=2?S.editSnd:S.curPreset;
     const midi=60+S.oct*12+noteOf(c,pi);
     const hitVel=EXP.take();          // MIDI velocity if this key came from EXP, else the c/v value
-    if(isAudioCh(pi)){
+    if(isAudioCh(pi)&&!isGranCh(pi)){
       /* THE KEYBOARD IS A SET OF JUMP POINTS. The clip divides into 16ths of
          the loop — one bar is sixteen slices, two bars thirty-two — and the
          letters, in note order, each hold one. Held, the clip plays from that
@@ -15546,8 +15587,8 @@ function gridHTML(pat,pos,anc,chans){
     h+='<div class="gcol" style="width:'+COLW+'ch">';
     if(!n16){
       h+='<div class="gc k" style="height:'+H+'px"></div>';
-      if(isAudioCh(i)&&engine.audBuf[i]){
-        const wb=engine.audBuf[i];
+      if((isAudioCh(i)||isGranCh(i))&&(engine.audBuf[i]||(engine.granBuf||[])[i])){
+        const wb=engine.audBuf[i]||(engine.granBuf||[])[i];
         const key2=i+'|'+wb.length+'|'+H;
         let wsvg=WAVEC.get(key2);
         if(!wsvg){
@@ -15565,6 +15606,14 @@ function gridHTML(pat,pos,anc,chans){
           WAVEC.set(key2,wsvg); if(WAVEC.size>20)WAVEC.delete(WAVEC.keys().next().value);
         }
         h+=wsvg;
+        /* THE GRAINS, LIVE ON THE WAVEFORM: each dot is a grain's playhead,
+           refreshed off the worklet's stat while the cloud runs */
+        if(isGranCh(i)&&engine.granViz&&(engine.granViz[i]||[]).length){
+          let gd='';
+          for(const p9 of engine.granViz[i])
+            gd+='<circle cx="'+(0.5*CW).toFixed(1)+'" cy="'+(p9*H).toFixed(1)+'" r="1.6"/>';
+          h+='<svg class="wlay gviz" width="'+CW.toFixed(1)+'" height="'+H+'">'+gd+'</svg>';
+        }
         const cues=(S.presets[i].au||{}).cues||{}, LN2=lane.len||8;
         let ct='';
         for(const k2 in cues){const cu=cues[k2];
