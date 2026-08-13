@@ -1012,7 +1012,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-13.2038';
+const BUILD='2026-08-13.2059';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -10690,7 +10690,7 @@ const HE={
   sample(id,v,t){
     const C=this.cfg();
     let k=this.keys[id];
-    if(!k)k=this.keys[id]={st:0,pv:0,pt:t,peak:0,top:0,code:null,fireV:0,fireT:0,zero:v};
+    if(!k)k=this.keys[id]={st:0,pv:0,pt:t,peak:0,top:0,code:null,fireV:0,fireT:0,zero:v,armed:false};
     /* EVERY KEY HAS ITS OWN ZERO, and this is the whole hanging-note story.
        Magnet gaps differ across a board: Gad's stuck key RESTED at 0.044 while
        the code called anything under 0.03 "at rest", so that key could never
@@ -10737,7 +10737,17 @@ const HE={
       ? (v-k.h[0][0])/Math.max(0.5,t-k.h[0][1])
       : slope;
     if(k.st===0){                                    // resting
-      if(v<=C.rest){k.pv=v; k.pt=t; return;}
+      /* A PRESS MUST START FROM REST — and this is the hanging note, finally.
+         A lift does not stop at the release threshold, it keeps falling, and
+         every sample on the way down is still above rest. The state machine
+         read that falling edge as a NEW press, fired a phantom note from it,
+         and set that note's peak to wherever the descent happened to be — so
+         its own release threshold ended up BELOW the key's resting value and
+         nothing could ever end it. Two keys, two phantoms, one per lift.
+         So: after a release the key is disarmed, and only coming home rearms
+         it. You cannot play a key you have not let go of. */
+      if(v<=C.rest){k.armed=true; k.pv=v; k.pt=t; return;}
+      if(!k.armed){k.pv=v; k.pt=t; return;}          // still on the way down from the last press
       k.st=1; k.h=[[k.pv,k.pt],[v,t]]; k.peak=Math.max(0,slope); k.top=v; k.wait=0;
       /* WINDOW MODE STARTS AT THE FIRST TOUCH, not at the trigger depth: the
          question is how far the key travels in a known slice of time, and the
@@ -10783,7 +10793,18 @@ const HE={
          proof, and one is enough. */
       if(Math.abs(v-k.pv)<0.002)this.streams=1;
       if(v>C.rest)k.osUp=0;      // it moved: the finger is still there, forget the key-up
-      if(v<C.rest*0.8){this.release(id);}
+      /* THE LIFT IS RELATIVE TO THIS PRESS, not to any fixed line. A learned
+         zero can go stale — a key's rest reading drifts while it is idle, and
+         an idle key sends nothing to learn from — so an absolute threshold
+         will eventually be unreachable again for some key, which is the bug
+         that has come back all evening in four disguises. A finger that has
+         gone always ends up far below where this press peaked, whatever the
+         zero happens to be today. Thirty-five percent of the deepest point is
+         the same rule rapid trigger uses, and it needs no calibration at all.
+         The absolute test stays as the floor, for a press so shallow that a
+         proportion of it means nothing. */
+      if(v>(k.top||0))k.top=v;                  // the deepest this press has gone
+      if(v<(k.top||0)*0.35||v<C.rest*0.8){this.release(id);}
       /* Re-attack. A key resting past the trigger — fingers parked, a high
          zero, a press that stopped short — sits here, and from there a
          full-force hit makes no sound at all. A light touch missing is fine;
@@ -10909,6 +10930,7 @@ const HE={
   },
   release(id){
     const k=this.keys[id]; if(!k)return;
+    k.armed=false;             // the rest of this lift is not a new note
     if(k._tmr){clearTimeout(k._tmr); k._tmr=null;}
     if(k.code&&this.sounded&&this.sounded[k.code]===id)delete this.sounded[k.code];
     if(k.st===2&&k.code)EXP.keyUp(k.code);
