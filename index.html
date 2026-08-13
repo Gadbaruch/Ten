@@ -1877,10 +1877,10 @@ function modDests_(pre){
   };
   for(let mi=0;mi<MODULES.length;mi++){
     const M=MODULES[mi]; if(!M||!M.id||M.prs)continue;
-    /* gran keeps VOX: unison, spread and mono/legato drive its worklet
-       voices now. audio still has no voice concept at all. */
     if(noVoice&&(M.id==='osc'||M.id==='flt'||M.id==='ply'))continue;
-    if(eng==='audio'&&M.id==='vox')continue;
+    /* the voice rack belongs to the SYNTH alone: audio (tape/cloud) and proc
+       run their own allocation, so their vox fields are dead knobs */
+    if((eng==='audio'||eng==='gran'||eng==='proc')&&M.id==='vox')continue;
     if(M.flat){for(const sp of M.flat)add(M.id,0,sp,''); continue;}
     if(!M.slot)continue;
     const rk=modHolder(pre,M.id)[M.id]||[];
@@ -9460,10 +9460,19 @@ function instFields(){
      so they were four controls that did nothing but cost you a walk past them.
      Glide and mono still mean something there; spread, width and slop do not. */
   const proc=isCodeCh(S.editSnd), kit=isKit(S.presets[S.editSnd]);
-  const dead=new Set(['uni','sprd','wide','slop']);   // proc allocates its own voices; kit pads are mono drums
+  const audio=isAudioCh(S.editSnd);
+  /* only the SYNTH builds voices worth thickening: audio (tape/cloud) and
+     proc show none of the voice fields — proc keeps glide, which its models
+     honour; kit keeps mode (kit LIVES in that menu) minus the unison half */
+  const dead=new Set(['uni','sprd','wide','slop']);
   return prsFieldDefs().concat(
     (MODULES[VOXI].flat||[])
-      .filter(spec=>!((proc||kit)&&dead.has(spec.key)))
+      .filter(spec=>{
+        if(audio)return false;
+        if(proc)return spec.key==='glide';
+        if(kit)return !dead.has(spec.key);
+        return true;
+      })
       .map(spec=>({k:spec.lbl,spec})));
 }
 function prsAction(d){
