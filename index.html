@@ -1012,7 +1012,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-13.1915';
+const BUILD='2026-08-13.2004';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1053,6 +1053,8 @@ const SETTINGS=[
                                   :'piano — home row white, row above black');}},
  /* ↑ on this row asks the server whether you are current, and reloads if not */
  {n:'build',g:'Behavior',  v:()=>BUILD,                    a:()=>checkUpdate()},
+ {n:'stuck',g:'Behavior',  v:()=>{let n=0;(engine.act||[]).forEach(a=>{for(const v of (a||[]))if(v&&!v.killed)n++;});
+                                    return String(n);},                a:()=>stuckReport()},
  {n:'swing',g:'Behavior',  v:()=>S.grv.amt+'%',            a:d=>S.grv.amt=clamp(S.grv.amt+d*5,0,100)},
  {n:'groove',g:'Behavior', v:()=>GROOVES[S.grv.typ].n,     a:d=>S.grv.typ=fmod(S.grv.typ+d,GROOVES.length)},
  {n:'grid',g:'Look',   v:()=>CFG.vgrid?'vertical':'lanes',a:()=>CFG.vgrid=CFG.vgrid?0:1},
@@ -15110,12 +15112,54 @@ function sweepOrphanVoices(){
   const now=AC.currentTime;
   for(let pi=0;pi<(engine.act||[]).length;pi++){
     for(const v of [...(engine.act[pi]||[])]){
-      if(!v||!v.live||v.released||v.killed)continue;
+      if(!v||v.killed)continue;
+      /* A RELEASED VOICE THAT IS STILL SOUNDING is the case every net so far
+         was blind to: release() marks the voice released the moment it is
+         CALLED, so a note whose ramp never actually reached zero — an op with
+         no envelope of its own, a gain something else kept writing — looked
+         finished to all of us while it droned. Long past its own release, a
+         voice has no business making sound: kill it, which stops the nodes
+         outright rather than asking them politely. */
+      if(v.released){
+        const dead=(v.relAt||v.startAt||0)+Math.min(8,Math.max(2,(v.rel||0.05)*8));
+        if(now>dead){try{v.kill(now+0.002);}catch(_){}}
+        continue;
+      }
       if(ref.has(v))continue;
-      if(now-(v.startAt||0)<1.5)continue;      // young enough that a handle may still be on its way
+      /* unreleased AND unreferenced: nobody can ever end this one. A voice with
+         a scheduled end is already marked released, so this cannot catch a
+         sequenced note however long it is. */
+      const age=now-(v.startAt||0);
+      if(age<(v.live?1.5:4))continue;
       try{v.release(now+0.002);}catch(_){}
     }
   }
+}
+/* WHAT IS ACTUALLY SOUNDING — for the next time something hangs and none of
+   this caught it. Reports every voice the engine still holds, and whether
+   anything references it, so a hang stops being a story and becomes numbers. */
+function stuckReport(){
+  const ref=new Set();
+  const take=h=>{if(h&&h.voices)for(const v of h.voices)ref.add(v);};
+  for(const c in liveV)take(liveV[c]);
+  for(const k in (EXP.held||{})){const h=EXP.held[k]; take(h&&h.h); if(h&&h.code)take(liveV[h.code]);}
+  if(AUD&&AUD.hold)take(AUD.hold.gsh);
+  const now=AC.currentTime, rows=[];
+  (engine.act||[]).forEach((arr,pi)=>{for(const v of (arr||[])){
+    if(!v||v.killed)continue;
+    let g=null; try{g=+v.vca.gain.value.toFixed(4);}catch(_){}
+    rows.push('ch'+pi+' m'+v.midi+' '+(v.live?'live':'seq')
+      +(v.released?' rel':' HELD')+(ref.has(v)?' ref':' ORPHAN')
+      +(v.oneShot?' 1shot':'')+' age'+(now-(v.startAt||0)).toFixed(1)+'s gain'+g);
+  }});
+  console.log('STUCK REPORT\n'+(rows.join('\n')||'nothing sounding'));
+  /* readable WITHOUT a console, because the moment you want this you are
+     holding a keyboard, not a devtools window: the oldest voice first, since
+     that is the one that hung */
+  const old=rows.slice().sort((a2,b2)=>
+    parseFloat(b2.split('age')[1])-parseFloat(a2.split('age')[1]));
+  flash(rows.length?(rows.length+' sounding · '+old.slice(0,2).join('  ·  ')):'nothing is sounding');
+  return rows;
 }
 function sweepStuckNotes(){
   for(const c in liveV){
