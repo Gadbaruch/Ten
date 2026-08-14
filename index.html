@@ -132,6 +132,9 @@
   .wtc path{stroke:var(--fg);stroke-width:1.2;opacity:.8;fill:none;}
   .cuet{position:absolute;left:0;width:100%;height:1px;background:var(--fg);opacity:.65;}
   .crx{position:absolute;left:0;width:100%;background:var(--bg);opacity:.62;}
+  .bart{position:absolute;left:0;width:100%;height:1px;background:var(--fg);opacity:.16;}
+  .cuel{position:absolute;right:1px;font-size:9px;line-height:9px;color:var(--fg);
+        opacity:.75;pointer-events:none;}
   .gcol.drp{outline:1px dashed var(--fg);outline-offset:-2px;background:rgba(255,255,255,.06);}
   .drpl{color:var(--fg);opacity:.95;}
   .cinf{position:absolute;top:-16px;left:0;width:100%;text-align:center;
@@ -1020,7 +1023,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-14.2116';
+const BUILD='2026-08-14.2126';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -17012,13 +17015,28 @@ function gridHTML(pat,pos,anc,chans){
         const cues=au9.cues||{};
         const dur9=(en9-st9)*wb.duration, loopS9=Math.max(1e-6,LN2*spb());
         const rate9=Math.max(0.05,Math.round(au9.fit)?dur9/loopS9:(au9.rate??1));
+        const frOf=b9=>(st9*wb.duration+b9*spb()*rate9)/wb.duration;
         let ct='';
+        /* THE CLOCK, ON THE TAKE. A waveform with no bar lines is a picture
+           with no time in it — you could not see whether the phrase sits on
+           the grid until you played it. Same arithmetic as the cues, so the
+           lines land where the cursor will actually be on that beat. */
+        for(let b9=4;b9<LN2;b9+=4){
+          const f9=frOf(b9); if(f9<=0.002||f9>=en9)continue;
+          ct+='<i class="bart" style="top:'+(f9*H).toFixed(1)+'px"></i>';
+        }
         for(const k2 in cues){const cu=cues[k2];
           const bt=(+k2*0.25+(cu.o||0));
           if(bt<0||bt>=LN2)continue;
-          const fr9=(st9*wb.duration+bt*spb()*rate9)/wb.duration;
+          const fr9=frOf(bt);
           if(fr9<0||fr9>=en9)continue;      // past the end of the take: nothing to jump to
-          ct+='<i class="cuet" style="top:'+(fr9*H).toFixed(1)+'px"></i>';}
+          ct+='<i class="cuet" style="top:'+(fr9*H).toFixed(1)+'px"></i>';
+          /* and WHICH KEY jumps there: the slot is an index into the letter
+             run, so the map from fingers to the take can simply be read */
+          const lk=KBSEQ[+k2];
+          if(lk&&Math.round(au9.kmode||0)===0)
+            ct+='<i class="cuel" style="top:'+(fr9*H-6).toFixed(1)+'px">'+
+                lk.slice(3).toLowerCase()+'</i>';}
         if(ct)h+='<div class="alay" style="height:'+H+'px;width:'+CW.toFixed(1)+'px">'+ct+'</div>';
       }
       h+='</div>'; continue; }
