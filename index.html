@@ -1012,7 +1012,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-14.1436';
+const BUILD='2026-08-14.1440';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -13377,8 +13377,13 @@ const onKeyDown=e=>{
      is down when you press them. */
   /* the system's own repeat is not wanted while we are driving one, and never
      wanted on a menu */
+  /* The system's repeat is swallowed when OUR repeat is driving, and on
+     anything stepped. Otherwise it is let through — so a held arrow always
+     moves, even on a board (or a key) whose travel we cannot read: at the
+     system's own rate rather than by depth, which is the same as it ever was
+     rather than nothing at all. */
   if(e.isTrusted&&e.repeat&&e.code.indexOf('Arrow')===0
-     &&(AREP.code||focusIsStepped()||HE.pressure()!=null))return;
+     &&(AREP.code||focusIsStepped()))return;
   if(e.isTrusted&&!e.repeat&&e.code.indexOf('Arrow')===0){
     if(arrowRefire(e.code)){e.preventDefault(); return;}
     arepStart(e.code);
@@ -17843,6 +17848,15 @@ function settingsRack(L){
    /* CONNECTED IS NOT STREAMING. A board that opened and never spoke reads the
       same as a board playing into a slot nothing is mapped to, so say which:
       reports in, the last slot that moved, and whether that slot has a key. */
+   /* THE THREE THINGS THAT DECIDE WHETHER A HELD ARROW RUNS: is a key on the
+      board being read at all, is the repeat armed, and is the cursor on
+      something continuous. Hold the arrow and look — whichever of these is
+      wrong is the reason, and it takes a glance instead of a round trip. */
+   if(HE.on){const pr=HE.pressure();
+     L.push('   '+sp('d','   press ')+sp(pr==null?'r':'a',pr==null?'—':pr.toFixed(2))
+       +sp('d','  repeat ')+sp(AREP.code?'a':'r',AREP.code?'on':'off')
+       +sp('d','  cursor ')+sp(focusIsStepped()?'r':'a',focusIsStepped()?'stepped':'dial')
+       +sp('d','  dial ')+sp(CFG.dial?'a':'r',CFG.dial?'on':'off'));}
    if(HE.on)L.push('   '+sp('d','   '+['?','keychron','rongyuan'][HE.kind]+'  reports ')+
      sp(HE.rx?'a':'r',String(HE.rx||0))+
      (HE.rxId===undefined?sp('r','  — nothing analog yet: press a key')
