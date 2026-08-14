@@ -1026,7 +1026,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-14.2310';
+const BUILD='2026-08-14.2318';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -3667,10 +3667,11 @@ let fxwReady=false;
                 e9.push(+Math.min(1,mx).toFixed(3));}
               return e9;})():null,
             rw:this.p.live>0.5?this.rw/this.ring.length:null,
-            gam:this.cx.filter(c9=>c9.bus===0&&c9.dur<Infinity).slice(0,24)
-              .map(g9=>+Math.max(0,Math.min(1,
-                this.env(Math.max(0,g9.n)/g9.dur,g9.shp)*g9.vel)).toFixed(3)),
-            pos:this.cx.filter(c9=>c9.bus===0&&c9.dur<Infinity).slice(0,24)
+            gam:this.cx.filter(c9=>c9.bus===0).slice(0,24)
+              .map(g9=>+Math.max(0,Math.min(1,g9.vs!=null
+                ?((this.vs.get(g9.vs)||{env:0}).env||0)*g9.vel
+                :this.env(Math.max(0,g9.n)/g9.dur,g9.shp)*g9.vel)).toFixed(3)),
+            pos:this.cx.filter(c9=>c9.bus===0).slice(0,24)
               .map(g9=>Math.max(0,Math.min(1,g9.ph/L9)))});}};
     }
     env(t,sh){          // t 0..1 through the grain, sh = slewed shape
@@ -3709,7 +3710,13 @@ let fxwReady=false;
           if(c.fr&&f0+k<c.fr)continue;         // sample-accurate start
           if(c.n<0){c.n++;continue;}           // pre-delay into the block
           let amp;
-          if(grain){
+          if(c.vs!=null){
+            /* a cursor the size dial opened all the way: no window of its
+               own, it lives and dies on the voice that spawned it */
+            const sp9=this.vs.get(c.vs);
+            if(!sp9){dead=1;break;}
+            amp=Math.max(0,Math.min(1,sp9.env))*c.vel;
+          }else if(grain){
             if(!(c.n<c.dur)){dead=1;break;}    // !(a<b) also culls a NaN dur
             amp=this.env(c.n/c.dur,c.shp)*c.vel*0.5;
           }else{
@@ -3749,7 +3756,7 @@ let fxwReady=false;
         }
         if(dead){
           this.cx.splice(ci,1);
-          if(grain)this.ng--; else if(c.id!=null)this.tv.delete(c.id);
+          if(cloud)this.ng--; else if(c.id!=null)this.tv.delete(c.id);
         }
       }
     }
@@ -3879,6 +3886,36 @@ let fxwReady=false;
         if(v.env<=0&&v.rel){this.vs.delete(id);continue;}
         /* deterministic phasor with FLOW-blended jitter, sample-accurate:
            every spawn lands on its exact sample via preDelay */
+        /* SIZE AT THE TOP OF ITS RANGE IS NOT A GRAIN AT ALL. A window that
+           never closes is a continuous playhead — the same thing the tape
+           is — so the dial runs from a 5ms sliver through clouds to one
+           clean unbroken cursor, and 'grains or tape' stops being a mode.
+           One per voice, held by the voice's own envelope. */
+        if(C.size>=0.999){
+          if(!v.one){
+            v.one=1; this.stat++;
+            const base9=live?(((this.rw/len)-0.05-C.pos*0.9)%1+1)%1
+                            :((C.pos+this.scanPh)%1+1)%1;
+            const st9=Math.max(0,Math.min(len-2,
+              (base9+(Math.random()*2-1)*C.spray*0.5)*len));
+            const step9=v.ratio*Math.pow(2,(C.semis+(Math.random()*2-1)*C.jit)/12);
+            const rev9=Math.random()<C.rev, pan9=(Math.random()*2-1)*C.width;
+            const th9=(pan9+1)*0.25*Math.PI;
+            this.cx.push({bus:0,wrap:1,dur:Infinity,vs:id,shp:C.shape,shift:1,ch:0,fr:0,
+              ph:st9,step:rev9?-step9:step9,sTgt:rev9?-step9:step9,
+              n:0,vel:v.vel*0.5,gl:Math.cos(th9),gr:Math.sin(th9),
+              gain:1,env:1,rel:0,relAt:0,life:1e12,end:len,tp:0,id:null});
+            this.ng++;
+          }
+          continue;                       // nothing else to spawn for this voice
+        }
+        if(v.one){
+          /* the dial came back down under a held key: the long cursor gives
+             way to the grain train rather than sounding under it */
+          for(let z=this.cx.length-1;z>=0;z--)
+            if(this.cx[z].vs===id){this.cx.splice(z,1); this.ng--;}
+          v.one=0; v.next=this.tick;
+        }
         while(v.next<this.tick+N&&this.ng<64){
           const pre=Math.max(0,Math.round(v.next-this.tick));
           this.stat++;
@@ -8383,7 +8420,7 @@ function libNos(){
   }
   return libNoCache=m;
 }
-const LIBV=23;   // bump BOTH: libStore writes it, libAll checks it
+const LIBV=24;   // bump BOTH: libStore writes it, libAll checks it
 function libStore(a){libMigrated=true; libCache=null; libNoCache=null;
   const out=(a||[]).map(en=>en&&en.data?{...en,data:portPreset(en.data,true)}:en);
   try{localStorage.setItem(LIBKEY,JSON.stringify({v:LIBV,items:out}));}catch(_){} if(typeof prepCache!=='undefined')prepCache.clear();}
@@ -9839,7 +9876,10 @@ const GRANF=[
  SP('pos','pos','lin',{min:0,max:1,step:0.01,fmt:v=>Math.round(v*100)+'%'}),
  SP('scan','scan','lin',{min:-4,max:4,step:0.05,fmt:v=>Math.abs(v)<0.001?'freeze':'\u00d7'+v}),
  SP('spray','spray','lin',{min:0,max:1,step:0.02,fmt:v=>Math.round(v*100)+'%'}),
- SP('size','size','lin',{min:0.005,max:1,step:0.005,fmt:v=>Math.round(v*1000)+'ms'}),
+ /* the character dial: a sliver, a cloud, or — at the top — one unbroken
+    playhead, which is the clean tape read */
+ SP('size','size','lin',{min:0.005,max:1,step:0.005,
+   fmt:v=>v>=0.999?'\u221e tape':Math.round(v*1000)+'ms'}),
  SP('dens','dens','lin',{min:0.5,max:120,step:0.5,fmt:v=>v+'/s'}),
  SP('flow','flow','lin',{min:0,max:1,step:0.05,fmt:v=>v<0.02?'lock':Math.round(v*100)+'%'}),
  SP('pitch','semis','lin',{min:-24,max:24,step:1,fmt:v=>v+'st'}),
@@ -15188,9 +15228,35 @@ const onKeyDown=e=>{
          way in cut the tape the moment your finger moved and left a hole
          until quantize came round — you heard the gap, not the grab. */
       engine.audStop(pi,atP);
-      engine.audPlay(pi,atP,L,clamp(sl*0.25+(cue.o||0),0,L-0.01),cue);
+      /* AND THE JUMP IS A CURSOR LIKE ANY OTHER. At the top of the size dial
+         it is one clean unbroken read — the tape jump, exactly as it was.
+         Turn size down and the same jump becomes a cloud AT THAT POINT in
+         the take: spray, jitter, reverse, scan, feedback, all of it, on the
+         playhead the key just placed. */
+      const gr9=S.presets[pi].gr||{};
+      if((gr9.size??0.12)<0.999){
+        const buf9=engine.audBuf[pi], au9=S.presets[pi].au||{};
+        const st9=clamp(au9.st??0,0,0.98), en9=clamp(au9.en??1,st9+0.01,1);
+        const dur9=(en9-st9)*buf9.duration, loop9=Math.max(1e-6,L*spb());
+        const rate9=Math.max(0.05,Math.round(au9.fit)?dur9/loop9:(au9.rate??1));
+        const bt9=clamp(sl*0.25+(cue.o||0),0,L-0.01);
+        const fr9=clamp((st9*buf9.duration+bt9*spb()*rate9)/buf9.duration,0,1);
+        engine.granNode(pi);
+        engine.granBuf=engine.granBuf||[];
+        if(!engine.granBuf[pi]&&buf9){engine.granBuf[pi]=buf9;engine.granSend(pi);}
+        engine.granCfg(pi);
+        engine._ctrlPut('grn',pi,0,'pos',fr9);
+        const ms9=Math.max(0,(atP-AC.currentTime)*1000);
+        const fire9=()=>{ if(!AUD.hold||AUD.hold.c!==c)return;
+          AUD.hold.gsh=engine.granNote(AC.currentTime+0.004,pi,
+            60+(cue.semis||0),(cue.vol??1)*EXP.take(),null);};
+        if(ms9<2)fire9(); else setTimeout(fire9,ms9);
+      }else{
+        engine.audPlay(pi,atP,L,clamp(sl*0.25+(cue.o||0),0,L-0.01),cue);
+      }
       flash('cue '+(sl+1)+'/'+nS+(cue.semis?' '+(cue.semis>0?'+':'')+cue.semis+'st':'')+
-        (cue.o?' @'+(sl*0.25+cue.o).toFixed(2)+'b':''));
+        (cue.o?' @'+(sl*0.25+cue.o).toFixed(2)+'b':'')+
+        ((gr9.size??0.12)<0.999?' · cloud':''));
       dirty=true; return;
     }
     const pat=S.patterns[S.editPat];
@@ -15666,7 +15732,9 @@ const onKeyUp=e=>{
     dirty=true;
   }
   else if(AUD.hold&&AUD.hold.c===c){
-    const {pi,sl,press,tr}=AUD.hold; AUD.hold=null;
+    const {pi,sl,press,tr,gsh}=AUD.hold; AUD.hold=null;
+    if(gsh){try{gsh.release(AC.currentTime);}catch(_){}
+      engine._ctrlPut('grn',pi,0,'pos',undefined);}
     engine.audStop(pi);
     const lane=S.patterns[S.editPat].lanes[pi], L=lane.len;
     /* the jump's length is the held gesture, like a note's */
@@ -15835,7 +15903,7 @@ window.addEventListener('blur',()=>{
 
 /* ---------------- persistence + migration ---------------------------- */
 const LS='ten-v1';
-const SAVEV=23;                       // bump BOTH: serialize writes it, load checks it
+const SAVEV=24;                       // bump BOTH: serialize writes it, load checks it
 /* v22: granular is the audio channel's MODE (au.amode), never a cat — old
    'gran' spellings are normalized on the way in */
 /* WHAT A SAVE SAYS vs WHAT THE RUNTIME USES.
@@ -15989,6 +16057,11 @@ function load(json){
                       running loop; the pitch PARAM does that, live, now)
              freeze → pitch starting HERE, loop on
              gran   → pitch from the pos dial, loop OFF */
+        /* v<24: cue jumps go through the cursor engine now, and size decides
+           whether that cursor is one clean read or a cloud. Every channel
+           that jumps was built when size meant grains only, so it is opened
+           all the way — turning it down is now a thing you choose. */
+        if(o.v<24&&Math.round(p.au.kmode||0)===0){p.gr=p.gr||{}; p.gr.size=1;}
         if(o.v<23){
           const km=Math.round(p.au.kmode||0), gran=Math.round(p.au.amode||0)===1;
           p.au.auto=gran?0:1;
