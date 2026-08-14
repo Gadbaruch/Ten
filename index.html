@@ -1012,7 +1012,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-14.0807';
+const BUILD='2026-08-14.0813';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -10501,8 +10501,20 @@ const HE={
       try{await d.open();}catch(err){oerr=err; if(d===inDev)break;}
     }
     if(!inDev.opened){
+      /* the commonest cause by far, now that a tab reclaims the board on load:
+         ANOTHER TEN TAB still holds it. Say that first, and try once more —
+         a hidden tab hands the keyboard back the moment it is not in front,
+         so the second attempt usually succeeds on its own. */
+      if(!this._retried){
+        this._retried=1;
+        await new Promise(r=>setTimeout(r,400));
+        const ok=await this.connect(pre);
+        this._retried=0;
+        if(ok)return true;
+      }
       flash('hid open failed: '+(oerr&&oerr.message||oerr||'?')
-        +' — another tab or app has this keyboard, or macOS Input Monitoring is off for Chrome');
+        +' — close any OTHER TEN tab (only one can hold the keyboard), or check '
+        +'macOS Input Monitoring for Chrome');
       return false;
     }
     if(kind===2&&!cfgDev.opened){cfgDev=inDev;}   // fall back to enabling on the stream interface
@@ -10530,7 +10542,26 @@ const HE={
     flash('hid: '+this.srcName+(this.map?'':' — run `h keys` to map the keys'));
     dirty=true; return true;
   },
+  /* HAND THE BOARD BACK WHEN YOU ARE NOT THE TAB IN FRONT. Only one page can
+     hold a HID device, and this app is reloaded constantly — so an old tab
+     kept the keyboard and every new one failed to open it. Sleeping is not
+     disconnecting: the grant and the intent to reconnect both survive, so the
+     tab you return to picks it straight back up. */
+  sleep(){
+    if(!this.on)return;
+    this.on=false; clearInterval(this.watch); this.watch=null;
+    for(const id in this.keys)this.release(id);
+    this.keys={}; this.recent={}; this.sounded={};
+    if(this.dev){try{this.dev.oninputreport=null;}catch(_){} try{this.dev.close();}catch(_){}}
+    this._slept=1; dirty=true;
+  },
+  async wake(){
+    if(this.on||!this._slept)return;
+    this._slept=0;
+    try{await this.reconnect();}catch(_){}
+  },
   disconnect(){
+    this._slept=0;
     this.set('autoOn',0);      // turned off on purpose: stay off through a reload
     this.on=false; clearInterval(this.watch); this.recent={};
     for(const id in this.keys)this.release(id);
@@ -15754,7 +15785,12 @@ document.addEventListener('drop',e=>{
 libInit();
 /* the analog board, if this origin was already granted one — silent when there
    is nothing plugged in, so it costs an unplugged session nothing */
-setTimeout(()=>{try{HE.reconnect();}catch(_){}},600);
+setTimeout(()=>{try{if(!document.hidden)HE.reconnect();}catch(_){}},600);
+/* …and only ever in the tab you are actually looking at */
+document.addEventListener('visibilitychange',()=>{
+  if(document.hidden)HE.sleep(); else HE.wake();
+});
+window.addEventListener('pagehide',()=>{try{HE.sleep();}catch(_){}});
 if(CFG.midiIn|0)EXP.connect(true);   // reconnect silently if midi in was left on
 
 /* ---------------- render --------------------------------------------- */
