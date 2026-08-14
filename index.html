@@ -1012,7 +1012,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-14.1623';
+const BUILD='2026-08-14.1627';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -13416,9 +13416,11 @@ const FNACT=['ArrowRight','ArrowLeft','ArrowUp','ArrowDown','Tab','Escape','Back
    these arrive untouched, unlike ⌘Tab and ⌘Space, which macOS eats first.
    win is claimed on the TAP only: held, it is still the ⌘ that saves a set. */
 const SPARE=['off','scope','oct −','oct +','play','rec','settings','dice'];
-/* win defaults to the instrument scope: it is the key under the left thumb on
-   a board with no ` where you want one, and Gad asked for it there. */
-const kWinIdx=()=>CFG.kWin==null?SPARE.indexOf('scope'):(CFG.kWin|0);
+/* win defaults to OFF again. The scope is still available there for anyone who
+   wants it, but that key is ⌘ — the browser and the OS both answer to it — and
+   a scope is STATE, so a tap that goes astray leaves the arrows walking the
+   instrument with no sign of why. State belongs on a key nothing else owns. */
+const kWinIdx=()=>CFG.kWin|0;
 const kMenuIdx=()=>CFG.kMenu|0;
 const spareKey=(name)=>{
   const synth=code=>{for(const kind of ['keydown','keyup'])
@@ -14123,6 +14125,9 @@ const onKeyDown=e=>{
   }
   if(c==='Enter'){e.preventDefault(); if(!e.repeat)diveIn(); return;}
   if(c==='Escape'){e.preventDefault();
+    /* whatever else escape does, it lets go of a scope first — a latched one
+       has no other way out if you have forgotten it is open */
+    if(HOLD.i){HOLD.i=false; HOLD.iUsed=false; flash('instrument scope closed'); dirty=true; return;}
     if(HE.cancelCalib())return;
     if(HE.cancelLearn())return;
     if(CHSEL.size){CHSEL.clear(); flash('channel selection cleared'); dirty=true; return;}
