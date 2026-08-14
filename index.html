@@ -1012,7 +1012,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-14.1353';
+const BUILD='2026-08-14.1358';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -2134,6 +2134,12 @@ const setV=(pre,mi,si,spec,v)=>{const o=MODULES[mi].flat?pre[MODULES[mi].id]:slo
    default, since it only means anything on an analog board. */
 function dialScale(){
   if(!CFG.dial||!HE.on)return 1;
+  /* ONE GATE FOR EVERY PATH. Menus reach their values through several
+     different handlers — adjust(), a settings row's own action, an instrument
+     row's cycler — and guarding each one means missing one, which is how a
+     deep press was still skipping entries. Ask here instead: if the cursor is
+     on something stepped, depth means nothing, whoever is asking. */
+  if(focusIsStepped())return 1;
   const d=HE.pressure();
   if(d==null)return 1;
   /* the two ends are yours: `dial min` is the step a feather-touch takes and
@@ -2202,7 +2208,7 @@ function adjust(spec,v,dir,m=1){
   /* A MENU IS NOT A DIAL. Pressing an enum harder should not skip nine entries
      to reach the tenth — one press, one option, always. Depth only means
      something where the values are a continuum. */
-  if(spec.type!=='enum')m*=dialScale();
+  if(spec.type!=='enum'&&!spec.opts)m*=dialScale();
   if(spec.curve==='vol'){
     /* ⇧ coarse · plain · ⌥ fine, in fader units — the same three sizes the
        channel fader uses, so the two feel like one control */
