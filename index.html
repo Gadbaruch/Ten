@@ -1012,7 +1012,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-13.2059';
+const BUILD='2026-08-14.0807';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1053,6 +1053,10 @@ const SETTINGS=[
                                   :'piano — home row white, row above black');}},
  /* ↑ on this row asks the server whether you are current, and reloads if not */
  {n:'build',g:'Behavior',  v:()=>BUILD,                    a:()=>checkUpdate()},
+ {n:'dial',g:'Behavior',   v:()=>CFG.dial?'pressure':'steps',
+              a:()=>{CFG.dial=CFG.dial?0:1; saveCfg();
+                     flash(CFG.dial?'dial — how deep you press the arrow decides how far the value moves'
+                                   :'steps — ⇧ coarse · plain · ⌥ fine, as before');}},
  {n:'latch',g:'Behavior',  v:()=>CFG.latch===0?'off':'⇧ holds',
               a:()=>{CFG.latch=CFG.latch===0?1:0; saveCfg();
                      if(CFG.latch===0)latchReleaseAll();
@@ -2134,7 +2138,21 @@ const getV=(pre,mi,si,spec)=>{const o=MODULES[mi].flat?pre[MODULES[mi].id]:slotO
 const setV=(pre,mi,si,spec,v)=>{const o=MODULES[mi].flat?pre[MODULES[mi].id]:slotOf(pre,mi,si);
   if(spec.set)spec.set(o,v); else o[spec.key]=v;};
 
+/* THE ARROW AS A DIAL. On a hall-effect board the ↑↓ keys report how far down
+   they are, so a value can move by a hair or by a stride depending on how hard
+   you lean on the key — which is the thing a knob does and a switch cannot.
+   Gentle is a tenth of the normal step, half travel is the normal step,
+   bottomed out is ten times it: the same three sizes ⌥ and ⇧ already give,
+   except your finger chooses continuously instead of in three notches. Off by
+   default, since it only means anything on an analog board. */
+function dialScale(){
+  if(!CFG.dial||!HE.on)return 1;
+  const d=HE.pressure();
+  if(d==null)return 1;
+  return clamp(Math.pow(10,2*d-1),0.05,10);
+}
 function adjust(spec,v,dir,m=1){
+  m*=dialScale();
   if(spec.curve==='vol'){
     /* ⇧ coarse · plain · ⌥ fine, in fader units — the same three sizes the
        channel fader uses, so the two feel like one control */
@@ -10599,6 +10617,21 @@ const HE={
   /* the board's own key-up, remembered rather than obeyed: it is not proof a
      note ended (rapid trigger sends one on any upward move) but it IS the
      witness the watchdog needs when the analog stream misses a lift */
+  /* HOW FAR DOWN THE KEY UNDER YOUR FINGER IS, 0..1, or null if nothing is
+     pressed. Whichever key is deepest wins — when you are turning a value the
+     only key moving is the one you are leaning on. A held key goes silent on
+     the wire, so this trusts the state machine rather than recency: it says
+     "down" until the key comes home, which is exactly what armed/release now
+     guarantee. */
+  pressure(){
+    if(!this.on)return null;
+    const now=performance.now(); let best=null;
+    for(const id in this.keys){const k=this.keys[id];
+      if(!k||k.st===0)continue;
+      if(now-(k.pt||0)>3000)continue;          // a state this stale is not a finger
+      if(best==null||k.pv>best)best=k.pv;}
+    return best==null?null:clamp(best,0,1);
+  },
   /* is the sensor itself still holding this code down? */
   holds(code){const r=this.cfg().rest;
     for(const id in this.keys){const k=this.keys[id];
