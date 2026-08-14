@@ -127,6 +127,7 @@
   .wlay path{stroke:var(--fg);stroke-width:1;opacity:.5;fill:none;}
   .wtc path{stroke:var(--fg);stroke-width:1.2;opacity:.8;fill:none;}
   .cuet{position:absolute;left:0;width:100%;height:1px;background:var(--fg);opacity:.65;}
+  .crx{position:absolute;left:0;width:100%;background:var(--bg);opacity:.62;}
   .cinf{position:absolute;top:-16px;left:0;width:100%;text-align:center;
         font-size:11px;line-height:14px;color:var(--fg);opacity:.9;
         white-space:nowrap;pointer-events:none;}
@@ -1013,7 +1014,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-14.1915';
+const BUILD='2026-08-14.1922';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -7841,7 +7842,7 @@ const engine=new Engine();
    manifest = silence; this app must boot from a bare file:// clone too. */
 fetch('samples/manifest.json').then(r=>r.ok?r.json():null).then(man=>{
   if(!Array.isArray(man))return;
-  for(const en of man.slice(0,24)){
+  for(const en of man.slice(0,32)){   // the pool itself holds 32
     fetch('samples/'+en.file).then(r=>r.ok?r.arrayBuffer():null)
       .then(ab=>ab&&AC.decodeAudioData(ab))
       .then(buf=>{if(buf){poolAdd(buf,en.name||en.file.replace(/\.\w+$/,'')); seedCloud();}})
@@ -16865,6 +16866,8 @@ function gridHTML(pat,pos,anc,chans){
       h+='<div class="gc k" style="height:'+H+'px"></div>';
       if((isAudioCh(i)||isGranCh(i))&&(engine.audBuf[i]||(engine.granBuf||[])[i])){
         const wb=engine.audBuf[i]||(engine.granBuf||[])[i];
+        const au9=S.presets[i].au||{}, LN2=lane.len||8;
+        const st9=clamp(au9.st??0,0,0.98), en9=clamp(au9.en??1,st9+0.01,1);
         const key2=i+'|'+bufId(wb)+'|'+H;
         let wsvg=WAVEC.get(key2);
         if(!wsvg){
@@ -16882,6 +16885,15 @@ function gridHTML(pat,pos,anc,chans){
           WAVEC.set(key2,wsvg); if(WAVEC.size>20)WAVEC.delete(WAVEC.keys().next().value);
         }
         h+=wsvg;
+        /* WHAT IS CROPPED OUT IS STILL DRAWN, and used to look exactly like
+           the part that plays — you could trim a take to its last bar and see
+           no difference. The ends the cursor never reaches are dimmed. */
+        if(st9>0.001||en9<0.999){
+          h+='<div class="alay" style="height:'+H+'px;width:'+CW.toFixed(1)+'px">'+
+             (st9>0.001?'<i class="crx" style="top:0;height:'+(st9*H).toFixed(1)+'px"></i>':'')+
+             (en9<0.999?'<i class="crx" style="top:'+(en9*H).toFixed(1)+'px;height:'+
+                ((1-en9)*H).toFixed(1)+'px"></i>':'')+'</div>';
+        }
         /* THE GRAINS, LIVE ON THE WAVEFORM: each dot is a grain's playhead,
            refreshed off the worklet's stat while the cloud runs */
         if(isGranCh(i)&&engine.granViz&&(engine.granViz[i]||[]).length){
@@ -16906,9 +16918,7 @@ function gridHTML(pat,pos,anc,chans){
            the crop and the rate — so a tick drawn at its share of the LOOP
            sat where the sound is not, on every channel whose take does not
            happen to fill the loop exactly. Same arithmetic as audPlay. */
-        const au9=S.presets[i].au||{}, LN2=lane.len||8;
         const cues=au9.cues||{};
-        const st9=clamp(au9.st??0,0,0.98), en9=clamp(au9.en??1,st9+0.01,1);
         const dur9=(en9-st9)*wb.duration, loopS9=Math.max(1e-6,LN2*spb());
         const rate9=Math.max(0.05,Math.round(au9.fit)?dur9/loopS9:(au9.rate??1));
         let ct='';
@@ -16918,7 +16928,7 @@ function gridHTML(pat,pos,anc,chans){
           const fr9=(st9*wb.duration+bt*spb()*rate9)/wb.duration;
           if(fr9<0||fr9>=en9)continue;      // past the end of the take: nothing to jump to
           ct+='<i class="cuet" style="top:'+(fr9*H).toFixed(1)+'px"></i>';}
-        if(ct)h+='<div class="alay" style="height:'+H+'px">'+ct+'</div>';
+        if(ct)h+='<div class="alay" style="height:'+H+'px;width:'+CW.toFixed(1)+'px">'+ct+'</div>';
       }
       h+='</div>'; continue; }
     /* a cell cannot render below about five pixels, so past that density the
