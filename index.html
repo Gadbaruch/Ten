@@ -1012,7 +1012,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-14.1420';
+const BUILD='2026-08-14.1423';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -14764,9 +14764,20 @@ const onKeyDown=e=>{
   if(isNoteKey(c)&&!e.repeat&&(S.layer>0||S.layer===-1)&&!e.ctrlKey&&!e.metaKey
      &&(!altOf(e)||ALTSUS.size>0)&&!scopeHeldOn(c)){
     e.preventDefault();
-    /* midi solo: the board's own keystrokes are noise — only the events EXP
-       synthesises for a midi note get through, so a note can't fire twice */
-    if(EXP.muted(c)&&!EXP.synth)return;
+    /* NOTHING DOUBLES. With an analog board connected, a letter you press is
+       seen by the sensor FIRST — always, because the trigger is a fiftieth of
+       the travel and the board's own actuation is millimetres deeper. So a
+       trusted keystroke on a note key is either the board's own copy of a note
+       the sensor has already spoken, or it arrived while a finger is on the
+       board, which makes it the same thing. Either way the sensor owns it.
+       Only with the board untouched does a keystroke mean the laptop, which
+       goes on working exactly as it always did. */
+    if(!EXP.synth&&(EXP.muted(c)||(HE.on&&HE.pressure()!=null))){
+      HE.dupKeys=(HE.dupKeys|0)+1; return;}
+    /* and a running count of where notes actually come from, so "nothing
+       doubles" is something you can watch rather than something I claim */
+    if(HE.on)HE.noteSrc=Object.assign({s:0,k:0},HE.noteSrc,
+      EXP.synth?{s:(HE.noteSrc?HE.noteSrc.s:0)+1}:{k:(HE.noteSrc?HE.noteSrc.k:0)+1});
     /* the same key again releases what it is holding — the way out is the key
        you came in on, exactly like rec and the dj pads */
     if(SUS.has(c)){endNote(c); dirty=true; return;}
@@ -15330,7 +15341,8 @@ const onKeyUp=e=>{
      A note the KEYBOARD started — because ownership had lapsed for a moment,
      which mashing does constantly — used to have its release eaten here too,
      and then nothing on earth was going to end it. */
-  if(EXP.muted(c)&&!EXP.synth&&HE.sounded&&HE.sounded[c]!==undefined){HE.osUp(c); return;}
+  if(!EXP.synth&&isNoteKey(c)&&HE.on
+     &&((HE.sounded&&HE.sounded[c]!==undefined)||HE.pressure()!=null)){HE.osUp(c); return;}
   endNote(c);
 };
 document.addEventListener('keyup',onKeyUp);
@@ -17809,6 +17821,8 @@ function settingsRack(L){
   {const C=HE.cfg();
    if(HE.on)L.push('   '+sp('a','   '+HE.srcName)+sp('d','  frames ')+sp(HE.fps<125?'r':'a',HE.fps+'Hz')+
      sp('d','  last vel ')+sp('a',String(Math.round(HE.lastVel*127)))+
+     sp('d','  notes ')+sp('a',String((HE.noteSrc&&HE.noteSrc.s)||0))
+       +sp((HE.noteSrc&&HE.noteSrc.k)?'r':'d','/'+((HE.noteSrc&&HE.noteSrc.k)||0)+' kbd')+
      sp('d','  '+(heEnds().win?'window '+(+(C.wait||4).toFixed(1))+'ms ':'peak ')
        +heEnds().soft.toFixed(4)+'…'+heEnds().hard.toFixed(3)+(C.auto?' (auto)':'')));
    /* CONNECTED IS NOT STREAMING. A board that opened and never spoke reads the
