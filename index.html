@@ -1012,7 +1012,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-14.0813';
+const BUILD='2026-08-14.1250';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1136,6 +1136,12 @@ const SETTINGS=[
                              :'peak — velocity is the steepest frame of the stroke');}},
  {n:'h wait',g:'Input',h:()=>!HE.on||Math.round(HE.cfg().est||0)!==1,v:()=>(+(HE.cfg().wait||4).toFixed(1))+'ms',
               a:d=>HE.set('wait',clamp((HE.cfg().wait||4)+d*0.5,0.5,20))},
+ {n:'dial min',g:'Input',h:()=>!HE.on||!CFG.dial,
+              v:()=>'×'+(+(HE.cfg().dlo??0.2)).toFixed(2),
+              a:d=>HE.set('dlo',clamp((HE.cfg().dlo??0.2)+d*0.05,0.02,4))},
+ {n:'dial max',g:'Input',h:()=>!HE.on||!CFG.dial,
+              v:()=>'×'+(+(HE.cfg().dhi??10)).toFixed(1),
+              a:d=>HE.set('dhi',clamp((HE.cfg().dhi??10)+d*2.5,1,200))},
  {n:'h calib',g:'Input',h:()=>!HE.on,
               v:()=>HE.cal?(HE.cal.phase+' '+HE.cal[HE.cal.phase].length+'/10'):'ready',
               a:()=>HE.startCalib()},
@@ -2149,7 +2155,13 @@ function dialScale(){
   if(!CFG.dial||!HE.on)return 1;
   const d=HE.pressure();
   if(d==null)return 1;
-  return clamp(Math.pow(10,2*d-1),0.05,10);
+  /* the two ends are yours: `dial min` is the step a feather-touch takes and
+     `dial max` the step a bottomed key takes, both as multiples of the normal
+     one, and the travel between them is geometric so the middle feels even
+     rather than lurching at one end. */
+  const C=HE.cfg();
+  const lo=Math.max(0.02,C.dlo??0.2), hi=Math.max(lo*1.2,C.dhi??10);
+  return clamp(lo*Math.pow(hi/lo,clamp(d,0,1)),0.02,200);
 }
 function adjust(spec,v,dir,m=1){
   m*=dialScale();
@@ -10312,8 +10324,8 @@ const EXP={
    key got in `wait` ms — a travel-triggered board's answer). The two measures
    are on different scales, so each keeps ITS OWN range: sharing storage between
    two mechanisms is the bug this file has already been bitten by twice. */
-const HEDEF={rest:0.03,trig:0.15,look:1,gamma:0.5,soft:0.005,hard:0.130,floor:1/127,auto:0,
-             est:0,wait:4,wSoft:0.002,wHard:0.05};
+const HEDEF={rest:0.03,trig:0.02,look:3,gamma:0.5,soft:0.005,hard:0.130,floor:1/127,auto:0,
+             est:0,wait:4,wSoft:0.002,wHard:0.05,dlo:0.2,dhi:10};
 /* Fastest slope a finger can actually produce, in travel/ms. Full key travel in
    2ms is already superhuman; anything above this is a measurement artifact. */
 const HE_MAX_SLOPE=0.5;
@@ -10600,6 +10612,24 @@ const HE={
     if(this.kind===1&&this.ready&&performance.now()-(this._reqAt||0)>60)this.kcRequest();
     /* a streaming board's silence is a note-off, so this loop is now part of
        playing rather than housekeeping */
+    /* AN ARROW THAT FIRES ONCE IS A BUTTON. A sensor-bound arrow is meant to
+       be a DIAL: hold it and it keeps stepping, and the deeper you hold it the
+       faster it goes — while the dial scale makes each of those steps bigger
+       too. Press feather-light for one small step at a time; bury the key and
+       the value runs. Only arrows repeat; tab or escape bound to a slot should
+       happen once, like the key they stand for. */
+    {const now9=performance.now();
+     const slots9=Object.assign({},this.kind===2?RY_DEFAULT_SLOTS:{},(CFG.he&&CFG.he.slots)||{});
+     for(const id in this.keys){
+       const k=this.keys[id], act=slots9[id];
+       if(!k||k.st!==2||!act||act==='off'||act.indexOf('Arrow')!==0)continue;
+       const gap=Math.max(45,240-(k.pv||0)*180);
+       if(now9-(k.rpt||k.fireT||0)<gap)continue;
+       k.rpt=now9;
+       for(const kind of ['keydown','keyup'])
+         document.dispatchEvent(new KeyboardEvent(kind,
+           Object.assign({code:act,key:act,bubbles:true},modsOf())));
+     }}
     /* AND THE OTHER QUIET: a key stuck sounding. Release needs a sample below
        the rest line, and this board only reports while a key MOVES — so a lift
        whose final sample lands just above that line never gets another report
@@ -10929,7 +10959,7 @@ const HE={
        answer for every special key: bind by MATRIX SLOT and the mapping lives
        here rather than in each keyboard's firmware, so a board that cannot be
        remapped, or one you have not remapped yet, still plays. */
-    const slots=(CFG.he&&CFG.he.slots)||{};
+    const slots=Object.assign({},this.kind===2?RY_DEFAULT_SLOTS:{},(CFG.he&&CFG.he.slots)||{});
     const act9=slots[id];
     if(act9&&act9!=='off'){
       for(const kind of ['keydown','keyup'])
@@ -13230,6 +13260,13 @@ const RIGHTARROW={AltRight:'ArrowLeft',ContextMenu:'ArrowUp',ControlRight:'Arrow
 const ARROWMODE=['real',', . - =','right cluster'];
 /* what the learned fn slot does — right arrow first, because that is the one
    the right cluster cannot fill from a keycode */
+/* fn IS THE RIGHT ARROW, out of the box. It sends no keycode at all, so the
+   sensor is the only way to it — but its matrix slot is a property of the
+   board, not of a session, and 71 is where the FUN60 keeps it (everything
+   around it is in RY_SLOTS; that hole is fn). Shipping it means the fourth
+   arrow works on a fresh profile, and cannot be lost by touching the learn
+   rows. Learning still overrides it, per board and per taste. */
+const RY_DEFAULT_SLOTS={71:'ArrowRight'};
 const FNACT=['ArrowRight','ArrowLeft','ArrowUp','ArrowDown','Tab','Escape','Backslash','Space',
              'Enter','Backquote','Slash','off'];
 const actName=a=>a.replace('Arrow','').replace('Backquote','` scope').replace('Slash','/ roll')
