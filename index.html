@@ -1012,7 +1012,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-14.1423';
+const BUILD='2026-08-14.1430';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -13746,8 +13746,17 @@ const onKeyDown=e=>{
         }
       }
       dirty=true;}
-    else if(c==='ArrowUp'||c==='ArrowDown')
-      {SETTINGS[S.setSel||0].a(c==='ArrowUp'?1:-1);saveCfg();dirty=true;}
+    else if(c==='ArrowUp'||c==='ArrowDown'){
+      /* a settings row runs its own handler and never sees adjust(), so the
+         dial has to reach it here: the direction is multiplied, which is the
+         same thing every one of those handlers already does with it. A row
+         showing a word is stepped, and dialScale answers ×1 for it. */
+      /* not rounded: these handlers multiply the direction by their own step,
+         so a fractional multiplier is what makes the middle of the travel feel
+         like a middle rather than jumping from one notch to the next. Never
+         below one, because a row cannot move by less than its own step. */
+      const d9=(c==='ArrowUp'?1:-1)*Math.max(1,dialScale());
+      SETTINGS[S.setSel||0].a(d9);saveCfg();dirty=true;}
     else if(c==='Slash'&&!e.repeat){               // the dice key: a whole song (⇧⌥ = wild)
       pushUndo('song gen'); genSong(rs(e)&&altOf(e)); S.layer=1;
     }
