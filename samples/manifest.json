@@ -1,42 +1,132 @@
 [
  {
-  "name": "sweep",
-  "file": "sweep.wav"
+  "name": "nylonlick",
+  "file": "nylonlick.mp3",
+  "bpm": 100.0,
+  "bars": 4
  },
  {
-  "name": "riser",
-  "file": "riser.wav"
+  "name": "steelriff",
+  "file": "steelriff.mp3",
+  "bpm": 100.0,
+  "bars": 4
  },
  {
-  "name": "drone",
-  "file": "drone.wav"
+  "name": "flamenco",
+  "file": "flamenco.mp3",
+  "bpm": 100.0,
+  "bars": 4
  },
  {
-  "name": "vowel",
-  "file": "vowel.wav"
+  "name": "banjoroll",
+  "file": "banjoroll.mp3",
+  "bpm": 100.0,
+  "bars": 4
+ },
+ {
+  "name": "harp",
+  "file": "harp.mp3",
+  "bpm": 100.0,
+  "bars": 4
+ },
+ {
+  "name": "koto",
+  "file": "koto.mp3",
+  "bpm": 100.0,
+  "bars": 4
+ },
+ {
+  "name": "pianoriff",
+  "file": "pianoriff.mp3",
+  "bpm": 100.0,
+  "bars": 4
+ },
+ {
+  "name": "rhodesvamp",
+  "file": "rhodesvamp.mp3",
+  "bpm": 100.0,
+  "bars": 4
+ },
+ {
+  "name": "prepiano",
+  "file": "prepiano.mp3",
+  "bpm": 100.0,
+  "bars": 4
+ },
+ {
+  "name": "cellostac",
+  "file": "cellostac.mp3",
+  "bpm": 100.0,
+  "bars": 4
+ },
+ {
+  "name": "upright",
+  "file": "upright.mp3",
+  "bpm": 100.0,
+  "bars": 4
+ },
+ {
+  "name": "marimba",
+  "file": "marimba.mp3",
+  "bpm": 100.0,
+  "bars": 4
+ },
+ {
+  "name": "kalimba",
+  "file": "kalimba.mp3",
+  "bpm": 100.0,
+  "bars": 4
+ },
+ {
+  "name": "tabla",
+  "file": "tabla.mp3",
+  "bpm": 100.0,
+  "bars": 4
+ },
+ {
+  "name": "brushkit",
+  "file": "brushkit.mp3",
+  "bpm": 100.0,
+  "bars": 4
  },
  {
   "name": "bell",
-  "file": "bell.wav"
- },
- {
-  "name": "pluck",
-  "file": "pluck.wav"
- },
- {
-  "name": "kick",
-  "file": "kick.wav"
- },
- {
-  "name": "snare",
-  "file": "snare.wav"
- },
- {
-  "name": "rain",
-  "file": "rain.wav"
+  "file": "bell.mp3"
  },
  {
   "name": "choirpad",
-  "file": "choirpad.wav"
+  "file": "choirpad.mp3"
+ },
+ {
+  "name": "drone",
+  "file": "drone.mp3"
+ },
+ {
+  "name": "kick",
+  "file": "kick.mp3"
+ },
+ {
+  "name": "pluck",
+  "file": "pluck.mp3"
+ },
+ {
+  "name": "rain",
+  "file": "rain.mp3"
+ },
+ {
+  "name": "riser",
+  "file": "riser.mp3"
+ },
+ {
+  "name": "snare",
+  "file": "snare.mp3"
+ },
+ {
+  "name": "sweep",
+  "file": "sweep.mp3"
+ },
+ {
+  "name": "vowel",
+  "file": "vowel.mp3"
  }
 ]
