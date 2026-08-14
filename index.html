@@ -1012,7 +1012,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-14.1604';
+const BUILD='2026-08-14.1607';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -2141,7 +2141,7 @@ function dialScale(){
      never dialled. Whether a parameter is a menu is a property of the
      PARAMETER, and adjust() already refuses to scale one; the callers that do
      not go through adjust() check for themselves. */
-  const d=HE.pressure();
+  const d=HE.driver();
   if(d==null)return 1;
   /* the two ends are yours: `dial min` is the step a feather-touch takes and
      `dial max` the step a bottomed key takes, both as multiples of the normal
@@ -2159,7 +2159,7 @@ function dialScale(){
    whatever the sensor's depth says. A MENU NEVER REPEATS — one press, one
    option — and the first press tells us which kind of parameter is under the
    cursor, so the answer is known before the second tick can happen. */
-const AREP={code:null,timer:null};
+const AREP={code:null,timer:null,stopT:null};
 /* ONE PUSH IS ONE STEP, AND THE KEY MUST COME HOME FOR THE NEXT ONE. Rapid
    trigger re-fires a key whenever it wobbles back across the actuation point,
    so one deep press on a remapped arrow sends three or four real key-downs —
@@ -2259,7 +2259,8 @@ function focusIsStepped(){
      still stops a bounce from moving anything twice. */
   return false;
 }
-function arepStop(){if(AREP.timer){clearTimeout(AREP.timer);AREP.timer=null;} AREP.code=null;}
+function arepStop(){if(AREP.timer){clearTimeout(AREP.timer);AREP.timer=null;}
+  if(AREP.stopT){clearTimeout(AREP.stopT);AREP.stopT=null;} AREP.code=null;}
 function arepStart(code){
   arepStop();
   if(!HE.on||HE.pressure()==null)return;      // a laptop keeps the system's own repeat
@@ -2269,7 +2270,7 @@ function arepStart(code){
   AREP.code=code;
   const step=()=>{
     if(!AREP.code)return;
-    if(HE.on&&HE.pressure()==null){arepStop(); return;}   // the finger is off the board
+    if(HE.on&&HE.driver()==null){arepStop(); return;}     // the driving key is gone
     if(focusIsStepped()){arepStop(); return;}   // a menu moved once and that is all
     for(const kind of ['keydown','keyup'])
       document.dispatchEvent(new KeyboardEvent(kind,
@@ -2278,7 +2279,7 @@ function arepStart(code){
        down to 30ms bottomed out, geometric so the middle is not bunched at one
        end. With the step size scaling too, a light press creeps and a buried
        key runs. */
-    const d=clamp((HE.on?HE.pressure():null)||0,0,1);
+    const d=clamp((HE.on?HE.driver():null)||0,0,1);
     AREP.timer=setTimeout(step,Math.round(260*Math.pow(30/260,d)));
   };
   AREP.timer=setTimeout(step,110);             // no half-second wait to get going
@@ -10773,6 +10774,18 @@ const HE={
   /* the board's own key-up, remembered rather than obeyed: it is not proof a
      note ended (rapid trigger sends one on any upward move) but it IS the
      witness the watchdog needs when the analog stream misses a lift */
+  /* THE KEY THAT IS DRIVING, not the deepest key on the board. Holding a note
+     with one hand while turning a value with the other made the note the
+     deepest thing down — so the dial paced itself by the note's depth, and the
+     arrow's release was invisible underneath it. The key that went down most
+     recently is the one being asked about; the board-wide answer is only a
+     fallback. */
+  driver(){
+    if(!this.on)return null;
+    const k=this.keys[this.lastSlot];
+    if(k&&k.st!==0)return clamp(k.pv,0,1);
+    return this.pressure();
+  },
   /* HOW FAR DOWN THE KEY UNDER YOUR FINGER IS, 0..1, or null if nothing is
      pressed. Whichever key is deepest wins — when you are turning a value the
      only key moving is the one you are leaning on. A held key goes silent on
@@ -10942,6 +10955,7 @@ const HE={
       if(!k.armed){k.pv=v; k.pt=t; return;}          // still on the way down from the last press
       k.st=1; k.h=[[k.pv,k.pt],[v,t]]; k.peak=Math.max(0,slope); k.top=v; k.wait=0;
       this.pressAt=t;                    // when the board was last touched, for the arrow guard
+      this.lastSlot=id;                  // …and WHICH key it was
       /* WINDOW MODE STARTS AT THE FIRST TOUCH, not at the trigger depth: the
          question is how far the key travels in a known slice of time, and the
          earliest movement is the honest start of that slice. It also buys the
@@ -13431,6 +13445,7 @@ const onKeyDown=e=>{
   if(e.isTrusted&&e.repeat&&e.code.indexOf('Arrow')===0
      &&(AREP.code||focusIsStepped()))return;
   if(e.isTrusted&&!e.repeat&&e.code.indexOf('Arrow')===0){
+    if(AREP.stopT&&AREP.code===e.code){clearTimeout(AREP.stopT); AREP.stopT=null;}  // that was a bounce
     if(arrowRefire(e.code)){e.preventDefault(); return;}
     arepStart(e.code);
   }
@@ -15140,12 +15155,15 @@ const onKeyUp=e=>{
      A latched note is the one exception; latch means the release is not the
      end, and the normal path knows how to hold it. */
   if(EXP.synth&&liveV[c]&&!noteLatch.has(c)){kbHeld.delete(c); endNote(c); dirty=true; return;}
-  /* A BOUNCE IS NOT A RELEASE. Rapid trigger sends a key-up every time the key
-     wobbles up past actuation, and stopping the repeat on those was why
-     holding a number never ran: the repeat died on the first bounce and the
-     key-down that followed was refused as one. The finger has left when the
-     SENSOR says so, and not before. */
-  if(e.isTrusted&&c.indexOf('Arrow')===0&&!(HE.on&&HE.pressure()!=null))arepStop();
+  /* A BOUNCE IS NOT A RELEASE — but a release must still stop the repeat, and
+     asking whether ANY key is down cannot tell them apart while the other hand
+     is holding a note. So the key-up arms a stop a moment ahead: a bounce
+     sends its next key-down within a few milliseconds and cancels it, a
+     finger that has actually left does not. */
+  if(e.isTrusted&&c.indexOf('Arrow')===0&&AREP.code===c){
+    if(AREP.stopT)clearTimeout(AREP.stopT);
+    AREP.stopT=setTimeout(()=>{AREP.stopT=null; arepStop();},90);
+  }
   if(arrowAlias(e,'keyup'))return;      // the release half — arrow key-ups end automation writes
   if(c==='MetaLeft'||c==='MetaRight'){
     const used=MK.winUsed; MK.win=false; MK.winUsed=false;
