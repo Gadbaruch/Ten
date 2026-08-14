@@ -1012,7 +1012,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-14.1404';
+const BUILD='2026-08-14.1414';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -2167,14 +2167,36 @@ const AREP={code:null,timer:null};
    key-down of the same arrow is that same push. Re-armed when the keys read
    home. Our OWN repeat is untouched, because it never sends trusted events —
    so numbers still run and menus still step. */
-const ASTEP={code:null,armed:true};
+const ASTEP={code:null,armed:true,lastAt:0};
 /* true when this key-down is the SAME push we already answered — the wobble a
    rapid trigger sends, not a new press. Split out so it can be reasoned about
    and tested on its own rather than inferred from behaviour. */
 function arrowRefire(code){
-  if(!(HE.on&&HE.pressure()!=null)){ASTEP.armed=true; ASTEP.code=null; return false;}
+  if(!HE.on)return false;                       // a laptop keeps its own behaviour
+  const now=performance.now();
+  const down=HE.pressure()!=null;
+  /* COMING HOME HAS TO MEAN IT. Rapid trigger's reset distance is about a
+     tenth of a millimetre — the same order as our own rest line — so a wobble
+     dips "home" for a few milliseconds between re-fires and used to re-arm the
+     guard. A finger that has actually left stays gone; sixty milliseconds of
+     home is the difference, and no menu needs stepping faster than that. */
+  /* HOW LONG WAS IT HOME BEFORE THIS PRESS. Asked at the press, of the moment
+     the sensor last let the key go — because this runs on a key-DOWN and can
+     never watch the gap itself, and a timer that only advances when something
+     calls it sticks shut the moment nothing does. A rapid-trigger bounce is
+     home for a few milliseconds; a finger that left is home for tens. */
+  /* HOW LONG HOME LASTED, not how long ago it started. A bounce is home for
+     four milliseconds and then down again; a finger that left is home until
+     you decide to press again. The two ends are the release and the next
+     press, and both are the sensor's own timestamps — so the gap is a fact
+     about the key rather than about when anything happened to ask. */
+  const home=HE.homeAt||0, press=HE.pressAt||0;
+  if(home>(ASTEP.lastAt||0)&&press>home&&press-home>60){ASTEP.armed=true; ASTEP.code=null;}
   if(ASTEP.code===code&&!ASTEP.armed)return true;
-  ASTEP.code=code; ASTEP.armed=false; return false;
+  /* and a floor under it all: two accepted steps of the same key inside a
+     tenth of a second is a bouncing switch, not a decision. */
+  if(ASTEP.code===code&&now-(ASTEP.lastAt||0)<80)return true;
+  ASTEP.code=code; ASTEP.armed=false; ASTEP.lastAt=now; return false;
 }
 /* WHAT IS UNDER THE CURSOR RIGHT NOW — asked at every tick rather than
    remembered from the last edit, because a remembered kind is wrong the moment
@@ -10670,9 +10692,11 @@ const HE={
   },
   tick(){                                            // watchdog: the board went quiet
     if(!this.on)return;
+    const now9=()=>performance.now();
     if(this.kind===1&&this.ready&&performance.now()-(this._reqAt||0)>60)this.kcRequest();
     /* nothing pressed: the next arrow key-down is a new push, not a re-fire */
-    if(this.pressure()==null){ASTEP.armed=true; ASTEP.code=null;}
+    if(this.pressure()==null&&now9()-(this.lastDownAt||0)>60){
+      ASTEP.armed=true; ASTEP.code=null;}
     const now=performance.now(), C=this.cfg();
     for(const id in this.keys){
       const k=this.keys[id];
@@ -10842,6 +10866,7 @@ const HE={
     const dt=clamp(t-k.pt,Math.max(0.5,P*0.4),Math.max(P*3.5,12)), slope=(v-k.pv)/dt;
     /* claim the key while it is off rest, so its typed keystroke is ignored and
        the laptop keyboard's identical keystroke is not */
+    if(v>C.rest)this.lastDownAt=t;      // when the board last had a finger on it
     /* claim only what the board is allowed to speak for: a NOTE key's own
        keystroke is the duplicate we suppress, but esc and tab and the digits
        must go on arriving normally */
@@ -10875,6 +10900,7 @@ const HE={
       if(v<=C.rest){k.armed=true; k.pv=v; k.pt=t; return;}
       if(!k.armed){k.pv=v; k.pt=t; return;}          // still on the way down from the last press
       k.st=1; k.h=[[k.pv,k.pt],[v,t]]; k.peak=Math.max(0,slope); k.top=v; k.wait=0;
+      this.pressAt=t;                    // when the board was last touched, for the arrow guard
       /* WINDOW MODE STARTS AT THE FIRST TOUCH, not at the trigger depth: the
          question is how far the key travels in a known slice of time, and the
          earliest movement is the honest start of that slice. It also buys the
@@ -11044,6 +11070,7 @@ const HE={
   },
   release(id){
     const k=this.keys[id]; if(!k)return;
+    this.homeAt=performance.now();   // when the board last came home, for the arrow guard
     k.armed=false;             // the rest of this lift is not a new note
     if(k._tmr){clearTimeout(k._tmr); k._tmr=null;}
     if(k.code&&this.sounded&&this.sounded[k.code]===id)delete this.sounded[k.code];
