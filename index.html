@@ -1012,7 +1012,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-14.1449';
+const BUILD='2026-08-14.1457';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -2226,7 +2226,23 @@ function focusIsStepped(){
   }
   if(S.layer>=2){
     const M=MODULES[S.curMod];
-    if(M&&M.prs)return true;                        // the instrument row is all choices
+    /* THE INSTRUMENT ROW IS NOT ALL CHOICES. It carries level, pan, tune and
+       transpose next to the engine and the preset name, and calling the whole
+       row stepped is why the strip never dialled. Each field answers for
+       itself: a voice field by its spec, everything else by what it SHOWS —
+       digits mean a value, a word means a choice. */
+    if(M&&M.prs){
+      try{
+        const F=(instFields()||[])[S.curParam|0];
+        if(F){
+          if(F.spec)return F.spec.type==='enum'||!!F.spec.opts;
+          const t=String(F.v?F.v():'');
+          if(/\d/.test(t))return false;
+          return !/^(level|pan|gain|tune|vel|vol)$/.test(F.k||'');
+        }
+      }catch(_){}
+      return true;
+    }
     try{
       const pre=S.presets[S.editSnd];
       const specs=paramsFor(S.curMod,M.flat?null:modHolder(pre,M.id)[M.id][S.curSlot]);
@@ -14752,7 +14768,10 @@ const onKeyDown=e=>{
          if(fd.spec.set)fd.spec.set(pv.vox,nv); else pv.vox[fd.spec.key]=nv;
          engine.refresh(S.editSnd); dirty=true; dirtySave=true; return;
        }}
-      prsAction(d); return;
+      /* the row runs its own handler, so the dial is applied to the direction
+         here — and only when the field under the cursor is a value, which
+         focusIsStepped has just decided by looking at the field itself */
+      prsAction(focusIsStepped()?d:d*Math.max(1,dialScale())); return;
     }
     if(S.layer>=2){adjustParam(d,kmult(e));return;}   // shift=×10 · option=×0.1 (prep lives on cmd)
     if(S.layer===1){                      // ⌥↑↓ transposes THIS CHANNEL; z/x move the one global kb register
@@ -16459,6 +16478,13 @@ function render(){
     /* LATCHED NOTES ARE STATE, and state you cannot see reads as a bug — this
        is the whole reason "hanging notes" survived six fixes. Left shift alone
        releases them, and now the header says how many there are to release. */
+    /* the dial, where you can see it from wherever you are — the settings
+       screen is the one place you are NOT when you want to know why a value
+       will not move. press is what the sensor reads, and the word after it is
+       what this cursor is. */
+    (HE.on&&CFG.dial?dot+sp('d','⌁')
+      +sp(HE.pressure()==null?'d':'a',HE.pressure()==null?'—':HE.pressure().toFixed(2))
+      +sp(focusIsStepped()?'d':'a',focusIsStepped()?' step':' dial'):'')+
     (SUS.size?dot+sp('ri',' ⟳ '+SUS.size+' held — tap ⇧ '):'')+
     (HOLD.optLatched&&HOLD.opt?dot+sp('ri',' ⟳ '+OPTRACK[HOLD.opt.c].name+' ch '+HOLD.opt.ch+' '):'')+
     /* WHETHER THE SET IS ON A DISK, at a glance. Not knowing was the whole
