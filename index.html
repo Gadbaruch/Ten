@@ -1012,7 +1012,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-14.1336';
+const BUILD='2026-08-14.1344';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -2144,7 +2144,40 @@ function dialScale(){
   const lo=Math.max(0.02,C.dlo??0.2), hi=Math.max(lo*1.2,C.dhi??10);
   return clamp(lo*Math.pow(hi/lo,clamp(d,0,1)),0.02,200);
 }
+/* THE REPEAT IS OURS, NOT THE SYSTEM'S. macOS waits half a second before it
+   repeats a held key and then ticks at a fixed rate — which is exactly the
+   pause before the dial woke up, and exactly what ran a menu through its
+   entries. So while an analog key is down we ignore the system's repeats and
+   drive our own: the first tick comes straight away, and the gap after that is
+   whatever the sensor's depth says. A MENU NEVER REPEATS — one press, one
+   option — and the first press tells us which kind of parameter is under the
+   cursor, so the answer is known before the second tick can happen. */
+const AREP={code:null,timer:null,isEnum:false};
+function arepStop(){if(AREP.timer){clearTimeout(AREP.timer);AREP.timer=null;} AREP.code=null;}
+function arepStart(code){
+  arepStop();
+  if(!HE.on||HE.pressure()==null)return;      // a laptop keeps the system's own repeat
+  AREP.code=code;
+  const step=()=>{
+    if(!AREP.code)return;
+    /* A SETTINGS ROW NEVER GOES THROUGH adjust(), so its kind cannot be
+       learned that way — but what it SHOWS says it plainly: a value that is
+       not a number is a choice, and a choice does not repeat. */
+    if(S.layer===-1){
+      try{const t9=String(SETTINGS[S.setSel||0].v());
+        if(!isFinite(parseFloat(t9))){arepStop(); return;}}catch(_){}
+    }
+    if(AREP.isEnum){arepStop(); return;}       // a menu moved once and that is all
+    for(const kind of ['keydown','keyup'])
+      document.dispatchEvent(new KeyboardEvent(kind,
+        Object.assign({code:AREP.code,key:AREP.code,bubbles:true},modsOf())));
+    const d=(HE.on?HE.pressure():null)||0;
+    AREP.timer=setTimeout(step,Math.max(35,210-d*175));
+  };
+  AREP.timer=setTimeout(step,110);             // no half-second wait to get going
+}
 function adjust(spec,v,dir,m=1){
+  AREP.isEnum=spec.type==='enum';              // what the cursor is on, learned by using it
   /* A MENU IS NOT A DIAL. Pressing an enum harder should not skip nine entries
      to reach the tenth — one press, one option, always. Depth only means
      something where the values are a continuum. */
@@ -13231,6 +13264,10 @@ const onKeyDown=e=>{
      and the sensor's version (which triggers at 2% and repeats by pressure)
      is the one worth keeping. A laptop's arrows are untouched: no sensor key
      is down when you press them. */
+  /* the system's own repeat is not wanted while we are driving one, and never
+     wanted on a menu */
+  if(e.isTrusted&&e.repeat&&e.code.indexOf('Arrow')===0&&(AREP.code||AREP.isEnum))return;
+  if(e.isTrusted&&!e.repeat&&e.code.indexOf('Arrow')===0)arepStart(e.code);
   if(arrowAlias(e,'keydown'))return;   // , . - = ARE the arrows on a board without any
   /* the menu key is unambiguous — nothing else uses it, so it acts on the press */
   if(e.code==='ContextMenu'&&!e.repeat&&SPARE[CFG.kMenu|0]!=='off'){
@@ -14909,6 +14946,7 @@ const onKeyUp=e=>{
      A latched note is the one exception; latch means the release is not the
      end, and the normal path knows how to hold it. */
   if(EXP.synth&&liveV[c]&&!noteLatch.has(c)){kbHeld.delete(c); endNote(c); dirty=true; return;}
+  if(e.isTrusted&&c.indexOf('Arrow')===0)arepStop();
   if(arrowAlias(e,'keyup'))return;      // the release half — arrow key-ups end automation writes
   if(c==='MetaLeft'||c==='MetaRight'){
     const used=MK.winUsed; MK.win=false; MK.winUsed=false;
