@@ -1012,7 +1012,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-14.1430';
+const BUILD='2026-08-14.1436';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -2230,6 +2230,7 @@ function arepStart(code){
   AREP.code=code;
   const step=()=>{
     if(!AREP.code)return;
+    if(HE.on&&HE.pressure()==null){arepStop(); return;}   // the finger is off the board
     if(focusIsStepped()){arepStop(); return;}   // a menu moved once and that is all
     for(const kind of ['keydown','keyup'])
       document.dispatchEvent(new KeyboardEvent(kind,
@@ -15080,7 +15081,12 @@ const onKeyUp=e=>{
      A latched note is the one exception; latch means the release is not the
      end, and the normal path knows how to hold it. */
   if(EXP.synth&&liveV[c]&&!noteLatch.has(c)){kbHeld.delete(c); endNote(c); dirty=true; return;}
-  if(e.isTrusted&&c.indexOf('Arrow')===0)arepStop();
+  /* A BOUNCE IS NOT A RELEASE. Rapid trigger sends a key-up every time the key
+     wobbles up past actuation, and stopping the repeat on those was why
+     holding a number never ran: the repeat died on the first bounce and the
+     key-down that followed was refused as one. The finger has left when the
+     SENSOR says so, and not before. */
+  if(e.isTrusted&&c.indexOf('Arrow')===0&&!(HE.on&&HE.pressure()!=null))arepStop();
   if(arrowAlias(e,'keyup'))return;      // the release half — arrow key-ups end automation writes
   if(c==='MetaLeft'||c==='MetaRight'){
     const used=MK.winUsed; MK.win=false; MK.winUsed=false;
