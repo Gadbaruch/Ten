@@ -123,6 +123,7 @@
   /* the gesture readout: text in the empty space above the column, no box */
   .wlay{position:absolute;top:0;left:calc(-1 * var(--bleed));pointer-events:none;}
   .gviz circle{fill:#fff;opacity:.85;}
+  .pvz line{stroke:#fff;stroke-width:1.4;opacity:.95;}
   .wlay path{stroke:var(--fg);stroke-width:1;opacity:.5;fill:none;}
   .wtc path{stroke:var(--fg);stroke-width:1.2;opacity:.8;fill:none;}
   .cuet{position:absolute;left:0;width:100%;height:1px;background:var(--fg);opacity:.65;}
@@ -1012,7 +1013,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-14.1823';
+const BUILD='2026-08-14.1915';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -2472,6 +2473,11 @@ const OPTRACK={
 const ALTSUS=new Set();     // scopes riding on a held ⌥ after their letter went up
 const AUD={hold:null};      // the audio slice key currently down, and its cue
 const WAVEC=new Map();      // rendered waveform columns, by buffer+height
+/* …and the buffer has to be told apart by IDENTITY. Keying on its length
+   meant every four-second take drew the FIRST four-second take this channel
+   ever held: load a new sample, see the old one. */
+const BUFID=new WeakMap(); let bufSeq=0;
+const bufId=b=>{let v=BUFID.get(b); if(!v){v=++bufSeq; BUFID.set(b,v);} return v;};
 const HOLD={tab:false,tabAt:0,tabUsed:false,tabLatch:false,m:false,mUsed:false,
             opt:null,optUsed:false,optLatch:false,optLatched:false,   // OPT: a rack grabbed by its letter
             ms:null,msLatch:false,msLatched:false,msUsed:false,   // MUTE/SOLO: ⌥m and ⌥s, and the digits that follow
@@ -3598,6 +3604,8 @@ let fxwReady=false;
         else if(m.t==='panic'){this.vs.clear(); this.grains.length=0; this.tv.clear();}
         else if(m.t==='ping'){const L9=(this.p.live>0.5?this.ring.length:this.len)||1;
           this.port.postMessage({t:'stat',g:this.grains.length,v:this.vs.size,tv:this.tv.size,spawned:this.stat,
+            /* every cursor's place in the take, for the playheads on the waveform */
+            tpos:[...this.tv.values()].slice(0,8).map(v9=>Math.max(0,Math.min(1,v9.c/L9))),
             pos:this.grains.slice(0,24).map(g9=>Math.max(0,Math.min(1,g9.ph/L9)))});}};
     }
     env(t,sh){          // t 0..1 through the grain, sh = slewed shape
@@ -7663,9 +7671,16 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     n.connect(this.buses[pi].vIn);
     e=this.gn[pi]={node:n,id:1};
     this.granViz=this.granViz||[];
+    this.tapeViz=this.tapeViz||[];
     n.port.onmessage=ev=>{const d9=ev.data;
-      if(d9&&d9.t==='stat'){e.stat=d9;
-        if(d9.pos){this.granViz[pi]=d9.pos; dirty=true;}}};
+      if(!d9||d9.t!=='stat')return;
+      e.stat=d9;
+      /* a redraw only when there is something to move or something to clear —
+         an idle channel pings just as often and must cost the UI nothing */
+      const had=(this.granViz[pi]||[]).length+(this.tapeViz[pi]||[]).length;
+      if(d9.pos)this.granViz[pi]=d9.pos;
+      if(d9.tpos)this.tapeViz[pi]=d9.tpos;
+      if(had||(d9.pos||[]).length+(d9.tpos||[]).length)dirty=true;};
     this.granCfg(pi);
     if(this.granBuf&&this.granBuf[pi])this.granSend(pi);
     return e;
@@ -7749,7 +7764,12 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     /* the shim REGISTERS in act like every other voice, so mono can steal it,
        choke can end it and a lost keyup has something the panic can find */
     const E=this;
+    /* startAt is not decoration: the orphan sweeper dates a voice by it, and
+       a shim without one is four seconds old the instant it is born — any
+       cloud note that is briefly unreferenced (a lost keyup, a latch edge)
+       was being released inside 400ms. */
     const sh={_grn:1,_ids:ids,_offs:offs,midi,pad:midi,released:false,killed:false,
+      startAt:Math.max(AC.currentTime,at),
       press:0,pressN:[],nodes:[],p,_lid:'ch',
       release(t){if(this.released)return; this.released=true;
         this.relAt=t||AC.currentTime; offAll(this.relAt); this._later();},
@@ -7824,16 +7844,22 @@ fetch('samples/manifest.json').then(r=>r.ok?r.json():null).then(man=>{
   for(const en of man.slice(0,24)){
     fetch('samples/'+en.file).then(r=>r.ok?r.arrayBuffer():null)
       .then(ab=>ab&&AC.decodeAudioData(ab))
-      .then(buf=>{if(buf)poolAdd(buf,en.name||en.file.replace(/\.\w+$/,''));})
+      .then(buf=>{if(buf){poolAdd(buf,en.name||en.file.replace(/\.\w+$/,'')); seedCloud();}})
       .catch(()=>{});
   }
 }).catch(()=>{});
+/* WHERE THE CURSORS ARE. The worklet is the only one who knows — the tape
+   voices and the grains live in it — so every audio channel that has a node
+   is asked, often enough that the playhead reads as a moving line rather
+   than a blinking one. Channels with nothing sounding answer with two empty
+   arrays and cost a message. */
 setInterval(()=>{
-  const pi=S.layer>=2?S.editSnd:S.curPreset;
-  if(!isGranCh(pi))return;
-  const e=engine.gn&&engine.gn[pi]; if(!e||!e.node)return;
-  try{e.node.port.postMessage({t:'ping'});}catch(_){}
-},150);
+  const gn=engine.gn; if(!gn)return;
+  for(const i of CHANS()){
+    const e=gn[i]; if(!e||!e.node||!isAudioCh(i))continue;
+    try{e.node.port.postMessage({t:'ping'});}catch(_){}
+  }
+},70);
 
 /* UI write: routes to the selected stack layer for voice modules, else the channel */
 function writeParam(pi,mi,si,px,v){
@@ -8000,8 +8026,13 @@ const bakAge=t=>{const s2=Math.max(0,Math.round((Date.now()-t)/1000));
    per channel, in the order sortChannels already ranks them, generated TAME —
    these are meant to be recognisable rather than interesting, the bed you jam
    on top of. */
+/* The last channel of a new set is the CLOUD, not a ninth synth: the audio
+   engine is the half of TEN you cannot reach by rolling a preset, so a fresh
+   set now opens with one channel already pointed at it. Its 'plk' patch is
+   only what it falls back to if you take it out of audio mode. */
 const SETROLES=[['kik','Kick'],['snr','Snare'],['hh','Hats'],['perc','Perc'],
-  ['bass','Bass'],['chord','Chords'],['keys','Keys'],['lead','Lead'],['plk','Pluck']];
+  ['bass','Bass'],['chord','Chords'],['keys','Keys'],['lead','Lead'],['plk','Cloud']];
+const CLOUDCH=9;
 function defaultKit(){
   SETROLES.forEach(([cat,name],i)=>{
     const pi=i+CH_LOW; if(pi>9)return;
@@ -8009,6 +8040,7 @@ function defaultKit(){
     setPresetData(pi,name,cat,presetData(np));
     mixChannel(pi);
     engine.rebuildRack(pi); engine.refresh(pi);
+    if(pi===CLOUDCH){setEngine(pi,'gran'); seedCloud();}
   });
 }
 function newSet(){
@@ -8026,7 +8058,7 @@ function newSet(){
   S.curPreset=CH_LOW; S.editSnd=CH_LOW; S.mSel=false;
   defaultKit();
   engine.rebuildMaster();
-  flash('new set — kick · snare · hats · perc · bass · chords · keys · lead · pluck');
+  flash('new set — kick · snare · hats · perc · bass · chords · keys · lead · cloud');
   dirty=true; dirtySave=true;
 }
 function pickKey(e){
@@ -11195,6 +11227,21 @@ const HE={
    lifetime for now, like every buffer before it — persistence is its own
    project.) */
 const POOL=[];
+/* A CLOUD WITH NOTHING IN IT IS SILENT, and a new set now opens on one. The
+   first factory phrase to land fills any gran channel that holds no take —
+   never one that already has a sound, so it cannot eat your own drop. */
+const CLOUDSEED='nylonlick';
+function seedCloud(){
+  const src=POOL.find(p2=>p2.name===CLOUDSEED)||POOL[0];
+  if(!src)return false;
+  let did=false;
+  for(const i of CHANS()){
+    if(!isGranCh(i)||engine.audBuf[i]||(engine.granBuf||[])[i])continue;
+    engine.setChanBuf(i,src.buf,src.name); did=true;
+  }
+  if(did)dirty=true;
+  return did;
+}
 function poolAdd(buf,name){
   if(!buf)return -1;
   const i=POOL.findIndex(p2=>p2.buf===buf);
@@ -16818,7 +16865,7 @@ function gridHTML(pat,pos,anc,chans){
       h+='<div class="gc k" style="height:'+H+'px"></div>';
       if((isAudioCh(i)||isGranCh(i))&&(engine.audBuf[i]||(engine.granBuf||[])[i])){
         const wb=engine.audBuf[i]||(engine.granBuf||[])[i];
-        const key2=i+'|'+wb.length+'|'+H;
+        const key2=i+'|'+bufId(wb)+'|'+H;
         let wsvg=WAVEC.get(key2);
         if(!wsvg){
           const d0=wb.getChannelData(0), rows=Math.max(16,Math.round(H/2));
@@ -16843,12 +16890,34 @@ function gridHTML(pat,pos,anc,chans){
             gd+='<circle cx="'+(0.5*CW).toFixed(1)+'" cy="'+(p9*H).toFixed(1)+'" r="1.6"/>';
           h+='<svg class="wlay gviz" width="'+CW.toFixed(1)+'" height="'+H+'">'+gd+'</svg>';
         }
-        const cues=(S.presets[i].au||{}).cues||{}, LN2=lane.len||8;
+        /* AND THE TAPE CURSORS: one line straight across the take for every
+           voice reading it. Two cue keys held is two lines — the channel is
+           polyphonic in the same buffer, and this is the only place you can
+           see that. */
+        if(engine.tapeViz&&(engine.tapeViz[i]||[]).length){
+          let td='';
+          for(const p9 of engine.tapeViz[i])
+            td+='<line x1="0" x2="'+CW.toFixed(1)+'" y1="'+(p9*H).toFixed(1)+
+                '" y2="'+(p9*H).toFixed(1)+'"/>';
+          h+='<svg class="wlay pvz" width="'+CW.toFixed(1)+'" height="'+H+'">'+td+'</svg>';
+        }
+        /* THE CUES BELONG ON THE TAKE, not on the bar. A cue is a number of
+           beats to skip, and how far into the buffer that lands depends on
+           the crop and the rate — so a tick drawn at its share of the LOOP
+           sat where the sound is not, on every channel whose take does not
+           happen to fill the loop exactly. Same arithmetic as audPlay. */
+        const au9=S.presets[i].au||{}, LN2=lane.len||8;
+        const cues=au9.cues||{};
+        const st9=clamp(au9.st??0,0,0.98), en9=clamp(au9.en??1,st9+0.01,1);
+        const dur9=(en9-st9)*wb.duration, loopS9=Math.max(1e-6,LN2*spb());
+        const rate9=Math.max(0.05,Math.round(au9.fit)?dur9/loopS9:(au9.rate??1));
         let ct='';
         for(const k2 in cues){const cu=cues[k2];
           const bt=(+k2*0.25+(cu.o||0));
           if(bt<0||bt>=LN2)continue;
-          ct+='<i class="cuet" style="top:'+(bt/LN2*H).toFixed(1)+'px"></i>';}
+          const fr9=(st9*wb.duration+bt*spb()*rate9)/wb.duration;
+          if(fr9<0||fr9>=en9)continue;      // past the end of the take: nothing to jump to
+          ct+='<i class="cuet" style="top:'+(fr9*H).toFixed(1)+'px"></i>';}
         if(ct)h+='<div class="alay" style="height:'+H+'px">'+ct+'</div>';
       }
       h+='</div>'; continue; }
