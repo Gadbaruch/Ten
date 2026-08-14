@@ -1012,7 +1012,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-14.1320';
+const BUILD='2026-08-14.1325';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -10718,6 +10718,10 @@ const HE={
      it. Bind it and never ask again. */
   autoBind(code){
     if(!this.on||!code||code.indexOf('Arrow')!==0)return;
+    /* NOT WHILE A MODIFIER IS HELD. ⇧← jumps racks, and the unknown key down
+       at that moment is the SHIFT, not the arrow — which is exactly how right
+       shift got bound as an arrow. A chord is never the moment to guess. */
+    if(MODS.shift||MODS.alt||MODS.ctrl||MODS.meta)return;
     const sl=Object.assign({},this.kind===2?RY_DEFAULT_SLOTS:{},(CFG.he&&CFG.he.slots)||{});
     if(Object.values(sl).includes(code))return;           // already spoken for
     let found=null;
@@ -10726,6 +10730,10 @@ const HE={
       if(!k||k.st===0)continue;
       if(this.map&&this.map[id])continue;                 // a key we already know by name
       if(sl[id])continue;                                 // a key already bound to something
+      /* and it must have gone down WITH the keystroke. A key held since before
+         the arrow — a modifier, a finger resting on the board — did not send
+         it, whatever else is true. */
+      if(performance.now()-(k.startT||0)>300)continue;
       if(found!==null)return;                             // two candidates: too ambiguous to guess
       found=id;
     }
@@ -10894,6 +10902,7 @@ const HE={
       if(v<=C.rest){k.armed=true; k.pv=v; k.pt=t; return;}
       if(!k.armed){k.pv=v; k.pt=t; return;}          // still on the way down from the last press
       k.st=1; k.h=[[k.pv,k.pt],[v,t]]; k.peak=Math.max(0,slope); k.top=v; k.wait=0;
+      k.startT=t;                        // when this press began, for autoBind
       /* WINDOW MODE STARTS AT THE FIRST TOUCH, not at the trigger depth: the
          question is how far the key travels in a known slice of time, and the
          earliest movement is the honest start of that slice. It also buys the
