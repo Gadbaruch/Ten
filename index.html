@@ -1012,7 +1012,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-14.1311';
+const BUILD='2026-08-14.1320';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1098,17 +1098,17 @@ const SETTINGS=[
  /* BIND ANY KEY BY ITS SENSOR, not by the keycode it sends — the portable
     version of the fn trick. `board key` picks what you are binding, `learn`
     takes the next key you press for it (↓ forgets it). */
- {n:'arrow keys',g:'Input',h:()=>!HE.on,
+ {n:'arrow keys',g:'Input',h:()=>!HE.on||!CFG.heAdv,
               v:()=>{if(HE.arrLearn)return 'press '+HE.arrLearn.order[HE.arrLearn.i].replace('Arrow','').toLowerCase();
                      const sl=(CFG.he&&CFG.he.slots)||{};
                      const n=['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].filter(a=>Object.values(sl).includes(a)).length;
                      return n?n+'/4 on sensor':'keycodes';},
               a:()=>HE.startArrows()},
- {n:'board key',g:'Input',h:()=>!HE.on,v:()=>{const a=FNACT[(CFG.he&&CFG.he.fnAct)|0];
+ {n:'board key',g:'Input',h:()=>!HE.on||!CFG.heAdv,v:()=>{const a=FNACT[(CFG.he&&CFG.he.fnAct)|0];
               const sl=(CFG.he&&CFG.he.slots)||{}, at=Object.keys(sl).find(k=>sl[k]===a);
               return actName(a)+(at?' #'+at:'');},
               a:d=>HE.set('fnAct',fmod(((CFG.he&&CFG.he.fnAct)|0)+d,FNACT.length))},
- {n:'learn',g:'Input', h:()=>!HE.on,v:()=>HE.learnFn?'press it':String(Object.keys((CFG.he&&CFG.he.slots)||{}).length),
+ {n:'learn',g:'Input', h:()=>!HE.on||!CFG.heAdv,v:()=>HE.learnFn?'press it':String(Object.keys((CFG.he&&CFG.he.slots)||{}).length),
               a:d=>{if(!HE.on){flash('connect the board first');return;}
                     const act=FNACT[(CFG.he&&CFG.he.fnAct)|0];
                     if(d<0){const sl=Object.assign({},(CFG.he&&CFG.he.slots)||{});
@@ -1148,6 +1148,12 @@ const SETTINGS=[
  {n:'dial max',g:'Input',h:()=>!HE.on||!CFG.dial,
               v:()=>'×'+(+(HE.cfg().dhi??10)).toFixed(1),
               a:d=>HE.set('dhi',clamp((HE.cfg().dhi??10)+d*2.5,1,200))},
+ /* the binding rows are for a board that needs teaching; yours binds itself,
+    so they stay out of the way until you ask for them */
+ {n:'key setup',g:'Input',h:()=>!HE.on,v:()=>CFG.heAdv?'shown':'auto',
+              a:()=>{CFG.heAdv=CFG.heAdv?0:1; saveCfg();
+                     flash(CFG.heAdv?'binding rows shown — arrow keys · board key · learn'
+                                    :'auto — the arrows bind themselves as you use them');}},
  {n:'h calib',g:'Input',h:()=>!HE.on,
               v:()=>HE.cal?(HE.cal.phase+' '+HE.cal[HE.cal.phase].length+'/10'):'ready',
               a:()=>HE.startCalib()},
@@ -10628,7 +10634,11 @@ const HE={
      const slots9=Object.assign({},this.kind===2?RY_DEFAULT_SLOTS:{},(CFG.he&&CFG.he.slots)||{});
      for(const id in this.keys){
        const k=this.keys[id], act=slots9[id];
-       if(!k||k.st!==2||!act||act==='off'||act.indexOf('Arrow')!==0)continue;
+       /* LEFT AND RIGHT ARE BUTTONS, UP AND DOWN ARE DIALS. Moving the cursor
+          one place per press is what a button is for; changing a VALUE is the
+          thing that wants to run faster the harder you lean on it. */
+       if(!k||k.st!==2||!act)continue;
+       if(act!=='ArrowUp'&&act!=='ArrowDown')continue;
        const gap=Math.max(45,240-(k.pv||0)*180);
        if(now9-(k.rpt||k.fireT||0)<gap)continue;
        k.rpt=now9;
@@ -10698,6 +10708,32 @@ const HE={
       if(now-(k.pt||0)>3000)continue;          // a state this stale is not a finger
       if(best==null||k.pv>best)best=k.pv;}
     return best==null?null:clamp(best,0,1);
+  },
+  /* BIND ITSELF, SILENTLY. A key that sends a real arrow — menu and right
+     control, remapped in a board's own software — starts sending only at the
+     firmware's actuation depth, which leaves almost no travel above it for a
+     dial to read. Reading the SENSOR instead gives the whole key. And there is
+     nothing to ask the player: when an arrow keystroke arrives and exactly one
+     sensor key is down that TEN has no name for, that key is the one that sent
+     it. Bind it and never ask again. */
+  autoBind(code){
+    if(!this.on||!code||code.indexOf('Arrow')!==0)return;
+    const sl=Object.assign({},this.kind===2?RY_DEFAULT_SLOTS:{},(CFG.he&&CFG.he.slots)||{});
+    if(Object.values(sl).includes(code))return;           // already spoken for
+    let found=null;
+    for(const id in this.keys){
+      const k=this.keys[id];
+      if(!k||k.st===0)continue;
+      if(this.map&&this.map[id])continue;                 // a key we already know by name
+      if(sl[id])continue;                                 // a key already bound to something
+      if(found!==null)return;                             // two candidates: too ambiguous to guess
+      found=id;
+    }
+    if(found===null)return;
+    const next=Object.assign({},(CFG.he&&CFG.he.slots)||{});
+    next[found]=code; this.set('slots',next);
+    flash(code.replace('Arrow','').toLowerCase()+' — reading that key from its sensor now');
+    dirty=true;
   },
   /* is a key BOUND to this action currently down? Used to drop the board's own
      keystroke for a key we are already driving from its sensor. */
@@ -13365,7 +13401,10 @@ const onKeyDown=e=>{
      and the sensor's version (which triggers at 2% and repeats by pressure)
      is the one worth keeping. A laptop's arrows are untouched: no sensor key
      is down when you press them. */
-  if(e.isTrusted&&e.code.indexOf('Arrow')===0&&HE.slotHeld(e.code))return;
+  if(e.isTrusted&&e.code.indexOf('Arrow')===0){
+    if(HE.slotHeld(e.code))return;      // the sensor is already driving this one
+    HE.autoBind(e.code);                // …and if it is not, learn which key that was
+  }
   if(arrowAlias(e,'keydown'))return;   // , . - = ARE the arrows on a board without any
   /* the menu key is unambiguous — nothing else uses it, so it acts on the press */
   if(e.code==='ContextMenu'&&!e.repeat&&SPARE[CFG.kMenu|0]!=='off'){
