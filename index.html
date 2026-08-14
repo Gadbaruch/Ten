@@ -1012,7 +1012,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-14.1414';
+const BUILD='2026-08-14.1420';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -10512,12 +10512,13 @@ const HE={
         c.rv=HE_RANGE_VER; CFG.he=c; saveCfg();
       }
     }
-    /* the single fn binding became a TABLE — carry the one you already learned
-       across rather than making you press the key again */
-    if(CFG.he&&CFG.he.fnSlot!=null&&!CFG.he.slots){
+    /* and the table itself is gone now: anything a profile still carries from
+       the learning that used to exist is a source of double presses, so it is
+       cleared rather than honoured */
+    if(CFG.he&&(CFG.he.slots||CFG.he.fnSlot!=null||CFG.he.fnAct!=null||CFG.he.heAdv!=null)){
       const c9=Object.assign({},CFG.he);
-      c9.slots={[c9.fnSlot]:FNACT[c9.fnAct|0]||'ArrowRight'};
-      delete c9.fnSlot; CFG.he=c9; saveCfg();
+      delete c9.slots; delete c9.fnSlot; delete c9.fnAct; delete c9.heAdv;
+      CFG.he=c9; saveCfg();
     }
     const d=this.kind?Object.assign({},HEDEF,{hard:HE_HARD[this.kind]||HEDEF.hard,
                                               soft:HE_SOFT[this.kind]||HEDEF.soft}):HEDEF;
@@ -11005,7 +11006,14 @@ const HE={
        answer for every special key: bind by MATRIX SLOT and the mapping lives
        here rather than in each keyboard's firmware, so a board that cannot be
        remapped, or one you have not remapped yet, still plays. */
-    const slots=Object.assign({},this.kind===2?RY_DEFAULT_SLOTS:{},(CFG.he&&CFG.he.slots)||{});
+    /* ONLY THE BUILT-IN DEFAULT. Learning is gone, and what it wrote must go
+       with it: a saved binding on the arrow keys made every press count TWICE
+       — once dispatched from the sensor, once as the firmware's own keystroke
+       — which is why Gad saw two steps with the window focused and exactly one
+       with it in the background, where the keystroke goes elsewhere and only
+       the sensor's copy lands. fn is the only key that needs this route,
+       because it is the only one that sends nothing of its own. */
+    const slots=this.kind===2?RY_DEFAULT_SLOTS:{};
     const act9=slots[id];
     if(act9&&act9!=='off'){
       for(const kind of ['keydown','keyup'])
