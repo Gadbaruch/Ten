@@ -1012,7 +1012,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-14.1306';
+const BUILD='2026-08-14.1311';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -13365,7 +13365,7 @@ const onKeyDown=e=>{
      and the sensor's version (which triggers at 2% and repeats by pressure)
      is the one worth keeping. A laptop's arrows are untouched: no sensor key
      is down when you press them. */
-  if(e.isTrusted&&c.indexOf('Arrow')===0&&HE.slotHeld(c))return;
+  if(e.isTrusted&&e.code.indexOf('Arrow')===0&&HE.slotHeld(e.code))return;
   if(arrowAlias(e,'keydown'))return;   // , . - = ARE the arrows on a board without any
   /* the menu key is unambiguous — nothing else uses it, so it acts on the press */
   if(e.code==='ContextMenu'&&!e.repeat&&SPARE[CFG.kMenu|0]!=='off'){
