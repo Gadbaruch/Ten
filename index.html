@@ -1026,7 +1026,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-14.2253';
+const BUILD='2026-08-14.2306';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1159,7 +1159,8 @@ const SETTINGS=[
 ];
 function basePreset(name){return{
   name, cat:'misc', tr:0, trs:0, prep:null,
-  au:{gain:0.9,semis:0,rate:1,st:0,en:1,fit:0,src:0,pmode:0,chan:0,cues:{}},
+  au:{gain:0.9,semis:0,rate:1,st:0,en:1,fit:0,src:0,pmode:0,chan:0,
+      kmode:0,auto:1,start:0,cues:{}},
   osc:rack(mkOsc), amp:rack(mkAmp), flt:rack(mkFlt), env:rack(mkEnv),
   lfo:rack(mkLfo), mod:rack(mkMod), fx:rack(mkFx), ply:rack(mkPly),
   vox:{mode:0,glide:0,uni:1,sprd:12,wide:0.6,slop:0.008},
@@ -4088,9 +4089,13 @@ function scheduleRange(from,to){
     const anySolo=pat.lanes.some(l=>l.solo);
     for(let li=1;li<10;li++){      // lane 0 is the master's own timeline
       const lane=pat.lanes[li];
-      if(isAudioCh(li)&&!isGranCh(li)){
+      if(isAudioCh(li)){
         if((anySolo?!lane.solo:lane.mute)||(muteHold&&muteHold.lane===li))continue;
-        engine.audCycle(li,lane,a,s0,s1,fresh);
+        /* THE LOOP IS A CURSOR LIKE ANY OTHER, and now you can turn it off:
+           with auto off nothing reads the take until you play it, which is
+           the polyphonic sampler — every key its own cursor, from the same
+           place, at the time you hit it. */
+        if(autoCur(S.presets[li]))engine.audCycle(li,lane,a,s0,s1,fresh);
         /* RECORDED JUMPS replay over the base cycle: at each cue event the
            tape stops, plays from the cue for the held length, then resumes
            the cycle exactly in phase — the same grab-and-snap-back the live
@@ -8378,7 +8383,7 @@ function libNos(){
   }
   return libNoCache=m;
 }
-const LIBV=22;   // bump BOTH: libStore writes it, libAll checks it
+const LIBV=23;   // bump BOTH: libStore writes it, libAll checks it
 function libStore(a){libMigrated=true; libCache=null; libNoCache=null;
   const out=(a||[]).map(en=>en&&en.data?{...en,data:portPreset(en.data,true)}:en);
   try{localStorage.setItem(LIBKEY,JSON.stringify({v:LIBV,items:out}));}catch(_){} if(typeof prepCache!=='undefined')prepCache.clear();}
@@ -9714,7 +9719,7 @@ const ENGINES=[
 ];
 /* the categories a Synth channel can be — the engine names are not among them */
 const SYNTHCATS=CATS.filter(c=>c!=='kit'&&c!=='audio'&&c!=='proc');
-const engineOf=p=>p.cat==='kit'?'kit':p.cat==='audio'?(engineGranP(p)?'gran':'audio'):p.cat==='proc'?'proc'
+const engineOf=p=>p.cat==='kit'?'kit':p.cat==='audio'?'audio':p.cat==='proc'?'proc'
   :p.cat==='gran'?'gran':'synth';
 /* gran mode is a FACE of audio: every label says Audio; 'gran' the internal
    read never leaks into UI (it used to fall through to 'Synth') */
@@ -9755,8 +9760,10 @@ function setEngine(pi,key){
   if(key==='kit'){p.cat='kit'; p.kit=null;}
   else if(key==='audio'){p.cat='audio'; (p.au=p.au||{}).amode=0;}
   else if(key==='gran'){
-    /* 'gran' is a MODE of audio now — this spelling stays for old callers */
-    p.cat='audio'; (p.au=p.au||{}).amode=1; p.gr=p.gr||{};
+    /* 'gran' is not an engine and not a mode any more: it is the audio
+       channel with pitch keys and the auto cursor off. The spelling stays
+       for the old callers (⌥-drop, the default set's ninth channel). */
+    p.cat='audio'; (p.au=p.au||{}).kmode=1; p.au.auto=0; p.gr=p.gr||{};
     engine.granNode(pi);
     if(!(engine.granBuf||[])[pi]&&engine.audBuf[pi]){
       engine.granBuf=engine.granBuf||[]; engine.granBuf[pi]=engine.audBuf[pi];
@@ -9800,19 +9807,13 @@ function prsFieldDefs(){
      cannot do without took the longest to reach. */
   const chSmp={k:'sample',v:()=>engine.audName[S.editSnd]
     ||(engine.granName||[])[S.editSnd]||'\u2014'};
-  if(engineGranP(p))return [
-    /* the cloud's SETUP — identity, not sound design. ONE letters field says
-       what the keyboard does; 'gran' is simply its fourth answer. */
-    chEng, chSmp,
-    {k:'keys mode',v:()=>'gran'},
-    {k:'gmode',v:()=>['grain','pitch'][Math.round((p.gr||{}).pmode||0)]},
-    {k:'input',v:()=>['take','live'][Math.round((p.gr||{}).live||0)]},
-    {k:'freeze',v:()=>['off','hold'][Math.round((p.gr||{}).frz||0)]},
-    {k:'gain', v:()=>((p.gr||{}).gain??0.8).toFixed(2)}];
+
   if(p.cat==='audio')return [
     /* the tape's SETUP: identity, not sound design */
     chEng, chSmp,
-    {k:'keys mode',v:()=>['cue','pitch','frz'][clamp(Math.round((p.au||{}).kmode||0),0,2)]},
+    {k:'keys mode',v:()=>kmodeOf(p)?'pitch':'position'},
+    {k:'auto',v:()=>autoCur(p)?'loop':'off'},
+    ...(kmodeOf(p)?[{k:'start',v:()=>Math.round((p.au||{}).start||0)?'here':'pos'}]:[]),
     {k:'input', v:()=>['mic','mstr'][Math.round((p.au||{}).src||0)]},
     {k:'chan',  v:()=>['stereo','left','right'][clamp(Math.round((p.au||{}).chan||0),0,2)]},
     {k:'fit',   v:()=>['off','on'][Math.round((p.au||{}).fit||0)]},
@@ -10080,21 +10081,27 @@ function _prsAction(d){
     flash('sample → '+nx.name);
     dirty=true; dirtySave=true; return;
   }
-  if(p.cat==='audio'&&!engineGranP(p)
-     &&['keys mode','input','chan','fit','gain'].includes(f)){
+  if(p.cat==='audio'
+     &&['keys mode','auto','start','input','chan','fit','gain'].includes(f)){
     pushUndo('audio setup');
     p.au=p.au||{};
     if(f==='keys mode'){
-      /* one wheel: cue → pitch → frz → gran → cue. gran is just what the
-         keys do, not a different engine. */
-      const cur9=Math.round(p.au.kmode||0);
-      const nx9=fmod(cur9+(d>0?1:-1),4);
-      if(nx9===3){p.au.amode=1;
+      p.au.kmode=kmodeOf(p)?0:1;
+      if(p.au.kmode===1){                       // pitch keys read through the cloud
         engine.granNode(pi); engine.granBuf=engine.granBuf||[];
         if(!engine.granBuf[pi]&&engine.audBuf[pi]){engine.granBuf[pi]=engine.audBuf[pi];engine.granSend(pi);}
-        engine.granCfg(pi); flash('letters → gran (the cloud)');}
-      else{p.au.kmode=nx9;
-        flash('letters → '+['cue jumps','pitch bends','freeze grabs'][nx9]);}
+        engine.granCfg(pi);
+      }
+      flash('keys → '+(p.au.kmode?'pitch (a cursor per key)':'position (the cue grid)'));
+    }
+    else if(f==='auto'){
+      p.au.auto=autoCur(p)?0:1;
+      if(!p.au.auto)engine.audStop(pi,AC.currentTime+0.01);
+      flash('auto cursor '+(p.au.auto?'loops':'off — the keys are the only playheads'));
+    }
+    else if(f==='start'){
+      p.au.start=Math.round(p.au.start||0)?0:1;
+      flash('keys start '+(p.au.start?'where the loop is (freeze)':'at the pos dial'));
     }
     else if(f==='input'){p.au.src=Math.round(p.au.src||0)?0:1;
       flash('input → '+['mic','resample the master'][p.au.src]);}
@@ -10106,29 +10113,7 @@ function _prsAction(d){
     else if(f==='gain')p.au.gain=clamp((p.au.gain??0.9)+d*0.05,0,1);
     dirty=true; dirtySave=true; return;
   }
-  if(engineGranP(p)&&['keys mode','gmode','input','freeze','gain'].includes(f)){
-    pushUndo('gran setup');
-    p.gr=p.gr||{}; p.au=p.au||{};
-    if(f==='keys mode'){
-      /* the wheel continues: from gran, forward wraps to cue, back to frz */
-      if(p.cat==='gran')p.cat='audio';
-      p.au.amode=0;
-      p.au.kmode=d>0?0:2;
-      if(!engine.audBuf[pi]&&(engine.granBuf||[])[pi])
-        engine.audBuf[pi]=engine.granBuf[pi];
-      flash('letters → '+['cue jumps','pitch bends','freeze grabs'][p.au.kmode]);
-    }
-    else if(f==='gmode'){p.gr.pmode=Math.round(p.gr.pmode||0)?0:1;
-      flash('mode → '+['grain','pitch'][p.gr.pmode]);}
-    else if(f==='input'){p.gr.live=Math.round(p.gr.live||0)?0:1;
-      if(p.gr.live===1&&MIC.on)engine.granLiveWire(pi);
-      flash('input → '+['take','live'][p.gr.live]);}
-    else if(f==='freeze'){p.gr.frz=Math.round(p.gr.frz||0)?0:1;
-      flash(p.gr.frz?'❄ held':'freeze off');}
-    else if(f==='gain'){p.gr.gain=clamp((p.gr.gain??0.8)+d*0.05,0,1.5);}
-    engine.granCfg(pi);
-    dirty=true; dirtySave=true; return;
-  }
+
   if(f==='engine'){
     /* Sampler and Grain are listed so the shape of the thing is visible, but
        cycling steps OVER them — landing on an engine that does nothing is a
@@ -11494,7 +11479,15 @@ const liveMute=Array.from({length:10},()=>0);   // >0 = a live key overrides rec
 const isAudioCh=pi=>S.presets[pi].cat==='audio';
 /* GRAN IS A MODE OF THE AUDIO CHANNEL now (au.amode 1); cat 'gran' survives
    as the legacy spelling so old saves keep singing */
-const engineGranP=p=>!!p&&(p.cat==='gran'||(p.cat==='audio'&&Math.round((p.au||{}).amode||0)===1));
+/* PITCH KEYS SPAWN CURSORS THROUGH THE CLOUD — that is what 'gran' was.
+   It is not a channel kind and not an engine: it is what the letters do,
+   which is one of exactly two things now. Position: the key picks WHERE in
+   the take a cursor starts. Pitch: the key picks WHAT PITCH it reads at,
+   and `start` says where it begins — the pos dial, or wherever the auto
+   cursor happens to be (which is all freeze ever was). */
+const kmodeOf=p=>Math.round((p&&p.au||{}).kmode||0)===1?1:0;
+const autoCur=p=>Math.round((p&&p.au||{}).auto??1)!==0;
+const engineGranP=p=>!!p&&(p.cat==='gran'||(p.cat==='audio'&&kmodeOf(p)===1));
 const isGranCh=pi=>engineGranP(S.presets[pi]);
 /* ---------------- code instruments -------------------------------------
    A channel whose sound is DSP you write, compiled into an AudioWorklet.
@@ -15107,16 +15100,20 @@ const onKeyDown=e=>{
       const slC=modHolder(S.presets[pi],'ply').ply[S.curSlot];
       if(slC&&slC.typ===1&&Math.round(slC.map||0)===1){slC._foc=pcOf(midi);dirty=true;}
     }
-    if(isAudioCh(pi)&&!isGranCh(pi)){
-      /* THE KEYBOARD IS A SET OF JUMP POINTS. The clip divides into 16ths of
-         the loop — one bar is sixteen slices, two bars thirty-two — and the
-         letters, in note order, each hold one. Held, the clip plays from that
-         cue; released, the cycle resumes exactly where the transport says it
-         should be. Each cue is its own little take: while held, ←→ nudges its
-         position, ↑↓ its pitch, ⇧↑↓ its volume, ⌥←→ its pan. */
+    /* EVERY audio channel comes through here now — the cloud is not a
+       separate kind of channel with its own key path, it is what a pitch key
+       spawns. The branch below picks by keys mode, and nothing else does. */
+    if(isAudioCh(pi)){
+      /* IN POSITION MODE THE KEYBOARD IS A SET OF JUMP POINTS. The clip
+         divides into 16ths of the loop — one bar is sixteen slices, two bars
+         thirty-two — and the letters, in note order, each hold one. Held, the
+         clip plays from that cue; released, the cycle resumes exactly where
+         the transport says it should be. Each cue is its own little take:
+         while held, ←→ nudges its position, ↑↓ its pitch, ⇧↑↓ its volume,
+         ⌥←→ its pan. */
       if(!engine.audBuf[pi]){flash('audio channel — tab records ('+(Math.round((S.presets[pi].au||{}).src||0)?'resample':'mic')+'), or drop a file');return;}
       const lane=S.patterns[S.editPat].lanes[pi], L=lane.len;
-      const kmode=Math.round((S.presets[pi].au||{}).kmode||0);
+      const kmode=kmodeOf(S.presets[pi]);
       if(kmode===1){
         /* PITCH KEYS: the loop keeps rolling, the letter bends it — semitones
            around the key an octave in. Sync pitch mode keeps the timing.
@@ -15125,41 +15122,51 @@ const onKeyDown=e=>{
            and with quantize on it lands on the grid rather than under your
            finger — the quantized moment was already being computed for the
            recording and then ignored for the sound. */
+        /* PITCH KEYS SPAWN A CURSOR EACH, and where it starts is a setting
+           rather than another mode: 'pos' begins at the dial (what gran was),
+           'here' begins wherever the auto cursor has got to (what freeze
+           was). Both read through the whole grain rack, both are notes —
+           octave, transpose, velocity, quantize. Bending the running loop is
+           still there: it is the pitch PARAM, live under your hand. */
         const p9=S.presets[pi];
-        const off=(kbNote(c,true)??12)-12+S.oct*12+trSemis(p9);
-        const vel9=EXP.take();
-        const t0p=gridNow(), gp=gridOf(lane);
-        const trp=CFG.qOn?qnext(t0p,gp)*(lane.qlive??1)+t0p*(1-(lane.qlive??1)):t0p;
-        AUD.hold={c,pi,pk:off,vel:vel9,press:AC.currentTime,tr:Math.max(t0p,trp)};
-        /* with quantize off there is nothing to wait for, and waiting even a
-           few milliseconds means a fast tap can end before its own sound */
-        const ms9=CFG.qOn
-          ?Math.max(0,(gridTime(AUD.hold.tr)-AC.currentTime)*1000):0;
-        const fire=()=>{ if(!AUD.hold||AUD.hold.c!==c)return;   // let go before it landed
-          engine.audPitch(pi,off);
-          engine.audGain(pi,(p9.au.gain??0.9)*vel9);};
-        if(ms9<2)fire(); else setTimeout(fire,ms9);
-        flash('tape '+(off>0?'+':'')+off+'st · vel '+Math.round(vel9*127)+
-          (ms9>=2?' · on the grid':'')); dirty=true; return;
-      }
-      if(kmode===2){
-        /* FREEZE KEYS: grab the playhead as a pitched grain-freeze, held
-           under the still-rolling loop until the key lifts */
+        const here=Math.round(p9.au.start||0)===1;
         const a2f=actAt(posNow());
-        const posF=T.playing?fmod(posNow()-a2f.anchor,L)/L:0;
+        const posF=here?(T.playing?fmod(posNow()-a2f.anchor,L)/L:0)
+                       :clamp((p9.gr||{}).pos??0,0,1);
         engine.granNode(pi);
         engine.granBuf=engine.granBuf||[];
         if(!engine.granBuf[pi]&&engine.audBuf[pi]){engine.granBuf[pi]=engine.audBuf[pi];engine.granSend(pi);}
-        S.presets[pi].gr=S.presets[pi].gr||{};
+        p9.gr=p9.gr||{};
         engine.granCfg(pi);
-        engine._ctrlPut('grn',pi,0,'scan',0);
-        engine._ctrlPut('grn',pi,0,'pos',clamp(posF,0,1));
-        const midiF=60+S.oct*12+(kbNote(c,true)??0);
+        if(here){                       // the grab holds still where it landed
+          engine._ctrlPut('grn',pi,0,'scan',0);
+          engine._ctrlPut('grn',pi,0,'pos',posF);
+        }
+        const midiF=60+S.oct*12+(kbNote(c,true)??0)+trSemis(p9);
+        const vel9=EXP.take();
         const t0f=gridNow(), gf=gridOf(lane);
-        const trf=CFG.qOn?qnext(t0f,gf):t0f;
-        const gsh=engine.granNote(AC.currentTime+0.005,pi,midiF,EXP.take(),null);
-        AUD.hold={c,pi,gsh,fz:clamp(posF,0,1),midi:midiF,press:AC.currentTime,tr:Math.max(t0f,trf)};
-        flash('❄ freeze @'+Math.round(posF*100)+'%'); dirty=true; return;
+        const trf=CFG.qOn?qnext(t0f,gf)*(lane.qlive??1)+t0f*(1-(lane.qlive??1)):t0f;
+        /* A HOLD PER KEY. AUD.hold is one slot, which was fine when a key
+           mode could only ever have one thing going — freeze grabbed, you let
+           go, you grabbed again. A cursor per key is polyphonic by definition,
+           and with one slot the second key orphaned the first: its spawner
+           was never released, so the sweeper reaped it mid-note. The slot
+           still tracks the LAST key, because that is what the arrows scope to
+           and what retro records. */
+        AUD.gk=AUD.gk||{};
+        const h9={c,pi,gsh:null,fz:posF,midi:midiF,vel:vel9,
+          press:AC.currentTime,tr:Math.max(t0f,trf)};
+        AUD.gk[c]=h9; AUD.hold=h9;
+        const ms9=CFG.qOn?Math.max(0,(gridTime(h9.tr)-AC.currentTime)*1000):0;
+        const fire=()=>{
+          if(AUD.gk[c]!==h9)return;                   // let go before it landed
+          h9.gsh=engine.granNote(AC.currentTime+0.004,pi,midiF,vel9,null);
+        };
+        if(ms9<2)fire(); else setTimeout(fire,ms9);
+        flash('cursor '+NN[((midiF%12)+12)%12]+(Math.floor(midiF/12)-1)+
+          ' @'+Math.round(posF*100)+'%'+(here?' (here)':'')+
+          ' · vel '+Math.round(vel9*127)+(ms9>=2?' · on the grid':''));
+        dirty=true; return;
       }
       const nS=Math.max(1,Math.round(L/0.25));
       const ki=KBSEQ.indexOf(c); if(ki<0)return;
@@ -15628,8 +15635,12 @@ const onKeyUp=e=>{
       if(ml.state==='rec'){ml.state='on';dirty=true;dirtySave=true;}
     }
   }
-  if(AUD.hold&&AUD.hold.c===c&&(AUD.hold.pk!==undefined||AUD.hold.gsh)){
-    const {pi,pk,gsh,fz,midi,press,tr}=AUD.hold; AUD.hold=null;
+  const hg9=(AUD.gk&&AUD.gk[c])||null;
+  if(hg9||(AUD.hold&&AUD.hold.c===c&&(AUD.hold.pk!==undefined||AUD.hold.gsh))){
+    const src9=hg9||AUD.hold;
+    const {pi,pk,gsh,fz,midi,press,tr}=src9;
+    if(hg9)delete AUD.gk[c];
+    if(AUD.hold===src9)AUD.hold=null;
     const lane=S.patterns[S.editPat].lanes[pi], L=lane.len;
     const durB=Math.max(0.05,press!=null?(AC.currentTime-press)/spb():0.25);
     if(pk!==undefined){engine.audPitch(pi,0);
@@ -15701,11 +15712,16 @@ document.addEventListener('keyup',onKeyUp);
    for over a second and a half cannot be ended by anyone. End it. */
 function sweepOrphanVoices(){
   const ref=new Set();
-  const take=h=>{if(h&&h.voices)for(const v of h.voices)ref.add(v);};
+  /* A CLOUD SHIM IS A VOICE, NOT A HOLDER OF VOICES. take() only understood
+     handles with a .voices array, so every gran voice ever held — a freeze
+     grab, a cloud note, now a sampler key — counted as unreferenced and was
+     released by the sweeper while the finger was still down. */
+  const take=h=>{if(!h)return; if(h.voices)for(const v of h.voices)ref.add(v); else ref.add(h);};
   for(const c in liveV)take(liveV[c]);
   for(const k in (EXP.held||{})){const h=EXP.held[k]; take(h&&h.h);
     if(h&&h.code)take(liveV[h.code]);}
   if(AUD&&AUD.hold)take(AUD.hold.gsh);
+  for(const k9 in (AUD&&AUD.gk||{}))take(AUD.gk[k9].gsh);   // one hold per key
   const now=AC.currentTime;
   for(let pi=0;pi<(engine.act||[]).length;pi++){
     for(const v of [...(engine.act[pi]||[])]){
@@ -15815,7 +15831,7 @@ window.addEventListener('blur',()=>{
 
 /* ---------------- persistence + migration ---------------------------- */
 const LS='ten-v1';
-const SAVEV=22;                       // bump BOTH: serialize writes it, load checks it
+const SAVEV=23;                       // bump BOTH: serialize writes it, load checks it
 /* v22: granular is the audio channel's MODE (au.amode), never a cat — old
    'gran' spellings are normalized on the way in */
 /* WHAT A SAVE SAYS vs WHAT THE RUNTIME USES.
@@ -15959,10 +15975,25 @@ function load(json){
         p.tr=sp.tr||0; p.trs=sp.trs||0; p.prep=sp.prep||null;
         p.code=sp.code||null; p.pmodel=resolveModel(sp.pmodel)||null; p.psel=sp.psel|0;
         p.cp=Array.isArray(sp.cp)?sp.cp.slice(0,8):[1,1,1,0.5,0,0,0.5,0.3];
-        p.au=Object.assign({gain:0.9,semis:0,rate:1,st:0,en:1,fit:0,src:0,pmode:0,chan:0,cues:{}},sp.au||{});
+        p.au=Object.assign({gain:0.9,semis:0,rate:1,st:0,en:1,fit:0,src:0,pmode:0,chan:0,
+          kmode:0,auto:1,start:0,cues:{}},sp.au||{});
+        /* v<23: the four keys modes were cue / pitch / freeze / gran, and
+           whether the loop ran by itself was a consequence of which one you
+           were in. Now it is a flag, and the modes are two:
+             cue    → position, loop on
+             pitch  → pitch from the pos dial, loop on  (it used to bend the
+                      running loop; the pitch PARAM does that, live, now)
+             freeze → pitch starting HERE, loop on
+             gran   → pitch from the pos dial, loop OFF */
+        if(o.v<23){
+          const km=Math.round(p.au.kmode||0), gran=Math.round(p.au.amode||0)===1;
+          p.au.auto=gran?0:1;
+          p.au.start=km===2?1:0;
+          p.au.kmode=(km>=1||gran)?1:0;
+        }
         if(sp.gr)p.gr=Object.assign({},sp.gr);   // the cloud's dials were being dropped on load
         /* v<22 spelled granular as an ENGINE; it is the audio channel's mode */
-        if(p.cat==='gran'){p.cat='audio'; p.au.amode=1;}
+        if(p.cat==='gran'){p.cat='audio'; p.au.kmode=1; p.au.auto=0;}
         /* MIX AND VOF ARE NOT RACKS ANY MORE, so the MODULES walk above no
            longer carries them and every reload flattened all nine channels to
            80% and centre. serialize() was writing them the whole time — the
