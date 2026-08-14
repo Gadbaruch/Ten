@@ -1012,7 +1012,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-14.1556';
+const BUILD='2026-08-14.1604';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -10995,7 +10995,14 @@ const HE={
          The absolute test stays as the floor, for a press so shallow that a
          proportion of it means nothing. */
       if(v>(k.top||0))k.top=v;                  // the deepest this press has gone
-      if(v<(k.top||0)*0.35||v<C.rest*0.8){this.release(id);}
+      /* A NOTE ENDS WHEN THE FINGER LEAVES, not when it eases. This was a
+         third of the press's depth, which meant pulling back from a deep press
+         to halfway ended the note — and halfway is exactly where you want to
+         be living when depth is driving pressure. The proportion is only here
+         as a safety net for a key whose learned zero has drifted; an eighth is
+         low enough to be that and nothing more, and the real test is the rest
+         line, which the per-key zero makes trustworthy. */
+      if(v<(k.top||0)*0.12||v<C.rest*0.8){this.release(id);}
       /* Re-attack. A key resting past the trigger — fingers parked, a high
          zero, a press that stopped short — sits here, and from there a
          full-force hit makes no sound at all. A light touch missing is fine;
