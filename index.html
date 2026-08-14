@@ -1012,7 +1012,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-14.1653';
+const BUILD='2026-08-14.1823';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -3513,45 +3513,6 @@ let fxwReady=false;
   /* granular pitch shifter: two taps sweep a short delay at (ratio-1),
      crossfaded so neither is heard wrapping. The classic, cheap and clean
      enough for octave-and-a-half either way. */
-  class PS extends AudioWorkletProcessor{
-    constructor(o){super();
-      const d=(o&&o.processorOptions)||{};
-      this.ratio=Math.pow(2,(d.semis||0)/12);
-      this.n=Math.round(sampleRate*0.12);
-      this.buf=[new Float32Array(this.n),new Float32Array(this.n)];
-      this.w=0; this.ph=0;
-      this.win=Math.round(sampleRate*0.05);
-      this.port.onmessage=e=>{const m=e.data||{};
-        if(m.semis!=null)this.ratio=Math.pow(2,m.semis/12);};
-    }
-    process(I,O){
-      const inp=I[0], out=O[0]; if(!out||!out[0])return true;
-      const L=inp&&inp[0], R=inp&&(inp[1]||inp[0]);
-      const N=out[0].length, W=this.win, drift=1-this.ratio;
-      for(let k=0;k<N;k++){
-        this.buf[0][this.w]=L?L[k]:0; this.buf[1][this.w]=R?R[k]:0;
-        this.ph=(this.ph+drift+W)%W;
-        const p1=this.ph, p2=(this.ph+W/2)%W;
-        const f1=Math.sin(Math.PI*p1/W), f2=Math.sin(Math.PI*p2/W);
-        const rd=(p3)=>{const i2=((this.w-p3)%this.n+this.n)%this.n;
-          const i0=Math.floor(i2), fr=i2-i0;
-          const a2=this.buf[0][i0], b2=this.buf[0][(i0+1)%this.n];
-          const c2=this.buf[1][i0], d2=this.buf[1][(i0+1)%this.n];
-          return [a2+(b2-a2)*fr, c2+(d2-c2)*fr];};
-        const [l1,r1]=rd(p1), [l2,r2]=rd(p2);
-        out[0][k]=l1*f1+l2*f2;
-        if(out[1])out[1][k]=r1*f1+r2*f2;
-        this.w=(this.w+1)%this.n;
-      }
-      return true;
-    }
-  }
-  /* THE GRANULAR VOICE ENGINE. One node per channel; the sample crosses the
-     port once, notes arrive as {on,id,ratio,vel} and leave as {off,id}, and
-     every parameter is a message. Each voice sprays grains from the scan
-     position: size and density say how much cloud, spray and jitter say how
-     loose, shape bends the window from click to swell, rev flips some grains
-     tail-first, width scatters them across the pair. Scan 0 is freeze. */
   class GR extends AudioWorkletProcessor{
     /* THE CLOUDS-SHAPED CORE (after Mutable Instruments Clouds, MIT).
        What separates this from the old sprayer, each audible on its own:
@@ -3895,7 +3856,6 @@ let fxwReady=false;
   }
   registerProcessor('ten-scan',SC);
   registerProcessor('ten-grsyn',GR);
-  registerProcessor('ten-psh',PS);
   registerProcessor('ten-buf',B2);
   registerProcessor('ten-grain',G);
   registerProcessor('ten-deci',D);
@@ -5389,7 +5349,7 @@ class Engine{
       8:[1,0,0,0.8,0,0.7,0,0,0.9,0,0.6,0,0,0.8],
     };
     this.buses=[]; this.act=[]; this.lastPitch=[]; this.arpPool=[]; this.arpIdx=[];
-    this.audBuf=[]; this.audName=[]; this.audActive=[]; this.audRec=null;
+    this.audBuf=[]; this.audName=[]; this.audRec=null;
     this.opSamples=new Map();
     for(let i=0;i<10;i++){
       const vIn=ac.createGain(), busG=ac.createGain(), pan=ac.createStereoPanner();
@@ -5398,7 +5358,7 @@ class Engine{
       busG.connect(pan); pan.connect(trim); trim.connect(this.mSum); pan.connect(an);
       this.buses.push({vIn,busG,pan,trim,an,rack:[]});
       this.act.push([]); this.lastPitch.push(0); this.arpPool.push([]); this.arpIdx.push(0);
-      this.lastMidi.push(60); this.audBuf.push(null); this.audName.push(''); this.audActive.push([]);
+      this.lastMidi.push(60); this.audBuf.push(null); this.audName.push('');
       this.rebuildRack(i); this.refresh(i);
     }
     this.rebuildMaster();
@@ -7618,8 +7578,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     if(!this.audBuf[li])return;
     const L=lane.len;
     if(fresh){                          // pattern just switched: cut the old cycle, join in progress
-      const cut=timeAt(s0);
-      for(const s2 of [...this.audActive[li]]){try{s2.stop(cut);}catch(_){}}
+      this.audStop(li,timeAt(s0));
       const c0=act.anchor+Math.floor((s0-act.anchor)/L+1e-9)*L;
       if(s0-c0>1e-6&&s0-c0<L-1e-6)this.audPlay(li,timeAt(s0),L,s0-c0);
     }
@@ -7627,9 +7586,10 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     if(t<s0-1e-6)t+=L;
     for(;t<s1-1e-9;t+=L)this.audPlay(li,timeAt(t),L);
   }
-  /* the ONE-CURSOR flag: CFG.tape2 routes tape plays through the gran worklet
-     as tape voices. Stage two: sync-pitch, channel-select and cue pans travel
-     WITH the cursor, so every play the tape can make the cursor can make. */
+  /* THE TAPE IS A CURSOR IN THE WORKLET, and now it is the only tape there is.
+     Everything a clip play needs travels in this one message: where to start,
+     where to stop, how fast, whether pitch rides the rate or the shifter,
+     which channel, where in the field, how loud and for how long. */
   audPlay2(pi,at,lenBeats,skipBeats,cue,P9){
     const e=this.granNode(pi); if(!e)return false;
     if((this.granBuf||[])[pi]!==this.audBuf[pi]){
@@ -7657,85 +7617,41 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     const rate=sync?baseRate:baseRate*Math.pow(2,semis/12);
     const skipSec=skipBeats*spb(), skipBuf=skipSec*rate;
     if(skipBuf>=dur-0.001)return;
-    if(CFG.tape2){
-      const sr9=buf.sampleRate, len9=buf.length, k9=sr9/AC.sampleRate;
-      /* pan as constant power around the cursor — the cue's own little take
-         keeps its place in the field without a node to hold it */
-      const pn9=cue?clamp(cue.pan||0,-1,1):0, th9=(pn9+1)*Math.PI/4;
-      if(this.audPlay2(pi,at,lenBeats,skipBeats,cue,{
-        pos:(off+skipBuf)*sr9,
-        end:en*len9,
-        rate:Math.max(0.05,rate)*k9,
-        base:baseRate*k9,
-        free:!sync,
-        sh:sync?Math.pow(2,semis/12):1,
-        ch:buf.numberOfChannels>1?Math.round(au.chan||0):0,
-        gl:Math.SQRT2*Math.cos(th9), gr:Math.SQRT2*Math.sin(th9),
-        gain:(au.gain??0.9)*(cue?cue.vol??1:1),
-        durSec:Math.min(loopSec-skipSec,(dur-skipBuf)/rate)}))return;
-    }
-    const src=AC.createBufferSource(); src.buffer=buf;
-    src.playbackRate.value=Math.max(0.05,rate);
-    /* BORN ON A RAMP. A cue jump starts mid-waveform, and mid-waveform is a
-       click unless the first few milliseconds fade in. Deaths ramp too — see
-       audStop — so slicing is clean at any rate. */
-    const g=AC.createGain(); const gTgt=(au.gain??0.9)*(cue?cue.vol??1:1);
-    g.gain.setValueAtTime(0,at); g.gain.linearRampToValueAtTime(gTgt,at+0.005);
-    let head=src;
-    /* stereo | left | right — a mono buffer passes straight through */
-    const chn=Math.round(au.chan||0);
-    if(chn&&buf.numberOfChannels>1){
-      const sp2=AC.createChannelSplitter(2), mg=AC.createChannelMerger(2);
-      src.connect(sp2); sp2.connect(mg,chn-1,0); sp2.connect(mg,chn-1,1);
-      head=mg; head.connect(g);
-    }else src.connect(g);
-    let tail=g;
-    if(sync&&Math.abs(semis)>0.01&&fxwReady){
-      const ps=new AudioWorkletNode(AC,'ten-psh',
-        {outputChannelCount:[2],processorOptions:{semis}});
-      g.connect(ps); tail=ps; src._psh=ps;
-    }
-    if(cue&&Math.abs(cue.pan||0)>0.01){
-      const pn=AC.createStereoPanner(); pn.pan.value=clamp(cue.pan,-1,1);
-      tail.connect(pn); tail=pn;
-    }
-    tail.connect(this.buses[pi].vIn);
-    src.start(at,off+skipBuf); src.stop(at+Math.min(loopSec-skipSec,(dur-skipBuf)/rate)+0.002);
-    const arr=this.audActive[pi]; arr.push(src);
-    src._auFree=!sync; src._auBase=baseRate; src._g=g;
-    src.onended=()=>{const i=arr.indexOf(src);if(i>=0)arr.splice(i,1);
-      try{g.disconnect();}catch(_){} try{tail.disconnect();}catch(_){}};
+    /* ONE PATH. The cursor does everything the BufferSource layer did — crop,
+       rate, fit, sync pitch, channel select, cue pan and gain — so there is no
+       second way to play a clip any more, and no flag deciding which. */
+    const sr9=buf.sampleRate, len9=buf.length, k9=sr9/AC.sampleRate;
+    /* pan as constant power around the cursor — the cue's own little take
+       keeps its place in the field without a node to hold it */
+    const pn9=cue?clamp(cue.pan||0,-1,1):0, th9=(pn9+1)*Math.PI/4;
+    this.audPlay2(pi,at,lenBeats,skipBeats,cue,{
+      pos:(off+skipBuf)*sr9,
+      end:en*len9,
+      rate:Math.max(0.05,rate)*k9,
+      base:baseRate*k9,
+      free:!sync,
+      sh:sync?Math.pow(2,semis/12):1,
+      ch:buf.numberOfChannels>1?Math.round(au.chan||0):0,
+      gl:Math.SQRT2*Math.cos(th9), gr:Math.SQRT2*Math.sin(th9),
+      gain:(au.gain??0.9)*(cue?cue.vol??1:1),
+      durSec:Math.min(loopSec-skipSec,(dur-skipBuf)/rate)});
   }
   /* a fade-out then the stop, so a released cue does not click on the way out */
   audStop(pi,at){
     at=at??AC.currentTime+0.002;
-    if(CFG.tape2){const e9=this.gn&&this.gn[pi];
-      if(e9&&e9.node){try{e9.node.port.postMessage(
-        {t:'tclr',frame:Math.round(at*AC.sampleRate)});}catch(_){}}}
-    for(const s2 of [...this.audActive[pi]]){
-      try{
-        if(s2._g){s2._g.gain.cancelScheduledValues(at);
-          s2._g.gain.setValueAtTime(s2._g.gain.value,at);
-          s2._g.gain.linearRampToValueAtTime(0,at+0.008);}
-        s2.stop(at+0.01);
-      }catch(_){}
-    }
+    const e9=this.gn&&this.gn[pi];
+    if(e9&&e9.node){try{e9.node.port.postMessage(
+      {t:'tclr',frame:Math.round(at*AC.sampleRate)});}catch(_){}}
   }
-  /* live pitch for the mod/automation destination: free mode bends the rate of
-     whatever is sounding; sync mode retunes the shifter */
+  /* live pitch for the mod/automation destination — one message to the
+     channel's cursors: free ones glide their rate, sync ones move the shifter
+     they carry inside themselves */
   audPitch(pi,semis){
     this.audPB=this.audPB||{}; this.audPB[pi]=semis||0;
     const au=S.presets[pi].au||{};
-    /* the pitch keys, as a cursor op: one message retunes every live cursor —
-       free ones glide their rate, sync ones move their shifter */
     const e9=this.gn&&this.gn[pi];
     if(e9&&e9.node){try{e9.node.port.postMessage(
       {t:'tpb',semis:(au.semis??0)+(semis||0)});}catch(_){}}
-    for(const src of this.audActive[pi]||[]){
-      if(src._auFree)src.playbackRate.setTargetAtTime(
-        Math.max(0.05,src._auBase*Math.pow(2,((au.semis??0)+(semis||0))/12)),AC.currentTime,0.02);
-      else if(src._psh)src._psh.port.postMessage({semis:(au.semis??0)+(semis||0)});
-    }
   }
   /* the granular channel: one worklet node per channel, notes over the port */
   granNode(pi){
@@ -7889,7 +7805,6 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
       try{gch.node.port.postMessage({t:'panic'});}catch(_){}}
     this.audStop(pi,n+0.002);}
   allOff(){const n=AC.currentTime;for(const a of this.act)for(const v of [...a])v.kill(n);
-    for(const arr of this.audActive)for(const s2 of [...arr]){try{s2.stop(n+0.01);}catch(_){}}
     for(const k9 in (this.gn||{})){const e9=this.gn[k9];        // cursors live in the worklet: silence has to reach them too
       if(e9&&e9.node){try{e9.node.port.postMessage({t:'tclr'});}catch(_){}}}
     this.arpPool.forEach(p=>p.length=0);}
@@ -9123,7 +9038,7 @@ function sortChannels(){
   S.presets=re(S.presets);
   for(const p2 of S.patterns)p2.lanes=re(p2.lanes);
   engine.audBuf=re(engine.audBuf); engine.audName=re(engine.audName);
-  engine.audActive=re(engine.audActive); engine.arpPool=re(engine.arpPool);
+  engine.arpPool=re(engine.arpPool);
   engine.lastPitch=re(engine.lastPitch); engine.lastMidi=re(engine.lastMidi);
   for(let i2=0;i2<10;i2++)retroBuf[i2]=retroBuf[i2]||[];
   const rb=re(retroBuf); for(let i2=0;i2<10;i2++)retroBuf[i2]=rb[i2];
@@ -9793,7 +9708,7 @@ const AUDF=[
     input, channels, fit, gain — lives on the Instrument row. */
  SP('pitch','semis','lin',{min:-24,max:24,step:1,fmt:v=>v+'st'}),
  /* free: varispeed — pitch and speed are one knob, tape rules.
-    sync: the clip keeps its timing and pitch moves alone, through ten-psh. */
+    sync: the clip keeps its timing and pitch moves alone, inside the cursor. */
  SP('mode','pmode','enum',{opts:['free','sync']}),
  SP('rate','rate','lin',{min:0.25,max:4,step:0.05,fmt:v=>'\u00d7'+v}),
  SP('start','st','lin',{min:0,max:0.98,step:0.01,fmt:v=>Math.round(v*100)+'%'}),
