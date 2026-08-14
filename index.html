@@ -1026,7 +1026,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-14.2318';
+const BUILD='2026-08-14.2329';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -4178,17 +4178,26 @@ function scheduleRange(from,to){
             const skp=clamp(ev.cue*0.25+(cu.o||0),0,L2-0.01);
             const divs=rtcA?(Math.round(rtcA.p1??0)>=2?clamp(Math.round(rtcA.p1),2,16):0):0;
             engine.audStop(li,timeAt(tt+a.anchor));
+            /* THE LENGTH ARGUMENT IS THE LOOP, NOT THE GESTURE. audPlay reads
+               it two ways: how long this voice may live, and — when fit is on
+               — the span the take is stretched to, which is the RATE. Passing
+               the held duration here meant a recorded jam played back at the
+               ratio between the loop and your finger: hold a key for half a
+               beat in a sixteen-beat loop and it came back thirty-two times
+               too fast. The scheduled stops below end the grab; the length
+               only ever had to say what the loop is. */
             if(divs>=2){
               const stepJ=dj2/divs;
               for(let i2=0;i2<divs;i2++){
                 engine.audStop(li,timeAt(tt+i2*stepJ+a.anchor));
-                engine.audPlay(li,timeAt(tt+i2*stepJ+a.anchor),stepJ*0.95,skp,cu);
+                engine.audPlay(li,timeAt(tt+i2*stepJ+a.anchor),L2,skp,cu);
+                engine.audStop(li,timeAt(tt+(i2+1)*stepJ*0.95+a.anchor));
               }
             }
-            else engine.audPlay(li,timeAt(tt+a.anchor),dj2,skp,cu);
+            else engine.audPlay(li,timeAt(tt+a.anchor),L2,skp,cu);
             const te=tt+dj2, ph=fmod(te,L2);
             engine.audStop(li,timeAt(te+a.anchor));
-            if(L2-ph>0.05)engine.audPlay(li,timeAt(te+a.anchor),L2-ph,ph);
+            if(L2-ph>0.05)engine.audPlay(li,timeAt(te+a.anchor),L2,ph);
           });
         }
         continue;
@@ -14482,6 +14491,26 @@ const onKeyDown=e=>{
   if(c==='Backspace'&&HOLD.tab){e.preventDefault();
     if(loopOps(e,c,curLoop()))HOLD.tabUsed=true;
     return;}
+  /* ⌫ ON THE SAMPLE FIELD EMPTIES THE CHANNEL. There was no way to take a
+     take off a channel at all — you could load another one over it, and that
+     was the whole vocabulary. It reads as the field's own erase, it is
+     undoable like any other (the buffer travels with the undo entry), and
+     the take stays in the pool, so the same ⌫ is a step you can walk back. */
+  if(c==='Backspace'&&!e.repeat&&!HOLD.tab&&HOLD.dig<0&&S.layer>=2&&
+     MODULES[S.curMod]&&MODULES[S.curMod].prs&&isAudioCh(S.editSnd)&&
+     (prsFieldDefs()[S.curParam]||{}).k==='sample'){
+    e.preventDefault();
+    const pi9=S.editSnd;
+    if(!engine.audBuf[pi9]&&!(engine.granBuf||[])[pi9]){flash('nothing loaded');return;}
+    pushUndo('clear take');
+    const nm9=engine.audName[pi9]||(engine.granName||[])[pi9]||'take';
+    engine.audBuf[pi9]=null; engine.audName[pi9]=null;
+    if(engine.granBuf)engine.granBuf[pi9]=null;
+    if(engine.granName)engine.granName[pi9]=null;
+    engine.chokeSeq(pi9); WAVEC.clear();
+    flash('cleared '+nm9+' from ch '+pi9+' — still in the pool, ⌘z brings it back');
+    dirty=true; dirtySave=true; return;
+  }
   if(c==='Backspace'){e.preventDefault();
     if(e.repeat)return;
     if(rs(e)){clearTimeout(delHoldTimer);delHoldTimer=setTimeout(layerInit,800);}
@@ -16595,6 +16624,9 @@ function initLane(l){
 function clearLane(pi){
   const l=S.patterns[S.editPat].lanes[pi];
   if(!l)return;
+  /* a jam of cue jumps is what an audio lane holds, and it was cleared by the
+     same key without ever saying so */
+  const jumps9=l.events.filter(ev=>ev.cue!==undefined||ev.pk!==undefined||ev.fz!==undefined).length;
   pushUndo(pi===0?'clear master lane':'clear lane');
   /* A cleared lane is a lane with nothing decided about it yet, and its length
      was decided by what used to be in it. Keeping a 4-bar loop after wiping
@@ -16603,7 +16635,9 @@ function clearLane(pi){
   initLane(l);
   if(retroBuf[pi])retroBuf[pi]=[];
   flash(pi===0?'master timeline cleared'
-             :'ch '+pi+CLIPKEYS[(S.clipAt||{})[pi]??0]+' cleared — back to 1 bar, listening');
+             :'ch '+pi+CLIPKEYS[(S.clipAt||{})[pi]??0]+' cleared'+
+              (jumps9?' — '+jumps9+' recorded jump'+(jumps9>1?'s':'')+' gone':
+               ' — back to 1 bar, listening'));
   dirty=true; dirtySave=true;
 }
 /* the first free slot in the rack you are on, or null if it is full */
