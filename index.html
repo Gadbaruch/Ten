@@ -1012,7 +1012,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-14.1457';
+const BUILD='2026-08-14.1556';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -2134,12 +2134,13 @@ const setV=(pre,mi,si,spec,v)=>{const o=MODULES[mi].flat?pre[MODULES[mi].id]:slo
    default, since it only means anything on an analog board. */
 function dialScale(){
   if(!CFG.dial||!HE.on)return 1;
-  /* ONE GATE FOR EVERY PATH. Menus reach their values through several
-     different handlers — adjust(), a settings row's own action, an instrument
-     row's cycler — and guarding each one means missing one, which is how a
-     deep press was still skipping entries. Ask here instead: if the cursor is
-     on something stepped, depth means nothing, whoever is asking. */
-  if(focusIsStepped())return 1;
+  /* PURE: depth in, multiplier out. It used to ask "is the cursor on
+     something stepped?" first, which sounded careful and was the bug — that
+     question needs a model of every cursor in the instrument, and the ones it
+     did not model (the channel strip, the master, the mix row) got ×1 and
+     never dialled. Whether a parameter is a menu is a property of the
+     PARAMETER, and adjust() already refuses to scale one; the callers that do
+     not go through adjust() check for themselves. */
   const d=HE.pressure();
   if(d==null)return 1;
   /* the two ends are yours: `dial min` is the step a feather-touch takes and
@@ -13799,7 +13800,9 @@ const onKeyDown=e=>{
          so a fractional multiplier is what makes the middle of the travel feel
          like a middle rather than jumping from one notch to the next. Never
          below one, because a row cannot move by less than its own step. */
-      const d9=(c==='ArrowUp'?1:-1)*Math.max(1,dialScale());
+      const row9=SETTINGS[S.setSel||0]||SETTINGS[0];
+      let word9=true; try{word9=!isFinite(parseFloat(String(row9.v())));}catch(_){}
+      const d9=(c==='ArrowUp'?1:-1)*(word9?1:Math.max(1,dialScale()));
       SETTINGS[S.setSel||0].a(d9);saveCfg();dirty=true;}
     else if(c==='Slash'&&!e.repeat){               // the dice key: a whole song (⇧⌥ = wild)
       pushUndo('song gen'); genSong(rs(e)&&altOf(e)); S.layer=1;
