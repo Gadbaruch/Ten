@@ -122,12 +122,18 @@
   .adot.dead{background:none;box-shadow:inset 0 0 0 1px var(--fg);opacity:.4;}
   /* the gesture readout: text in the empty space above the column, no box */
   .wlay{position:absolute;top:0;left:calc(-1 * var(--bleed));pointer-events:none;}
-  .gviz circle{fill:#fff;opacity:.85;}
+  /* no opacity here: each grain carries its own, and a CSS opacity would
+     beat the attribute and flatten the whole cloud back to one brightness */
+  .gviz circle{fill:#fff;}
+  .gviz rect.gspr{fill:var(--fg);opacity:.09;}
+  .gviz line.gctr{stroke:var(--fg);opacity:.5;stroke-width:1;stroke-dasharray:2 3;}
   .pvz line{stroke:#fff;stroke-width:1.4;opacity:.95;}
   .wlay path{stroke:var(--fg);stroke-width:1;opacity:.5;fill:none;}
   .wtc path{stroke:var(--fg);stroke-width:1.2;opacity:.8;fill:none;}
   .cuet{position:absolute;left:0;width:100%;height:1px;background:var(--fg);opacity:.65;}
   .crx{position:absolute;left:0;width:100%;background:var(--bg);opacity:.62;}
+  .gcol.drp{outline:1px dashed var(--fg);outline-offset:-2px;background:rgba(255,255,255,.06);}
+  .drpl{color:var(--fg);opacity:.95;}
   .cinf{position:absolute;top:-16px;left:0;width:100%;text-align:center;
         font-size:11px;line-height:14px;color:var(--fg);opacity:.9;
         white-space:nowrap;pointer-events:none;}
@@ -1014,7 +1020,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-14.1922';
+const BUILD='2026-08-14.2116';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -3607,6 +3613,15 @@ let fxwReady=false;
           this.port.postMessage({t:'stat',g:this.grains.length,v:this.vs.size,tv:this.tv.size,spawned:this.stat,
             /* every cursor's place in the take, for the playheads on the waveform */
             tpos:[...this.tv.values()].slice(0,8).map(v9=>Math.max(0,Math.min(1,v9.c/L9))),
+            /* …and where the cloud is reading from: the centre the grains are
+               sprayed around (scan included), how wide the spray is, and how
+               loud each grain is right now, so the picture breathes with it */
+            cpos:this.p.live>0.5
+              ?((((this.rw/L9)-0.05-(this.cur||this.p).pos*0.9)%1)+1)%1
+              :((((this.cur||this.p).pos+this.scanPh)%1)+1)%1,
+            cspr:(this.cur||this.p).spray,
+            gam:this.grains.slice(0,24).map(g9=>+Math.max(0,Math.min(1,
+              this.env(Math.max(0,g9.n)/g9.dur,g9.sh)*g9.vel)).toFixed(3)),
             pos:this.grains.slice(0,24).map(g9=>Math.max(0,Math.min(1,g9.ph/L9)))});}};
     }
     env(t,sh){          // t 0..1 through the grain, sh = slewed shape
@@ -7826,8 +7841,12 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
       try{gch.node.port.postMessage({t:'panic'});}catch(_){}}
     this.audStop(pi,n+0.002);}
   allOff(){const n=AC.currentTime;for(const a of this.act)for(const v of [...a])v.kill(n);
-    for(const k9 in (this.gn||{})){const e9=this.gn[k9];        // cursors live in the worklet: silence has to reach them too
-      if(e9&&e9.node){try{e9.node.port.postMessage({t:'tclr'});}catch(_){}}}
+    /* cursors AND clouds live in the worklet, so silence has to reach both:
+       tclr only ever stopped the tape, which left grain voices with no shim
+       — a sequenced cloud note, an orphaned id — ringing through an
+       all-notes-off with nothing in the app able to end them */
+    for(const k9 in (this.gn||{})){const e9=this.gn[k9];
+      if(e9&&e9.node){try{e9.node.port.postMessage({t:'panic'});}catch(_){}}}
     this.arpPool.forEach(p=>p.length=0);}
   click(at,accent){
     const o=AC.createOscillator(),g=AC.createGain();
@@ -7848,6 +7867,7 @@ fetch('samples/manifest.json').then(r=>r.ok?r.json():null).then(man=>{
       .then(buf=>{if(buf){poolAdd(buf,en.name||en.file.replace(/\.\w+$/,'')); seedCloud();}})
       .catch(()=>{});
   }
+  setTimeout(()=>seedCloud(true),4000);   // whatever landed, rather than silence
 }).catch(()=>{});
 /* WHERE THE CURSORS ARE. The worklet is the only one who knows — the tape
    voices and the grains live in it — so every audio channel that has a node
@@ -8041,7 +8061,7 @@ function defaultKit(){
     setPresetData(pi,name,cat,presetData(np));
     mixChannel(pi);
     engine.rebuildRack(pi); engine.refresh(pi);
-    if(pi===CLOUDCH){setEngine(pi,'gran'); seedCloud();}
+    if(pi===CLOUDCH){setEngine(pi,'gran'); seedCloud(true);}
   });
 }
 function newSet(){
@@ -9665,10 +9685,15 @@ function prsFieldDefs(){
                               +' '+((p.psel|0)+1)+'/'+L.length : '—'},
     ];
   }
+  /* WHAT IT IS PLAYING comes before anything about how. The pool picker was
+     buried at the end of the sound rack, so the one field an audio channel
+     cannot do without took the longest to reach. */
+  const chSmp={k:'sample',v:()=>engine.audName[S.editSnd]
+    ||(engine.granName||[])[S.editSnd]||'\u2014'};
   if(engineGranP(p))return [
     /* the cloud's SETUP — identity, not sound design. ONE letters field says
        what the keyboard does; 'gran' is simply its fourth answer. */
-    chEng,
+    chEng, chSmp,
     {k:'letters',v:()=>'gran'},
     {k:'gmode',v:()=>['grain','pitch'][Math.round((p.gr||{}).pmode||0)]},
     {k:'input',v:()=>['take','live'][Math.round((p.gr||{}).live||0)]},
@@ -9676,7 +9701,7 @@ function prsFieldDefs(){
     {k:'gain', v:()=>((p.gr||{}).gain??0.8).toFixed(2)}];
   if(p.cat==='audio')return [
     /* the tape's SETUP: identity, not sound design */
-    chEng,
+    chEng, chSmp,
     {k:'letters',v:()=>['cue','pitch','frz'][clamp(Math.round((p.au||{}).kmode||0),0,2)]},
     {k:'input', v:()=>['mic','mstr'][Math.round((p.au||{}).src||0)]},
     {k:'chan',  v:()=>['stereo','left','right'][clamp(Math.round((p.au||{}).chan||0),0,2)]},
@@ -9904,6 +9929,18 @@ function _prsAction(d){
     else if(f==='pan')K.mix.pan=clamp(+(K.mix.pan+d*0.1).toFixed(1),-1,1);
     else if(f==='wild'){CFG.wild=clamp((CFG.wild??35)+d*5,0,100);saveCfg();}
     engine.rebuildRack(pi); dirty=true; dirtySave=true; return;
+  }
+  /* the pool, on either face of the audio channel: one clip per channel, so
+     the tape and the cloud are handed the same take by the same call */
+  if(f==='sample'&&(p.cat==='audio'||engineGranP(p))){
+    if(!POOL.length){flash('pool is empty — record (\u2303+tab) or drop audio in');dirty=true;return;}
+    const cur=POOL.findIndex(e2=>e2.buf===(engine.audBuf[pi]||(engine.granBuf||[])[pi]));
+    const nx=POOL[fmod((cur<0?0:cur)+(d>0?1:-1),POOL.length)];
+    pushUndo('sample');
+    if(engineGranP(p))engine.granNode(pi);
+    engine.setChanBuf(pi,nx.buf,nx.name);
+    flash('sample → '+nx.name);
+    dirty=true; dirtySave=true; return;
   }
   if(p.cat==='audio'&&!engineGranP(p)
      &&['letters','input','chan','fit','gain'].includes(f)){
@@ -11232,8 +11269,11 @@ const POOL=[];
    first factory phrase to land fills any gran channel that holds no take —
    never one that already has a sound, so it cannot eat your own drop. */
 const CLOUDSEED='nylonlick';
-function seedCloud(){
-  const src=POOL.find(p2=>p2.name===CLOUDSEED)||POOL[0];
+function seedCloud(any){
+  /* the pool arrives in whatever order the fetches finish, so a strict call
+     waits for the take we meant; `any` is the fallback once they have all
+     had their chance */
+  const src=POOL.find(p2=>p2.name===CLOUDSEED)||(any?POOL[0]:null);
   if(!src)return false;
   let did=false;
   for(const i of CHANS()){
@@ -15488,8 +15528,14 @@ function sweepOrphanVoices(){
       /* unreleased AND unreferenced: nobody can ever end this one. A voice with
          a scheduled end is already marked released, so this cannot catch a
          sequenced note however long it is. */
+      /* A CLOUD VOICE IS REFERENCED FOR AS LONG AS A KEY IS DOWN, so an
+         unreferenced one can never be ended by a keyup — waiting the full
+         four seconds on it is four seconds of hanging grains. It used to be
+         reaped almost at once, but only by accident: the shim carried no
+         startAt, so the sweeper read it as ancient. Now it has one, and the
+         short grace is deliberate. */
       const age=now-(v.startAt||0);
-      if(age<(v.live?1.5:4))continue;
+      if(age<(v._grn?0.35:v.live?1.5:4))continue;
       try{v.release(now+0.002);}catch(_){}
     }
   }
@@ -15955,8 +16001,32 @@ function exportJSON(){
   a.href=URL.createObjectURL(new Blob([serialize()],{type:'application/json'}));
   a.download='ten-session.json'; a.click(); flash('exported ten-session.json');
 }
-document.addEventListener('dragover',e=>e.preventDefault());
+/* DRAGGING AUDIO IN USED TO LOOK LIKE NOTHING WAS HAPPENING. There is no
+   pointer here — the drop always lands on the channel you are ON — so the
+   feedback has to say which channel that is, and whether it will land as
+   tape or as cloud (⌥, or a channel already in gran mode). dragleave is not
+   trustworthy across child elements, so the state times itself out. */
+const DRAGA={on:false,alt:false,at:0};
+const dragTgt=()=>S.layer>=2?S.editSnd:S.curPreset;
+function dragEnd(){if(!DRAGA.on)return; DRAGA.on=false; dirty=true;}
+document.addEventListener('dragover',e=>{
+  e.preventDefault();
+  const files=e.dataTransfer&&[...(e.dataTransfer.types||[])].includes('Files');
+  if(!files)return;
+  if(!DRAGA.on||DRAGA.alt!==!!e.altKey){
+    DRAGA.on=true; DRAGA.alt=!!e.altKey; dirty=true;
+    const pi=dragTgt();
+    const asCloud=DRAGA.alt||isGranCh(pi);
+    flash('drop audio → channel '+pi+' · '+(asCloud?'the cloud':'tape')+
+      (asCloud?'':'   ⌥ for the cloud'));
+  }
+  DRAGA.at=performance.now();
+});
+document.addEventListener('dragleave',()=>setTimeout(()=>{
+  if(DRAGA.on&&performance.now()-DRAGA.at>250)dragEnd();},300));
+document.addEventListener('dragend',dragEnd);
 document.addEventListener('drop',e=>{
+  dragEnd();
   e.preventDefault(); const f=e.dataTransfer.files[0]; if(!f)return;
   const dropAlt=!!e.altKey;
   if(/audio|\.(wav|mp3|aiff?|m4a|ogg|flac)$/i.test((f.type||'')+f.name)){
@@ -16861,7 +16931,9 @@ function gridHTML(pat,pos,anc,chans){
   for(const i of chans){
     const lane=pat.lanes[i], sel=i===S.curPreset, dim=dimOf(i);
     const n16=(lane&&!isAudioCh(i))?Math.max(1,Math.round(lane.len/step)):0;
-    h+='<div class="gcol" style="width:'+COLW+'ch">';
+    const dtg=DRAGA.on&&i===dragTgt();
+    h+='<div class="gcol'+(dtg?' drp':'')+'" style="width:'+COLW+'ch">';
+    if(dtg)h+='<div class="cinf drpl">'+(DRAGA.alt||isGranCh(i)?'\u2601 cloud':'\u25b6 tape')+'</div>';
     if(!n16){
       h+='<div class="gc k" style="height:'+H+'px"></div>';
       if((isAudioCh(i)||isGranCh(i))&&(engine.audBuf[i]||(engine.granBuf||[])[i])){
@@ -16894,13 +16966,32 @@ function gridHTML(pat,pos,anc,chans){
              (en9<0.999?'<i class="crx" style="top:'+(en9*H).toFixed(1)+'px;height:'+
                 ((1-en9)*H).toFixed(1)+'px"></i>':'')+'</div>';
         }
-        /* THE GRAINS, LIVE ON THE WAVEFORM: each dot is a grain's playhead,
-           refreshed off the worklet's stat while the cloud runs */
-        if(isGranCh(i)&&engine.granViz&&(engine.granViz[i]||[]).length){
+        /* THE CLOUD, LIVE ON THE WAVEFORM. Three things are happening at once
+           and they used to share one flat dot: WHERE the cloud reads from (a
+           band as wide as the spray, walking when scan is up), and each
+           grain's own playhead, drawn at the loudness it has this instant —
+           so a grain fades in and out where it actually is instead of
+           blinking on and off at full brightness. */
+        const gst=(engine.gn&&engine.gn[i]&&engine.gn[i].stat)||null;
+        if(isGranCh(i)&&gst){
           let gd='';
-          for(const p9 of engine.granViz[i])
-            gd+='<circle cx="'+(0.5*CW).toFixed(1)+'" cy="'+(p9*H).toFixed(1)+'" r="1.6"/>';
-          h+='<svg class="wlay gviz" width="'+CW.toFixed(1)+'" height="'+H+'">'+gd+'</svg>';
+          if(Number.isFinite(gst.cpos)){
+            const spr=Math.max(0.006,Math.min(1,gst.cspr||0));
+            const y0=((gst.cpos-spr/2)%1+1)%1;
+            const band=(y,ht)=>'<rect class="gspr" x="0" y="'+(y*H).toFixed(1)+
+              '" width="'+CW.toFixed(1)+'" height="'+(ht*H).toFixed(1)+'"/>';
+            gd+=band(y0,Math.min(spr,1-y0));
+            if(y0+spr>1)gd+=band(0,y0+spr-1);      // the take is a ring: the band wraps
+            gd+='<line class="gctr" x1="0" x2="'+CW.toFixed(1)+'" y1="'+(gst.cpos*H).toFixed(1)+
+                '" y2="'+(gst.cpos*H).toFixed(1)+'"/>';
+          }
+          const am=gst.gam||[];
+          (engine.granViz[i]||[]).forEach((p9,ix)=>{
+            const a=Math.max(0.12,Math.min(1,am[ix]==null?0.6:am[ix]));
+            gd+='<circle cx="'+(0.5*CW).toFixed(1)+'" cy="'+(p9*H).toFixed(1)+
+                '" r="'+(1.1+2.1*a).toFixed(1)+'" opacity="'+a.toFixed(2)+'"/>';
+          });
+          if(gd)h+='<svg class="wlay gviz" width="'+CW.toFixed(1)+'" height="'+H+'">'+gd+'</svg>';
         }
         /* AND THE TAPE CURSORS: one line straight across the take for every
            voice reading it. Two cue keys held is two lines — the channel is
