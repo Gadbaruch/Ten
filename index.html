@@ -1012,7 +1012,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-14.1634';
+const BUILD='2026-08-14.1647';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -10448,7 +10448,7 @@ const EXP={
    key got in `wait` ms — a travel-triggered board's answer). The two measures
    are on different scales, so each keeps ITS OWN range: sharing storage between
    two mechanisms is the bug this file has already been bitten by twice. */
-const HEDEF={rest:0.03,trig:0.02,look:3,gamma:0.5,soft:0.005,hard:0.130,floor:1/127,auto:0,
+const HEDEF={rest:0.03,trig:0.02,look:6,gamma:0.5,soft:0.005,hard:0.130,floor:1/127,auto:0,
              est:0,wait:4,wSoft:0.002,wHard:0.05,dlo:0.2,dhi:10};
 /* Fastest slope a finger can actually produce, in travel/ms. Full key travel in
    2ms is already superhuman; anything above this is a measurement artifact. */
@@ -10957,7 +10957,7 @@ const HE={
       if(v<=homeBand(C)){k.armed=true; k.pv=v; k.pt=t; return;}
       if(!k.armed){k.pv=v; k.pt=t; return;}          // still on the way down from the last press
       k.st=1; k.h=[[k.pv,k.pt],[v,t]]; k.peak=Math.max(0,slope); k.top=v; k.wait=0;
-      k.reArm=0; k.upV=v;
+      k.sl=[];                           // a new stroke measures itself
       this.pressAt=t;                    // when the board was last touched, for the arrow guard
       this.lastSlot=id;                  // …and WHICH key it was
       /* WINDOW MODE STARTS AT THE FIRST TOUCH, not at the trigger depth: the
@@ -10976,9 +10976,19 @@ const HE={
          of latency on exactly the hits that need it least */
     }
     if(k.st===1){                                    // downstroke, not yet spoken
-      /* in window mode the speed was already measured over the window — a
-         later jitter spike must not be allowed to raise it */
-      if(Math.round(C.est||0)!==1)k.peak=Math.max(k.peak,span);
+      /* THE MEDIAN, NOT THE MAXIMUM. Every stroke offers several span slopes,
+         and taking the largest means taking whichever one a report burst
+         inflated — the estimator was a maximum of noise, which is why velocity
+         wobbled on identical strokes. A median cannot be moved by one bad
+         sample, and measured over the same strokes it halves the spread while
+         landing on the same numbers, so a calibration made against the old
+         reading still fits. */
+      if(Math.round(C.est||0)!==1){
+        (k.sl=k.sl||[]).push(span);
+        if(k.sl.length>24)k.sl.shift();
+        const a9=k.sl.slice().sort((x,y)=>x-y);
+        k.peak=a9[Math.floor((a9.length-1)/2)];
+      }
       k.top=Math.max(k.top,v);
       if(v<=C.rest){k.st=0;}                         // a nudge that never got there
       else if(v>=C.trig){
