@@ -1012,7 +1012,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-14.1619';
+const BUILD='2026-08-14.1622';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1105,9 +1105,9 @@ const SETTINGS=[
  {n:'hid',g:'Input',    v:()=>HE.on?(HE.srcName||'on').slice(0,8):'off',
               a:()=>{if(HE.on)HE.disconnect(); else HE.connect();}},
  /* the bottom-row keys a 60% board has and this instrument never used */
- {n:'win key',g:'Input', v:()=>SPARE[CFG.kWin|0],
-              a:d=>{CFG.kWin=fmod((CFG.kWin|0)+d,SPARE.length); saveCfg();
-                    flash('win tap → '+SPARE[CFG.kWin|0]+' · held it is still ⌘');}},
+ {n:'win key',g:'Input', v:()=>SPARE[kWinIdx()],
+              a:d=>{CFG.kWin=fmod(kWinIdx()+d,SPARE.length); saveCfg();
+                    flash('win tap → '+SPARE[kWinIdx()]+' · held it is still ⌘');}},
  {n:'menu key',g:'Input',v:()=>SPARE[CFG.kMenu|0],
               a:d=>{CFG.kMenu=fmod((CFG.kMenu|0)+d,SPARE.length); saveCfg();
                     flash('menu → '+SPARE[CFG.kMenu|0]);}},
@@ -13393,13 +13393,28 @@ const FNACT=['ArrowRight','ArrowLeft','ArrowUp','ArrowDown','Tab','Escape','Back
    only take a key while it is focused — which is the right scope — and both of
    these arrive untouched, unlike ⌘Tab and ⌘Space, which macOS eats first.
    win is claimed on the TAP only: held, it is still the ⌘ that saves a set. */
-const SPARE=['off','oct −','oct +','play','rec','settings','dice'];
+const SPARE=['off','scope','oct −','oct +','play','rec','settings','dice'];
+/* win defaults to the instrument scope: it is the key under the left thumb on
+   a board with no ` where you want one, and Gad asked for it there. */
+const kWinIdx=()=>CFG.kWin==null?SPARE.indexOf('scope'):(CFG.kWin|0);
+const kMenuIdx=()=>CFG.kMenu|0;
 const spareKey=(name)=>{
   const synth=code=>{for(const kind of ['keydown','keyup'])
     document.dispatchEvent(new KeyboardEvent(kind,
       Object.assign({code,key:code,bubbles:true},modsOf())));};
   if(name==='oct −'||name==='oct +'){
     S.oct=clamp(S.oct+(name==='oct +'?1:-1),-3,3); flash('oct '+S.oct); dirty=true; return;}
+  /* THE INSTRUMENT SCOPE, LATCHED. Holding this key is not an option — it is
+     ⌘, and ⌘ with an arrow belongs to the browser and to the per-note tweak.
+     So a tap opens the scope and a tap closes it, and the arrows in between
+     are plain arrows walking the instrument, exactly as they do while ` is
+     held. Esc closes it too, like everything else that stays open. */
+  if(name==='scope'){
+    HOLD.i=!HOLD.i; HOLD.iUsed=false;
+    flash(HOLD.i?'instrument scope OPEN — arrows walk it · tap again to close'
+                :'instrument scope closed');
+    dirty=true; return;
+  }
   if(name==='play'){T.playing?stop():play(); return;}
   if(name==='rec')return synth('Tab');
   if(name==='settings')return synth('Escape');
@@ -13453,8 +13468,8 @@ const onKeyDown=e=>{
   }
   if(arrowAlias(e,'keydown'))return;   // , . - = ARE the arrows on a board without any
   /* the menu key is unambiguous — nothing else uses it, so it acts on the press */
-  if(e.code==='ContextMenu'&&!e.repeat&&SPARE[CFG.kMenu|0]!=='off'){
-    e.preventDefault(); spareKey(SPARE[CFG.kMenu|0]); return;}
+  if(e.code==='ContextMenu'&&!e.repeat&&SPARE[kMenuIdx()]!=='off'){
+    e.preventDefault(); spareKey(SPARE[kMenuIdx()]); return;}
   /* win/⌘ is a TAP, decided at release: held it is still the modifier that
      saves a set, and a chord with anything marks it used */
   if(e.code==='MetaLeft'||e.code==='MetaRight'){
@@ -15169,7 +15184,7 @@ const onKeyUp=e=>{
   if(arrowAlias(e,'keyup'))return;      // the release half — arrow key-ups end automation writes
   if(c==='MetaLeft'||c==='MetaRight'){
     const used=MK.winUsed; MK.win=false; MK.winUsed=false;
-    if(!used&&SPARE[CFG.kWin|0]!=='off'){e.preventDefault(); spareKey(SPARE[CFG.kWin|0]); return;}
+    if(!used&&SPARE[kWinIdx()]!=='off'){e.preventDefault(); spareKey(SPARE[kWinIdx()]); return;}
   }
   /* the release half of the same rule: the panel owns only the keys it
      navigates with, and every other key-up is the desk's */
