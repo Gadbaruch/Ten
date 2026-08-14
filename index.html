@@ -1026,7 +1026,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-14.2329';
+const BUILD='2026-08-14.2343';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1790,6 +1790,16 @@ const addrKey=a=>a?a.rack+'/'+(a.sid!=null?'#'+a.sid:a.slot)+'/'+a.key:'?';
    to move, the address is not. Null when it no longer names anything. */
 function autoWhere(pre,a){
   if(!a)return null;
+  /* THE AUDIO CHANNEL'S DIALS ARE NOT IN A MODULE RACK — they are AUDF and
+     GRANF, which is why an address naming one resolved to nothing and every
+     audio param was silently unautomatable. Same address shape, different
+     shelf to look on. */
+  if(a.rack==='aud'||a.rack==='grn'){
+    const specs=a.rack==='aud'?AUDF:GRANF;
+    const px=specs.findIndex(x=>x.key===a.key&&x.lbl===a.lbl);
+    if(px<0)return null;
+    return {mi:-1,si:0,px,spec:specs[px],rack:a.rack};
+  }
   const mi=MODULES.findIndex(M=>M&&M.id===a.rack);
   if(mi<0)return null;
   const M=MODULES[mi];
@@ -2042,9 +2052,15 @@ function modDests_(pre){
     for(const sp of seen.values())add(M.id,'*',sp,'all');   // one entry per param, every slot
   }
   if((pre.cat||'')==='audio'){
-    for(const sp of AUDF)
-      if(['semis','st','en','rate'].includes(sp.key))
-        add('aud',0,sp.key==='semis'?SP('pitch','semis','lin',{min:-24,max:24,step:1,fmt:v=>v+'st'}):sp,'');
+    /* EVERY DIAL ON THE PAGE, not a list of four written by hand. The
+       hardcoded set predated half the params it was supposed to cover — the
+       stretch window was invented and simply never appeared here — and the
+       next one added would have been missing too. Menus stay out: a
+       modulator needs a range, not a choice. */
+    for(const sp of AUDF){
+      if(sp.type==='enum'||sp.key==='_pool')continue;
+      add('aud',0,sp,'');
+    }
     add('aud',0,SP('gain','gain','lin',{min:0,max:1,step:0.05}),'');   // moved to the inst row, still a dest
   }
   if(engineGranP(pre)||pre.cat==='audio')for(const sp of GRANF)add('grn',0,sp,'');
@@ -2594,6 +2610,26 @@ function optSlot(ch,c,make){
    last write and this one goes — computed forward, so a gesture that crosses
    the loop point erases the right side of it rather than the whole middle. */
 const AUTOW={};
+/* the audio page's own recorder: the address is the rack and the dial, with
+   no module or slot to resolve, and the overwrite rules are the ones every
+   other lane already uses */
+function recAutoAud(pi,pre,rack,spec,nv){
+  const ml=pre&&pre.modLoop;
+  if(!ml||ml.state!=='rec'||!T.playing)return;
+  const L=ml.len; if(L<=0)return;
+  const a={rack,slot:0,key:spec.key,lbl:spec.lbl};
+  const t=fmod(qz(fmod(posNow(),L),0.25),L);
+  const k=pi+'|'+addrKey(a), now=performance.now(), prev=AUTOW[k];
+  const mine=ev=>sameAddr(evAddr(pre,ev),a);
+  const d=prev?fmod(t-prev.t,L):-1;
+  if(prev&&now-prev.at<400&&d>1e-9&&d<L/2)
+    ml.clear(ev=>{ if(!mine(ev))return false;
+                   const dd=fmod(ev.t-prev.t,L); return dd>1e-9&&dd<=d+1e-9; });
+  else ml.clear(ev=>mine(ev)&&Math.abs(ev.t-t)<1e-6);
+  ml.events.push({t,a,v:nv});
+  ml._rev=(ml._rev|0)+1;
+  AUTOW[k]={t,at:now};
+}
 function recAuto(pi,pre,mi,si,px,nv){
   const ml=pre&&pre.modLoop;
   if(!ml||ml.state!=='rec'||!T.playing)return;
@@ -6455,7 +6491,8 @@ class Engine{
         const w=autoWhere(pre,lane.a); if(!w)continue;
         const pts=lane.pts.filter(p=>p.t<L-1e-9); if(!pts.length)continue;
         const v=autoValueAt(w.spec,pts,ph,L);
-        if(v!=null)applyParam(pi,w.mi,w.si,w.px,v);
+        if(v==null)continue;
+        if(w.rack)applyAudParam(pi,w.rack,w.spec,v); else applyParam(pi,w.mi,w.si,w.px,v);
       }
     }
     dirty=true;
@@ -6519,10 +6556,14 @@ class Engine{
         engine.audPitch(pi,(v===undefined?au.semis??0:v)-(au.semis??0));
         return true;
       }
-      /* gain/start/end/rate land on an overlay the next cycle reads — the
-         clip itself keeps what you dialled */
+      /* the overlay holds the modulated value so the clip keeps what you
+         dialled — and then the cursor is re-aimed at it, so a route on
+         speed, crop, window or level is heard on the take that is ALREADY
+         running rather than at the next trigger. Under a four-bar loop, "the
+         next trigger" is four bars of a modulator doing nothing. */
       this.audOv=this.audOv||{}; const ov=this.audOv[pi]=this.audOv[pi]||{};
       if(v===undefined)delete ov[key]; else ov[key]=v;
+      if(key==='wnd')this.audWnd(pi); else this.audLive(pi);
       return true;
     }
     if(rack==='voice'&&key==='pan'){
@@ -7764,7 +7805,13 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     const semis=(au.semis??0)+(cue?cue.semis||0:0)+(this.audPB&&this.audPB[pi]||0);
     /* SYNC keeps the clock: the rate is the loop fit (or ×rate), and pitch
        travels separately through the shifter. FREE is tape: one knob, both. */
-    const baseRate=Math.round(au.fit)?dur/loopSec:(au.rate??1);
+    /* A ROUTE ON SPEED OUTRANKS FIT. Fit means "the loop decides the rate",
+       which is right until something is deliberately driving the rate — and
+       since fit is the default on a take that loops, a modulator pointed at
+       speed used to move nothing at all. When the route stops, the overlay
+       clears and fit has it back. */
+    const ovR=(this.audOv&&this.audOv[pi]||{}).rate;
+    const baseRate=(Math.round(au.fit)&&ovR===undefined)?dur/loopSec:(au.rate??1);
     const rate=sync?baseRate:baseRate*Math.pow(2,semis/12);
     const skipSec=skipBeats*spb(), skipBuf=skipSec*rate;
     if(skipBuf>=dur-0.001)return;
@@ -7810,12 +7857,14 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     const dur=(en-st)*buf.duration, loopSec=Math.max(1e-6,ask.lenBeats*spb());
     const sync=Math.round(au.pmode||0)===1;
     const semis=(au.semis??0)+(ask.cue?ask.cue.semis||0:0)+(this.audPB&&this.audPB[pi]||0);
-    const baseRate=Math.round(au.fit)?dur/loopSec:(au.rate??1);
+    const ovR=(this.audOv&&this.audOv[pi]||{}).rate;
+    const baseRate=(Math.round(au.fit)&&ovR===undefined)?dur/loopSec:(au.rate??1);
     const rate=sync?baseRate:baseRate*Math.pow(2,semis/12);
     const k9=buf.sampleRate/AC.sampleRate;
     try{e9.node.port.postMessage({t:'tset',
       rate:Math.max(0.05,rate)*k9, base:baseRate*k9,
-      sh:sync?Math.pow(2,semis/12):1, end:en*buf.length});}catch(_){}
+      sh:sync?Math.pow(2,semis/12):1, end:en*buf.length,
+      gain:(au.gain??0.9)*(ask.cue?ask.cue.vol??1:1)});}catch(_){}
   }
   audLiveAll(){for(const i of CHANS())if(isAudioCh(i))this.audLive(i);}
   audGain(pi,g){
@@ -7824,7 +7873,8 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
   }
   audWnd(pi){
     const e9=this.gn&&this.gn[pi]; if(!e9||!e9.node)return;
-    const ms=clamp((S.presets[pi].au||{}).wnd??50,5,300);
+    const ov9=(this.audOv&&this.audOv[pi])||{};
+    const ms=clamp(ov9.wnd??(S.presets[pi].au||{}).wnd??50,5,300);
     try{e9.node.port.postMessage({t:'wnd',ms});}catch(_){}
   }
   /* live pitch for the mod/automation destination — one message to the
@@ -8057,6 +8107,22 @@ function writeParam(pi,mi,si,px,v){
   dirtySave=true;
 }
 /* value change entry point: address = (module, slot(-1=flat), param) */
+/* an automated audio dial is written where the dial lives and then pushed at
+   whatever is sounding, so a curve on speed or spray or the crop is heard on
+   the take already running rather than at its next trigger */
+function applyAudParam(pi,rack,spec,v){
+  const p=S.presets[pi]; if(!p)return;
+  if(rack==='grn'){
+    p.gr=p.gr||{};
+    if(spec.set)spec.set(p.gr,v); else p.gr[spec.key]=v;
+    engine.granCfg(pi);
+  }else{
+    p.au=p.au||{};
+    if(spec.set)spec.set(p.au,v); else p.au[spec.key]=v;
+    if(spec.key==='wnd')engine.audWnd(pi); else engine.audLive(pi);
+  }
+  dirty=true;
+}
 function applyParam(pi,mi,si,px,v){
   const M=MODULES[mi]; if(!M||!M.id||M.prs)return;
   const slot=M.flat?null:S.presets[pi][M.id][si];
@@ -9907,19 +9973,9 @@ const GRANF=[
      if(!e2){flash('pool is empty — record (\u2303+tab) or drop audio first');return;}
      engine.granNode(pi); engine.setChanBuf(pi,e2.buf,e2.name);}}),
 ];
-function granAction(d,m){
-  const pre=S.presets[S.editSnd], spec=GRANF[clamp(S.curParam,0,GRANF.length-1)];
-  pre.gr=pre.gr||{};
-  const GD={pos:0,spray:0.05,size:0.12,dens:20,semis:0,jit:0,shape:0.5,rev:0.1,width:0.5,scan:1,gain:0.8,fade:0.06,flow:0.5,dif:0,live:0,frz:0,fb:0,pmode:0};
-  /* through the spec's own get/set when it has them — the pool picker's set()
-     IS the assignment, same lesson the kit mode field just taught */
-  const cur=spec.get?spec.get(pre.gr):pre.gr[spec.key]??GD[spec.key];
-  const nv=adjust(spec,cur,d,m);
-  if(spec.set)spec.set(pre.gr,nv); else pre.gr[spec.key]=nv;
-  engine.granCfg(S.editSnd);
-  flash('grain '+spec.lbl+' = '+fmtVal(spec,spec.get?spec.get(pre.gr):pre.gr[spec.key]));
-  dirty=true; dirtySave=true;
-}
+/* (granAction lived here: the cloud's own knob handler, writing pre.gr and
+   nothing else. audAction covers both halves of the page now, so a dial
+   turned on either one records automation and re-aims what is sounding.) */
 const AUDF=[
  /* the tape's SOUND rack: how the clip plays. Identity — keys mode, sample,
     input, channels, fit, gain — lives on the Instrument row. */
@@ -9985,7 +10041,10 @@ function wtAction(d,m){
 }
 function audAction(d,m){
   if(isCodeCh(S.editSnd)){codeAction(d,m);return;}
-  if(isGranCh(S.editSnd)){granAction(d,m);return;}
+  /* NOT granAction any more: an audio channel has ONE page whichever way its
+     keys are set, and that page is AUDALL. Sending pitch-mode channels off to
+     the cloud-only handler is why a dial turned there recorded no automation
+     and why the page changed shape when you switched keys mode. */
   if(isWtCh(S.editSnd)){wtAction(d,m);return;}
   const pre=S.presets[S.editSnd], all=AUDALL();
   const spec=all[clamp(S.curParam,0,all.length-1)];
@@ -9997,6 +10056,7 @@ function audAction(d,m){
     const nv0=adjust(spec,cur0,d,m);
     if(spec.set)spec.set(pre.gr,nv0); else pre.gr[spec.key]=nv0;
     engine.granNode(S.editSnd); engine.granCfg(S.editSnd);
+    recAutoAud(S.editSnd,pre,'grn',spec,spec.get?spec.get(pre.gr):pre.gr[spec.key]);
     flash('grain '+spec.lbl+' = '+fmtVal(spec,spec.get?spec.get(pre.gr):pre.gr[spec.key]));
     dirty=true; dirtySave=true; return;
   }
@@ -10005,6 +10065,7 @@ function audAction(d,m){
   if(spec.set)spec.set(pre.au,nv); else pre.au[spec.key]=nv;
   if(spec.key==='wnd')engine.audWnd(S.editSnd);
   engine.audLive(S.editSnd);         // …and the take that is already running hears it
+  recAutoAud(S.editSnd,pre,'aud',spec,spec.get?spec.get(pre.au):pre.au[spec.key]);
   flash('audio '+spec.lbl+' = '+fmtVal(spec,spec.get?spec.get(pre.au):pre.au[spec.key]));
   dirty=true; dirtySave=true;
 }
@@ -14141,7 +14202,10 @@ const onKeyDown=e=>{
         if(pat.state!=='rec'){pushUndo('take');pat.state='rec';}
         /* In a sound layer the same key also arms the channel's MOD LOOP, so
            holding it and moving a param records the move. */
-        if(S.layer>=2&&!isAudioCh(S.editSnd)){
+        if(S.layer>=2){
+          /* THE MOD LOOP USED TO REFUSE TO ARM ON AN AUDIO CHANNEL, which is
+             the other half of why nothing there could be automated: no
+             address to resolve, and no arming to write one. */
           const ml=S.presets[S.editSnd].modLoop;
           if(ml.state!=='rec')ml.state='rec';
           if(ml.state==='rec'&&!T.playing)
@@ -14230,7 +14294,6 @@ const onKeyDown=e=>{
        aims at the engine's own rack. */
     if(M.id==='osc'&&(isWtCh(S.editSnd)||isGranCh(S.editSnd)||isAudioCh(S.editSnd))){
       const page=isWtCh(S.editSnd)?{specs:WTF,rack:'osc',slot:0}
-        :isGranCh(S.editSnd)?{specs:GRANF,rack:'grn',slot:0}
         :{specs:AUDALL(),rack:'aud',slot:0};
       const spec=page.specs[clamp(S.curParam,0,page.specs.length-1)];
       if(spec&&spec.st==='gr')page.rack='grn';   // the cloud's dials keep their own rack
@@ -14925,7 +14988,6 @@ const onKeyDown=e=>{
         if(M2.prs)return instFields().length;
         if(M2.flat)return M2.flat.length;
         if(M2.id==='osc'&&isCodeCh(S.editSnd))return CODEF().length;
-        if(M2.id==='osc'&&isGranCh(S.editSnd))return GRANF.length;   // BEFORE audio: gran mode IS an audio channel
         if(M2.id==='osc'&&isAudioCh(S.editSnd))return AUDALL().length;
         if(M2.id==='osc'&&isWtCh(S.editSnd))return WTF.length;
         if(M2.slot){const base=paramsFor(mi2,modHolder(pre2,M2.id)[M2.id][S.curSlot]).length;
@@ -15716,7 +15778,7 @@ const onKeyUp=e=>{
            you touched wrote a point, and the point played back over you the
            next time round, which is what "the automations are always on and I
            can't get rid of them" actually was. */
-        if(S.layer>=2&&!isAudioCh(S.editSnd)){
+        if(S.layer>=2){
           const ml3=S.presets[S.editSnd].modLoop;
           if(ml3.state==='rec')ml3.state='on';
         }
@@ -15729,7 +15791,7 @@ const onKeyUp=e=>{
     if(engine.audRec)engine.audRecStop();
     const pat=S.layer>=1?S.patterns[S.editPat]:null;      // pattern rec (notes), pattern + sound layers
     if(pat&&pat.state==='rec'){pat.state='on';finalizeCaptures(true);dirty=true;dirtySave=true;}
-    if(S.layer>=2&&!isAudioCh(S.editSnd)){               // ...and disarm the mod loop with it
+    if(S.layer>=2){                                     // ...and disarm the mod loop with it
       const ml=S.presets[S.editSnd].modLoop;
       if(ml.state==='rec'){ml.state='on';dirty=true;dirtySave=true;}
     }
@@ -17897,36 +17959,9 @@ function renderSnd(L,pos){
     L.push('');
     L.push('   '+sp('d','pos sweeps the frames INSIDE a table \u00b7 morph blends the two tables \u00b7 all four + fold are live mod destinations'));
   }
-  else if(M.id==='osc'&&isGranCh(S.editSnd)){
-    const buf=engine.granBuf&&engine.granBuf[S.editSnd];
-    L.push('  '+sp('a','\u2591 GRANULAR  ')+(buf
-      ?sp('d','sample: ')+sp('a',((engine.granName||[])[S.editSnd]||'clip')+' \u00b7 '+buf.duration.toFixed(2)+'s')
-      :sp('r','no sample — ⌥-drop an audio file onto this channel')));
-    L.push('');
-    const gr=pre.gr||{};
-    const GDEF={pos:0,spray:0.05,size:0.12,dens:20,semis:0,jit:0,shape:0.5,rev:0.1,
-      width:0.5,scan:1,gain:0.8,fade:0.06,flow:0.5,dif:0,live:0,frz:0,fb:0,pmode:0};
-    /* the page outgrew one row (nineteen dials): TWO label/value pairs, split
-       down the middle, and every cell reads through the spec's own get */
-    const half=Math.ceil(GRANF.length/2);
-    for(let r0=0;r0<2;r0++){
-      const seg=GRANF.slice(r0*half,(r0+1)*half);
-      if(!seg.length)break;
-      let lr='   ', vr='   ';
-      seg.forEach((pspec,j)=>{
-        const i=r0*half+j, foc=i===S.curParam;
-        const raw=pspec.get?pspec.get(gr):gr[pspec.key]??GDEF[pspec.key];
-        const v=fmtVal(pspec,raw);
-        const cw=pspec.w?15:7;
-        lr+=(foc?spH('a','\u25b8'+pad(pspec.lbl,cw),'cp',i):spH('d',' '+pad(pspec.lbl,cw),'cp',i))+' ';
-        vr+=(foc?spH('i',' '+pad(v,cw),'cp',i):spH('v',' '+pad(v,cw),'cp',i))+' ';
-      });
-      L.push(lr); L.push(vr);
-      if(r0===0)L.push('');
-    }
-    L.push('');
-    L.push('   '+sp('d','letters play the cloud at pitch \u00b7 mode pitch = melody, timing kept \u00b7 input live = the \u2303 mic through a 4s ring \u00b7 everything here is a mod destination'));
-  }
+  /* (the cloud had a page of its own here — nineteen dials that only
+     appeared when the channel's keys were set to gran. It is the same take
+     through the same node either way, so there is one page now, below.) */
   else if(M.id==='osc'&&isAudioCh(S.editSnd)){
     const buf=engine.audBuf[S.editSnd];
     L.push('  '+sp('a','≈ AUDIO CHANNEL  ')+(buf
