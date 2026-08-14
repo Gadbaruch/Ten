@@ -1012,7 +1012,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-14.1325';
+const BUILD='2026-08-14.1327';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1151,9 +1151,12 @@ const SETTINGS=[
  /* the binding rows are for a board that needs teaching; yours binds itself,
     so they stay out of the way until you ask for them */
  {n:'key setup',g:'Input',h:()=>!HE.on,v:()=>CFG.heAdv?'shown':'auto',
-              a:()=>{CFG.heAdv=CFG.heAdv?0:1; saveCfg();
-                     flash(CFG.heAdv?'binding rows shown — arrow keys · board key · learn'
-                                    :'auto — the arrows bind themselves as you use them');}},
+              a:d=>{if(d<0){HE.set('slots',{});
+                      flash('every learned key forgotten — press each one again to rebind');
+                      dirty=true; return;}
+                    CFG.heAdv=CFG.heAdv?0:1; saveCfg();
+                    flash(CFG.heAdv?'binding rows shown — arrow keys · board key · learn'
+                                   :'auto — the arrows bind themselves as you use them · ↓ forgets them all');}},
  {n:'h calib',g:'Input',h:()=>!HE.on,
               v:()=>HE.cal?(HE.cal.phase+' '+HE.cal[HE.cal.phase].length+'/10'):'ready',
               a:()=>HE.startCalib()},
@@ -10743,6 +10746,29 @@ const HE={
     flash(code.replace('Arrow','').toLowerCase()+' — reading that key from its sensor now');
     dirty=true;
   },
+  /* AND UNBIND ITSELF WHEN IT WAS WRONG. A modifier keystroke names the
+     physical key that sent it, so if a sensor key went down at that same
+     moment and is bound to an arrow, that binding is on the MODIFIER — the
+     mistake that made right shift move left. Drop it, and say so, rather than
+     leaving the player to find a settings row for a binding they never asked
+     to make. */
+  unbindIfModifier(code){
+    if(!this.on||!code)return;
+    if(!/^(Shift|Control|Alt|Meta)(Left|Right)$|^CapsLock$|^ContextMenu$/.test(code))return;
+    const sl=(CFG.he&&CFG.he.slots)||{};
+    const now=performance.now();
+    for(const id in this.keys){
+      const k=this.keys[id];
+      if(!k||k.st===0||!sl[id])continue;
+      if(now-(k.startT||0)>300)continue;
+      const was=sl[id];
+      const next=Object.assign({},sl); delete next[id];
+      this.set('slots',next);
+      flash(code.replace(/(Left|Right)$/,' $1').toLowerCase()+' is not '
+        +was.replace('Arrow','').toLowerCase()+' — binding removed');
+      dirty=true; return;
+    }
+  },
   /* is a key BOUND to this action currently down? Used to drop the board's own
      keystroke for a key we are already driving from its sensor. */
   slotHeld(code){
@@ -13410,6 +13436,7 @@ const onKeyDown=e=>{
      and the sensor's version (which triggers at 2% and repeats by pressure)
      is the one worth keeping. A laptop's arrows are untouched: no sensor key
      is down when you press them. */
+  if(e.isTrusted)HE.unbindIfModifier(e.code);   // a modifier says which key it is
   if(e.isTrusted&&e.code.indexOf('Arrow')===0){
     if(HE.slotHeld(e.code))return;      // the sensor is already driving this one
     HE.autoBind(e.code);                // …and if it is not, learn which key that was
