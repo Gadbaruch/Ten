@@ -1012,7 +1012,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-14.1358';
+const BUILD='2026-08-14.1404';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -2159,6 +2159,23 @@ function dialScale(){
    option — and the first press tells us which kind of parameter is under the
    cursor, so the answer is known before the second tick can happen. */
 const AREP={code:null,timer:null};
+/* ONE PUSH IS ONE STEP, AND THE KEY MUST COME HOME FOR THE NEXT ONE. Rapid
+   trigger re-fires a key whenever it wobbles back across the actuation point,
+   so one deep press on a remapped arrow sends three or four real key-downs —
+   and on a menu every one of them is another entry gone by. The sensor knows
+   what the wire cannot: while a finger is still on the board, a second
+   key-down of the same arrow is that same push. Re-armed when the keys read
+   home. Our OWN repeat is untouched, because it never sends trusted events —
+   so numbers still run and menus still step. */
+const ASTEP={code:null,armed:true};
+/* true when this key-down is the SAME push we already answered — the wobble a
+   rapid trigger sends, not a new press. Split out so it can be reasoned about
+   and tested on its own rather than inferred from behaviour. */
+function arrowRefire(code){
+  if(!(HE.on&&HE.pressure()!=null)){ASTEP.armed=true; ASTEP.code=null; return false;}
+  if(ASTEP.code===code&&!ASTEP.armed)return true;
+  ASTEP.code=code; ASTEP.armed=false; return false;
+}
 /* WHAT IS UNDER THE CURSOR RIGHT NOW — asked at every tick rather than
    remembered from the last edit, because a remembered kind is wrong the moment
    you move to a different parameter, and being wrong here means either a menu
@@ -10654,8 +10671,39 @@ const HE={
   tick(){                                            // watchdog: the board went quiet
     if(!this.on)return;
     if(this.kind===1&&this.ready&&performance.now()-(this._reqAt||0)>60)this.kcRequest();
-    /* a streaming board's silence is a note-off, so this loop is now part of
-       playing rather than housekeeping */
+    /* nothing pressed: the next arrow key-down is a new push, not a re-fire */
+    if(this.pressure()==null){ASTEP.armed=true; ASTEP.code=null;}
+    const now=performance.now(), C=this.cfg();
+    for(const id in this.keys){
+      const k=this.keys[id];
+      if(!k||k.st!==2)continue;
+      /* THE HARD-HIT HANG. A slam bottoms the key out, and if the lift's
+         samples are missed the state sits at nine tenths of travel — above the
+         trigger, so the sweep below never touches it. The corroborating
+         witness is the BOARD'S OWN key-up: ignored for note-off, because rapid
+         trigger fires one every time a finger eases back, but if it arrives
+         and then no analog movement follows, the finger really has gone. */
+      if(k.osUp&&now-k.osUp>180&&now-(k.pt||0)>180){this.release(id); continue;}
+      if(now-(k.pt||0)<900)continue;                  // just played, or held and silent on the wire
+      /* A HOLD THIS BOARD NEVER MENTIONS AGAIN. It reports per unit of travel,
+         so a still finger is silent and silence cannot tell "held" from
+         "lifted, and the lift went missing" — which is why a key reading above
+         the trigger is spared. Twenty seconds of it is not a performance. */
+      if(k.pv>=C.trig){
+        if(now-(k.pt||0)>20000)this.release(id);
+        continue;
+      }
+      this.release(id);
+    }
+    /* THE LAST LINE OF DEFENCE. Whatever the state machine believes, a note
+       this stream started and no longer holds must not be left sounding — a
+       hanging note takes its letter down with it. */
+    for(const code in (this.sounded||{})){
+      const k2=this.keys[this.sounded[code]];
+      if(k2&&k2.st===2&&k2.code===code)continue;
+      delete this.sounded[code];
+      if(liveV[code])EXP.keyUp(code);
+    }
   },
   /* the board's own key-up, remembered rather than obeyed: it is not proof a
      note ended (rapid trigger sends one on any upward move) but it IS the
@@ -13295,7 +13343,10 @@ const onKeyDown=e=>{
      wanted on a menu */
   if(e.isTrusted&&e.repeat&&e.code.indexOf('Arrow')===0
      &&(AREP.code||focusIsStepped()||HE.pressure()!=null))return;
-  if(e.isTrusted&&!e.repeat&&e.code.indexOf('Arrow')===0)arepStart(e.code);
+  if(e.isTrusted&&!e.repeat&&e.code.indexOf('Arrow')===0){
+    if(arrowRefire(e.code)){e.preventDefault(); return;}
+    arepStart(e.code);
+  }
   if(arrowAlias(e,'keydown'))return;   // , . - = ARE the arrows on a board without any
   /* the menu key is unambiguous — nothing else uses it, so it acts on the press */
   if(e.code==='ContextMenu'&&!e.repeat&&SPARE[CFG.kMenu|0]!=='off'){
