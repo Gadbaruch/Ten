@@ -1012,7 +1012,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-14.1627';
+const BUILD='2026-08-14.1634';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -10474,6 +10474,9 @@ const HE_SOFT={1:0.005,2:0.005};   // 2 = same pass, 29 soft hits (p12)
    residue of a bug, and version stamps are not enough to catch it: a stamp
    written by a build that failed to clear the value marks the bad value as
    current, which is exactly what happened here. Judge the value itself. */
+/* the same band answers "is it home?" everywhere — releasing a note, arming
+   the next one, and deciding a press has ended. One number, one meaning. */
+const homeBand=C=>Math.max((C.rest||0.03)*0.8,0.10);
 const HE_SANE={soft:[0.0002,0.08], hard:[0.01,HE_MAX_SLOPE]};
 /* The Keychron full-matrix report is a fixed 6x16 row-major scan, so the slot a
    playing key lands in is known in advance and `hid keys` is not needed on these
@@ -10951,7 +10954,7 @@ const HE={
          nothing could ever end it. Two keys, two phantoms, one per lift.
          So: after a release the key is disarmed, and only coming home rearms
          it. You cannot play a key you have not let go of. */
-      if(v<=C.rest){k.armed=true; k.pv=v; k.pt=t; return;}
+      if(v<=homeBand(C)){k.armed=true; k.pv=v; k.pt=t; return;}
       if(!k.armed){k.pv=v; k.pt=t; return;}          // still on the way down from the last press
       k.st=1; k.h=[[k.pv,k.pt],[v,t]]; k.peak=Math.max(0,slope); k.top=v; k.wait=0;
       k.reArm=0; k.upV=v;
@@ -11010,37 +11013,19 @@ const HE={
          The absolute test stays as the floor, for a press so shallow that a
          proportion of it means nothing. */
       if(v>(k.top||0))k.top=v;                  // the deepest this press has gone
-      /* THE RESET DISTANCE — the one thing that lets both of Gad's rules be
-         true at once. Easing back while you play with pressure must NOT end
-         the note; a fast repeat that never quite comes home must still play
-         again. The two look identical to a threshold and completely different
-         as gestures: expression stays deep, a repeat comes most of the way up
-         and then drives back down. So: once the key has risen past two thirds
-         of its own travel it is re-armed, and the first real push after that
-         is a new note — released and struck, not a note that never ended. */
-      const reset=Math.max(C.rest*1.5,(k.top||0)*0.34);
-      if(!k.reArm&&v<=reset){k.reArm=1; k.upV=v;}
-      else if(k.reArm){
-        if(v<k.upV)k.upV=v;                     // still rising: remember the top of the lift
-        else if(v>k.upV+0.08){                  // …and now driving down again
-          this.release(id);
-          k.st=1; k.h=[[k.upV,k.pt],[v,t]]; k.peak=Math.max(0,slope); k.top=v;
-          k.wait=0; k.armed=true; k.reArm=0;
-          this.pressAt=t; this.lastSlot=id;
-          if(v>=C.trig)this.fire(id,k,v,t);
-          k.pv=v; k.pt=t; return;
-        }
-      }
-      /* A NOTE ENDS WHEN THE FINGER LEAVES THE KEY. Nothing else. There was a
-         proportional test here as well — a fraction of the press's own depth —
-         put in to survive a drifted zero, and it kept ending notes on the way
-         up while a finger was still very much on the board. Depth IS the
-         pressure; taking the note away halfway through the travel throws away
-         the half that matters. The per-key zero makes the rest line
-         trustworthy on its own, and if a zero ever does drift far enough to
-         strand a note, the watchdog above ends it from the board's own key-up
-         rather than from a guess about how far down is far enough. */
-      if(v<C.rest*0.8){this.release(id);}
+      /* HOME IS A BAND, NOT A LINE. The board reports per unit of travel and
+         delivers those reports in bursts, so a fast lift-and-press can skip the
+         last few millimetres entirely — the lowest sample we ever see might be
+         a tenth of the travel and never the rest line itself. Requiring that
+         line meant the note never ended and the next press had nothing to
+         start: the dead window. A tenth of the travel is a finger off the key
+         by any honest measure, and it is still nowhere near the half-press
+         where expression lives. */
+      /* and reaching home IS the arming. release() disarms the key, which is
+         right when the release came from a watchdog or a panic — but when it
+         came from the finger arriving home, the very next push is a new note
+         and there may be no further sample low enough to say so. */
+      if(v<homeBand(C)){this.release(id); k.armed=true;}
       /* Re-attack. A key resting past the trigger — fingers parked, a high
          zero, a press that stopped short — sits here, and from there a
          full-force hit makes no sound at all. A light touch missing is fine;
