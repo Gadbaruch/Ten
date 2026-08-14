@@ -1012,7 +1012,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-14.1440';
+const BUILD='2026-08-14.1449';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -2207,18 +2207,40 @@ function focusIsStepped(){
     try{const t=String(SETTINGS[S.setSel||0].v());
       return !isFinite(parseFloat(t));}catch(_){return true;}
   }
-  if(S.layer>=2){
+  /* WALKING THE GRID IS STEPPING; everything else on the desk is a value that
+     some scope is holding open — the channel's level and pan, the dice
+     weighting, the tempo. */
+  if(S.layer===1)return !(HOLD.c||HOLD.r||HOLD.i||HOLD.v||HOLD.n||HOLD.q)||!!HOLD.sc;
+  /* the master keeps its own cursor — its own slot and its own param — so
+     asking the channel's one about it answers nothing */
+  if(S.layer>=2&&S.mSel){
     try{
-      const M=MODULES[S.curMod];
-      if(!M||!M.id||M.prs)return true;              // the instrument row is all choices
+      const sl=S.master&&S.master[S.mSlot|0];
+      if(sl){
+        const specs=[{type:'enum'}].concat(FX_P(sl));
+        const sp=specs[S.mParam|0];
+        if(sp)return sp.type==='enum'||!!sp.opts;
+      }
+    }catch(_){}
+    return false;
+  }
+  if(S.layer>=2){
+    const M=MODULES[S.curMod];
+    if(M&&M.prs)return true;                        // the instrument row is all choices
+    try{
       const pre=S.presets[S.editSnd];
       const specs=paramsFor(S.curMod,M.flat?null:modHolder(pre,M.id)[M.id][S.curSlot]);
       const sp=specs[flatView(S.curMod)?S.curParam:S.slotParam];
-      if(!sp)return true;
-      return sp.type==='enum'||!!sp.opts;
-    }catch(_){return true;}
+      if(sp)return sp.type==='enum'||!!sp.opts;
+    }catch(_){}
   }
-  return true;      // the pattern grid steps; only values are continuous
+  /* AND WHEN WE CANNOT TELL, IT IS A VALUE. Defaulting to "stepped" meant
+     every cursor this function does not model — the channel strip, the master,
+     the mix row — silently lost the dial, which is exactly where Gad found it
+     missing. Guessing "value" is the safe way round: an enum reached through
+     adjust() is still protected there by its own spec, and the one-step guard
+     still stops a bounce from moving anything twice. */
+  return false;
 }
 function arepStop(){if(AREP.timer){clearTimeout(AREP.timer);AREP.timer=null;} AREP.code=null;}
 function arepStart(code){
@@ -13882,7 +13904,7 @@ const onKeyDown=e=>{
   if((c==='BracketLeft'||c==='BracketRight')&&!e.metaKey&&!PICK&&!DPICK){
     e.preventDefault();
     const d=c==='BracketRight'?1:-1;
-    const st=rs(e)||e.shiftKey?0.25:altOf(e)?0.01:0.05;
+    const st=(rs(e)||e.shiftKey?0.25:altOf(e)?0.01:0.05)*dialScale();   // the pan keys dial too
     const tg=chTargets();
     pushUndo('pan');
     tg.forEach(i=>{const pc=S.presets[i];
@@ -14412,7 +14434,7 @@ const onKeyDown=e=>{
       dirty=true; return;
     }
     if(HOLD.r){                                    // how loaded the dice are — one global number
-      if(vert){CFG.wild=clamp(Math.round((CFG.wild??35)+dv*(rs(e)?1:5)),0,100);
+      if(vert){CFG.wild=clamp(Math.round((CFG.wild??35)+dv*(rs(e)?1:5)*dialScale()),0,100);
         saveCfg(); flash('wild '+CFG.wild+'%'); HOLD.rUsed=true; dirty=true;}
       return;
     }
@@ -14420,13 +14442,16 @@ const onKeyDown=e=>{
       const tg=chTargets();
       /* the same three sizes every other param uses: ⇧ coarse, plain, ⌥ fine.
          In fader units that is 10 · 1 · 0.1. */
-      const stV=rs(e)?10:altOf(e)?0.1:1;
+      /* the channel's level and pan are held open by a scope rather than
+         reached through adjust(), so the dial has to be applied where their
+         own step is chosen — the same gap the settings rows had. */
+      const stV=(rs(e)?10:altOf(e)?0.1:1)*dialScale();
       tg.forEach(i=>{
         const pc=S.presets[i];
         if(vert){
           const f=clamp(Math.round((volToF(pc.mix.lvl)+dv*stV)*10)/10,0,100);
           pc.mix.lvl=+fToVol(f).toFixed(4);
-        }else pc.mix.pan=clamp(Math.round((pc.mix.pan+dv*(rs(e)?0.25:altOf(e)?0.01:0.05))*100)/100,-1,1);
+        }else pc.mix.pan=clamp(Math.round((pc.mix.pan+dv*(rs(e)?0.25:altOf(e)?0.01:0.05)*dialScale())*100)/100,-1,1);
         engine.refresh(i);
       });
       const p0=S.presets[tg[0]];
