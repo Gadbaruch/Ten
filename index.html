@@ -1012,7 +1012,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-14.1327';
+const BUILD='2026-08-14.1336';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1088,34 +1088,6 @@ const SETTINGS=[
  {n:'key',g:'Behavior',    v:()=>KEYN[CFG.key],             a:d=>CFG.key=fmod(CFG.key+d,12)},
  {n:'mode',g:'Behavior',   v:()=>SCALES[CFG.scale][0],      a:d=>CFG.scale=fmod(CFG.scale+d,SCALES.length)},
  {n:'vel',g:'Input', v:()=>String(Math.round(clamp(CFG.kvel??0.9,0.02,1)*127)), a:d=>EXP.bump(d*0.05)},
- {n:'midi in',g:'Input',v:()=>EXP.midiOn?['off','solo','+kbd'][CFG.midiIn|0]:'off', a:d=>EXP.cycleMidi(d)},
- {n:'hid',g:'Input',    v:()=>HE.on?(HE.srcName||'on').slice(0,8):'off',
-              a:()=>{if(HE.on)HE.disconnect(); else HE.connect();}},
- {n:'h keys',g:'Input',h:()=>!HE.on||(!HE.learn&&HE.map&&Object.keys(HE.map).length>=20),v:()=>HE.learn?(HE.learn.i+'/'+HE.learn.order.length):(HE.map?String(Object.keys(HE.map).length):'—'),
-              a:()=>HE.startLearn()},
- /* fn sends no keycode on this board — it is a firmware layer switch. Its
-    magnet still moves, so learn the SLOT and it becomes a usable key. */
- /* BIND ANY KEY BY ITS SENSOR, not by the keycode it sends — the portable
-    version of the fn trick. `board key` picks what you are binding, `learn`
-    takes the next key you press for it (↓ forgets it). */
- {n:'arrow keys',g:'Input',h:()=>!HE.on||!CFG.heAdv,
-              v:()=>{if(HE.arrLearn)return 'press '+HE.arrLearn.order[HE.arrLearn.i].replace('Arrow','').toLowerCase();
-                     const sl=(CFG.he&&CFG.he.slots)||{};
-                     const n=['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].filter(a=>Object.values(sl).includes(a)).length;
-                     return n?n+'/4 on sensor':'keycodes';},
-              a:()=>HE.startArrows()},
- {n:'board key',g:'Input',h:()=>!HE.on||!CFG.heAdv,v:()=>{const a=FNACT[(CFG.he&&CFG.he.fnAct)|0];
-              const sl=(CFG.he&&CFG.he.slots)||{}, at=Object.keys(sl).find(k=>sl[k]===a);
-              return actName(a)+(at?' #'+at:'');},
-              a:d=>HE.set('fnAct',fmod(((CFG.he&&CFG.he.fnAct)|0)+d,FNACT.length))},
- {n:'learn',g:'Input', h:()=>!HE.on||!CFG.heAdv,v:()=>HE.learnFn?'press it':String(Object.keys((CFG.he&&CFG.he.slots)||{}).length),
-              a:d=>{if(!HE.on){flash('connect the board first');return;}
-                    const act=FNACT[(CFG.he&&CFG.he.fnAct)|0];
-                    if(d<0){const sl=Object.assign({},(CFG.he&&CFG.he.slots)||{});
-                      for(const k9 in sl)if(sl[k9]===act)delete sl[k9];
-                      HE.set('slots',sl); flash(actName(act)+' unbound'); return;}
-                    HE.learnFn=act;
-                    flash('press the key you want for '+actName(act)+' — we are watching the sensor, not the keycode');}},
  {n:'h trig',g:'Input',h:()=>!HE.on,v:()=>Math.round(HE.cfg().trig*100)+'%', a:d=>HE.set('trig',clamp(HE.cfg().trig+d*0.01,0.02,1))},
  /* WHICH QUESTION THE BOARD IS ASKED. peak: how fast was the fastest frame —
     right on a board that samples on a clock. window: how far did the key get
@@ -1129,6 +1101,9 @@ const SETTINGS=[
                            ', . = ←→ · - = = ↓↑ · ⇧ as always · octave moves to ⌃, ⌃.',
                            'right alt ← · fn/F13 → · menu ↑ · right ctrl ↓ · , . - = back to normal'
                           ][CFG.hidArrows|0]);}},
+ {n:'midi in',g:'Input',v:()=>EXP.midiOn?['off','solo','+kbd'][CFG.midiIn|0]:'off', a:d=>EXP.cycleMidi(d)},
+ {n:'hid',g:'Input',    v:()=>HE.on?(HE.srcName||'on').slice(0,8):'off',
+              a:()=>{if(HE.on)HE.disconnect(); else HE.connect();}},
  /* the bottom-row keys a 60% board has and this instrument never used */
  {n:'win key',g:'Input', v:()=>SPARE[CFG.kWin|0],
               a:d=>{CFG.kWin=fmod((CFG.kWin|0)+d,SPARE.length); saveCfg();
@@ -1148,15 +1123,6 @@ const SETTINGS=[
  {n:'dial max',g:'Input',h:()=>!HE.on||!CFG.dial,
               v:()=>'×'+(+(HE.cfg().dhi??10)).toFixed(1),
               a:d=>HE.set('dhi',clamp((HE.cfg().dhi??10)+d*2.5,1,200))},
- /* the binding rows are for a board that needs teaching; yours binds itself,
-    so they stay out of the way until you ask for them */
- {n:'key setup',g:'Input',h:()=>!HE.on,v:()=>CFG.heAdv?'shown':'auto',
-              a:d=>{if(d<0){HE.set('slots',{});
-                      flash('every learned key forgotten — press each one again to rebind');
-                      dirty=true; return;}
-                    CFG.heAdv=CFG.heAdv?0:1; saveCfg();
-                    flash(CFG.heAdv?'binding rows shown — arrow keys · board key · learn'
-                                   :'auto — the arrows bind themselves as you use them · ↓ forgets them all');}},
  {n:'h calib',g:'Input',h:()=>!HE.on,
               v:()=>HE.cal?(HE.cal.phase+' '+HE.cal[HE.cal.phase].length+'/10'):'ready',
               a:()=>HE.startCalib()},
@@ -2179,7 +2145,10 @@ function dialScale(){
   return clamp(lo*Math.pow(hi/lo,clamp(d,0,1)),0.02,200);
 }
 function adjust(spec,v,dir,m=1){
-  m*=dialScale();
+  /* A MENU IS NOT A DIAL. Pressing an enum harder should not skip nine entries
+     to reach the tenth — one press, one option, always. Depth only means
+     something where the values are a continuum. */
+  if(spec.type!=='enum')m*=dialScale();
   if(spec.curve==='vol'){
     /* ⇧ coarse · plain · ⌥ fine, in fader units — the same three sizes the
        channel fader uses, so the two feel like one control */
@@ -10627,72 +10596,6 @@ const HE={
     if(this.kind===1&&this.ready&&performance.now()-(this._reqAt||0)>60)this.kcRequest();
     /* a streaming board's silence is a note-off, so this loop is now part of
        playing rather than housekeeping */
-    /* AN ARROW THAT FIRES ONCE IS A BUTTON. A sensor-bound arrow is meant to
-       be a DIAL: hold it and it keeps stepping, and the deeper you hold it the
-       faster it goes — while the dial scale makes each of those steps bigger
-       too. Press feather-light for one small step at a time; bury the key and
-       the value runs. Only arrows repeat; tab or escape bound to a slot should
-       happen once, like the key they stand for. */
-    {const now9=performance.now();
-     const slots9=Object.assign({},this.kind===2?RY_DEFAULT_SLOTS:{},(CFG.he&&CFG.he.slots)||{});
-     for(const id in this.keys){
-       const k=this.keys[id], act=slots9[id];
-       /* LEFT AND RIGHT ARE BUTTONS, UP AND DOWN ARE DIALS. Moving the cursor
-          one place per press is what a button is for; changing a VALUE is the
-          thing that wants to run faster the harder you lean on it. */
-       if(!k||k.st!==2||!act)continue;
-       if(act!=='ArrowUp'&&act!=='ArrowDown')continue;
-       const gap=Math.max(45,240-(k.pv||0)*180);
-       if(now9-(k.rpt||k.fireT||0)<gap)continue;
-       k.rpt=now9;
-       for(const kind of ['keydown','keyup'])
-         document.dispatchEvent(new KeyboardEvent(kind,
-           Object.assign({code:act,key:act,bubbles:true},modsOf())));
-     }}
-    /* AND THE OTHER QUIET: a key stuck sounding. Release needs a sample below
-       the rest line, and this board only reports while a key MOVES — so a lift
-       whose final sample lands just above that line never gets another report
-       and the note hangs. Sweep them: sounding, not sampled lately, and the
-       sensor says it is not pressed. */
-    const now=performance.now(), C=this.cfg();
-    for(const id in this.keys){
-      const k=this.keys[id];
-      if(!k||k.st!==2)continue;
-      /* THE HARD-HIT HANG. A slam bottoms the key out, and if the lift's
-         samples are missed the state sits at nine tenths of travel forever —
-         above the trigger, so the sweep below never touched it. The note hangs
-         and the letter stays owned, which is why j stopped working after one.
-         The corroborating witness is the BOARD'S OWN key-up: we ignore it for
-         note-off (rapid trigger fires one every time a finger eases back), but
-         if it arrives and then no analog movement follows, the finger really
-         has gone and the sensor simply missed it. */
-      if(k.osUp&&now-k.osUp>180&&now-(k.pt||0)>180){this.release(id); continue;}
-      if(now-(k.pt||0)<900)continue;                  // just played, or held and silent on the wire
-      /* A HOLD THIS BOARD NEVER MENTIONS AGAIN. It reports per unit of travel,
-         so a still finger is silent on the wire, and silence alone cannot tell
-         "held" from "lifted, and the lift went missing" — which is why a key
-         reading above the trigger is spared. But twenty seconds of a note
-         nobody has touched is not a performance, and a note held for ever is
-         worse than a drone cut after twenty seconds. */
-      if(k.pv>=C.trig){
-        /* on a streaming board, quiet IS the lift — 90ms is thirty report
-           intervals at the rate this one runs, so it cannot be mistaken for a
-           gap in play. On a change-only board we are back to the ceiling. */
-        if(this.streams&&now-(k.pt||0)>90)this.release(id);
-        else if(now-(k.pt||0)>20000)this.release(id);
-        continue;
-      }
-      this.release(id);
-    }
-    /* THE LAST LINE OF DEFENCE. Whatever the state machine believes, a note
-       this stream started and no longer holds must not be left sounding — a
-       hanging note takes its letter down with it. */
-    for(const code in (this.sounded||{})){
-      const k2=this.keys[this.sounded[code]];
-      if(k2&&k2.st===2&&k2.code===code)continue;
-      delete this.sounded[code];
-      if(liveV[code])EXP.keyUp(code);
-    }
   },
   /* the board's own key-up, remembered rather than obeyed: it is not proof a
      note ended (rapid trigger sends one on any upward move) but it IS the
@@ -10712,72 +10615,8 @@ const HE={
       if(best==null||k.pv>best)best=k.pv;}
     return best==null?null:clamp(best,0,1);
   },
-  /* BIND ITSELF, SILENTLY. A key that sends a real arrow — menu and right
-     control, remapped in a board's own software — starts sending only at the
-     firmware's actuation depth, which leaves almost no travel above it for a
-     dial to read. Reading the SENSOR instead gives the whole key. And there is
-     nothing to ask the player: when an arrow keystroke arrives and exactly one
-     sensor key is down that TEN has no name for, that key is the one that sent
-     it. Bind it and never ask again. */
-  autoBind(code){
-    if(!this.on||!code||code.indexOf('Arrow')!==0)return;
-    /* NOT WHILE A MODIFIER IS HELD. ⇧← jumps racks, and the unknown key down
-       at that moment is the SHIFT, not the arrow — which is exactly how right
-       shift got bound as an arrow. A chord is never the moment to guess. */
-    if(MODS.shift||MODS.alt||MODS.ctrl||MODS.meta)return;
-    const sl=Object.assign({},this.kind===2?RY_DEFAULT_SLOTS:{},(CFG.he&&CFG.he.slots)||{});
-    if(Object.values(sl).includes(code))return;           // already spoken for
-    let found=null;
-    for(const id in this.keys){
-      const k=this.keys[id];
-      if(!k||k.st===0)continue;
-      if(this.map&&this.map[id])continue;                 // a key we already know by name
-      if(sl[id])continue;                                 // a key already bound to something
-      /* and it must have gone down WITH the keystroke. A key held since before
-         the arrow — a modifier, a finger resting on the board — did not send
-         it, whatever else is true. */
-      if(performance.now()-(k.startT||0)>300)continue;
-      if(found!==null)return;                             // two candidates: too ambiguous to guess
-      found=id;
-    }
-    if(found===null)return;
-    const next=Object.assign({},(CFG.he&&CFG.he.slots)||{});
-    next[found]=code; this.set('slots',next);
-    flash(code.replace('Arrow','').toLowerCase()+' — reading that key from its sensor now');
-    dirty=true;
-  },
-  /* AND UNBIND ITSELF WHEN IT WAS WRONG. A modifier keystroke names the
-     physical key that sent it, so if a sensor key went down at that same
-     moment and is bound to an arrow, that binding is on the MODIFIER — the
-     mistake that made right shift move left. Drop it, and say so, rather than
-     leaving the player to find a settings row for a binding they never asked
-     to make. */
-  unbindIfModifier(code){
-    if(!this.on||!code)return;
-    if(!/^(Shift|Control|Alt|Meta)(Left|Right)$|^CapsLock$|^ContextMenu$/.test(code))return;
-    const sl=(CFG.he&&CFG.he.slots)||{};
-    const now=performance.now();
-    for(const id in this.keys){
-      const k=this.keys[id];
-      if(!k||k.st===0||!sl[id])continue;
-      if(now-(k.startT||0)>300)continue;
-      const was=sl[id];
-      const next=Object.assign({},sl); delete next[id];
-      this.set('slots',next);
-      flash(code.replace(/(Left|Right)$/,' $1').toLowerCase()+' is not '
-        +was.replace('Arrow','').toLowerCase()+' — binding removed');
-      dirty=true; return;
-    }
-  },
   /* is a key BOUND to this action currently down? Used to drop the board's own
      keystroke for a key we are already driving from its sensor. */
-  slotHeld(code){
-    if(!this.on)return false;
-    const sl=Object.assign({},this.kind===2?RY_DEFAULT_SLOTS:{},(CFG.he&&CFG.he.slots)||{});
-    for(const id in this.keys){const k=this.keys[id];
-      if(k&&k.st!==0&&sl[id]===code)return true;}
-    return false;
-  },
   /* is the sensor itself still holding this code down? */
   holds(code){const r=this.cfg().rest;
     for(const id in this.keys){const k=this.keys[id];
@@ -10928,7 +10767,6 @@ const HE={
       if(v<=C.rest){k.armed=true; k.pv=v; k.pt=t; return;}
       if(!k.armed){k.pv=v; k.pt=t; return;}          // still on the way down from the last press
       k.st=1; k.h=[[k.pv,k.pt],[v,t]]; k.peak=Math.max(0,slope); k.top=v; k.wait=0;
-      k.startT=t;                        // when this press began, for autoBind
       /* WINDOW MODE STARTS AT THE FIRST TOUCH, not at the trigger depth: the
          question is how far the key travels in a known slice of time, and the
          earliest movement is the honest start of that slice. It also buys the
@@ -10964,14 +10802,12 @@ const HE={
       if(t-k.wT>=Math.max(0.5,C.wait||4)||v>0.985)this.winClose(id,v,t);
       k.pv=v; k.pt=t; return;
     }else if(k.st===2){                              // sounding
-      /* DOES THIS BOARD STREAM, OR ONLY REPORT CHANGES? Everything here has
-         assumed the second — reports come per unit of travel, so a still
-         finger is silent and silence proves nothing. If a board ALSO reports a
-         key that is not moving, then silence about a sounding key means the
-         finger is gone, and the lift needs no lucky final sample. Boards
-         differ, so let the board answer: a report with no movement is the
-         proof, and one is enough. */
-      if(Math.abs(v-k.pv)<0.002)this.streams=1;
+      /* (a "does this board stream?" guess used to live here, and it was the
+         thing cutting held notes: two similar readings in a row — which sensor
+         noise produces constantly — marked the board as streaming, and from
+         then on 90ms of quiet about a sounding key was read as a lift. A held
+         key IS quiet on this board. The lift is judged by travel now, which
+         needs no guess about the wire.) */
       if(v>C.rest)k.osUp=0;      // it moved: the finger is still there, forget the key-up
       /* THE LIFT IS RELATIVE TO THIS PRESS, not to any fixed line. A learned
          zero can go stale — a key's rest reading drifts while it is idle, and
@@ -11030,17 +10866,6 @@ const HE={
        stream reports MATRIX POSITIONS rather than keycodes. So fn is invisible
        as a keystroke and perfectly visible as a slot. Learn it once and it is
        a key like any other. */
-    if(this.arrLearn&&this.arrowsHit(id,code))return;
-    if(this.learnFn){
-      const act=this.learnFn;   // the action this learn was armed for
-      this.learnFn=0;
-      if(code&&isNoteKey(code)){flash('that slot is '+code+' — a note key. try again');return;}
-      const sl=Object.assign({},(CFG.he&&CFG.he.slots)||{});
-      for(const k9 in sl)if(sl[k9]===act)delete sl[k9];   // one key per action
-      sl[id]=act; this.set('slots',sl);
-      flash('◎ slot '+id+' → '+act.replace('Arrow','')+'  ('+Object.keys(sl).length+' board keys)');
-      dirty=true; return;
-    }
     /* THE BOARD'S OWN KEYS, read as sensors. This started as a way to reach fn
        — which sends no keycode at all — and it turns out to be the portable
        answer for every special key: bind by MATRIX SLOT and the mapping lives
@@ -11167,35 +10992,6 @@ const HE={
      ones, take the 12th and 88th percentile the way the sibling MIDI tool's
      wizard does, and write them in. Thirty seconds, and it survives any change
      to how the stroke is measured. */
-  /* LEARN THE WHOLE CLUSTER IN ONE PASS. Four keys, four presses, in the order
-     a keyboard draws them — because binding arrows one at a time through two
-     settings rows is four times the ceremony for the same four facts, and the
-     arrows are the keys most worth having on the sensor: they trigger at 2%,
-     they repeat by how hard you lean, and they step by how deep you press. */
-  startArrows(){
-    if(!this.on){flash('connect the board first');return;}
-    this.arrLearn={i:0,order:['ArrowLeft','ArrowRight','ArrowUp','ArrowDown']};
-    flash('ARROWS — press the key you want for LEFT · esc cancels');
-    dirty=true;
-  },
-  arrowsHit(id,code){
-    const A=this.arrLearn; if(!A)return false;
-    if(code&&isNoteKey(code)){flash('that slot is '+code+' — a note key. try another');return true;}
-    const want=A.order[A.i];
-    const sl=Object.assign({},(CFG.he&&CFG.he.slots)||{});
-    for(const k9 in sl)if(sl[k9]===want)delete sl[k9];
-    sl[id]=want; this.set('slots',sl);
-    A.i++;
-    if(A.i<A.order.length){
-      flash('◎ '+want.replace('Arrow','').toLowerCase()+' = slot '+id
-        +' · now press '+A.order[A.i].replace('Arrow','').toUpperCase());
-    }else{
-      this.arrLearn=null;
-      flash('◎ all four arrows are on the sensor — 2% trigger, pressure repeat');
-    }
-    dirty=true; return true;
-  },
-  cancelArrows(){if(this.arrLearn){this.arrLearn=null;flash('arrow learn cancelled');dirty=true;return true;}return false;},
   startCalib(){
     if(!this.on){flash('connect the board first');return;}
     this.cal={phase:'soft',soft:[],hard:[]};
@@ -13385,8 +13181,7 @@ const ARROWMODE=['real',', . - =','right cluster'];
 const RY_DEFAULT_SLOTS={71:'ArrowRight'};
 const FNACT=['ArrowRight','ArrowLeft','ArrowUp','ArrowDown','Tab','Escape','Backslash','Space',
              'Enter','Backquote','Slash','off'];
-const actName=a=>a.replace('Arrow','').replace('Backquote','` scope').replace('Slash','/ roll')
-                  .replace('Backslash','\\ dice').toLowerCase();
+
 /* THE SPARE KEYS. A 60% board's bottom row carries win and menu, which do
    nothing for this instrument and something unwanted for the OS. A page can
    only take a key while it is focused — which is the right scope — and both of
@@ -13436,11 +13231,6 @@ const onKeyDown=e=>{
      and the sensor's version (which triggers at 2% and repeats by pressure)
      is the one worth keeping. A laptop's arrows are untouched: no sensor key
      is down when you press them. */
-  if(e.isTrusted)HE.unbindIfModifier(e.code);   // a modifier says which key it is
-  if(e.isTrusted&&e.code.indexOf('Arrow')===0){
-    if(HE.slotHeld(e.code))return;      // the sensor is already driving this one
-    HE.autoBind(e.code);                // …and if it is not, learn which key that was
-  }
   if(arrowAlias(e,'keydown'))return;   // , . - = ARE the arrows on a board without any
   /* the menu key is unambiguous — nothing else uses it, so it acts on the press */
   if(e.code==='ContextMenu'&&!e.repeat&&SPARE[CFG.kMenu|0]!=='off'){
@@ -14065,7 +13855,6 @@ const onKeyDown=e=>{
   }
   if(c==='Enter'){e.preventDefault(); if(!e.repeat)diveIn(); return;}
   if(c==='Escape'){e.preventDefault();
-    if(HE.cancelArrows())return;
     if(HE.cancelCalib())return;
     if(HE.cancelLearn())return;
     if(CHSEL.size){CHSEL.clear(); flash('channel selection cleared'); dirty=true; return;}
@@ -15120,7 +14909,6 @@ const onKeyUp=e=>{
      A latched note is the one exception; latch means the release is not the
      end, and the normal path knows how to hold it. */
   if(EXP.synth&&liveV[c]&&!noteLatch.has(c)){kbHeld.delete(c); endNote(c); dirty=true; return;}
-  if(e.isTrusted&&c.indexOf('Arrow')===0&&HE.slotHeld(c))return;
   if(arrowAlias(e,'keyup'))return;      // the release half — arrow key-ups end automation writes
   if(c==='MetaLeft'||c==='MetaRight'){
     const used=MK.winUsed; MK.win=false; MK.winUsed=false;
@@ -17874,8 +17662,7 @@ function settingsRack(L){
    /* CONNECTED IS NOT STREAMING. A board that opened and never spoke reads the
       same as a board playing into a slot nothing is mapped to, so say which:
       reports in, the last slot that moved, and whether that slot has a key. */
-   if(HE.on)L.push('   '+sp('d','   '+['?','keychron','rongyuan'][HE.kind]
-     +(HE.streams?' streaming':' on-change')+'  reports ')+
+   if(HE.on)L.push('   '+sp('d','   '+['?','keychron','rongyuan'][HE.kind]+'  reports ')+
      sp(HE.rx?'a':'r',String(HE.rx||0))+
      (HE.rxId===undefined?sp('r','  — nothing analog yet: press a key')
        :sp('d','  slot ')+sp('a',String(HE.rxId))+sp('d',' depth '+HE.rxV)+
