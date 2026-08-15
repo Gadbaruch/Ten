@@ -1061,7 +1061,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.1900';
+const BUILD='2026-08-15.1910';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -2304,6 +2304,16 @@ function arrowRefire(code){
    you move to a different parameter, and being wrong here means either a menu
    that runs away or a number that refuses to move. */
 function focusIsStepped(){
+  /* A HELD SCOPE ANSWERS FOR ITSELF, and it must, or the arrows in it move
+     once and stop: this question decides whether a held arrow REPEATS — the
+     system's own repeat is swallowed on a stepped focus and the pressure dial
+     stops itself there too — and with a magnetized scope open the arrows are
+     not on the page's cursor at all. On the desk it used to answer "stepped"
+     for everything, so ⌥e + a held ↑ gave exactly one step of time.
+     `stp` is stamped whenever the scope's field changes rather than resolved
+     here, because this runs every frame in the HUD and resolving it means
+     rebuilding a mod slot's whole spec list. */
+  if(HOLD.opt&&HOLD.opt.nav&&HOLD.opt.stp!=null)return HOLD.opt.stp;
   if(S.layer===-1){
     try{const t=String(SETTINGS[S.setSel||0].v());
       return !isFinite(parseFloat(t));}catch(_){return true;}
@@ -2688,6 +2698,9 @@ function magSee(H,C,px){
 const magLbl=(C,f)=>{const F=magSpec(C,f);
   return F?F.spec.lbl+' '+fmtVal(F.spec,getV(C.holder,C.mi,C.si,F.spec)):'—';};
 const magVal=(C,F)=>fmtVal(F.spec,getV(C.holder,C.mi,C.si,F.spec));
+/* a menu is one press one option; everything else is a dial that runs while
+   you lean on it — the same question focusIsStepped asks of the page */
+const magStp=spec=>spec.type==='enum'||!!spec.opts;
 /* what the scope says when it opens and whenever a letter re-aims it: the row
    itself, read out — the only place the mapping is ever written down for you */
 function magRead(H,C,head){
@@ -2697,6 +2710,13 @@ function magRead(H,C,head){
     (B?' · ←→ '+B.spec.lbl+' '+magVal(C,B):'')+
     (A?' · -/= '+A.spec.lbl+' '+magVal(C,A):'');
 }
+/* ⌥ IS FINE AND ⇧ IS COARSE — and inside a held scope BOTH shifts are the
+   coarse one. rs() ignores the left shift everywhere else because that key is
+   LATCH; but latch is a gesture on the scope's LETTER, and a shift chorded
+   with an arrow is nobody's idea of one. Left shift still latches the scope on
+   release exactly as it did — this only stops it from being a dead key on the
+   way there, which read as the arrows breaking under it. */
+const magMult=e=>altOf(e)?0.1:(e.shiftKey||KM.srLatch)?10:1;
 /* one press of a dial. Same road every other param takes — adjust() for the
    step, writeParam() for the engine, recAuto() so a scope moved with REC armed
    lands in the channel's mod loop like any other knob would. */
@@ -2711,10 +2731,10 @@ function magDial(H,which,d,e){
   if(!F){flash(magRead(H,C,C.T2.name+' has no '+
     (which==='amt'?'amount':'second dial')+' — '));return true;}
   pushUndo(C.T2.name);
-  const nv=adjust(F.spec,getV(C.holder,C.mi,C.si,F.spec),d,kmult(e));
+  const nv=adjust(F.spec,getV(C.holder,C.mi,C.si,F.spec),d,magMult(e));
   writeParam(H.ch,C.mi,C.si,F.px,nv);
   if(C.holder===C.pre)recAuto(H.ch,C.pre,C.mi,C.si,F.px,nv);
-  if(which==='pri'){magSee(H,C,F.px); H.lbl=F.spec.lbl;}   // ←→ and -/= are knobs, not a cursor
+  if(which==='pri'){magSee(H,C,F.px); H.lbl=F.spec.lbl; H.stp=magStp(F.spec);}   // ←→ and -/= are knobs, not a cursor
   flash(C.T2.name+(C.list.length>1?' '+(C.list.indexOf(C.si)+1):'')+
         ' · '+F.spec.lbl+' '+fmtVal(F.spec,nv));
   dirty=true; dirtySave=true; return true;
@@ -2725,7 +2745,7 @@ function magDial(H,which,d,e){
 function magAim(H,key){
   const C=magCtx(H); if(!C)return false;
   const F=magSpec(C,key); if(!F)return false;
-  H.fld=F.spec.key; H.lbl=F.spec.lbl;
+  H.fld=F.spec.key; H.lbl=F.spec.lbl; H.stp=magStp(F.spec);
   magSee(H,C,F.px);
   flash(magRead(H,C,C.T2.name+' → '));
   dirty=true; return true;
@@ -14817,7 +14837,8 @@ const onKeyDown=e=>{
           next ↑ dialled delay's time instead of walking on to the next effect */
        if(C){HOLD.opt.fld=magCur(HOLD.opt,C);
              const F=magSpec(C,HOLD.opt.fld);
-             if(F){magSee(HOLD.opt,C,F.px); HOLD.opt.lbl=F.spec.lbl;}
+             if(F){magSee(HOLD.opt,C,F.px); HOLD.opt.lbl=F.spec.lbl;
+                   HOLD.opt.stp=magStp(F.spec);}
              flash(magRead(HOLD.opt,C,T2.name+' ch '+ch+
                (list.length>1?' 1/'+list.length:'')+' · '));}
        else if(list.length>1)flash(T2.name+' — '+list.length+' of them; digits jump between');}
