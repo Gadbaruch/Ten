@@ -201,6 +201,12 @@
    ===================================================================== */
 
 const clamp=(v,a,b)=>v<a?a:v>b?b:v;
+/* THE GATE ON THE WAY TO A WORKLET. A NaN posted into the cursor engine
+   poisons that channel permanently — the feedback tap and the diffuser read
+   themselves, so once one of them holds NaN nothing downstream is ever a
+   number again. The worklet scrubs itself if one gets through; this is the
+   half that stops it getting through. */
+const FIN=(v,d)=>Number.isFinite(v)?v:d;
 const fmod=(a,b)=>((a%b)+b)%b;
 
 /* ---------------- generic looper ------------------------------------ */
@@ -1037,7 +1043,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.1558';
+const BUILD='2026-08-15.1609';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -8034,10 +8040,14 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     }
     const id='t'+(e.id++);
     this._lastTid=id;
-    e.node.port.postMessage({t:'tape',id,frame:Math.round(at*AC.sampleRate),
-      pos:P9.pos,end:P9.end,rate:P9.rate,base:P9.base,free:P9.free?1:0,sh:P9.sh,
-      ch:P9.ch,gl:P9.gl,gr:P9.gr,gain:P9.gain,wrap:P9.wrap?1:0,lo:P9.lo||0,car:P9.car?1:0,
-      durF:Math.round(P9.durSec*AC.sampleRate)});
+    /* every number gated: one bad one here is a channel that never makes a
+       sound again until the page is reloaded */
+    e.node.port.postMessage({t:'tape',id,frame:FIN(Math.round(at*AC.sampleRate),0),
+      pos:FIN(P9.pos,0),end:FIN(P9.end,0),rate:FIN(P9.rate,1),base:FIN(P9.base,1),
+      free:P9.free?1:0,sh:FIN(P9.sh,1),
+      ch:FIN(P9.ch,0),gl:FIN(P9.gl,1),gr:FIN(P9.gr,1),gain:FIN(P9.gain,0.9),
+      wrap:P9.wrap?1:0,lo:FIN(P9.lo,0),car:P9.car?1:0,
+      durF:FIN(Math.round(P9.durSec*AC.sampleRate),1e9)});
     return true;
   }
   audPlay(pi,at,lenBeats,skipBeats=0,cue){
@@ -8208,14 +8218,16 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     const baseRate=(Math.round(au.fit)&&ovR===undefined)?dur/loopSec:(au.rate??1);
     const rate=sync?baseRate:baseRate*Math.pow(2,semis/12);
     const k9=buf.sampleRate/AC.sampleRate;
+    const r9=(rate<0?Math.min(-0.05,rate):Math.max(0.05,rate))*k9;
     try{e9.node.port.postMessage({t:'tset',
       /* a negative rate is a real rate: a floor of +0.05 turned reverse into
          a very slow forward, and dividing the take's remaining length by it
          gave the voice a negative life, so it died on arrival */
-      rate:(rate<0?Math.min(-0.05,rate):Math.max(0.05,rate))*k9, base:baseRate*k9,
-      sh:sync?(1/Math.max(0.05,baseRate))*Math.pow(2,semis/12):1, end:en*buf.length,
-      gain:(au.gain??0.9)*(ask.cue?(ask.cue.vol??1)*(au.kvol??1)*(ask.cue.vel??1)
-                                   :(au.lvol??1))});}catch(_){}
+      rate:FIN(r9,1), base:FIN(baseRate*k9,1),
+      sh:FIN(sync?(1/Math.max(0.05,baseRate))*Math.pow(2,semis/12):1,1),
+      end:FIN(en*buf.length,buf.length),
+      gain:FIN((au.gain??0.9)*(ask.cue?(ask.cue.vol??1)*(au.kvol??1)*(ask.cue.vel??1)
+                                   :(au.lvol??1)),0.9)});}catch(_){}
   }
   audLiveAll(){for(const i of CHANS())if(isAudioCh(i))this.audLive(i);}
   audGain(pi,g){
