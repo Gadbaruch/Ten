@@ -37,24 +37,34 @@ Gran is pitch keys with the loop off. None of them are modes any more.
 
 ## What is next, in order
 
-0. **MAGNETIZE THE SCOPE HOLDS** (agreed with Gad 2026-08-15, his framing, and
-   the next thing to build). A held scope should be a complete little editor,
-   not a jump: `⌥e` moves the cursor and then lets go of it, so the arrows fall
-   back to whatever the page was doing and the next keypress edits something
-   else. While a scope is held, the arrows and `-/=` belong to THAT scope and
-   nothing else — and it must work with the channel strip CLOSED, which is the
-   bigger win, because it makes the strip a view rather than a mode.
-   Write it as a TABLE, one row per scope, not as branches:
-     `-/=`  amount        (the thing you always reach for)
-     `↑↓`   primary       (env: time · lfo: rate · flt: cutoff)
-     `←→`   secondary     (env: attack · lfo: shape · flt: reso)
+0. **MAGNETIZE THE SCOPE HOLDS — DONE.** A held nav scope is a complete little
+   editor now, at any layer: the arrows and `-/=` belong to THAT scope for as
+   long as the letter is down, and the channel strip follows as a VIEW when it
+   happens to be open. The table is `mag` on each OPTRACK row —
+     `-/=`  amount        (a route's depth · an effect's mix · absent on a
+                           plain series filter, which says so and reads the
+                           row back at you)
+     `↑↓`   primary       (env: time · lfo: rate/div · flt: cutoff · fx: p1)
+     `←→`   secondary     (env: attack · lfo: shape · flt: reso · fx: p2)
      letters  sub-fields  (env: a d s r)
-   Prototype on `env` first and settle one open question: whether `←→` walks
-   WITHIN the scope's fields (better when a scope has more than two knobs) or
-   stays pinned to one secondary. Try both before writing the table.
+   — and every cell may be a function of the slot, which is how a synced LFO
+   dials divisions rather than Hz. `=` used to grow the family; the amount took
+   it, so **a digit past the last instance makes another** (⌫ still removes).
+
+   **THE ←→ QUESTION IS SETTLED: PINNED, NOT A WALK.** Both were built and
+   played. Walking is the strip's own gesture and it is right when you are
+   LOOKING at a list — but with the strip closed nothing on screen says where
+   the cursor went, so every press needed the flash read back, and on env the
+   walk put `dest` eight presses left of the primary: one ↑ there re-routed the
+   whole envelope from amp to pan, in the dark. Pinned, the two pairs are two
+   knobs and the letters cover the rest. Nothing is lost — the strip's own ←→
+   still walks the list when no scope is held.
    Related and already done: `scopeStepped()` — n/i/sc/v/m arrows are notches;
    c and r still dial, in both senses (repeat runs AND the step is multiplied
    by key pressure).
+   Left for later, deliberately: only `env` has a letters row. delay, reverb
+   and the rest reach two dials and their mix from the scope, and the strip for
+   everything else — add `keys` to a row when a third dial earns a letter.
 
 1. **KILL `center` ON MOD ROUTES** (agreed 2026-08-15). It is a second way to
    say what the destination already says: a modulator's centre is where the

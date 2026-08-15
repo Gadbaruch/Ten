@@ -1061,7 +1061,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.1917';
+const BUILD='2026-08-15.1934';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1547,14 +1547,14 @@ const FX_P=sl=>{
             fmt:(v,m)=>Math.round((m&&m.rv)||0)===0?fT(vrbSec(v)):Math.round(0.2+v*4.3)+'s'}),
          SP('damp','p2','lin',{min:0,max:1,step:0.05}),
          SP('width','p3','lin',{min:0,max:1,step:0.05}),
-         /* PRE DEFAULTS TO OFF, and it has to say so here: a slot saved before
-            pre-delay existed has no p5, and reading that as undefined printed
-            NaNms and wrote NaN into the slot the first time you nudged it — and
-            a NaN p5 survives `??` on the way to the plate's AudioParam, which
-            is a throw, which is the whole channel. The engine already reads a
-            missing p5 as 0 and builds no delay node at all; this is the dial
-            saying the same thing. */
-         SP('pre','p5','lin',{min:0,max:1,step:0.05,get:o=>o.p5??0,
+         /* PRE RESTS AT OFF, and what is worth writing down is why that
+            matters rather than how it happens: a slot saved before pre-delay
+            existed has no p5, and a NaN here is not a cosmetic dash — it
+            survives `??` on the way to the plate's AudioParam, which throws,
+            which is the whole channel. The engine reads a missing p5 as 0 and
+            builds no delay node at all. specVal hands the dial that same 0,
+            off mkFx, the way it does for every param a slot predates. */
+         SP('pre','p5','lin',{min:0,max:1,step:0.05,
             fmt:v=>v<0.005?'off':Math.round(v*200)+'ms'}),
          SPMIX()],
     limit:[SP('ceil','p1','lin',{min:0,max:1,step:0.05,fmt:v=>Math.round(-30+v*30)+'dB'}),
@@ -2564,14 +2564,14 @@ const OPTRACK={
            hearing, and that is what -/= should hold */
         mag:{amt:sl=>DROUTE[Math.round((sl&&sl.par)||0)]==='par'?'lvl'
                     :(FLT_GAINY.has(fTy(sl))?'gn':null),
-             pri:'frq',sec:'q',keys:{KeyT:'typ'}}},
+             pri:'frq',sec:'q'}},
   KeyL:{id:'mod',name:'lfo',nav:1,
         find:rk=>rk.map((x,i)=>x&&x.src===2&&!x.off?i:-1).filter(i=>i>=0),
         make:(sl,i)=>Object.assign(sl,mkMod(i),{src:2,off:false}),
         unmake:(sl,i)=>Object.assign(sl,mkMod(i)),
         free:rk=>rk.findIndex(x=>!x||!x.src),
         mag:{amt:'amt',pri:sl=>Math.round((sl&&sl.syn)||0)===1?'rdiv':'rate',
-             sec:'wav',keys:{KeyW:'wav',KeyY:'syn'}}},
+             sec:'wav'}},
   KeyK:{id:'mod',name:'keytrack',nav:1,
         find:rk=>rk.map((x,i)=>x&&x.src===4&&!x.off?i:-1).filter(i=>i>=0),
         make:(sl,i)=>Object.assign(sl,mkMod(i),{src:4,off:false}),
@@ -2672,10 +2672,16 @@ function magSpec(C,key){
   return px<0?null:{px,spec:C.specs[px]};
 }
 /* …except ↑↓, which always has somewhere to be: the field a letter last named
-   if the slot still has it, and the row's primary otherwise. The list changes
-   under a held scope — sync an lfo and `rate` becomes `rdiv` — so this is
-   asked every press rather than stored. */
-const magCur=(H,C)=>(magSpec(C,H.fld)?H.fld:magKey(C.mag.pri,C.slot));
+   if the slot still has it, the row's primary otherwise, and failing both the
+   first field there is — which is what ⌥x on an empty fx slot lands on, so the
+   dial picks WHICH EFFECT before there is anything for a primary to name. The
+   list changes under a held scope — sync an lfo and `rate` becomes `rdiv` — so
+   this is asked every press rather than stored. */
+function magCur(H,C){
+  if(magSpec(C,H.fld))return H.fld;
+  const p=magKey(C.mag.pri,C.slot);
+  return magSpec(C,p)?p:(C.specs[0]&&C.specs[0].key);
+}
 /* the strip is a VIEW: when it is open on this channel it follows the scope,
    so what you dial is what you are looking at — and when it is closed nothing
    here needs it to be open */
@@ -2712,7 +2718,7 @@ function magDial(H,which,d,e){
   const nv=adjust(F.spec,getV(C.holder,C.mi,C.si,F.spec),d,kmult(e));
   writeParam(H.ch,C.mi,C.si,F.px,nv);
   if(C.holder===C.pre)recAuto(H.ch,C.pre,C.mi,C.si,F.px,nv);
-  if(which==='pri')magSee(H,C,F.px);       // ←→ and -/= are knobs, not a cursor
+  if(which==='pri'){magSee(H,C,F.px); H.lbl=F.spec.lbl;}   // ←→ and -/= are knobs, not a cursor
   flash(C.T2.name+(C.list.length>1?' '+(C.list.indexOf(C.si)+1):'')+
         ' · '+F.spec.lbl+' '+fmtVal(F.spec,nv));
   dirty=true; dirtySave=true; return true;
@@ -2723,24 +2729,9 @@ function magDial(H,which,d,e){
 function magAim(H,key){
   const C=magCtx(H); if(!C)return false;
   const F=magSpec(C,key); if(!F)return false;
-  H.fld=F.spec.key;
+  H.fld=F.spec.key; H.lbl=F.spec.lbl;
   magSee(H,C,F.px);
   flash(magRead(H,C,C.T2.name+' → '));
-  dirty=true; return true;
-}
-/* the other answer to the ←→ question, kept side by side while both were
-   played: the pair WALKS the slot's fields and ↑↓ dials whichever one it
-   lands on — the strip's gesture, without the strip. */
-let MAGSIDE='pin';
-function magStep(H,d){
-  const C=magCtx(H); if(!C)return false;
-  const cur=magCur(H,C);
-  let px=C.specs.findIndex(x=>x.key===cur);
-  if(px<0)px=0;
-  px=fmod(px+d,C.specs.length);
-  H.fld=C.specs[px].key;
-  magSee(H,C,px);
-  flash(C.T2.name+' → '+magLbl(C,H.fld));
   dirty=true; return true;
 }
 const ALTSUS=new Set();     // scopes riding on a held ⌥ after their letter went up
@@ -14877,8 +14868,13 @@ const onKeyDown=e=>{
          are on before you move them — this is the whole of the mapping, and
          it prints whether or not the strip is open to show it. */
       {const C=magCtx(HOLD.opt);
-       if(C){const F=magSpec(C,magCur(HOLD.opt,C));
-             if(F)magSee(HOLD.opt,C,F.px);
+       /* the dial is PINNED at the open and does not drift afterwards: on an
+          empty fx slot the primary names a field that is not there yet, and
+          letting it re-resolve every press meant ↑ chose `delay` and the very
+          next ↑ dialled delay's time instead of walking on to the next effect */
+       if(C){HOLD.opt.fld=magCur(HOLD.opt,C);
+             const F=magSpec(C,HOLD.opt.fld);
+             if(F){magSee(HOLD.opt,C,F.px); HOLD.opt.lbl=F.spec.lbl;}
              flash(magRead(HOLD.opt,C,T2.name+' ch '+ch+
                (list.length>1?' 1/'+list.length:'')+' · '));}
        else if(list.length>1)flash(T2.name+' — '+list.length+' of them; digits jump between');}
@@ -14975,8 +14971,7 @@ const onKeyDown=e=>{
       }
       if(T2.mag&&(e.code==='ArrowLeft'||e.code==='ArrowRight')){
         e.preventDefault(); HOLD.optUsed=true;
-        const d9=e.code==='ArrowRight'?1:-1;
-        if(MAGSIDE==='walk')magStep(HOLD.opt,d9); else magDial(HOLD.opt,'sec',d9,e);
+        magDial(HOLD.opt,'sec',e.code==='ArrowRight'?1:-1,e);
         return;
       }
       /* everything else — letters, space — falls THROUGH: the keyboard still
@@ -18182,7 +18177,10 @@ function render(){
       +sp(HE.pressure()==null?'d':'a',HE.pressure()==null?'—':HE.pressure().toFixed(2))
       +sp(focusIsStepped()?'d':'a',focusIsStepped()?' step':' dial'):'')+
     (SUS.size?dot+sp('ri',' ⟳ '+SUS.size+' held — tap ⇧ '):'')+
-    (HOLD.optLatched&&HOLD.opt?dot+sp('ri',' ⟳ '+OPTRACK[HOLD.opt.c].name+' ch '+HOLD.opt.ch+' '):'')+
+    /* a LATCHED scope outlives the hand that opened it, so it has to say what
+       its dial is pointing at — the flash that said so has long gone */
+    (HOLD.optLatched&&HOLD.opt?dot+sp('ri',' ⟳ '+OPTRACK[HOLD.opt.c].name+' ch '+HOLD.opt.ch+
+      (HOLD.opt.lbl?' · '+HOLD.opt.lbl:'')+' '):'')+
     /* WHETHER THE SET IS ON A DISK, at a glance. Not knowing was the whole
        problem: an autosave you cannot see is one you find out about afterwards. */
     dot+(FILEH?(FILEOK?sp('a','◆ file'):sp('r','◆ file?')):sp('d','⌘⇧E file'))+
