@@ -1031,7 +1031,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.1454';
+const BUILD='2026-08-15.1459';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -11895,6 +11895,10 @@ const HE={
    EVERYTHING, so tab on an audio channel is retro for sound: tap it and the
    last loop-length of air is already in the lane. Ctrl+letter combos still
    work — a chord marks the hold as modifier use and the mic closes with it.
+   PRINTSCREEN IS THE SAME KEY, for a board whose own remapper has moved
+   control somewhere better: nothing on macOS claims it, so it reaches the page
+   cleanly and carries no modifier of its own — which is why chord-use is
+   decided by "was anything else pressed", not by asking whether ctrl is down.
    (`fn` cannot reach a browser page on macOS; the code listens for it anyway
    so a HID board that sends one just works.) */
 /* ---------------- the SAMPLE POOL --------------------------------------
@@ -11933,6 +11937,15 @@ function poolAdd(buf,name){
 }
 const MIC={stream:null,on:false,latched:false,node:null,ring:null,w:0,sr:0,
   _down:false,_used:false,_latch:false};
+/* WHAT COUNTS AS THE MIC KEY. Bare control is the original, and 'Fn' is here in
+   hope — a board can send one, macOS never does. PrintScreen joins them because
+   it is what a 60% board's own remapper reaches for when it wants a key that
+   nothing on macOS has a use for: nothing global claims it, no browser shortcut
+   wants it, and it survives being pressed while a chord is already down.
+   NOT F13, which looks like the same idea and is not — F13-F16 are already the
+   right-cluster arrow escape hatch, and a key cannot be the mic and the left
+   arrow at once. */
+const MICKEY=c=>c==='ControlLeft'||c==='ControlRight'||c==='Fn'||c==='PrintScreen';
 /* ⌥M just made a mod (env by default). While ⌥ is STILL down, one letter
    re-sources it: l lfo, v velocity, k key, / random, e env again. Closed the
    moment ⌥ comes up, so the letters go back to their scopes. */
@@ -14243,13 +14256,18 @@ const onKeyDown=e=>{
   /* BARE CONTROL (or a board's fn) IS THE MIC. Down opens it; a ctrl+letter
      chord marks the hold as modifier use so the mic closes on release instead
      of latching; left-shift at the press latches (decided at release). */
-  if((e.code==='ControlLeft'||e.code==='ControlRight'||e.code==='Fn')&&!e.repeat){
+  if(MICKEY(e.code)&&!e.repeat){
+    e.preventDefault();          // PrintScreen is a screenshot on some setups
     MIC._down=true; MIC._used=false; MIC._latch=KM.sl;
     if(KM.sl)LATCH.used=true;
     if(MIC.latched){MIC._unlatch=true;}      // second tap on a latched mic = off at release
     else micOn();
   }
-  else if(e.ctrlKey&&MIC._down)MIC._used=true;
+  /* CHORD USE, asked without reference to a modifier flag. "Is ctrl down?" was
+     the test, and PrintScreen sets no flag at all — so with the mic on that key
+     every chord read as a clean tap and latched the mic open. Any other key
+     pressed while the mic key is held is the same gesture either way. */
+  else if(MIC._down&&!MICKEY(e.code))MIC._used=true;
   /* THE BROWSER OWNS ITS OWN KEYS while it is open — but only the ones it
      uses. Letters still play, because hearing the channel is the whole reason
      you are choosing where to send a modulator. */
@@ -16253,14 +16271,15 @@ const onKeyUp=e=>{
   syncCaps(e);   // macOS reports caps going OFF on the keyup
   kbHeld.delete(c);
   if((e.altKey||e.ctrlKey||(KM.sr&&e.shiftKey))&&scopeHeldOn(c)){ALTSUS.add(c); return;}
-  if(c==='ControlLeft'||c==='ControlRight'||c==='Fn'){
+  if(MICKEY(c)){
     /* the mic's release: chord use closes it, a clean tap latches (if the
        left shift said so) or closes, a tap on a latched mic unlatches */
     if(MIC._down){
       const used=MIC._used, un=MIC._unlatch;
       MIC._down=false; MIC._used=false; MIC._unlatch=false;
       if(un||used)micOff();
-      else if(MIC._latch){MIC.latched=true; flash('⟳ mic latched — ctrl again turns it off');}
+      else if(MIC._latch){MIC.latched=true;
+        flash('⟳ mic latched — '+(c==='PrintScreen'?'prtsc':'ctrl')+' again turns it off');}
       else if(!MIC.latched)micOff();
       MIC._latch=false;
     }
