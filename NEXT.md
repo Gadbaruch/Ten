@@ -127,6 +127,11 @@ Gran is pitch keys with the loop off. None of them are modes any more.
 - **`npx serve` caches.** A reload can come back with the previous file. Load
   with `?cb=$RANDOM` and check a distinctive token from your edit is in the page
   before believing a measurement.
+- **`serve.json` TAKES NO KEYS SERVE DOES NOT KNOW — not even `$schema`.** It
+  validates the file against its own schema and exits code 1 on an unknown
+  property, so a comment or an editor hint in there does not degrade, it stops
+  the dev server booting: `must NOT have additional properties`. The `$schema`
+  line that shipped with the no-store header did exactly that (serve 14.2.6).
 - **Measure, do not model.** Every real bug this week was found by asking
   the running engine what its state was: audPlay's arguments logged from
   both builds, cursor positions sampled over time, the seven-case matrix
