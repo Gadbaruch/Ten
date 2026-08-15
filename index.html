@@ -200,6 +200,14 @@
    Live quantize = push the note to the NEXT 16th; post quantize = playback.
    ===================================================================== */
 
+/* WHERE THE LETTERS SIT. The home row played middle C, which put the whole
+   instrument an octave above where it belongs — a kick at octave 0 came out a
+   fifth above where a kick lives, and getting down to it cost you the octave
+   dial before you had played a note. C3 is home now: what you used to get at 0
+   is what −1 gives you, and the dial still reaches three either way.
+   Recorded notes do not move — a lane stores absolute midi — so this changes
+   what your fingers play and nothing about what is already written. */
+const KBBASE=48;
 const clamp=(v,a,b)=>v<a?a:v>b?b:v;
 /* THE GATE ON THE WAY TO A WORKLET. A NaN posted into the cursor engine
    poisons that channel permanently — the feedback tap and the diffuser read
@@ -1043,7 +1051,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.1619';
+const BUILD='2026-08-15.1624';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -11137,7 +11145,7 @@ const EXP={
   },
   noteOn(ch,note,vel){
     const pi=S.layer>=2?S.editSnd:S.curPreset;
-    const code=KEYFOR[note-(60+S.oct*12)];
+    const code=KEYFOR[note-(KBBASE+S.oct*12)];
     if(code&&this.keyDown(code,vel)){         // in range: take the real key path
       this.held[ch+':'+note]={code};
       return;
@@ -15943,7 +15951,7 @@ const onKeyDown=e=>{
     const kbi9=KBSEQ.indexOf(c);
     const midi=(isAudioCh(pi)&&!kmodeOf(S.presets[pi])&&kbi9>=0)
       ?60+kbi9
-      :60+S.oct*12+noteOf(c,pi);
+      :KBBASE+S.oct*12+noteOf(c,pi);
     const hitVel=EXP.take();          // MIDI velocity if this key came from EXP, else the c/v value
     /* CHORD MAP EDITING: while a map-on chord slot is under the cursor, the
        key you play is the key you edit — replay it to hear the change */
@@ -16007,7 +16015,7 @@ const onKeyDown=e=>{
           engine._ctrlPut('grn',pi,0,'scan',0);
           engine._ctrlPut('grn',pi,0,'pos',posF);
         }
-        const midiF=60+S.oct*12+(kbNote(c,true)??0)+trSemis(p9);
+        const midiF=KBBASE+S.oct*12+(kbNote(c,true)??0)+trSemis(p9);
         /* hitVel, not another take(): the note path above has already
            consumed the pending velocity, so asking again returned the
            keyboard's flat default — which is why nothing on this channel
