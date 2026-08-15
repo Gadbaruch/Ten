@@ -1061,7 +1061,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.2116';
+const BUILD='2026-08-15.2123';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -2494,6 +2494,9 @@ const altOf=e=>KM.altLatch||!!e.altKey;
    worked on a PC, which was fine while control meant nothing on its own — it
    is the FUNCTION LAYER now, and ⌃c has to be "hold volume", not "copy". */
 const cmdOf=e=>!!e.metaKey;
+/* the TOOLS layer: left control, and only the left one — see the block in
+   onKeyDown for why the side is the whole design */
+const toolsOf=e=>HOLD.t&&!e.metaKey&&!altOf(e);
 /* THE FUNCTION LAYER IS ⌥. It was ⌃ for a day, and control is the one
    modifier a left hand cannot reach while it plays. ⌥S and ⌥A keep their old
    meanings (solo, the arp grab) — they were never bare letters. The one true
@@ -2819,7 +2822,7 @@ const BUFID=new WeakMap(); let bufSeq=0;
 const bufId=b=>{let v=BUFID.get(b); if(!v){v=++bufSeq; BUFID.set(b,v);} return v;};
 const HOLD={tab:false,tabAt:0,tabUsed:false,tabLatch:false,m:false,mUsed:false,
             a:false,aUsed:false,     // MODCAP: caps — the captured knobs, and arming their capture
-            t:false,tUsed:false,     // TOOLS: left control, reserved and not yet bound to anything
+            t:false,tUsed:false,     // TOOLS: left control — copy/cut/paste, undo/redo, save
 
             opt:null,optUsed:false,optLatch:false,optLatched:false,   // OPT: a rack grabbed by its letter
             ms:null,msLatch:false,msLatched:false,msUsed:false,   // MUTE/SOLO: ⌥m and ⌥s, and the digits that follow
@@ -15097,8 +15100,9 @@ const onKeyDown=e=>{
         dirtySave=true;}
       DPICK=null; dirty=true; e.preventDefault(); return;}
   }
-  /* TOOLS is tracked, not claimed: left control carries no binding of its own
-     yet, and it must not swallow the event or ⌃+letter would die with it. */
+  /* TOOLS is TRACKED, not claimed: the key itself must not swallow its own
+     event or every ⌃+letter the instrument already had would die with it.
+     What it means is decided by the letter that follows. */
   if(e.code==='ControlLeft'&&!e.repeat){HOLD.t=true; HOLD.tUsed=false;}
   if(e.code==='ShiftLeft'){const fresh=!KM.sl; KM.sl=true;
     if(PICK){PICK.peek=true; dirty=true;}
@@ -15432,6 +15436,32 @@ const onKeyDown=e=>{
       if(modLearnOp(op))return;      // MOD learn: arm on a mod slot, map on a target param
       clipboardOp(op);}
     return;
+  }
+  /* TOOLS: LEFT CONTROL IS A SECOND ⌘, for the five things every application
+     has. They are already on ⌘ and they stay there — this is a second home,
+     not a move, because on a board whose control sits where a Mac's command
+     does, reaching across for ⌘ to undo mid-take is exactly the small friction
+     that stops you playing.
+     LEFT ONLY, and that is what makes it fit alongside everything control
+     already meant: the RIGHT control keeps the mic, and both keep every
+     ⌃+letter the instrument had, so ⌃b ⌃o ⌃q ⌃m are unchanged from either
+     hand. The two that overlap go to the right one — ⌃c is still the patch as
+     JSON and ⌃s is still snap, from over there.
+     Cut is here beside copy and paste although Gad listed four: it shares the
+     one clipboard handler, and a control-c that copies next to a control-x
+     that does nothing is a bug report waiting to be filed. */
+  if(toolsOf(e)&&!e.repeat){
+    const K=e.code;
+    if(K==='KeyZ'){e.preventDefault(); HOLD.tUsed=true; (e.shiftKey?doRedo:doUndo)(); return;}
+    if(K==='KeyS'){e.preventDefault(); HOLD.tUsed=true;
+      const askWhere=e.shiftKey||S.setSlot==null;
+      if(askWhere){PEEKED=null; PICK={mode:'save',sel:S.setSlot??0,confirm:false,peek:false};}
+      else saveToSlot(S.setSlot);
+      dirty=true; return;}
+    if(K==='KeyC'||K==='KeyX'||K==='KeyV'){e.preventDefault(); HOLD.tUsed=true;
+      const op=K==='KeyC'?'copy':K==='KeyX'?'cut':'paste';
+      if(modLearnOp(op))return;
+      clipboardOp(op); return;}
   }
   AC.resume();
   const c=e.code;

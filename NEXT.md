@@ -101,12 +101,15 @@ carrier sampled every 150ms across a x4 length change whose old cycle ended at
                                           could not stay on it and this can.
                                           ⌥` still walks the captured knobs.
   mic            L-ctrl      →  R-ctrl    (+ Fn, PrintScreen as before), so
-                                          LEFT CONTROL is free as the TOOLS
-                                          modifier. HOLD.t tracks it and it is
-                                          bound to nothing yet — ⌃+letter
-                                          chords still answer to either
-                                          control, and the tools layer has to
-                                          say what happens to those.
+                                          LEFT CONTROL is the TOOLS modifier:
+                                          a second ⌘ for c/x/v, z (⇧z redo)
+                                          and s. A second home, not a move —
+                                          ⌘ keeps all of them. LEFT ONLY, so
+                                          the right control keeps the mic and
+                                          the two overlaps stay over there:
+                                          ⌃c is still patch-as-JSON and ⌃s is
+                                          still snap. ⌃b ⌃o ⌃q ⌃m are
+                                          unchanged from either hand.
   centre pairs               [ ]  , .     both keys of a direction pair at once
                                           means neither: pan to centre, octave
                                           to 0.
