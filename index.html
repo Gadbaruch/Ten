@@ -1059,7 +1059,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.1814';
+const BUILD='2026-08-15.1824';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1510,7 +1510,14 @@ const FX_P=sl=>{
             fmt:(v,m)=>Math.round((m&&m.rv)||0)===0?fT(vrbSec(v)):Math.round(0.2+v*4.3)+'s'}),
          SP('damp','p2','lin',{min:0,max:1,step:0.05}),
          SP('width','p3','lin',{min:0,max:1,step:0.05}),
-         SP('pre','p5','lin',{min:0,max:1,step:0.05,
+         /* PRE DEFAULTS TO OFF, and it has to say so here: a slot saved before
+            pre-delay existed has no p5, and reading that as undefined printed
+            NaNms and wrote NaN into the slot the first time you nudged it — and
+            a NaN p5 survives `??` on the way to the plate's AudioParam, which
+            is a throw, which is the whole channel. The engine already reads a
+            missing p5 as 0 and builds no delay node at all; this is the dial
+            saying the same thing. */
+         SP('pre','p5','lin',{min:0,max:1,step:0.05,get:o=>o.p5??0,
             fmt:v=>v<0.005?'off':Math.round(v*200)+'ms'}),
          SPMIX()],
     limit:[SP('ceil','p1','lin',{min:0,max:1,step:0.05,fmt:v=>Math.round(-30+v*30)+'dB'}),
