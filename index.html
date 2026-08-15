@@ -1031,7 +1031,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.1354';
+const BUILD='2026-08-15.1400';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -7887,7 +7887,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     const semis=(au.semis??0)+(cue?cue.semis||0:0)+(this.audPB&&this.audPB[pi]||0);
     /* SYNC keeps the clock: the rate is the loop fit (or ×rate), and pitch
        travels separately through the shifter. FREE is tape: one knob, both. */
-    /* A ROUTE ON SPEED OUTRANKS FIT. Fit means "the loop decides the rate",
+    /* A ROUTE ON SPEED OUTRANKS SYNC. Sync means "the loop decides the rate",
        which is right until something is deliberately driving the rate — and
        since fit is the default on a take that loops, a modulator pointed at
        speed used to move nothing at all. When the route stops, the overlay
@@ -10189,13 +10189,19 @@ const AUDF=[
     top) so nothing is stored twice, and the page shows only the dials the
     mode actually uses. */
  SP('mode','cmode','enum',{opts:['tape','stretch','grain']}),
- /* SPEED, WITH FIT AT THE CENTRE. Fit is the resting state — the loop sets
-    the rate — so it belongs in the middle of the dial rather than at the
-    bottom, where it read as "slowest". Up from centre is faster by hand;
-    down from centre is the same speeds BACKWARDS, because the other thing a
-    playhead can do is run the other way. */
+ /* SPEED, WITH SYNC AT THE CENTRE. The centre is the resting state: the LOOP
+    sets the rate, and the take lines up with the clock. Up from centre is
+    faster by hand, down is the same speeds BACKWARDS.
+    IT IS CALLED SYNC BECAUSE THAT IS WHAT IT IS — Gad's point, and he is
+    right: fitting a take to the loop IS syncing it, and tape/stretch/grain
+    are three MEANS to that one end (tape syncs by pitching the take,
+    stretch by stretching it, grain by setting how fast the carrier
+    travels). The two words had been on the wrong controls: 'sync' was
+    sitting on the mode and 'fit' on the tempo lock, which is exactly why
+    the pair read as confusing. The field underneath is still au.fit — the
+    data has not moved, only the name you see. */
  SP('speed','rate','lin',{min:-4,max:4,step:0.05,
-   fmt:v=>Math.abs(v)<0.2?'fit':(v<0?'\u25c0 \u00d7':'\u00d7')+Math.abs(+v).toFixed(2).replace(/0$/,''),
+   fmt:v=>Math.abs(v)<0.2?'sync':(v<0?'\u25c0 \u00d7':'\u00d7')+Math.abs(+v).toFixed(2).replace(/0$/,''),
    /* THE DIAL KEEPS ITS OWN POSITION. Deriving it from fit meant every step
       out of the centre was read back as 0 and the next step started from 0
       again — the dial could not leave the detent it was sitting in. */
@@ -18537,7 +18543,7 @@ function renderSnd(L,pos){
       if(r0===0&&rows[1].length)L.push('   '+sp('d','── the same take, through the cloud ──'));
     });
     L.push('');
-    L.push('   '+sp('d','speed at its bottom detent is FIT: the loop sets the rate · link on = pitch drags speed (tape) · window is the stretch'));
+    L.push('   '+sp('d','speed at CENTRE is SYNC — the loop sets the rate and the take lines up · up is faster by hand, down is backwards · the mode says HOW it syncs'));
     L.push('   '+sp('d','the cloud row plays under freeze grabs and gran keys — spray, jitter and scan work in every keys mode'));
   }
   else if(M.prs){
