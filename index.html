@@ -1031,7 +1031,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.1305';
+const BUILD='2026-08-15.1329';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -7947,8 +7947,12 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
          material remaining ahead of it, which for a cue near the end is a
          fraction of a second — so it died exactly where it should have
          wrapped. The key's release ends it, and so do stop, choke and panic. */
-      durSec:(cue||rate<0)?1e6
-        :Math.min(loopSec-skipSec,(dur-skipBuf)/Math.abs(rate))});
+      /* THE LOOP LASTS THE LOOP. Its life used to be capped by the material
+         ahead of it, so a take shorter than the cycle — anything not fitted,
+         which is every take once sync is off — played once and left the rest
+         of the bar silent instead of coming round again. It wraps the crop,
+         so the cycle is the only thing that should end it. */
+      durSec:(cue||rate<0)?1e6:Math.max(0.05,loopSec-skipSec)});
     return this._lastTid;
   }
   /* a fade-out then the stop, so a released cue does not click on the way out */
@@ -10136,7 +10140,10 @@ const GRANF=[
  SP('spray','spray','lin',{min:0,max:1,step:0.02,fmt:v=>Math.round(v*100)+'%'}),
  /* the character dial: a sliver, a cloud, or — at the top — one unbroken
     playhead, which is the clean tape read */
- SP('size','size','lin',{min:0.005,max:1,step:0.005,
+ /* 5ms to a whole second in 5ms steps was two hundred presses end to end —
+    the dial moved, it just could not get anywhere. 25ms a step, and the
+    usual multipliers on top. */
+ SP('size','size','lin',{min:0.005,max:1,step:0.025,
    fmt:v=>v>=0.999?'\u221e tape':Math.round(v*1000)+'ms'}),
  SP('dens','dens','lin',{min:0.5,max:120,step:0.5,fmt:v=>v+'/s'}),
  SP('flow','flow','lin',{min:0,max:1,step:0.05,fmt:v=>v<0.02?'lock':Math.round(v*100)+'%'}),
