@@ -1,7 +1,7 @@
 # TEN — where the audio channel stands, and what is next
 
 Written 2026-08-15. Live at gadbaruch.github.io/Ten/ · dev server: `preview_start
-name "ten"` → localhost:3031 · one file, `index.html`, no build step.
+name "ten"` → localhost:3031 (or `ten-main` → 3032 when a worktree holds 3031) · one file, `index.html`, no build step.
 
 ## The model, in one paragraph
 
@@ -25,8 +25,8 @@ Gran is pitch keys with the loop off. None of them are modes any more.
 
 ## Where the page sits now (88cd60b)
 
-- **Sound page**: mode · speed · [window, stretch only] · start · end · pitch ·
-  key vol, then the cloud's fourteen in grain mode.
+- **Sound page**: mode · sync · speed · [window, stretch only] · start · end ·
+  pitch · key vol, then the cloud's fourteen in grain mode.
 - **Instrument row**: engine · sample · keys mode · auto · loop vol · voice ·
   [from] · input · chan · gain. Nine fields, readable at a glance.
 - Both levels rest at the top and only cut (SAVEV/LIBV 25).
@@ -34,6 +34,32 @@ Gran is pitch keys with the loop off. None of them are modes any more.
   `AUDADDR()`, so a param added anywhere shows up in the matrix by itself.
 - A hold ends through `endAudHold(c)`, called by the key-up, by blur, and by
   the 400ms sweep; `AUD.hold` is a view of `AUD.gk`, not a copy.
+
+## Just landed (2026-08-15 evening batch)
+
+- **Ring reaches a ring.** `1 − amt + amt·mod`, the dry trim a second gain on
+  the same amt fed by a constant −1 — so full level is true four-quadrant with
+  no dry in it (twice the old depth), and an envelope closing the operator
+  opens the dry back up in step instead of closing the channel.
+- **Operator envelopes LAND.** setTargetAtTime is an asymptote; at tau=d/3 an
+  FM index of 24 is still at 1.2 when the decay has nominally finished. tau=d/5
+  plus an exact landing. Sustain 0 now means zero.
+- **⌥e + a/d/s/r reached DELAY, not the envelope** — all four stage letters are
+  also scope letters, and the scope-OPENING handler ran first. A held scope's
+  `keys` row claims its letters now.
+- **Cue flips crossfade** (3ms equal-power, inside detectCuts' existing 3ms of
+  pre-roll). Measured on a sine: max step 0.2255 → 0.0041.
+- **tab+↑↓ crops the take** on an audio channel; it was doing the same job as
+  tab+-/= (both just changed `lane.len`). -/= still stretches the loop.
+- **A take arrives knowing its tempo** — `guessTake()` picks the beat count
+  that puts the implied bpm in 80..170, and the lane takes it on load (never
+  over a lane with events in it).
+- **sync and speed are two fields.** They shared one dial with sync at the
+  centre detent, so they were mutually exclusive and a mod route on speed had
+  to outrank sync to move anything. `audRate()` is the one place the rate is
+  decided. Synced-and-double-time is measurable now: 1.2 · 2.4 · 0.6 against
+  a fitted 1.2. Old presets migrate through `audSpd()` — the detent reads back
+  as sync + ×1 and nothing saved has to move.
 
 ## What is next, in order
 
@@ -78,14 +104,23 @@ Gran is pitch keys with the loop off. None of them are modes any more.
    works — making enter mean "go to what this points at" everywhere is more of
    the homogenisation Gad is after.
 
-2. **THE ARP ON POLY + POSITION** — Gad still reports held keys playing nothing
+2. **MONO CUE RELEASE THROUGH THE RACK.** The live keyboard path is momentary
+   and measured so — with auto on and off, the cursor is gone within 150ms of
+   the release. But `cueNote`'s mono branch (the path the ARP and the sequencer
+   use) returns a sham handle whose `release()` sets a flag and touches no
+   audio at all, so a cue fired through a play slot in mono never ends. Not
+   fixed: in mono the moved cursor IS the loop carrier, so stopping it there
+   can gap the loop, and the keyboard path only gets away with it by re-firing
+   audPlay afterwards. Decide what the rack should do before changing it.
+
+3. **THE ARP ON POLY + POSITION** — Gad still reports held keys playing nothing
    there. The twelve-cue jump had two causes (piano mapping 29e7608, channel
    transpose in slot space fac7260) and both are fixed; this is a third thing
    and it has never been diagnosed. Build the readout before touching code —
    log what `cueNote` receives from the ply delegation with poly + arp + keys
    on position, and compare against mono.
 
-3. **Level across the size dial — PARTIALLY DONE (eddae35, d7abace).**
+4. **Level across the size dial — PARTIALLY DONE (eddae35, d7abace).**
    Predicting it (window rms x 0.5 x sqrt(duty) x norm) took the worst case
    from 5.7x to ~3x; MEASURING it — an rms of the cloud against the take's own
    level, slewed into a compensation — did better again. Against a clean read
@@ -94,11 +129,11 @@ Gran is pitch keys with the loop off. None of them are modes any more.
    which is a poor estimate of a slow-moving carrier; try integrating over a
    real span before adding more gain.
 
-4. **Width as a stereo spread** rather than random placement per cursor.
+5. **Width as a stereo spread** rather than random placement per cursor.
    Whole notes are centred now (they keep the take's own stereo); grains
    still scatter, which is right for grains and wrong as a "width" control.
 
-5. **More factory phrases** — `python3 tools/gen_samples.py <name>` re-rolls
+6. **More factory phrases** — `python3 tools/gen_samples.py <name>` re-rolls
    one, no args does the shelf. Prompts are the shelf; see the docstring for
    what to ask for (phrases, never one-shots).
 

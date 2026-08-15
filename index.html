@@ -1061,7 +1061,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.2004';
+const BUILD='2026-08-15.2014';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -8356,7 +8356,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
        speed used to move nothing at all. When the route stops, the overlay
        clears and fit has it back. */
     const ovR=(this.audOv&&this.audOv[pi]||{}).rate;
-    const baseRate=(Math.round(au.fit)&&ovR===undefined)?dur/loopSec:(au.rate??1);
+    const baseRate=audRate(au,dur,loopSec,ovR);
     const rate=sync?baseRate:baseRate*Math.pow(2,semis/12);
     /* a cue that names a transient carries the place itself; the beat skip is
        what the auto cursor and the recorded jam still speak in */
@@ -8506,7 +8506,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     const sync=Math.round(au.pmode||0)===1;
     const semis=(au.semis??0)+(ask.cue?ask.cue.semis||0:0)+(this.audPB&&this.audPB[pi]||0);
     const ovR=(this.audOv&&this.audOv[pi]||{}).rate;
-    const baseRate=(Math.round(au.fit)&&ovR===undefined)?dur/loopSec:(au.rate??1);
+    const baseRate=audRate(au,dur,loopSec,ovR);
     const rate=sync?baseRate:baseRate*Math.pow(2,semis/12);
     const k9=buf.sampleRate/AC.sampleRate;
     const r9=(rate<0?Math.min(-0.05,rate):Math.max(0.05,rate))*k9;
@@ -10662,6 +10662,33 @@ const GRANF=[
 /* (granAction lived here: the cloud's own knob handler, writing pre.gr and
    nothing else. audAction covers both halves of the page now, so a dial
    turned on either one records automation and re-aims what is sounding.) */
+/* THE SPEED MULTIPLIER, read off a channel that may predate it. Speed used to
+   carry sync in its own centre detent — one dial holding two ideas, so you
+   could have sync OR a multiplier and never both, and a modulator pointed at
+   speed had to OUTRANK sync to move anything at all. Sync is its own field
+   now and speed is a plain number. A stored spd inside the old detent meant
+   "synced", not "stopped", so it reads back as x1 and au.fit carries the sync
+   it always did; a spd outside the detent was already a free rate and is
+   exactly what it was. Nothing saved has to move. */
+const audSpd=au=>{
+  const o=au||{}, v=o.spd;
+  if(!Number.isFinite(v))
+    return (Number.isFinite(o.rate)&&!Math.round(o.fit||0))?clamp(o.rate,-4,4):1;
+  if(Math.abs(v)<0.25)return 1;                     // the old sync detent
+  return clamp(v,-4,4);
+};
+/* ONE PLACE THE TAPE'S RATE IS DECIDED, and every reader goes through it.
+   sync says whether the LOOP sets the rate; speed multiplies whatever that
+   turns out to be, so x1 is the take's own speed when free and the fitted
+   speed when synced — and "synced AND double time" is now something you can
+   ask for. Negative is the same speed backwards, either side of the switch.
+   A route on speed drives the multiplier, which is why it works under sync
+   instead of having to defeat it. */
+const audRate=(au,dur,loopSec,ov)=>{
+  const spd=Number.isFinite(ov)?ov:audSpd(au);
+  const fitR=Math.round((au||{}).fit||0)?(loopSec>1e-9?dur/loopSec:1):1;
+  return fitR*spd;
+};
 const AUDF=[
  /* the tape's SOUND rack: how the clip plays. Identity — keys mode, sample,
     input, channels, fit, gain — lives on the Instrument row. */
@@ -10686,15 +10713,26 @@ const AUDF=[
     sitting on the mode and 'fit' on the tempo lock, which is exactly why
     the pair read as confusing. The field underneath is still au.fit — the
     data has not moved, only the name you see. */
+ SP('sync','fit','enum',{opts:['free','sync'],
+   get:o=>Math.round(o.fit||0)?1:0,
+   set:(o,v)=>{o.fit=Math.round(v)?1:0;}}),
+ /* …and SPEED IS A PLAIN MULTIPLIER, meaning the same thing on both sides of
+    that switch: ×1 is the take's own speed when free and the fitted speed
+    when synced. Negative is that same speed backwards, either way.
+    NO ZERO IN THE MIDDLE OF THE TRAVEL — a multiplier of nothing is a tape
+    that has stopped, which is not a speed. Walking down through the centre
+    flips direction instead, so the step below ×0.25 is the reverse quarter
+    and the backwards half of the dial is reached by going through it. */
  SP('speed','rate','lin',{min:-4,max:4,step:0.05,
-   fmt:v=>Math.abs(v)<0.2?'sync':(v<0?'\u25c0 \u00d7':'\u00d7')+Math.abs(+v).toFixed(2).replace(/0$/,''),
-   /* THE DIAL KEEPS ITS OWN POSITION. Deriving it from fit meant every step
-      out of the centre was read back as 0 and the next step started from 0
-      again — the dial could not leave the detent it was sitting in. */
-   get:o=>Number.isFinite(o.spd)?o.spd:(Math.round(o.fit||0)?0:(o.rate??1)),
-   set:(o,v)=>{o.spd=+(+v).toFixed(2);
-     if(Math.abs(o.spd)<0.125){o.fit=1;}
-     else{o.fit=0; o.rate=Math.abs(o.spd)<0.25?(o.spd<0?-0.25:0.25):o.spd;}}}),
+   fmt:v=>(v<0?'\u25c0 \u00d7':'\u00d7')+Math.abs(+v).toFixed(2),
+   get:o=>audSpd(o),
+   set:(o,v)=>{let s=+(+v).toFixed(2);
+     if(Math.abs(s)<0.25)s=audSpd(o)>0?-0.25:0.25;
+     o.spd=clamp(s,-4,4);
+     /* au.rate is what every legacy reader reaches for; keep it saying what
+        speed says, so an old session and a new build are never two numbers in
+        a fight over one knob */
+     o.rate=o.spd;}}),
  /* the stretch's character: how far apart the two taps sit */
  SP('window','wnd','lin',{min:5,max:300,step:5,fmt:v=>Math.round(v)+'ms'}),
 ];
@@ -10758,7 +10796,7 @@ const AUDADDR=()=>AUDF.concat(AUDTAKE,AUDLVL,AUDINST);
    ??0 instead, which is invisible while every preset comes from basePreset and
    wrong the moment one does not — an unset `end` would read 0% and the first
    arrow press would move it to 1%, cropping the take to nothing. */
-const AUDDEF={st:0,en:1,semis:0,gain:0.9,kvol:1,lvol:1,wnd:50,rate:1,spd:0,fit:1,cmode:0,pmode:0};
+const AUDDEF={st:0,en:1,semis:0,gain:0.9,kvol:1,lvol:1,wnd:50,rate:1,spd:1,fit:1,cmode:0,pmode:0};
 /* the mode a channel is in, read off the two things that define it when the
    field itself has never been touched — so an old set opens in the mode it
    was already behaving as */
@@ -10783,9 +10821,9 @@ function applyCmode(pi){
 const AUDPAGE=()=>{
   const p=S.presets[S.editSnd], m=cmodeOf(p);
   const keep=new Set(m===2
-    ?['cmode','rate','st','en','semis','kvol']
-    :m===1?['cmode','rate','wnd','st','en','semis','kvol']
-          :['cmode','rate','st','en','semis','kvol']);
+    ?['cmode','fit','rate','st','en','semis','kvol']
+    :m===1?['cmode','fit','rate','wnd','st','en','semis','kvol']
+          :['cmode','fit','rate','st','en','semis','kvol']);
   return AUDALL().filter(sp=>sp.st==='gr'?m===2:keep.has(sp.key));
 };
 function codeAction(d,m){
@@ -16529,7 +16567,7 @@ const onKeyDown=e=>{
         const buf9=engine.audBuf[pi], au9=S.presets[pi].au||{};
         const st9=clamp(au9.st??0,0,0.98), en9=clamp(au9.en??1,st9+0.01,1);
         const dur9=(en9-st9)*buf9.duration, loop9=Math.max(1e-6,L*spb());
-        const rate9=Math.max(0.05,Math.round(au9.fit)?dur9/loop9:(au9.rate??1));
+        const rate9=Math.max(0.05,Math.abs(audRate(au9,dur9,loop9)));
         const bt9=clamp(sl*0.25+(cue.o||0),0,L-0.01);
         const fr9=clamp((st9*buf9.duration+bt9*spb()*rate9)/buf9.duration,0,1);
         engine.granNode(pi);
@@ -18690,7 +18728,7 @@ function gridHTML(pat,pos,anc,chans){
            happen to fill the loop exactly. Same arithmetic as audPlay. */
         const cues=au9.cues||{};
         const dur9=(en9-st9)*wb.duration, loopS9=Math.max(1e-6,LN2*spb());
-        const rate9=Math.max(0.05,Math.round(au9.fit)?dur9/loopS9:(au9.rate??1));
+        const rate9=Math.max(0.05,Math.abs(audRate(au9,dur9,loopS9)));
         const frOf=b9=>(st9*wb.duration+b9*spb()*rate9)/wb.duration;
         let ct='';
         /* THE CLOCK, ON THE TAKE. A waveform with no bar lines is a picture
@@ -18701,12 +18739,15 @@ function gridHTML(pat,pos,anc,chans){
           const f9=frOf(b9); if(f9<=0.002||f9>=en9)continue;
           ct+='<i class="bart" style="top:'+(f9*H).toFixed(1)+'px"></i>';
         }
-        /* WHERE THE LOOP ENDS, ON THE TAKE. With speed at fit they are the
-           same place and there is nothing to draw. Off fit they part, and
+        /* WHERE THE LOOP ENDS, ON THE TAKE. At sync x1 they are the same
+           place and there is nothing to draw; anywhere else they part, and
            this is the only way to see it: the line says how much of the take
            the loop actually gets through — short of the bottom means the
-           tail never plays, past the bottom means it never finishes. */
-        if(!Math.round(au9.fit)){
+           tail never plays, past the bottom means it never finishes.
+           The GEOMETRY decides whether to draw it, not the sync flag: with
+           speed now multiplying the fitted rate, synced-and-double-time parts
+           from the loop end exactly as free speeds always did. */
+        {
           const fe=frOf(LN2);
           if(fe>0.02&&fe<en9-0.01)
             ct+='<i class="loopend" style="top:'+(fe*H).toFixed(1)+'px"></i>';
@@ -19311,7 +19352,7 @@ function renderSnd(L,pos){
       if(r0===0&&rows[1].length)L.push('   '+sp('d','── the same take, through the cloud ──'));
     });
     L.push('');
-    L.push('   '+sp('d','speed at CENTRE is SYNC — the loop sets the rate and the take lines up · up is faster by hand, down is backwards · the mode says HOW it syncs'));
+    L.push('   '+sp('d','SYNC says the loop sets the rate · SPEED multiplies it either way — ×1 is the take\'s own speed when free and the fitted speed when synced, and negative is the same speed backwards · the mode says HOW it syncs'));
     L.push('   '+sp('d','the cloud row plays under freeze grabs and gran keys — spray, jitter and scan work in every keys mode'));
   }
   else if(M.prs){
