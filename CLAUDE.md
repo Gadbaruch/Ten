@@ -120,6 +120,10 @@ arrows, `-/=` and the letters belong to THAT param, and so do the modifiers:
 - Neither shift may close a scope ⌥ is still holding. ⇧R can hold one open by
   itself, so its release closes the ones IT holds — check ⌥ first.
 
+The row a held scope owns is four pairs now: `↑↓` primary · `←→` secondary ·
+`-/=` amount · `[ ]` TYPE (which reverb, which filter shape, which effect).
+Each is a cell on `mag` and may be a function of the slot.
+
 The rule behind all three: **a key that is holding something open is not also a
 modifier of it.** Any new modifier in a scope gets asked that question.
 

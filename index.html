@@ -1061,7 +1061,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.2107';
+const BUILD='2026-08-15.2116';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -2567,7 +2567,7 @@ const OPTRACK={
         find:rk=>rk.map((x,i)=>x&&x.typ===1&&!x.off?i:-1).filter(i=>i>=0),
         make:sl=>Object.assign(sl,{typ:1,p1:0.3,p2:0.35,p3:1,p5:0.5,mix:fToVol(40)}),
         unmake:sl=>Object.assign(sl,{typ:0}),
-        mag:{amt:'mix',pri:'p1',sec:'p2'}},
+        mag:{amt:'mix',pri:'p1',sec:'p2',typ:'p3'}},
   KeyE:{id:'mod',name:'env',nav:1,
         find:rk=>rk.map((x,i)=>x&&x.src===1&&!x.off?i:-1).filter(i=>i>=0),
         make:(sl,i)=>Object.assign(sl,mkMod(i),{src:1,off:false}),
@@ -2587,7 +2587,7 @@ const OPTRACK={
            hearing, and that is what -/= should hold */
         mag:{amt:sl=>DROUTE[Math.round((sl&&sl.par)||0)]==='par'?'lvl'
                     :(FLT_GAINY.has(fTy(sl))?'gn':null),
-             pri:'frq',sec:'q'}},
+             pri:'frq',sec:'q',typ:'typ'}},
   KeyL:{id:'mod',name:'lfo',nav:1,
         find:rk=>rk.map((x,i)=>x&&x.src===2&&!x.off?i:-1).filter(i=>i>=0),
         make:(sl,i)=>Object.assign(sl,mkMod(i),{src:2,off:false}),
@@ -2613,34 +2613,36 @@ const OPTRACK={
         find:rk=>rk.map((x,i)=>x&&x.typ===XTYPES.indexOf('verb')&&!x.off?i:-1).filter(i=>i>=0),
         make:sl=>Object.assign(sl,{typ:XTYPES.indexOf('verb'),p1:0.5,p2:0.3,p3:0.5,mix:fToVol(35)}),
         unmake:sl=>Object.assign(sl,{typ:0}),
-        mag:{amt:'mix',pri:'p1',sec:'p2'}},
+        /* a reverb's TYPE is its algorithm, which lives on rv, not on typ —
+           typ is what makes the slot a reverb at all */
+        mag:{amt:'mix',pri:'p1',sec:'p2',typ:'rv'}},
   KeyG:{id:'fx',name:'grain',nav:1,
         find:rk=>rk.map((x,i)=>x&&x.typ===XTYPES.indexOf('grain')&&!x.off?i:-1).filter(i=>i>=0),
         make:sl=>Object.assign(sl,{typ:XTYPES.indexOf('grain'),p1:0.4,p2:0.5,p3:0.5,mix:fToVol(45)}),
         unmake:sl=>Object.assign(sl,{typ:0}),
-        mag:{amt:'mix',pri:'p1',sec:'p2'}},
+        mag:{amt:'mix',pri:'p1',sec:'p2',typ:'typ'}},
   KeyS:{id:'fx',name:'saturation',nav:1,
         find:rk=>rk.map((x,i)=>x&&x.typ===XTYPES.indexOf('sat')&&!x.off?i:-1).filter(i=>i>=0),
         make:sl=>Object.assign(sl,{typ:XTYPES.indexOf('sat'),p1:0.35,p2:0.5,p3:0,mix:fToVol(60)}),
         unmake:sl=>Object.assign(sl,{typ:0}),
-        mag:{amt:'mix',pri:'p1',sec:'p2'}},
+        mag:{amt:'mix',pri:'p1',sec:'p2',typ:'p3'}},
   KeyP:{id:'fx',name:'phase',nav:1,
         find:rk=>{const f=[2,3,4,5].map(x=>x);
           return rk.map((x,i)=>x&&f.includes(Math.round(x.typ))&&!x.off?i:-1).filter(i=>i>=0);},
         make:sl=>Object.assign(sl,{typ:XTYPES.indexOf('phase'),p1:0.3,p2:0.5,p3:0.5,mix:fToVol(45)}),
         unmake:sl=>Object.assign(sl,{typ:0}),
-        mag:{amt:'mix',pri:'p1',sec:'p2'}},
+        mag:{amt:'mix',pri:'p1',sec:'p2',typ:'typ'}},
   KeyC:{id:'fx',name:'comp',nav:1,
         find:rk=>{const f=[XTYPES.indexOf('comp'),XTYPES.indexOf('limit'),XTYPES.indexOf('clip')];
           return rk.map((x,i)=>x&&f.includes(Math.round(x.typ))&&!x.off?i:-1).filter(i=>i>=0);},
         make:sl=>Object.assign(sl,{typ:XTYPES.indexOf('comp'),p1:0.4,p2:0.5,p3:0.5,mix:1}),
         unmake:sl=>Object.assign(sl,{typ:0}),
-        mag:{amt:'mix',pri:'p1',sec:'p2'}},
+        mag:{amt:'mix',pri:'p1',sec:'p2',typ:'typ'}},
   KeyQ:{id:'fx',name:'quality',nav:1,
         find:rk=>rk.map((x,i)=>x&&XTYPES[Math.round(x.typ)]==='qual'&&!x.off?i:-1).filter(i=>i>=0),
         make:sl=>Object.assign(sl,{typ:XTYPES.indexOf('qual'),p1:0.5,p2:0.5,p3:0,mix:fToVol(70)}),
         unmake:sl=>Object.assign(sl,{typ:0}),
-        mag:{amt:'mix',pri:'p1',sec:'p2'}},
+        mag:{amt:'mix',pri:'p1',sec:'p2',typ:'p3'}},
   KeyB:{id:'fx',name:'buffer',nav:1,
         find:rk=>rk.map((x,i)=>x&&XTYPES[Math.round(x.typ)]==='buf'&&!x.off?i:-1).filter(i=>i>=0),
         make:sl=>Object.assign(sl,{typ:XTYPES.indexOf('buf'),p1:0.3,p3:0,mix:fToVol(80)}),
@@ -2650,7 +2652,9 @@ const OPTRACK={
         find:rk=>{const a2=rk.map((x,i)=>x&&x.typ?i:-1).filter(i=>i>=0);
                   return a2.length?a2:[0];},         // empty rack: land on slot 1, make nothing
         make:sl=>sl, unmake:sl=>Object.assign(sl,{typ:0}),
-        mag:{amt:'mix',pri:'p1',sec:'p2'}},
+        /* the generic fx door: its TYPE is which effect the slot is, which is
+           the most useful [ ] on the whole table */
+        mag:{amt:'mix',pri:'p1',sec:'p2',typ:'typ'}},
 };
 /* ---------------- MAGNETIZED SCOPES ------------------------------------
    Everything a held nav scope does to a slot goes through here, so the scope
@@ -2733,9 +2737,11 @@ function magSecStepped(H){
 function magRead(H,C,head){
   const A=C.mag.amt?magSpec(C,magKey(C.mag.amt,C.slot)):null;
   const B=C.mag.sec?magSpec(C,magKey(C.mag.sec,C.slot)):null;
+  const Tp=C.mag.typ?magSpec(C,magKey(C.mag.typ,C.slot)):null;
   return head+'↑↓ '+magLbl(C,magCur(H,C))+
     (B?' · ←→ '+B.spec.lbl+' '+magVal(C,B):'')+
-    (A?' · -/= '+A.spec.lbl+' '+magVal(C,A):'');
+    (A?' · -/= '+A.spec.lbl+' '+magVal(C,A):'')+
+    (Tp?' · [ ] '+Tp.spec.lbl+' '+magVal(C,Tp):'');
 }
 /* PARAM FOCUS: THE MODIFIERS INSIDE A HELD SCOPE. ⌥ is fine, ⇧ is coarse —
    and inside a held scope BOTH shifts are the coarse one. rs() ignores the
@@ -2764,12 +2770,13 @@ function magDial(H,which,d,e){
   const C=magCtx(H); if(!C)return false;
   const key=which==='pri'?magCur(H,C)
            :which==='sec'?magKey(C.mag.sec,C.slot)
+           :which==='typ'?magKey(C.mag.typ,C.slot)
            :magKey(C.mag.amt,C.slot);
   const F=magSpec(C,key);
   /* nothing there is worth saying out loud — it is the row telling you what it
      does have, which is the only documentation a held scope can give */
   if(!F){flash(magRead(H,C,C.T2.name+' has no '+
-    (which==='amt'?'amount':'second dial')+' — '));return true;}
+    (which==='amt'?'amount':which==='typ'?'type':'second dial')+' — '));return true;}
   pushUndo(C.T2.name);
   const nv=adjust(F.spec,getV(C.holder,C.mi,C.si,F.spec),d,magMult(e,H));
   writeParam(H.ch,C.mi,C.si,F.px,nv);
@@ -2811,7 +2818,8 @@ const WAVEC=new Map();      // rendered waveform columns, by buffer+height
 const BUFID=new WeakMap(); let bufSeq=0;
 const bufId=b=>{let v=BUFID.get(b); if(!v){v=++bufSeq; BUFID.set(b,v);} return v;};
 const HOLD={tab:false,tabAt:0,tabUsed:false,tabLatch:false,m:false,mUsed:false,
-            a:false,aUsed:false,     // MODCAP: ` — the captured knobs, and arming their capture
+            a:false,aUsed:false,     // MODCAP: caps — the captured knobs, and arming their capture
+            t:false,tUsed:false,     // TOOLS: left control, reserved and not yet bound to anything
 
             opt:null,optUsed:false,optLatch:false,optLatched:false,   // OPT: a rack grabbed by its letter
             ms:null,msLatch:false,msLatched:false,msUsed:false,   // MUTE/SOLO: ⌥m and ⌥s, and the digits that follow
@@ -12668,7 +12676,16 @@ const MIC={stream:null,on:false,latched:false,node:null,ring:null,w:0,sr:0,
    NOT F13, which looks like the same idea and is not — F13-F16 are already the
    right-cluster arrow escape hatch, and a key cannot be the mic and the left
    arrow at once. */
-const MICKEY=c=>c==='ControlLeft'||c==='ControlRight'||c==='Fn'||c==='PrintScreen';
+/* LEFT CONTROL IS NOT THE MIC ANY MORE — it is reserved as the TOOLS
+   modifier. The mic keeps the right one, and Fn and PrintScreen, which is
+   what it was already offering a 60% board; nothing it could do has been
+   lost, the gesture just moved a hand's width to the right.
+   Not the win key, which was the obvious-looking answer and is wrong: Gad's
+   board sends ScrollLock/Pause/Insert from it and those ARE the sound scope.
+   ⌃+letter chords (⌃b ⌃c ⌃o ⌃q ⌃m, ⌃+tab) still answer to either control —
+   they read e.ctrlKey, not which key it came from — so the tools layer, when
+   it grows bindings, has to say what happens to those. */
+const MICKEY=c=>c==='ControlRight'||c==='Fn'||c==='PrintScreen';
 /* ⌥M just made a mod (env by default). While ⌥ is STILL down, one letter
    re-sources it: l lfo, v velocity, k key, / random, e env again. Closed the
    moment ⌥ comes up, so the letters go back to their scopes. */
@@ -12727,6 +12744,8 @@ let eraseHold=null, muteHold=null, stepCur=0, stepWalked=false, taps=[];
 /* which pan key is down — the pair means centre, and the pan handler returns
    before kbHeld is ever written, so it has to keep its own count */
 const BRK={l:false,r:false};
+/* …and the same for the octave pair, for the same reason */
+const OCT={l:false,r:false};
 let gridAt=-1;                        // which L entry is the grid's markup
 const rawAt=new Set();                // ...and which others are markup too
 const kbHeld=new Set();               // note keys physically down, for chord-vs-sequence
@@ -14880,11 +14899,20 @@ function syncCaps(e){
   const on=e.getModifierState('CapsLock');
   if(on===capsWas)return;
   capsWas=on;
-  /* CAPS NO LONGER TOGGLES PATTERN EDIT — it is ⇧p now, because a LATCHING key
-     is the wrong shape for a mode you flick in and out of: the OS holds it, so
-     the state could disagree with the instrument after any focus loss, and it
-     could never be chorded with anything. The state is still read here so a
-     board that reports caps does not confuse anything else. */
+  /* CAPS IS MODCAP NOW. Pattern edit moved off it to ⇧p — a latching key is
+     the wrong shape for a mode you flick in and out of — and modcap is the
+     RIGHT shape for one: it is a mode you are either in or not, the overlay
+     is either up or it is not, and the OS holding it means it survives a
+     focus loss instead of being a hold you have to keep finding again.
+     Caps on shows the captured knobs and makes tab arm the capture (see the
+     tab handler); caps off puts it away. */
+  HOLD.a=on; HOLD.aUsed=false;
+  if(on){
+    const pre=S.presets[S.curPreset], ls=autoLanes(pre);
+    S.aView=0; S.aAddr=ls.length?(aFront(pre)||ls[0]).k:null;
+    flash(ls.length?'modcap — '+ls.length+' knob'+(ls.length>1?'s':'')+' on '+pre.name
+                   :'modcap — nothing captured on '+pre.name+' yet  (caps + tab arms it)');
+  }else if(S.aView!==null){S.aView=null; flash('modcap hidden');}
   dirty=true;
 }
 let capsWas=false;
@@ -15069,6 +15097,9 @@ const onKeyDown=e=>{
         dirtySave=true;}
       DPICK=null; dirty=true; e.preventDefault(); return;}
   }
+  /* TOOLS is tracked, not claimed: left control carries no binding of its own
+     yet, and it must not swallow the event or ⌃+letter would die with it. */
+  if(e.code==='ControlLeft'&&!e.repeat){HOLD.t=true; HOLD.tUsed=false;}
   if(e.code==='ShiftLeft'){const fresh=!KM.sl; KM.sl=true;
     if(PICK){PICK.peek=true; dirty=true;}
     if(!e.repeat&&fresh){LATCH.used=false; latchArmHeld();} return;}
@@ -15289,6 +15320,16 @@ const onKeyDown=e=>{
       if((e.code==='Equal'||e.code==='Minus')&&T2.mag&&T2.mag.amt){
         e.preventDefault(); HOLD.optUsed=true;
         magDial(HOLD.opt,'amt',e.code==='Equal'?1:-1,e);
+        return;
+      }
+      /* [ ] IS THE TYPE — which reverb, which saturation curve, which filter
+         shape, and on the generic fx door which effect the slot is at all.
+         The one question every one of these racks asks that the two dials and
+         the amount could not reach, so it was a trip to the strip. A menu, so
+         one press one option: no repeat. */
+      if((e.code==='BracketLeft'||e.code==='BracketRight')&&T2.mag&&!e.repeat){
+        e.preventDefault(); HOLD.optUsed=true;
+        magDial(HOLD.opt,'typ',e.code==='BracketRight'?1:-1,e);
         return;
       }
       if(e.code==='Backspace'&&!e.repeat&&!HOLD.optLatched){
@@ -15792,28 +15833,14 @@ const onKeyDown=e=>{
      bar is a shape next to the notes it is opening under.
      Backslash because it was one of five keys left, and because it sits under
      the brackets that walk between the knobs. */
-  if(c==='Backquote'&&!e.repeat&&!e.metaKey&&!altOf(e)&&!PICK&&!DPICK){
-    e.preventDefault();
-    /* MODCAP — Gad's name, and the better one: this is not a view of a thing
-       called "automation", it is where captured knob moves live and where you
-       arm the capture. Held with rec it arms that capture on the focused
-       channel from ANY layer (see the tab handler), which is the gesture the
-       overlay always implied and never had. */
-    HOLD.a=true; HOLD.aUsed=false;
-    if(S.aView!==null){S.aView=null; flash('modcap hidden'); dirty=true; return;}
-    const pre=S.presets[S.curPreset], ls=autoLanes(pre);
-    S.aView=0; S.aAddr=ls.length?(aFront(pre)||ls[0]).k:null;
-    flash(ls.length?'modcap — '+ls.length+' knob'+(ls.length>1?'s':'')+' on '+pre.name
-                   :'modcap — nothing captured on '+pre.name+' yet  (hold ` + tab to arm)');
-    dirty=true; return;
-  }
-  /* ⌥` walks the captured knobs — the same key as the overlay it belongs to,
-     forward normally and backward with ⇧, because the brackets it lived on
-     are the pan now */
+
+  /* ⌥` walks the captured knobs. The overlay itself is caps now, so ` is
+     otherwise free and this is all it does — forward normally, backward with
+     ⇧, because the brackets it lived on are the pan. */
   if(c==='Backquote'&&altOf(e)&&!e.metaKey&&!PICK&&!DPICK){
     e.preventDefault();
     if(e.repeat)return;
-    if(S.aView===null){flash('` shows the modcap first');return;}
+    if(S.aView===null){flash('caps shows the modcap first');return;}
     const pre=S.presets[S.curPreset], ls=autoLanes(pre);
     if(ls.length<2){flash(ls.length?'only one knob is automated here':'nothing recorded on '+pre.name);return;}
     const at=Math.max(0,aIndexOf(ls,S.aAddr));
@@ -15895,6 +15922,15 @@ const onKeyDown=e=>{
     const d=c==='Period'?1:-1;
     if(e.shiftKey){EXP.bump(d*0.05);
       flash('keyboard vel '+Math.round(clamp(CFG.kvel??0.9,0.02,1)*127)); return;}
+    OCT[c==='Comma'?'l':'r']=true;
+    /* BOTH TOGETHER IS HOME, the same gesture the pan pair has: the two keys
+       are the two directions, so holding them at once asks for neither. The
+       step the first of the two took on its way in is squashed — they are
+       never pressed on the same millisecond. */
+    if(OCT.l&&OCT.r){
+      if(S.oct!==0){S.oct=0; flash('octave centred'); dirty=true;}
+      return;
+    }
     if(!e.repeat){S.oct=clamp(S.oct+d,-3,3); dirty=true;} return;
   }
   /* THE ACTION IS THE PRESS. Waiting for the keyup to decide tap-vs-hold made
@@ -17328,9 +17364,11 @@ const onKeyUp=e=>{
       dirty=true;}
     return;}
   if(c==='KeyM'&&HOLD.m){HOLD.m=false; HOLD.mUsed=false; return;}
-  if(c==='Backquote'&&HOLD.a){HOLD.a=false; HOLD.aUsed=false;}
+  if(c==='ControlLeft'){HOLD.t=false; HOLD.tUsed=false;}
   if(c==='BracketLeft')BRK.l=false;
   if(c==='BracketRight')BRK.r=false;
+  if(c==='Comma')OCT.l=false;
+  if(c==='Period')OCT.r=false;
   if((c==='ShiftLeft'||c==='ShiftRight')&&PICK){PICK.peek=false; dirty=true;}
   if(PICK&&/^Digit\d$/.test(c)){PICK.dig=0;}   // the digit is no longer held
   if(c==='ShiftRight'){KM.sr=false;
@@ -17384,7 +17422,8 @@ const onKeyUp=e=>{
   }
   if(c==='Backspace'){
     if(eraseHold)spanUnmark(S.patterns[S.editPat].lanes[focusCh()]);
-    eraseHold=null;muteHold=null;BRK.l=false;BRK.r=false;HOLD.a=false;clearTimeout(delHoldTimer);}
+    eraseHold=null;muteHold=null;BRK.l=false;BRK.r=false;OCT.l=false;OCT.r=false;
+    HOLD.a=false;clearTimeout(delHoldTimer);}
   if(rPend[c]){
     const r=rPend[c];
     /* SAME RULE AS THE RECORDER: the length is the held gesture. r.ts is the

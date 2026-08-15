@@ -91,11 +91,28 @@ carrier sampled every 150ms across a x4 length change whose old cycle ended at
                                           shape for a mode you flick
   sound scope    `           →  \         + its own row: \+[ ] presets ·
                                           \+; ' types · \+, . engines
-  modcap         \           →  `         (the swap). Was called "automation";
-                                          it is where captured knob moves live
-                                          AND where you arm the capture:
-                                          hold ` + tab arms the focused
-                                          channel from ANY layer.
+  modcap         \           →  caps      Was called "automation"; it is where
+                                          captured knob moves live AND where
+                                          you arm the capture: caps on + tab
+                                          arms the focused channel from ANY
+                                          layer. A latching key is the RIGHT
+                                          shape for this — a mode you are in
+                                          or not — which is why pattern edit
+                                          could not stay on it and this can.
+                                          ⌥` still walks the captured knobs.
+  mic            L-ctrl      →  R-ctrl    (+ Fn, PrintScreen as before), so
+                                          LEFT CONTROL is free as the TOOLS
+                                          modifier. HOLD.t tracks it and it is
+                                          bound to nothing yet — ⌃+letter
+                                          chords still answer to either
+                                          control, and the tools layer has to
+                                          say what happens to those.
+  centre pairs               [ ]  , .     both keys of a direction pair at once
+                                          means neither: pan to centre, octave
+                                          to 0.
+  param focus    [ ]                      the slot's TYPE — which reverb, which
+                                          saturation curve, which filter shape,
+                                          and on ⌥x which effect the slot IS.
 
 `HOLD.a` is modcap's hold. The ` + tab branch is asked FIRST in the tab
 handler, ahead of the audio channel's own three meanings for it, or the
