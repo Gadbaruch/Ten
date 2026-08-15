@@ -1031,7 +1031,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.1406';
+const BUILD='2026-08-15.1411';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -4059,21 +4059,39 @@ let fxwReady=false;
       /* the feedback tap is PRE-norm, pre-gain: the loop must not pay the
          1/sqrt(N) tax twice or it can never sustain */
       this.prevL=this.prevL||new Float32Array(N); this.prevL.set(this.gL);
-      /* LEVEL ACROSS THE SIZE DIAL. A grain train is quieter than the
-         continuous read it replaces, and by a knowable amount: each grain
-         carries a window (about 0.6 rms against its peak) and the built-in
-         0.5, the grains sum incoherently so the total goes as sqrt of the
-         duty cycle (density x size), and the 1/sqrt(N) normalize takes
-         another bite. Turning size down should change the CHARACTER, not
-         drop the channel 15dB — so when the cloud is doing the loop's
-         reading, that arithmetic is undone. Clamped, because at very low
-         duty the compensation would be asking a handful of grains to carry
-         a whole take. */
-      const duty9=Math.max(0.05,Math.min(6,(C.dens||1)*(C.size||0.1)));
-      const comp9=this.carMute
-        ?Math.max(1,Math.min(8,1/(Math.max(0.15,this.norm)*0.6*0.5*Math.sqrt(duty9))))
-        :1;
-      const gn=C.gain*this.norm*comp9, df=C.dif;
+      /* LEVEL ACROSS THE SIZE DIAL, MEASURED RATHER THAN PREDICTED. The
+         arithmetic version (window rms x 0.5 x sqrt(duty) x norm) got the
+         worst case from 5.7x down to 3x and no further, because two of its
+         terms are not what they claim: norm is slewed and lags a size
+         change, and flow randomises the spacing so the real overlap is not
+         density x size. So this asks instead of deriving. The cloud's
+         own output is compared with the level of the TAKE AT THE POINT THE
+         CARRIER IS READING — which is exactly what the continuous cursor
+         would have put out — and the ratio corrects it. Slewed at 0.02 a
+         block so it cannot chase the diffuser or the feedback tap, and
+         clamped so a near-silent passage cannot demand infinite gain. */
+      if(this.carMute){
+        let cr9=0,n9=0;
+        for(let k=0;k<N;k+=8){cr9+=this.gL[k]*this.gL[k];n9++;}
+        cr9=Math.sqrt(cr9/Math.max(1,n9));
+        let tr9=0; const b9=Math.max(0,Math.min(len-1,Math.round(this.car*len)));
+        for(let q=0;q<24;q++){const v9=SL[(b9+q*97)%len]||0; tr9+=v9*v9;}
+        tr9=Math.sqrt(tr9/24);
+        /* both sides are averaged over time before they are divided. A single
+           block of a 300ms grain train is mostly one grain's middle or one
+           grain's edge, so a per-block ratio chases its own noise — which is
+           what left the long sizes further off than the short ones. */
+        this.cRms=Number.isFinite(this.cRms)?this.cRms+(cr9-this.cRms)*0.06:cr9;
+        this.tRms=Number.isFinite(this.tRms)?this.tRms+(tr9-this.tRms)*0.06:tr9;
+        this.cComp=Number.isFinite(this.cComp)?this.cComp:1;
+        if(this.cRms>2e-4&&this.tRms>2e-4){
+          const want9=Math.max(0.25,Math.min(12,this.tRms/this.cRms));
+          this.cComp+=(want9-this.cComp)*0.05;
+        }
+      }else if(Number.isFinite(this.cComp)&&this.cComp!==1){
+        this.cComp+=(1-this.cComp)*0.05;      // back to unity when the cloud is a voice again
+      }
+      const gn=C.gain*this.norm*(this.carMute?(this.cComp||1):1), df=C.dif;
       for(let k=0;k<N;k++){
         let l9=this.gL[k]*gn, r9=this.gR[k]*gn;
         if(df>0.005){
