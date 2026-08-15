@@ -1026,7 +1026,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.1122';
+const BUILD='2026-08-15.1151';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -3657,6 +3657,17 @@ let fxwReady=false;
             n:0,env:0,rel:0,relAt:0,tp:0};
           this.tv.set(m.id,c9); this.cx.push(c9);}}
         else if(m.t==='toff'){const v=this.tv.get(m.id); if(v)v.rel=1;}
+        /* MOVE A CURSOR RATHER THAN SPAWNING ONE: mono and legato keys send
+           the read head somewhere else instead of stacking another on top.
+           A glide slides the position over the time given, which is what
+           portamento is when the axis is the take rather than the pitch. */
+        else if(m.t==='cmov'){
+          const to=Math.max(0,Math.min(1,+m.pos||0))*(this.len||1);
+          for(const c9 of this.cx){
+            if(c9.bus!==(m.bus|0))continue;
+            if(m.gl>0.001){c9.gTo=to; c9.gK=1/Math.max(1,m.gl*sampleRate);}
+            else {c9.ph=to; c9.gTo=null;}
+          }}
         /* LIVE RE-AIM. Pitch, speed, tempo and the crop used to reach a
            cursor only at its birth, so every one of them meant "next time":
            you turned a knob under a sounding take and nothing moved. The
@@ -3764,6 +3775,10 @@ let fxwReady=false;
             amp=c.env*c.gain;
           }
           if(c.step!==c.sTgt)c.step+=(c.sTgt-c.step)*sT;   // a bend glides, it does not step
+          if(c.gTo!=null){                                 // …and so does a move
+            c.ph+=(c.gTo-c.ph)*c.gK;
+            if(Math.abs(c.gTo-c.ph)<2)c.gTo=null;
+          }
           let l9,r9;
           if(c.shift!==1){
             /* PITCH INSIDE THE CURSOR: the head keeps the source's timing and
@@ -3935,11 +3950,14 @@ let fxwReady=false;
             const st9=Math.max(0,Math.min(len-2,
               (base9+(Math.random()*2-1)*C.spray*0.5)*len));
             const step9=v.ratio*Math.pow(2,(C.semis+(Math.random()*2-1)*C.jit)/12);
-            const rev9=Math.random()<C.rev, pan9=(Math.random()*2-1)*C.width;
-            const th9=(pan9+1)*0.25*Math.PI;
+            const rev9=Math.random()<C.rev;
+            /* A WHOLE NOTE IS NOT A GRAIN: throwing it to a random point in
+               the field the way the spray does gave every key a different
+               place in the stereo picture, which reads as the sound jumping
+               about rather than as width. It keeps the take's own stereo. */
             this.cx.push({bus:0,wrap:1,dur:Infinity,vs:id,shp:C.shape,shift:1,ch:0,fr:0,
               ph:st9,step:rev9?-step9:step9,sTgt:rev9?-step9:step9,
-              n:0,vel:v.vel*0.5,gl:Math.cos(th9),gr:Math.sin(th9),
+              n:0,vel:v.vel*0.5,gl:1,gr:1,
               gain:1,env:1,rel:0,relAt:0,life:1e12,end:len,tp:0,id:null});
             this.ng++;
           }
@@ -4209,9 +4227,10 @@ function scheduleRange(from,to){
             let tt=t+(nudA?((nudA.p1||0)/1000)/spb():0);
             if(hmzA){const rng=(hmzA.p1||0)/1000/spb();
               tt+=(h9(ev.t*13.7+cyc*4.3)*2-1)*rng;}
-            const cu=(au2.cues||{})[ev.cue]||{};
+            const cu=Object.assign({},(au2.cues||{})[ev.cue]||{},
+              {frac:cutAt(li,ev.cue)});
             const dj2=clamp(ev.dur||0.25,0.05,L2);
-            const skp=clamp(ev.cue*0.25+(cu.o||0),0,L2-0.01);
+            const skp=0;
             const divs=rtcA?(Math.round(rtcA.p1??0)>=2?clamp(Math.round(rtcA.p1),2,16):0):0;
             engine.audStop(li,timeAt(tt+a.anchor));
             /* THE LENGTH ARGUMENT IS THE LOOP, NOT THE GESTURE. audPlay reads
@@ -7814,7 +7833,12 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     const ovR=(this.audOv&&this.audOv[pi]||{}).rate;
     const baseRate=(Math.round(au.fit)&&ovR===undefined)?dur/loopSec:(au.rate??1);
     const rate=sync?baseRate:baseRate*Math.pow(2,semis/12);
-    const skipSec=skipBeats*spb(), skipBuf=skipSec*rate;
+    /* a cue that names a transient carries the place itself; the beat skip is
+       what the auto cursor and the recorded jam still speak in */
+    const skipSec=skipBeats*spb();
+    const skipBuf=(cue&&Number.isFinite(cue.frac))
+      ?clamp(cue.frac*buf.duration-off,0,Math.max(0,dur-0.01))
+      :skipSec*rate;
     if(skipBuf>=dur-0.001)return;
     /* what this play was asked for, so a knob turned under it can work out
        the same numbers again without guessing the loop length */
@@ -7845,6 +7869,24 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
   /* END ONE CURSOR. audStop is a broadcast — every cursor on the channel goes
      — which is exactly right for a jump that replaces the loop and exactly
      wrong once several keys are each holding their own. */
+  /* the cut list for a channel, cached against the take and the crop */
+  audCuts(pi){
+    const buf=this.audBuf[pi]; if(!buf)return null;
+    const au=S.presets[pi].au||{};
+    const st=clamp(au.st??0,0,0.98), en=clamp(au.en??1,st+0.01,1);
+    const key=bufId(buf)+'|'+st.toFixed(4)+'|'+en.toFixed(4);
+    this._cuts=this._cuts||[];
+    const c=this._cuts[pi];
+    if(c&&c.key===key)return c.a;
+    const a=detectCuts(buf,st,en,KBSEQ.length);
+    this._cuts[pi]={key,a};
+    return a;
+  }
+  /* mono/legato: send the cursors that are already reading somewhere else */
+  audMove(pi,frac,glideSec,bus){
+    const e9=this.gn&&this.gn[pi]; if(!e9||!e9.node)return;
+    try{e9.node.port.postMessage({t:'cmov',pos:frac,gl:glideSec||0,bus:bus|0});}catch(_){}
+  }
   audOff(pi,id){
     const e9=this.gn&&this.gn[pi]; if(!e9||!e9.node||!id)return;
     try{e9.node.port.postMessage({t:'toff',id});}catch(_){}
@@ -9941,6 +9983,7 @@ function prsFieldDefs(){
     chEng, chSmp,
     {k:'keys mode',v:()=>kmodeOf(p)?'pitch':'position'},
     {k:'auto',v:()=>autoCur(p)?'loop':'off'},
+    {k:'voice',v:()=>['poly','mono','legato'][clamp(Math.round((p.vox||{}).mode||0),0,2)]},
     ...(kmodeOf(p)?[{k:'start',v:()=>Math.round((p.au||{}).start||0)?'here':'pos'}]:[]),
     {k:'input', v:()=>['mic','mstr'][Math.round((p.au||{}).src||0)]},
     {k:'chan',  v:()=>['stereo','left','right'][clamp(Math.round((p.au||{}).chan||0),0,2)]},
@@ -9973,7 +10016,7 @@ const GRANF=[
    fmt:v=>v>=0.999?'\u221e tape':Math.round(v*1000)+'ms'}),
  SP('dens','dens','lin',{min:0.5,max:120,step:0.5,fmt:v=>v+'/s'}),
  SP('flow','flow','lin',{min:0,max:1,step:0.05,fmt:v=>v<0.02?'lock':Math.round(v*100)+'%'}),
- SP('pitch','semis','lin',{min:-24,max:24,step:1,fmt:v=>v+'st'}),
+ SP('gpitch','semis','lin',{min:-24,max:24,step:1,fmt:v=>v+'st'}),
  SP('jit','jit','lin',{min:0,max:12,step:0.5,fmt:v=>'\u00b1'+v+'st'}),
  SP('shape','shape','lin',{min:0,max:1,step:0.05}),
  SP('rev','rev','lin',{min:0,max:1,step:0.05,fmt:v=>Math.round(v*100)+'%'}),
@@ -10221,7 +10264,7 @@ function _prsAction(d){
     dirty=true; dirtySave=true; return;
   }
   if(p.cat==='audio'
-     &&['keys mode','auto','start','input','chan','gain'].includes(f)){
+     &&['keys mode','auto','start','voice','input','chan','gain'].includes(f)){
     pushUndo('audio setup');
     p.au=p.au||{};
     if(f==='keys mode'){
@@ -10237,6 +10280,15 @@ function _prsAction(d){
       p.au.auto=autoCur(p)?0:1;
       if(!p.au.auto)engine.audStop(pi,AC.currentTime+0.01);
       flash('auto cursor '+(p.au.auto?'loops':'off — the keys are the only playheads'));
+    }
+    else if(f==='voice'){
+      /* the same three the synth voices have, because a cursor is a voice:
+         poly spawns one per key, mono keeps ONE and moves it, legato does
+         that and glides between where it was and where you sent it. */
+      p.vox=p.vox||{};
+      p.vox.mode=fmod(Math.round(p.vox.mode||0)+(d>0?1:-1),3);
+      flash('voice → '+['poly (a cursor per key)','mono (one cursor, moved)',
+        'legato (one cursor, glided)'][p.vox.mode]);
     }
     else if(f==='start'){
       p.au.start=Math.round(p.au.start||0)?0:1;
@@ -13173,6 +13225,70 @@ const resolveModel=n=>{
 const procSrc = p => _PRE + ((p.pmodel && PROCLIB[resolveModel(p.pmodel)]) ? PROCLIB[resolveModel(p.pmodel)].src : CODE_DEFAULT);
 
 
+/* CUE POINTS FIND THE HITS. Dividing the loop into sixteenths put a key on
+   every grid line whether or not anything happened there, so half the letters
+   landed in the middle of a note and the take's own rhythm was something you
+   had to hunt for by ear. This walks the playable range — inside start and
+   end, which is the part that can sound at all — takes a 5ms energy envelope,
+   keeps what rises above its own moving average, and picks the strongest
+   peaks that are at least 30ms apart. Fewer hits than letters is normal on a
+   sparse take: the widest gaps are split until every letter has somewhere to
+   land, so the run always covers the whole take end to end. */
+/* where cue N sits in the take: the detected hit, plus whatever the cue's own
+   nudge has moved it by (still in beats, because that is what nudging against
+   a grid means) */
+function cutAt(pi,sl){
+  const cuts=engine.audCuts(pi); if(!cuts||!cuts.length)return 0;
+  const buf=engine.audBuf[pi], au=S.presets[pi].au||{};
+  const base=cuts[clamp(sl,0,cuts.length-1)];
+  const o=(au.cues||{})[sl]&&(au.cues[sl].o||0);
+  if(!o||!buf)return base;
+  return clamp(base+(o*spb())/buf.duration,0,1);
+}
+function detectCuts(buf,st,en,n){
+  const d=buf.getChannelData(0), sr=buf.sampleRate, N=d.length;
+  const i0=Math.max(0,Math.floor(st*N)), i1=Math.min(N,Math.floor(en*N));
+  if(i1-i0<64)return [st];
+  const hop=Math.max(64,Math.round(sr*0.005)), win=hop*2;
+  const nb=Math.max(4,Math.floor((i1-i0)/hop));
+  const env=new Float32Array(nb);
+  for(let b=0;b<nb;b++){
+    const a0=i0+b*hop, a1=Math.min(i1,a0+win);
+    let s2=0; for(let i=a0;i<a1;i++)s2+=d[i]*d[i];
+    env[b]=Math.sqrt(s2/Math.max(1,a1-a0));
+  }
+  const flux=new Float32Array(nb);
+  let avg=env[0]||0;
+  for(let b=0;b<nb;b++){avg+=(env[b]-avg)*0.15; flux[b]=Math.max(0,env[b]-avg*1.05);}
+  const minGap=Math.max(2,Math.round(0.03*sr/hop));
+  const peaks=[];
+  for(let b=1;b<nb-1;b++)
+    if(flux[b]>0&&flux[b]>flux[b-1]&&flux[b]>=flux[b+1])peaks.push([b,flux[b]]);
+  peaks.sort((x,y)=>y[1]-x[1]);
+  const chosen=[];
+  for(const [b] of peaks){
+    if(chosen.length>=n)break;
+    if(chosen.every(q=>Math.abs(q-b)>=minGap))chosen.push(b);
+  }
+  chosen.sort((a,b)=>a-b);
+  const fr=chosen.map(b=>(i0+b*hop)/N).filter(f=>f>st+1e-6&&f<en-1e-6);
+  /* the take's own start is a cut — unless the first hit IS the start, which
+     it usually is, and then two keys would land 20ms apart */
+  if(!fr.length||fr[0]-st>0.02*sr/N)fr.unshift(st);
+  for(let i=fr.length-1;i>0;i--)                     // no two cuts within 40ms
+    if(fr[i]-fr[i-1]<0.04*sr/N)fr.splice(i,1);
+  while(fr.length<n){                               // sparse take: split the widest gap
+    let gi=0,gw=-1;
+    for(let i=0;i<fr.length;i++){
+      const hi=i+1<fr.length?fr[i+1]:en, w=hi-fr[i];
+      if(w>gw){gw=w;gi=i;}
+    }
+    if(gw<=1e-5)break;
+    const hi=gi+1<fr.length?fr[gi+1]:en;
+    fr.splice(gi+1,0,(fr[gi]+hi)/2);
+  }
+  return fr.slice(0,n);
+}
 function audPlace(pi,rec,startBeat,name='mic'){
   /* SILENCE IS NOT A TAKE. A muted mic, a denied permission, a channel with
      nothing routed to it — all of them used to overwrite a loaded sample
@@ -14308,9 +14424,8 @@ const onKeyDown=e=>{
        edited cue, leaving any other held keys alone */
     const L=S.patterns[S.editPat].lanes[pi].len;
     if(AUD.hold.tid)engine.audOff(pi,AUD.hold.tid);
-    AUD.hold.tid=engine.audPlay(pi,AC.currentTime+0.006,L,
-      clamp(sl*0.25+(cue.o||0),0,L-0.01),
-      Object.assign({},cue,{vel:AUD.hold.vel??1}));
+    AUD.hold.tid=engine.audPlay(pi,AC.currentTime+0.006,L,0,
+      Object.assign({},cue,{vel:AUD.hold.vel??1,frac:cutAt(pi,sl)}));
     dirty=true; dirtySave=true; return;
   }
   if((c==='Equal'||c==='Minus')&&!e.metaKey&&!altOf(e)&&!HOLD.tab&&!PICK&&!DPICK){
@@ -15327,7 +15442,11 @@ const onKeyDown=e=>{
           engine._ctrlPut('grn',pi,0,'pos',posF);
         }
         const midiF=60+S.oct*12+(kbNote(c,true)??0)+trSemis(p9);
-        const vel9=EXP.take();
+        /* hitVel, not another take(): the note path above has already
+           consumed the pending velocity, so asking again returned the
+           keyboard's flat default — which is why nothing on this channel
+           responded to how hard it was played. */
+        const vel9=hitVel;
         const t0f=gridNow(), gf=gridOf(lane);
         const trf=CFG.qOn?qnext(t0f,gf)*(lane.qlive??1)+t0f*(1-(lane.qlive??1)):t0f;
         /* A HOLD PER KEY. AUD.hold is one slot, which was fine when a key
@@ -15352,7 +15471,10 @@ const onKeyDown=e=>{
           ' · vel '+Math.round(vel9*127)+(ms9>=2?' · on the grid':''));
         dirty=true; return;
       }
-      const nS=Math.max(1,Math.round(L/0.25));
+      /* the letters ARE the hits, in time order: z is the take's start, and
+         each key after it the next transient along */
+      const cuts9=engine.audCuts(pi)||[];
+      const nS=Math.max(1,cuts9.length);
       const ki=KBSEQ.indexOf(c); if(ki<0)return;
       const sl=ki%nS;
       const au=S.presets[pi].au; au.cues=au.cues||{};
@@ -15367,11 +15489,24 @@ const onKeyDown=e=>{
          broadcast stop. Each key owns its cursor now, so a chord of cue keys
          is a chord of playheads at different points in the take. */
       AUD.gk=AUD.gk||{};
-      const vel9=EXP.take();
+      const vel9=hitVel;
       const hj={c,pi,kind:'pos',sl,vel:vel9,tid:null,press:AC.currentTime,tr:Math.max(t0j,trj)};
       AUD.gk[c]=hj; AUD.hold=hj;
       const first9=Object.keys(AUD.gk).length===1;
       const atP=Math.max(AC.currentTime+0.005,CFG.qOn?gridTime(hj.tr):0);
+      /* MONO AND LEGATO DO NOT SPAWN — they MOVE what is already reading, so
+         the loop keeps rolling and the key changes where it reads from. That
+         is the difference he asked for: poly adds a head on top, mono moves
+         the one head you have, legato slides it there. */
+      const vm9=clamp(Math.round((S.presets[pi].vox||{}).mode||0),0,2);
+      if(vm9>0&&(autoCur(S.presets[pi])||!first9)){
+        const gl9=vm9===2?Math.max(0.01,(S.presets[pi].vox||{}).glide||0.08):0;
+        const ms0=Math.max(0,(atP-AC.currentTime)*1000);
+        const go=()=>engine.audMove(pi,cutAt(pi,sl),gl9,1);
+        if(ms0<2)go(); else setTimeout(go,ms0);
+        flash('cue '+(sl+1)+'/'+nS+' · '+(vm9===2?'glide':'moved'));
+        dirty=true; return;
+      }
       /* THE AUTO CURSOR DIES AT THE JUMP, NOT AT THE KEYPRESS — stopping on
          the way in cut the tape the moment your finger moved and left a hole
          until quantize came round. Only the FIRST key does it: the ones after
@@ -15394,15 +15529,15 @@ const onKeyDown=e=>{
         engine.granBuf=engine.granBuf||[];
         if(!engine.granBuf[pi]&&buf9){engine.granBuf[pi]=buf9;engine.granSend(pi);}
         engine.granCfg(pi);
-        engine._ctrlPut('grn',pi,0,'pos',fr9);
+        engine._ctrlPut('grn',pi,0,'pos',cutAt(pi,sl));
         const ms9=Math.max(0,(atP-AC.currentTime)*1000);
         const fire9=()=>{ if(!AUD.hold||AUD.hold.c!==c)return;
           AUD.hold.gsh=engine.granNote(AC.currentTime+0.004,pi,
-            60+(cue.semis||0),(cue.vol??1)*EXP.take(),null);};
+            60+(cue.semis||0),(cue.vol??1)*vel9,null);};
         if(ms9<2)fire9(); else setTimeout(fire9,ms9);
       }else{
-        hj.tid=engine.audPlay(pi,atP,L,clamp(sl*0.25+(cue.o||0),0,L-0.01),
-          Object.assign({},cue,{vel:vel9}));
+        hj.tid=engine.audPlay(pi,atP,L,0,
+          Object.assign({},cue,{vel:vel9,frac:cutAt(pi,sl)}));
       }
       flash('cue '+(sl+1)+'/'+nS+(cue.semis?' '+(cue.semis>0?'+':'')+cue.semis+'st':'')+
         (cue.o?' @'+(sl*0.25+cue.o).toFixed(2)+'b':'')+
@@ -15909,7 +16044,12 @@ const onKeyUp=e=>{
         dirtySave=true;
       }
     }
-    if(T.playing){                    // resume the cycle exactly in phase
+    /* RESUME ONLY WHAT WAS RUNNING. Letting go of a cue restarted the cycle
+       in phase whether or not the auto cursor was on — so with auto OFF, a
+       grab you released handed you the take playing from the loop position,
+       all the way to its end, sounding for all the world like the cue had
+       never stopped. */
+    if(T.playing&&autoCur(S.presets[pi])&&!others9){
       const a2=actAt(posNow());
       engine.audPlay(pi,AC.currentTime+0.006,L,fmod(posNow()-a2.anchor,L));
     }
@@ -17480,11 +17620,13 @@ function gridHTML(pat,pos,anc,chans){
           const f9=frOf(b9); if(f9<=0.002||f9>=en9)continue;
           ct+='<i class="bart" style="top:'+(f9*H).toFixed(1)+'px"></i>';
         }
-        for(const k2 in cues){const cu=cues[k2];
-          const bt=(+k2*0.25+(cu.o||0));
-          if(bt<0||bt>=LN2)continue;
-          const fr9=frOf(bt);
-          if(fr9<0||fr9>=en9)continue;      // past the end of the take: nothing to jump to
+        /* the cue marks are the cuts themselves now — no beat arithmetic in
+           between, because a transient is a place in the take, not a beat */
+        const cutL=engine.audCuts(i)||[];
+        for(let k2=0;k2<cutL.length;k2++){
+          const cu=cues[k2]||{};
+          const fr9=cutAt(i,k2);
+          if(fr9<0||fr9>=en9)continue;
           /* A CUE CARRIES ITS OWN LEVEL, and a cue at zero is a key that
              does nothing with nothing on screen to say why. The tick and its
              letter now dim with the cue's volume and strike through at
@@ -17492,7 +17634,7 @@ function gridHTML(pat,pos,anc,chans){
           const vol9=cu.vol??1, sil9=vol9<0.005;
           ct+='<i class="cuet" style="top:'+(fr9*H).toFixed(1)+'px;opacity:'+
               (sil9?0.2:0.35+0.4*Math.min(1,vol9)).toFixed(2)+'"></i>';
-          const lk=KBSEQ[+k2];
+          const lk=KBSEQ[k2];
           if(lk&&Math.round(au9.kmode||0)===0)
             ct+='<i class="cuel'+(sil9?' off':'')+'" style="top:'+(fr9*H-6).toFixed(1)+
                 'px;opacity:'+(sil9?0.5:0.45+0.35*Math.min(1,vol9)).toFixed(2)+'">'+
