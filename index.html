@@ -1031,7 +1031,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.1526';
+const BUILD='2026-08-15.1538';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -5057,6 +5057,28 @@ class Voice{
          `target` whenever op 0 is tonal (rootFreq IS toneFreq there), and the
          whole fix when it is not */
       const tTarget=target*(this.rootFreq>0?this.toneFreq/this.rootFreq:1);
+      /* WHO IS SCANNING WHOM. Scan has meant one thing since it shipped — "my
+         playhead is your waveform" — which puts the mode on the SAMPLE and
+         makes it the only op mode that points BACKWARDS. fm, ring and pm all
+         read "I do this TO my dest"; scan alone read "I take this FROM my
+         dest", so setting the op AFTER a sample to scan did nothing at all,
+         which is precisely what you would try first.
+         It reads both ways now. An op in scan mode pointed at a sample DRIVES
+         that sample's playhead, and the sample is the thing you hear; the
+         driver goes silent, the way every other modulator does. Which spelling
+         you meant is never ambiguous, because only one of the two ops is
+         holding a buffer. */
+      const scanDriver={}, scanDrives={};
+      for(let j=1;j<10;j++){
+        const o2=ops[j];
+        if(!o2||o2.off||o2.amt<=0.001||Math.round(o2.mode)!==5||o2.wav===9)continue;
+        let t=(o2.dst|0)>0?(o2.dst|0)-1:-1;
+        if(t<0||t===j)for(let k=j-1;k>=0;k--){
+          const o3=ops[k]; if(o3&&!o3.off&&(k===0||o3.amt>0.001)){t=k;break;}}
+        if(t>=0&&t!==j&&ops[t]&&ops[t].wav===9&&scanDriver[t]===undefined){
+          scanDriver[t]=j; scanDrives[j]=t;
+        }
+      }
       for(let i=1;i<10;i++){
         const op=ops[i]; if(!op||op.amt<=0.001||op.off)continue;
         const wv=op.wav;
@@ -5068,7 +5090,7 @@ class Voice{
         const mf=sync?tTarget*syncMasterRat(ops,i):0;
         const fi=sync?mf:tTarget*op.rat*Math.pow(2,(op.fine||0)/1200);
         let s2, scanned=false;
-        if(wv===9&&Math.round(op.mode)===5&&fxwReady){
+        if(wv===9&&(Math.round(op.mode)===5||scanDriver[i]!==undefined)&&fxwReady){
           /* SCAN: this sample's playhead is its dst/prev op's WAVEFORM. No
              BufferSource at all — a worklet reads wherever the driver says.
              (the buffer crosses the port per note: audition build; a shared
@@ -5123,7 +5145,7 @@ class Voice{
         else{s2=ac.createOscillator();
           E.setWave(s2,wv,op.phm===1?Math.random()*360:op.ph,op.pw);
           setF(s2.frequency,fi);}
-        built.push({i,s:s2,osc:!isNoiseW(wv)&&wv!==9&&!scanned,f:fi,op,scan:scanned});
+        built.push({i,s:s2,osc:!isNoiseW(wv)&&wv!==9&&!scanned,f:fi,op,scan:scanned,drv:scanDrives[i]});
         (this.opNodes[i]=this.opNodes[i]||[]).push(s2);
         if(!isNoiseW(wv)&&wv!==9&&wv!==14){
           (this.opPitch[i]=this.opPitch[i]||[]).push({pm:s2.frequency,base:fi,kind:sync?'sync':'osc'});
@@ -5188,6 +5210,10 @@ class Voice{
           (this.opGains[b.i]=this.opGains[b.i]||[]).push(sg);
           (this.opAmt[b.i]=this.opAmt[b.i]||[]).push({g:sg,sc:1});
         }else{                                    // 'add' and 'sync' both just sum
+          /* …but a scan DRIVER is a modulator, not a voice. It is only there to
+             say where the sample is read from, and summing it in would put a
+             raw sine on top of the sample it is steering. */
+          if(b.drv!==undefined)continue;
           const ob=this.opBias&&this.opBias[b.i]?1+this.opBias[b.i]:1;
           const og=ac.createGain(); og.gain.value=clamp(b.op.amt*0.9*ob,0,4);
           b.s.connect(og); outN[b.i]=og;
@@ -5199,7 +5225,9 @@ class Voice{
          Runs after every op exists so a scan can read any slot, either side. */
       for(const b of built){
         if(!b.scan)continue;
-        const j=tgtOf(b), tb=built.find(x=>x.i===j);
+        /* driven from the other side when someone is pointing AT this sample */
+        const j=scanDriver[b.i]!==undefined?scanDriver[b.i]:tgtOf(b);
+        const tb=built.find(x=>x.i===j);
         if(tb&&tb.s&&tb.s.connect){try{tb.s.connect(b.s);}catch(_){}}
       }
       let node=sum;
@@ -5625,6 +5653,15 @@ class Engine{
   constructor(){
     const ac=AC;
     this.master=ac.createGain(); this.master.gain.value=0.8;
+    /* THE ONE FADER IN THE INSTRUMENT NOBODY COULD MOVE. The master strip has
+       had a fader drawn in the mix row since the row existed, permanently at
+       the top, because the gain behind it was set to 0.8 here and never
+       written again — there is no bus 0 to turn down, the master is a gain of
+       its own at the end of the chain. S.mLvl is that fader, and it starts
+       exactly where the number always was, so opening an old set changes
+       nothing you can hear. */
+    this.setMaster=()=>{try{this.master.gain.setTargetAtTime(
+      clamp(S.mLvl??0.8,0,1),AC.currentTime,0.02);}catch(_){}};
     this.comp=ac.createDynamicsCompressor();
     this.master.connect(this.comp); this.comp.connect(ac.destination);
     this.mSum=ac.createGain();                       // channel sum -> master insert chain
@@ -9882,7 +9919,8 @@ function layerInit(){
     flash('⟲ every channel re-initialized — lanes empty, 1 bar, listening');
   }else if(S.layer===-2){
     pushUndo('master init');
-    S.master=mkMaster(); S.dj=DJ0();
+    S.master=mkMaster(); S.dj=DJ0(); S.mLvl=0.8;
+    if(engine&&engine.setMaster)engine.setMaster();
     engine.rebuildMaster(); djApply(true);
     flash('⟲ master rack + dj pads re-initialized');
   }
@@ -14841,6 +14879,18 @@ const onKeyDown=e=>{
   if((c==='Equal'||c==='Minus')&&!e.metaKey&&!altOf(e)&&!HOLD.tab&&!PICK&&!DPICK){
     e.preventDefault();
     const d=c==='Equal'?1:-1, st=rs(e)?10:1;
+    /* ON THE MASTER, -/= MOVES THE MASTER. chTargets() answers [0] here, and
+       channel 0 is the master's SLOT in the strip rather than a bus — so this
+       was writing the mix level of a preset nothing plays through, which is
+       why turning the whole thing down was the one move the instrument could
+       not make. Same fader curve as a channel, all the way to silence. */
+    if(S.mSel&&S.layer<2){
+      pushUndo('master volume');
+      S.mLvl=+fToVol(clamp(volToF(S.mLvl??0.8)+d*st,0,100)).toFixed(4);
+      engine.setMaster();
+      chSay('MASTER vol '+volToF(S.mLvl).toFixed(0),1);
+      dirty=true; dirtySave=true; return;
+    }
     const tg=chTargets();
     pushUndo('volume');
     tg.forEach(i=>{const pc=S.presets[i];
@@ -16784,7 +16834,7 @@ function portPreset(p,out){
   if(Array.isArray(q.kit))q.kit=q.kit.map(k=>k?portPreset(k,out):null);
   return q;
 }
-function serialize(){return JSON.stringify({v:SAVEV,bpm:T.bpm,metro:S.metro,hum:S.hum,grv:S.grv,oct:S.oct,master:S.master,dj:S.dj,gmT:S.gmT||[],arrOn:S.arrOn!==false,
+function serialize(){return JSON.stringify({v:SAVEV,bpm:T.bpm,metro:S.metro,hum:S.hum,grv:S.grv,oct:S.oct,master:S.master,mLvl:S.mLvl??0.8,dj:S.dj,gmT:S.gmT||[],arrOn:S.arrOn!==false,
   clips:S.clips,scenes:S.scenes,clipAt:S.clipAt,sceneAt:S.sceneAt,
   arr:S.arr,
   patterns:S.patterns.map(p=>({state:p.state==='edit'?'on':p.state,sw:p.sw||0,lanes:p.lanes})),
@@ -16825,6 +16875,10 @@ function load(json){
     S.master=Array.isArray(o.master)
       ?o.master.map((m,i)=>({typ:0,rt:0,p1:0.3,p2:0.3,p3:0.5,mix:0.3,...m}))
       :mkMaster();
+    /* the master fader travels with the set, like every other level. An old
+       save has none, and the value it did not know it had was 0.8. */
+    S.mLvl=Number.isFinite(o.mLvl)?clamp(o.mLvl,0,1):0.8;
+    if(typeof engine!=='undefined'&&engine&&engine.setMaster)engine.setMaster();
     if(o.v<17)fx17(S.master);            // drv/crush → dist · verb size curve
     if(o.v<9&&S.master[9]&&!S.master[9].typ)S.master[9]={typ:15,rt:0,p1:0.85,p2:0.3,p3:0.5,mix:0};
     // v<18 stored one octave per channel — carry over the one you used MOST
@@ -18398,7 +18452,7 @@ function meterRow(LN,PR,peeking){
     const mx=PR(i).mix||{lvl:0.8,pan:0};
     return mixCell(mx.lvl,mx.pan,audible?chLevel(i):0,audible);
   }, sp('d',pad('Mix',GUTW)),
-     mixCell(S.mLvl!==undefined?S.mLvl:1,0,peeking?0:masterLevel(),!peeking));
+     mixCell(S.mLvl??0.8,0,peeking?0:masterLevel(),!peeking));
 }
 /* WHERE EACH AUTOMATED KNOB STARTS THE BAR. One small dot per automated
    parameter, sitting at the top of that channel's own column at the x its
