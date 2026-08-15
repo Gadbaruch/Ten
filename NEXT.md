@@ -121,6 +121,33 @@ carrier sampled every 150ms across a x4 length change whose old cycle ended at
 handler, ahead of the audio channel's own three meanings for it, or the
 gesture would mean different things on different channels.
 
+## 0. THE FILTER ENVELOPE'S RESTING POINT — diagnosed, not fixed
+
+Gad: play a long note, let it settle, tweak the cutoff by ear, and the NEXT
+note's sustain does not land where you put it. Reproduced and the arithmetic
+is exact. In the dst===3 env block:
+
+    base    = the stored cutoff
+    peak    = base · 2^(amt/100·5)
+    sustain = base + (peak−base)·s  =  base · K,  K = 1+(2^(amt/100·5)−1)·s
+
+So the knob writes the FLOOR while your ear is tuning the SUSTAIN, and the
+next note re-derives the sweep from the new floor.
+
+THE FIX, and it is the same principle that killed `center`: the stored value
+is the RESTING value. Divide it back out by K to find where the sweep starts,
+and migrate old patches by multiplying by K so they settle exactly where they
+always did (verified in isolation: 800 → 8000 matches the old sustain for
+amt 80 / s 0.6). s then says how much extra the ATTACK adds, and the resting
+point stops moving when you change it.
+
+NOT SHIPPED. It changes every filter envelope in the instrument and the probe
+harness could not confirm the live value — a sounding voice read 350Hz where
+the maths says 1000, which means the filter node is being built from something
+other than the stored frq and THAT has to be understood first. Do not land
+this without reading a real note's filter frequency at sustain and watching it
+match the dial.
+
 ## What is next, in order
 
 0. **MAGNETIZE THE SCOPE HOLDS — DONE.** A held nav scope is a complete little

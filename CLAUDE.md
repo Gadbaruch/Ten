@@ -155,7 +155,7 @@ modifier of it.** Any new modifier in a scope gets asked that question.
 
 Rearranged 2026-08-15 (Gad). Each one now means exactly one thing:
 
-    win (ScrollLock/Pause/Insert)  LATCH — notes, scopes, rec, mute/solo.
+    ` (and ScrollLock/Pause/Insert)  LATCH — notes, scopes, rec, mute/solo.
                                    `KM.sl`, and every reader of it is
                                    unchanged: only who SETS it moved.
     left shift   `KM.shl`          GLOBAL — and it SILENCES the keyboard while
@@ -167,9 +167,16 @@ Rearranged 2026-08-15 (Gad). Each one now means exactly one thing:
                                    ⇧m click · ⇧esc settings. `gblOf()`.
     right shift  `KM.sr`           NAVIGATION and DIALS only — loop lengths,
                                    the coarse step, walking a rack. `rs()`.
-    left ctrl    `HOLD.t`          TOOLS — c/x/v, z (⇧z redo), s. A second ⌘.
-                 `TOOLKEY`         …and PrintScreen, because Gad's board
-                                   remaps its left control to it.
+    left ⌥       `HOLD.t`          TOOLS — c/x/v, z (⇧z redo), s. A second ⌘.
+    left ctrl    `KM.scp`          THE CHANNEL'S SCOPES (what ⌥ used to be).
+                 `SCOPEKEY`        Defaults ControlLeft + NumLock; learnable.
+       ⌥ and ctrl SWAPPED (Gad, 2026-08-15). Everything still calls altOf() —
+       only what it asks changed, which is what makes a swap this wide safe.
+       Every scope handler had a `!e.ctrlKey` guard meaning "a modified letter
+       is not a note"; control IS the scope modifier now, so those guards were
+       refusing the scope its own key and had to go. gblOf dropped ctrl for the
+       same reason — ctrl+q would have been the quality scope AND quantize.
+                 `TOOLKEY`         Defaults AltLeft/AltRight; learnable.
        **TOOLS IS ARMED, NOT HELD.** PrintScreen does not deliver a normal
        press: the OS treats it as a ONE-SHOT and sends keydown and keyup
        together, or only the keyup. It worked as the mic because mic on/off is

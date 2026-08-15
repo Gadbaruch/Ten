@@ -1108,7 +1108,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.2241';
+const BUILD='2026-08-15.2250';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1193,6 +1193,9 @@ const SETTINGS=[
  {n:'tools key',g:'Input', v:()=>TOOLLEARN?'press it now…':(CFG.toolKey||'ctrl / prtsc'),
    a:d=>{ if(d<0&&CFG.toolKey){CFG.toolKey=null; saveCfg(); flash('tools key back to ctrl / prtsc'); return;}
           TOOLLEARN=true; flash('press the key you want for TOOLS — esc cancels'); }},
+ {n:'scope key',g:'Input', v:()=>SCOPELEARN?'press it now…':(CFG.scopeKey||'ctrl / numlock'),
+   a:d=>{ if(d<0&&CFG.scopeKey){CFG.scopeKey=null; saveCfg(); flash('scope key back to ctrl / numlock'); return;}
+          SCOPELEARN=true; flash('press the key you want for the CHANNEL SCOPES — esc cancels'); }},
  {n:'last key',g:'Input', v:()=>LASTKEY||'— nothing yet',
    a:()=>flash(LASTKEY?('last key the page saw: '+LASTKEY):'no key has reached TEN yet')},
  {n:'h trig',g:'Input',h:()=>!HE.on,v:()=>Math.round(HE.cfg().trig*100)+'%', a:d=>HE.set('trig',clamp(HE.cfg().trig+d*0.01,0.02,1))},
@@ -2553,16 +2556,26 @@ function adjust(spec,v,dir,m=1){
    inside a held scope had to stop arming the latch so it could be the coarse
    step. With latch elsewhere, ⇧ can be both again — it is not the latch at
    all any more. */
-const KM={sl:false,shl:false,sr:false,srLatch:false,altLatch:false};
+const KM={sl:false,shl:false,sr:false,srLatch:false,altLatch:false,scp:false};
 /* WHAT THE LATCH IS, physically. Gad's board sends one of these from its win
    key — macOS binds none of them, which is exactly why they were already the
    sound scope's stand-ins before the sound scope moved to backslash. */
-const LATCHKEY=c=>c==='ScrollLock'||c==='Pause'||c==='Insert';
+const LATCHKEY=c=>c==='Backquote'||c==='ScrollLock'||c==='Pause'||c==='Insert';
 /* Latch works on the MODIFIERS too: hold latch, tap shift or option, and it
    stays down until you tap it again. Two-handed chords on a laptop keyboard
    are the thing that stops being playable first. */
 const rs=e=>KM.srLatch||(!!e.shiftKey&&(KM.sr||!KM.shl));
-const altOf=e=>KM.altLatch||!!e.altKey;
+/* THE SCOPE MODIFIER, and it is not ⌥ any more. Gad's rearrangement: ⌥ is
+   TOOLS (a second ⌘, under the left thumb where copy and undo belong) and the
+   key in the LEFT CONTROL position opens the channel's scopes. Every one of
+   the thirty-odd readers still calls altOf() — only what it asks changed, which
+   is what makes a swap this wide safe to make at all.
+   KM.scp is set by whichever key that position actually SENDS: a real
+   ControlLeft, NumLock (what Gad's board is remapped to now — a proper
+   press you can hold, unlike PrintScreen, which is a one-shot and is exactly
+   why tools kept doing nothing), or anything learned into `scope key`. */
+const SCOPEKEY=c=>c===CFG.scopeKey||(!CFG.scopeKey&&(c==='ControlLeft'||c==='NumLock'));
+const altOf=e=>KM.altLatch||KM.scp;
 /* ⌘ IS ⌘ AND ⌃ IS NOT. Control used to stand in for command so the shortcuts
    worked on a PC, which was fine while control meant nothing on its own — it
    is the FUNCTION LAYER now, and ⌃c has to be "hold volume", not "copy". */
@@ -2579,7 +2592,7 @@ function armTools(code){
      must not read as two. Anything inside 250ms of the last edge is the same
      press still finishing; a genuine second tap after that puts the layer
      away, so it can always be cancelled. */
-  if(HOLD.t&&code!=='ControlLeft'&&now-TOOLAT>250){disarmTools(1); flash('tools off'); return;}
+  if(HOLD.t&&code!=='AltLeft'&&code!=='AltRight'&&now-TOOLAT>250){disarmTools(1); flash('tools off'); return;}
   /* …and the OTHER half of THAT tap must not turn it straight back on: a
      cancel happens on one edge and the key still owes us the other. Only a
      CANCEL sets that window — a layer that was spent by a letter, or cleared
@@ -2591,9 +2604,9 @@ function armTools(code){
   HOLD.t=true; HOLD.tUsed=false;
   if(TOOLT)clearTimeout(TOOLT);
   /* only the one-shot key needs a lapse; a control key clears on its own up */
-  TOOLT=code==='ControlLeft'
-    ? null : setTimeout(()=>{TOOLT=null; HOLD.t=false; dirty=true;},2500);
-  if(code!=='ControlLeft'&&fresh)flash('tools — c/x/v copy cut paste · z undo (⇧z redo) · s save');
+  const held=code==='AltLeft'||code==='AltRight';
+  TOOLT=held?null:setTimeout(()=>{TOOLT=null; HOLD.t=false; dirty=true;},2500);
+  if(!held&&fresh)flash('tools — c/x/v copy cut paste · z undo (⇧z redo) · s save');
   dirty=true;
 }
 function disarmTools(cancel){ if(TOOLT){clearTimeout(TOOLT); TOOLT=null;}
@@ -2611,7 +2624,7 @@ function disarmTools(cancel){ if(TOOLT){clearTimeout(TOOLT); TOOLT=null;}
    So: the hold OR the flag. Any control is tools, whichever side it is on and
    whether or not we saw it arrive — unless the mic is actually open, which is
    the one case where a control is doing something else. */
-const toolsOf=e=>(HOLD.t||!!e.ctrlKey)&&!MIC._down&&!e.metaKey&&!altOf(e);
+const toolsOf=e=>(HOLD.t||!!e.altKey)&&!MIC._down&&!e.metaKey&&!altOf(e);
 /* THE FUNCTION LAYER IS ⌥. It was ⌃ for a day, and control is the one
    modifier a left hand cannot reach while it plays. ⌥S and ⌥A keep their old
    meanings (solo, the arp grab) — they were never bare letters. The one true
@@ -2620,11 +2633,14 @@ const toolsOf=e=>(HOLD.t||!!e.ctrlKey)&&!MIC._down&&!e.metaKey&&!altOf(e);
    A scope stays open on the LETTER once ⌥ has opened it, so the thumb can
    come off ⌥ and the arrows step normally; ⌥ held through an arrow is still
    the fine step, same as everywhere else. */
-const ctlOf=e=>altOf(e)&&!e.metaKey&&!e.ctrlKey&&!ALTSUS.size;
+const ctlOf=e=>altOf(e)&&!e.metaKey&&!ALTSUS.size;
 /* ⌃ IS THE INSTRUMENT: quantize, tempo, the click — the settings you set and
    then live inside. Reach matters for performance keys; these are not that,
    and giving them their own modifier keeps ⌥ purely the channel's. */
-const gblOf=e=>!e.metaKey&&!altOf(e)&&(!!e.ctrlKey||(KM.shl&&!!e.shiftKey));
+/* LEFT SHIFT ONLY. It used to accept ctrl as well, and ctrl is the scope key
+   now — holding it and pressing q would have been the quality scope AND the
+   quantize toggle at once. */
+const gblOf=e=>!e.metaKey&&!altOf(e)&&KM.shl&&!!e.shiftKey;
 const LATCH={held:false,used:false,on:false};
 /* HELD KEYS SCOPE THE ARROWS. The arrows always mean "adjust"; the key you are
    holding says adjust WHAT. tab = the loop, m = tempo. `used` records whether
@@ -5487,6 +5503,16 @@ class Voice{
         const si2=clamp(Math.round(e2.idx),1,10)-1;
         const ps=this.fParams(si2,'frequency');
         if(!ps.length)continue;
+        /* GAD'S REPORT, DIAGNOSED AND NOT YET FIXED — see NEXT.md. base is the
+           stored cutoff, the peak is base·2^(amt/100·5), and the sustain lands
+           at base·K where K = 1+(2^(amt/100·5)−1)·s. So the knob writes the
+           FLOOR while your ear is tuning the SUSTAIN, and the next note
+           re-derives the sweep from the new floor and settles somewhere else.
+           The fix is to make the stored value the settling point (divide it
+           back out by K here, migrate old patches by multiplying by it) — the
+           same principle that killed `center`. Not shipped because it changes
+           every filter envelope in the instrument and the probe harness could
+           not confirm it live; verify against a real note before landing. */
         const base=ps[0].value;
         const peak=clamp(base*Math.pow(2,e2.amt/100*5),20,20000);
         const a=Math.max(0.001,e2.a);
@@ -12870,8 +12896,8 @@ const MICKEY=c=>c==='ControlRight'||c==='Fn';
    `last key` sits next to it and shows the code of the last key the PAGE saw,
    on either edge, so "does this key reach TEN at all" is a question you can
    answer by looking rather than by asking me. */
-const TOOLKEY=c=>c===CFG.toolKey||(!CFG.toolKey&&(c==='ControlLeft'||c==='PrintScreen'));
-let TOOLLEARN=false, LASTKEY='';
+const TOOLKEY=c=>c===CFG.toolKey||(!CFG.toolKey&&(c==='AltLeft'||c==='AltRight'));
+let TOOLLEARN=false, SCOPELEARN=false, LASTKEY='';
 /* ⌥M just made a mod (env by default). While ⌥ is STILL down, one letter
    re-sources it: l lfo, v velocity, k key, / random, e env again. Closed the
    moment ⌥ comes up, so the letters go back to their scopes. */
@@ -15229,11 +15255,13 @@ const onKeyDown=e=>{
   if(e.isTrusted&&e.code){LASTKEY=e.code; if(S.layer===-1)dirty=true;}
   /* the learn is asked FIRST, before any handler can claim the key — the whole
      point is to catch a key nothing else knows what to do with */
-  if(TOOLLEARN&&e.code&&!e.repeat){
+  if((TOOLLEARN||SCOPELEARN)&&e.code&&!e.repeat){
     e.preventDefault();
-    if(e.code==='Escape'){TOOLLEARN=false; flash('tools key unchanged'); dirty=true; return;}
-    TOOLLEARN=false; CFG.toolKey=e.code; saveCfg(); disarmTools();
-    flash('◎ tools key = '+e.code+'  — tap it, then c/x/v · z · s');
+    const what=TOOLLEARN?'tools':'scope';
+    if(e.code==='Escape'){TOOLLEARN=SCOPELEARN=false; flash(what+' key unchanged'); dirty=true; return;}
+    if(TOOLLEARN){CFG.toolKey=e.code; disarmTools();} else {CFG.scopeKey=e.code; KM.scp=false;}
+    TOOLLEARN=SCOPELEARN=false; saveCfg();
+    flash('◎ '+what+' key = '+e.code);
     dirty=true; return;
   }
   if(e.isTrusted){MODS.shift=e.shiftKey; MODS.alt=e.altKey; MODS.ctrl=e.ctrlKey; MODS.meta=e.metaKey;
@@ -15337,8 +15365,9 @@ const onKeyDown=e=>{
      it, and it lapses on its own so it can never be left stuck. A real control
      key still behaves like a hold — it re-arms on every repeat and clears on
      its own key-up — so nothing changes for a board that sends one. */
-  if(TOOLKEY(e.code)){armTools(e.code); if(e.code!=='ControlLeft')e.preventDefault();}   // it is a screenshot on some setups
-  if(LATCHKEY(e.code)){const fresh=!KM.sl; KM.sl=true;
+  if(SCOPEKEY(e.code)&&!e.repeat){KM.scp=true; if(e.code==='NumLock')e.preventDefault();}
+  if(TOOLKEY(e.code)){armTools(e.code);}   // it is a screenshot on some setups
+  if(LATCHKEY(e.code)&&!altOf(e)){const fresh=!KM.sl; KM.sl=true;
     e.preventDefault();
     if(PICK){PICK.peek=true; dirty=true;}
     if(!e.repeat&&fresh){LATCH.used=false; latchArmHeld();} return;}
@@ -15395,7 +15424,7 @@ const onKeyDown=e=>{
   }
 
   /* the ⌥M source window: one letter re-sources the mod that was just made */
-  if(MODPICK&&altOf(e)&&!e.repeat&&MODPICK_SRC[e.code]!==undefined&&!e.metaKey&&!e.ctrlKey){
+  if(MODPICK&&altOf(e)&&!e.repeat&&MODPICK_SRC[e.code]!==undefined&&!e.metaKey){
     e.preventDefault();
     const m9=MODPICK.hold.mod[MODPICK.at];
     if(m9){m9.src=MODPICK_SRC[e.code];
@@ -15436,7 +15465,7 @@ const onKeyDown=e=>{
      reason the clip branch is: the letters it uses are already spoken for
      further down, and while one is held the digits and arrows belong to it
      rather than to mute, the step cursor or the channel row. */
-  if(e.code==='Slash'&&altOf(e)&&!e.repeat&&S.layer>=2&&!e.metaKey&&!e.ctrlKey
+  if(e.code==='Slash'&&altOf(e)&&!e.repeat&&S.layer>=2&&!e.metaKey
      &&!ALTSUS.size&&!HOLD.opt&&!MODPICK){
     e.preventDefault(); rollSlot(); return;
   }
@@ -15454,7 +15483,7 @@ const onKeyDown=e=>{
      whether the letter is down or not, because holding a letter to change slot
      is the thing Gad specifically did not want. Same for the arrows, -/= and
      [ ]: none of them ever depended on the letter. */
-  if(OPTRACK[e.code]&&altOf(e)&&!e.repeat&&S.layer>=1&&!e.metaKey&&!e.ctrlKey
+  if(OPTRACK[e.code]&&altOf(e)&&!e.repeat&&S.layer>=1&&!e.metaKey
      &&(!ALTSUS.size||(HOLD.opt&&ALTSUS.has(HOLD.opt.c)))
      &&!(HOLD.opt&&HOLD.opt.nav&&!ALTSUS.has(HOLD.opt.c)
          &&OPTRACK[HOLD.opt.c]&&OPTRACK[HOLD.opt.c].mag
@@ -15536,7 +15565,7 @@ const onKeyDown=e=>{
     return;
   }
   /* while it is held the keyboard is that rack's control surface */
-  if(HOLD.opt&&!e.metaKey&&!e.ctrlKey){
+  if(HOLD.opt&&!e.metaKey){
     const {c:oc,ch,key}=HOLD.opt, T2=OPTRACK[oc];
     if(HOLD.opt.nav){
       const pre=S.presets[ch], rk=modHolder(pre,T2.id)[T2.id];
@@ -15730,7 +15759,7 @@ const onKeyDown=e=>{
      before the pan, the octave and mute/solo, every one of which owns one of
      these keys when no scope is held. Repeats run: walking a preset list is a
      dial, not a notch. */
-  if(HOLD.i&&!e.metaKey&&!e.ctrlKey&&!altOf(e)&&
+  if(HOLD.i&&!e.metaKey&&!altOf(e)&&
      ['BracketLeft','BracketRight','Semicolon','Quote','Comma','Period'].includes(c)){
     e.preventDefault();
     const dI=(c==='BracketRight'||c==='Quote'||c==='Period')?1:-1;
@@ -15927,7 +15956,7 @@ const onKeyDown=e=>{
      latch and could not carry a chord. A held rack-letter scope keeps its own
      =/- (add/remove an INSTANCE of that letter), which is why this waits for
      no scope to be open. */
-  if((c==='Equal'||c==='Minus')&&altOf(e)&&!e.metaKey&&!e.ctrlKey&&S.layer>=2&&!e.repeat
+  if((c==='Equal'||c==='Minus')&&altOf(e)&&!e.metaKey&&S.layer>=2&&!e.repeat
      &&!HOLD.opt&&!ALTSUS.size){
     e.preventDefault();
     if(c==='Equal')addSlotHere(); else removeSlotHere();
@@ -17037,7 +17066,10 @@ const onKeyDown=e=>{
      played a note. The same rule ⌃ and ⌘ have always had, arriving late
      because left shift only stopped being the latch an hour ago. `rs()` is
      untouched — the RIGHT shift is navigation and still plays. */
-  if(isNoteKey(c)&&!e.repeat&&(S.layer>0||S.layer===-1)&&!e.ctrlKey&&!e.metaKey&&!KM.shl
+  /* no `!e.ctrlKey` any more: control IS the scope modifier, and altOf() below
+     already says what a held scope means for the letters — a riding one lets
+     them play, which is the whole point of keeping it down. */
+  if(isNoteKey(c)&&!e.repeat&&(S.layer>0||S.layer===-1)&&!e.metaKey&&!KM.shl
      &&(!altOf(e)||ALTSUS.size>0)&&!scopeHeldOn(c)){
     e.preventDefault();
     /* NOTHING DOUBLES. With an analog board connected, a letter you press is
@@ -17563,10 +17595,11 @@ const onKeyUp=e=>{
   if(e.isTrusted&&e.code){LASTKEY=e.code; if(S.layer===-1)dirty=true;}
   /* a key that sends ONLY a key-up can still be learned — that is exactly the
      kind of key this exists for */
-  if(TOOLLEARN&&e.code&&e.code!=='Escape'){
-    TOOLLEARN=false; CFG.toolKey=e.code; saveCfg(); disarmTools();
-    flash('◎ tools key = '+e.code+'  — tap it, then c/x/v · z · s');
-    dirty=true; return;
+  if((TOOLLEARN||SCOPELEARN)&&e.code&&e.code!=='Escape'){
+    const what=TOOLLEARN?'tools':'scope';
+    if(TOOLLEARN){CFG.toolKey=e.code; disarmTools();} else {CFG.scopeKey=e.code; KM.scp=false;}
+    TOOLLEARN=SCOPELEARN=false; saveCfg();
+    flash('◎ '+what+' key = '+e.code); dirty=true; return;
   }
   if(e.isTrusted){MODS.shift=e.shiftKey; MODS.alt=e.altKey; MODS.ctrl=e.ctrlKey; MODS.meta=e.metaKey;
     if(!e.shiftKey){KM.sl=false; KM.sr=false;}}
@@ -17621,12 +17654,7 @@ const onKeyUp=e=>{
       MIC._latch=false;
     }
   }
-  if(c==='AltLeft'||c==='AltRight'||c==='ControlLeft'||c==='ControlRight'){
-    MODPICK=null;                       // the ⌥M source window closes with ⌥
-    for(const k of [...ALTSUS]){ALTSUS.delete(k);
-      document.dispatchEvent(new KeyboardEvent('keyup',
-        {code:k,shiftKey:e.shiftKey,bubbles:true}));}
-  }
+  if(SCOPEKEY(c)){MODPICK=null;}   // the source window closes with the scope key
   /* THE KEY IS UP BUT THE NOTE IS NOT. Decided here rather than at press time,
      because at press time you do not yet know you wanted to keep it. */
   if(noteLatch.has(c)&&(liveV[c]||pend[c])){SUS.add(c); return;}
@@ -17719,7 +17747,11 @@ const onKeyUp=e=>{
      learned is treated as a possible one-shot, because that is the case that
      was silently broken: a key whose down edge never arrives, or arrives and
      departs in the same instant. */
-  if(TOOLKEY(c)){ if(c==='ControlLeft')disarmTools(); else armTools(c); }
+  if(SCOPEKEY(c)){KM.scp=false;
+    /* a scope riding on the modifier ends with it, exactly as it did on ⌥ */
+    for(const k of [...ALTSUS]){ALTSUS.delete(k);
+      document.dispatchEvent(new KeyboardEvent('keyup',{code:k,bubbles:true}));}}
+  if(TOOLKEY(c)){ if(c==='AltLeft'||c==='AltRight')disarmTools(); else armTools(c); }
   if(c==='BracketLeft')BRK.l=false;
   if(c==='BracketRight')BRK.r=false;
   if(c==='Comma')OCT.l=false;
