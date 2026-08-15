@@ -1026,7 +1026,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-14.2343';
+const BUILD='2026-08-15.1122';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1159,8 +1159,8 @@ const SETTINGS=[
 ];
 function basePreset(name){return{
   name, cat:'misc', tr:0, trs:0, prep:null,
-  au:{gain:0.9,semis:0,rate:1,st:0,en:1,fit:0,src:0,pmode:0,chan:0,
-      kmode:0,auto:1,start:0,cues:{}},
+  au:{gain:0.9,semis:0,rate:1,st:0,en:1,fit:1,src:0,pmode:0,chan:0,
+      kmode:0,auto:1,start:0,kvol:1,lvol:1,cues:{}},
   osc:rack(mkOsc), amp:rack(mkAmp), flt:rack(mkFlt), env:rack(mkEnv),
   lfo:rack(mkLfo), mod:rack(mkMod), fx:rack(mkFx), ply:rack(mkPly),
   vox:{mode:0,glide:0,uni:1,sprd:12,wide:0.6,slop:0.008},
@@ -7790,6 +7790,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
       this.granSend(pi);
     }
     const id='t'+(e.id++);
+    this._lastTid=id;
     e.node.port.postMessage({t:'tape',id,frame:Math.round(at*AC.sampleRate),
       pos:P9.pos,end:P9.end,rate:P9.rate,base:P9.base,free:P9.free?1:0,sh:P9.sh,
       ch:P9.ch,gl:P9.gl,gr:P9.gr,gain:P9.gain,
@@ -7834,10 +7835,20 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
       sh:sync?Math.pow(2,semis/12):1,
       ch:buf.numberOfChannels>1?Math.round(au.chan||0):0,
       gl:Math.SQRT2*Math.cos(th9), gr:Math.SQRT2*Math.sin(th9),
-      gain:(au.gain??0.9)*(cue?cue.vol??1:1),
+      /* a key-spawned cursor carries the key level and its velocity; the auto
+         cursor carries the loop level. cue.vol is the cue's own trim. */
+      gain:(au.gain??0.9)*(cue?(cue.vol??1)*(au.kvol??1)*(cue.vel??1):(au.lvol??1)),
       durSec:Math.min(loopSec-skipSec,(dur-skipBuf)/rate)});
+    return this._lastTid;
   }
   /* a fade-out then the stop, so a released cue does not click on the way out */
+  /* END ONE CURSOR. audStop is a broadcast — every cursor on the channel goes
+     — which is exactly right for a jump that replaces the loop and exactly
+     wrong once several keys are each holding their own. */
+  audOff(pi,id){
+    const e9=this.gn&&this.gn[pi]; if(!e9||!e9.node||!id)return;
+    try{e9.node.port.postMessage({t:'toff',id});}catch(_){}
+  }
   audStop(pi,at){
     at=at??AC.currentTime+0.002;
     const e9=this.gn&&this.gn[pi];
@@ -7864,7 +7875,8 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     try{e9.node.port.postMessage({t:'tset',
       rate:Math.max(0.05,rate)*k9, base:baseRate*k9,
       sh:sync?Math.pow(2,semis/12):1, end:en*buf.length,
-      gain:(au.gain??0.9)*(ask.cue?ask.cue.vol??1:1)});}catch(_){}
+      gain:(au.gain??0.9)*(ask.cue?(ask.cue.vol??1)*(au.kvol??1)*(ask.cue.vel??1)
+                                   :(au.lvol??1))});}catch(_){}
   }
   audLiveAll(){for(const i of CHANS())if(isAudioCh(i))this.audLive(i);}
   audGain(pi,g){
@@ -9870,7 +9882,11 @@ function setEngine(pi,key){
   if(key===was)return false;
   if(was==='synth')p._scat=p.cat;          // remember the category to come back to
   if(key==='kit'){p.cat='kit'; p.kit=null;}
-  else if(key==='audio'){p.cat='audio'; (p.au=p.au||{}).amode=0;}
+  else if(key==='audio'){
+    /* fitted by default: a take on a channel that loops is nearly always
+       meant to fill the loop, and the alternative is discovering that your
+       four-bar phrase runs at whatever speed it happened to be recorded at */
+    p.cat='audio'; p.au=p.au||{}; if(p.au.fit===undefined)p.au.fit=1; delete p.au.amode;}
   else if(key==='gran'){
     /* 'gran' is not an engine and not a mode any more: it is the audio
        channel with pitch keys and the auto cursor off. The spelling stays
@@ -9995,6 +10011,12 @@ const AUDF=[
    set:(o,v)=>{if(v<0.25)o.fit=1; else {o.fit=0; o.rate=+(+v).toFixed(2);}}}),
  /* the stretch's character: how far apart the two taps sit */
  SP('window','wnd','lin',{min:5,max:300,step:5,fmt:v=>Math.round(v)+'ms'}),
+ /* TWO LEVELS, because there are two ways this channel makes sound and they
+    are not the same instrument: the auto cursor rolling underneath, and the
+    cursors your fingers spawn on top. One fader for both meant balancing a
+    grab against the loop by turning the loop down and losing the grab too. */
+ SP('key vol','kvol','lin',{min:0,max:1.5,step:0.05,fmt:v=>Math.round(v*100)+'%'}),
+ SP('loop vol','lvol','lin',{min:0,max:1.5,step:0.05,fmt:v=>Math.round(v*100)+'%'}),
  SP('start','st','lin',{min:0,max:0.98,step:0.01,fmt:v=>Math.round(v*100)+'%'}),
  SP('end','en','lin',{min:0.02,max:1,step:0.01,fmt:v=>Math.round(v*100)+'%'}),
  SP('smpl','_pool','lin',{min:0,max:31,step:1,w:2,
@@ -14248,6 +14270,49 @@ const onKeyDown=e=>{
     if(c==='Equal')addSlotHere(); else removeSlotHere();
     return;
   }
+  /* A HELD CUE KEY SCOPES − AND = TO ITS CUE. This was on the arrows, which
+     meant that while any key was down the arrows silently stopped being
+     navigation and started nudging whatever cue you happened to be holding —
+     you could not move around the rack while playing, and if you did not know
+     the gesture existed the numbers moved for no visible reason. − and = are
+     next to each other and do nothing else while a key is held:
+       −/=        where in the take this cue starts
+       ⇧ −/=      its pitch
+       ⌥ −/=      its level
+       ⌥⇧ −/=     its pan
+       ⌫          put the cue back to how it was born                      */
+  if((c==='Minus'||c==='Equal'||c==='Backspace')
+     &&AUD.hold&&AUD.hold.sl!=null&&!HOLD.tab){
+    e.preventDefault();
+    const {pi,sl}=AUD.hold, au=S.presets[pi].au;
+    const cue=au.cues[sl]=au.cues[sl]||{o:0,semis:0,vol:1,pan:0};
+    const d2=c==='Equal'?1:-1;
+    const sh2=e.shiftKey||rs(e), al2=altOf(e);
+    /* THESE WERE THE ONE SET OF EDITS WITH NO UNDO BEHIND THEM — and the
+       arrow repeat walks vol from 1 to 0 in well under a second, which is
+       how a cue goes silent for good with nothing on screen saying so. */
+    pushUndo('cue '+(sl+1));
+    /* ⌫ while the cue is held puts it back to how it was born */
+    if(c==='Backspace'){au.cues[sl]={o:0,semis:0,vol:1,pan:0};
+      flash('cue '+(sl+1)+' reset'); dirty=true; dirtySave=true; return;}
+    if(al2&&sh2){cue.pan=clamp(+((cue.pan||0)+d2*0.1).toFixed(2),-1,1);
+      flash('cue '+(sl+1)+' pan '+panCh(cue.pan).trim());}
+    else if(al2){cue.vol=clamp(+((cue.vol??1)+d2*0.05).toFixed(2),0,1.5);
+      flash('cue '+(sl+1)+' vol '+Math.round(cue.vol*100)+'%'+
+        (cue.vol<0.005?' — SILENT (⌫ resets)':''));}
+    else if(sh2){cue.semis=clamp(Math.round((cue.semis||0)+d2),-24,24);
+      flash('cue '+(sl+1)+' pitch '+(cue.semis>0?'+':'')+cue.semis+'st');}
+    else{cue.o=clamp(+((cue.o||0)+d2*0.0625).toFixed(4),-4,4);
+      flash('cue '+(sl+1)+' @ '+(sl*0.25+cue.o).toFixed(3)+'b');}
+    /* re-audition immediately: end THIS key's cursor and refire it from the
+       edited cue, leaving any other held keys alone */
+    const L=S.patterns[S.editPat].lanes[pi].len;
+    if(AUD.hold.tid)engine.audOff(pi,AUD.hold.tid);
+    AUD.hold.tid=engine.audPlay(pi,AC.currentTime+0.006,L,
+      clamp(sl*0.25+(cue.o||0),0,L-0.01),
+      Object.assign({},cue,{vel:AUD.hold.vel??1}));
+    dirty=true; dirtySave=true; return;
+  }
   if((c==='Equal'||c==='Minus')&&!e.metaKey&&!altOf(e)&&!HOLD.tab&&!PICK&&!DPICK){
     e.preventDefault();
     const d=c==='Equal'?1:-1, st=rs(e)?10:1;
@@ -14789,35 +14854,6 @@ const onKeyDown=e=>{
     dirty=true; return;
   }
 
-  /* a held slice key scopes the arrows to ITS cue — and ⌫ resets it */
-  if((c==='ArrowLeft'||c==='ArrowRight'||c==='ArrowUp'||c==='ArrowDown'||c==='Backspace')
-     &&AUD.hold&&AUD.hold.sl!=null){
-    e.preventDefault();
-    const {pi,sl}=AUD.hold, au=S.presets[pi].au;
-    const cue=au.cues[sl]=au.cues[sl]||{o:0,semis:0,vol:1,pan:0};
-    const d2=(c==='ArrowUp'||c==='ArrowRight')?1:-1, vert=c==='ArrowUp'||c==='ArrowDown';
-    /* THESE WERE THE ONE SET OF EDITS WITH NO UNDO BEHIND THEM — and the
-       arrow repeat walks vol from 1 to 0 in well under a second, which is
-       how a cue goes silent for good with nothing on screen saying so. */
-    pushUndo('cue '+(sl+1));
-    /* ⌫ while the cue is held puts it back to how it was born */
-    if(c==='Backspace'){au.cues[sl]={o:0,semis:0,vol:1,pan:0};
-      flash('cue '+(sl+1)+' reset'); dirty=true; dirtySave=true; return;}
-    if(vert&&(e.shiftKey||rs(e))){cue.vol=clamp(+((cue.vol??1)+d2*0.05).toFixed(2),0,1.5);
-      flash('cue '+(sl+1)+' vol '+Math.round(cue.vol*100)+'%'+
-        (cue.vol<0.005?' — SILENT (⌫ resets)':''));}
-    else if(vert){cue.semis=clamp(Math.round((cue.semis||0)+d2),-24,24);
-      flash('cue '+(sl+1)+' pitch '+(cue.semis>0?'+':'')+cue.semis+'st');}
-    else if(altOf(e)){cue.pan=clamp(+((cue.pan||0)+d2*0.1).toFixed(2),-1,1);
-      flash('cue '+(sl+1)+' pan '+panCh(cue.pan).trim());}
-    else{cue.o=clamp(+((cue.o||0)+d2*(e.shiftKey||rs(e)?0.25:0.0625)).toFixed(4),-4,4);
-      flash('cue '+(sl+1)+' @ '+(sl*0.25+cue.o).toFixed(3)+'b');}
-    /* re-audition immediately: stop and refire from the edited cue */
-    engine.audStop(pi);
-    const L=S.patterns[S.editPat].lanes[pi].len;
-    engine.audPlay(pi,AC.currentTime+0.006,L,clamp(sl*0.25+(cue.o||0),0,L-0.01),cue);
-    dirty=true; dirtySave=true; return;
-  }
   if((c==='ArrowLeft'||c==='ArrowRight'||c==='ArrowUp'||c==='ArrowDown')&&
      (HOLD.tab||HOLD.m||HOLD.c||HOLD.n||HOLD.r||HOLD.i||HOLD.v||HOLD.sc)){
     e.preventDefault();
@@ -15073,7 +15109,20 @@ const onKeyDown=e=>{
          also how you get in: there is no mode to arm, you just move onto a
          step and start typing notes. (transpose moved to ⌥↑↓, volume to ⇧↑↓) */
       const pat1=S.patterns[S.editPat], lane1=pat1.lanes[S.curPreset];
-      if(isAudioCh(S.curPreset)){flash('audio channel — no steps to edit');return;}
+      /* AN AUDIO CHANNEL HAS NO STEPS TO WALK, so these two arrows spent
+         their life saying so. They are its OCTAVE now — which is what a
+         pitch-keys channel had no way to change at all, since every letter
+         on the board is a note there and z/x are two of them. It works with
+         keys held, which is the point of taking the cue edits off the
+         arrows in the first place. */
+      if(isAudioCh(S.curPreset)){
+        const pa=S.presets[S.curPreset];
+        pushUndo('octave');
+        pa.tr=clamp((pa.tr||0)+d,-3,3);
+        flash(pa.name+' octave '+(pa.tr>0?'+':'')+pa.tr+
+          (kmodeOf(pa)?'':'  (position keys — pitch comes from each cue)'));
+        dirty=true; dirtySave=true; return;
+      }
       /* Walking the grid no longer switches modes — caps lock owns that, and
          two ways into one mode meant they could disagree. The cursor still
          picks itself up from under the playhead the first time you move it. */
@@ -15289,7 +15338,7 @@ const onKeyDown=e=>{
            still tracks the LAST key, because that is what the arrows scope to
            and what retro records. */
         AUD.gk=AUD.gk||{};
-        const h9={c,pi,gsh:null,fz:posF,midi:midiF,vel:vel9,
+        const h9={c,pi,kind:'pitch',gsh:null,fz:posF,midi:midiF,vel:vel9,
           press:AC.currentTime,tr:Math.max(t0f,trf)};
         AUD.gk[c]=h9; AUD.hold=h9;
         const ms9=CFG.qOn?Math.max(0,(gridTime(h9.tr)-AC.currentTime)*1000):0;
@@ -15313,12 +15362,21 @@ const onKeyDown=e=>{
          rec is on. That is what makes tab+N reveal a cue jam afterwards. */
       const t0j=gridNow(), gj=gridOf(lane);
       const trj=CFG.qOn?qnext(t0j,gj)*(lane.qlive??1)+t0j*(1-(lane.qlive??1)):t0j;
-      AUD.hold={c,pi,sl,press:AC.currentTime,tr:Math.max(t0j,trj)};
-      const atP=Math.max(AC.currentTime+0.005,CFG.qOn?gridTime(AUD.hold.tr):0);
-      /* THE OLD CURSOR DIES AT THE JUMP, NOT AT THE KEYPRESS. Stopping on the
-         way in cut the tape the moment your finger moved and left a hole
-         until quantize came round — you heard the gap, not the grab. */
-      engine.audStop(pi,atP);
+      /* ONE HOLD PER KEY HERE TOO. A jump used to be strictly one at a time —
+         the second letter cut the first — because there was one slot and one
+         broadcast stop. Each key owns its cursor now, so a chord of cue keys
+         is a chord of playheads at different points in the take. */
+      AUD.gk=AUD.gk||{};
+      const vel9=EXP.take();
+      const hj={c,pi,kind:'pos',sl,vel:vel9,tid:null,press:AC.currentTime,tr:Math.max(t0j,trj)};
+      AUD.gk[c]=hj; AUD.hold=hj;
+      const first9=Object.keys(AUD.gk).length===1;
+      const atP=Math.max(AC.currentTime+0.005,CFG.qOn?gridTime(hj.tr):0);
+      /* THE AUTO CURSOR DIES AT THE JUMP, NOT AT THE KEYPRESS — stopping on
+         the way in cut the tape the moment your finger moved and left a hole
+         until quantize came round. Only the FIRST key does it: the ones after
+         it are joining a chord, not replacing what is already grabbed. */
+      if(first9)engine.audStop(pi,atP);
       /* AND THE JUMP IS A CURSOR LIKE ANY OTHER. At the top of the size dial
          it is one clean unbroken read — the tape jump, exactly as it was.
          Turn size down and the same jump becomes a cloud AT THAT POINT in
@@ -15343,7 +15401,8 @@ const onKeyDown=e=>{
             60+(cue.semis||0),(cue.vol??1)*EXP.take(),null);};
         if(ms9<2)fire9(); else setTimeout(fire9,ms9);
       }else{
-        engine.audPlay(pi,atP,L,clamp(sl*0.25+(cue.o||0),0,L-0.01),cue);
+        hj.tid=engine.audPlay(pi,atP,L,clamp(sl*0.25+(cue.o||0),0,L-0.01),
+          Object.assign({},cue,{vel:vel9}));
       }
       flash('cue '+(sl+1)+'/'+nS+(cue.semis?' '+(cue.semis>0?'+':'')+cue.semis+'st':'')+
         (cue.o?' @'+(sl*0.25+cue.o).toFixed(2)+'b':'')+
@@ -15796,7 +15855,10 @@ const onKeyUp=e=>{
       if(ml.state==='rec'){ml.state='on';dirty=true;dirtySave=true;}
     }
   }
-  const hg9=(AUD.gk&&AUD.gk[c])||null;
+  /* the two kinds of hold live in the same map and end differently: a pitch
+     key lets its spawner go, a position key ends its own cursor and leaves
+     the rest of the chord alone */
+  const hg9=(AUD.gk&&AUD.gk[c]&&AUD.gk[c].kind==='pitch')?AUD.gk[c]:null;
   if(hg9||(AUD.hold&&AUD.hold.c===c&&(AUD.hold.pk!==undefined||AUD.hold.gsh))){
     const src9=hg9||AUD.hold;
     const {pi,pk,gsh,fz,midi,press,tr}=src9;
@@ -15822,11 +15884,18 @@ const onKeyUp=e=>{
     if(retroBuf[pi].length>512)retroBuf[pi].shift();
     dirty=true;
   }
-  else if(AUD.hold&&AUD.hold.c===c){
-    const {pi,sl,press,tr,gsh}=AUD.hold; AUD.hold=null;
+  else if((AUD.gk&&AUD.gk[c])||(AUD.hold&&AUD.hold.c===c)){
+    const hj9=(AUD.gk&&AUD.gk[c])||AUD.hold;
+    const {pi,sl,press,tr,gsh,tid}=hj9;
+    if(AUD.gk)delete AUD.gk[c];
+    if(AUD.hold===hj9)AUD.hold=null;
     if(gsh){try{gsh.release(AC.currentTime);}catch(_){}
       engine._ctrlPut('grn',pi,0,'pos',undefined);}
-    engine.audStop(pi);
+    /* this key's cursor only — the others are still held. The loop comes back
+       when the last finger leaves, which is what a grab has always meant. */
+    if(tid)engine.audOff(pi,tid);
+    const others9=Object.keys(AUD.gk||{}).some(k9=>(AUD.gk[k9]||{}).pi===pi);
+    if(!others9)engine.audStop(pi);
     const lane=S.patterns[S.editPat].lanes[pi], L=lane.len;
     /* the jump's length is the held gesture, like a note's */
     const durB=Math.max(0.05,press!=null?(AC.currentTime-press)/spb():0.25);
@@ -16138,8 +16207,8 @@ function load(json){
         p.tr=sp.tr||0; p.trs=sp.trs||0; p.prep=sp.prep||null;
         p.code=sp.code||null; p.pmodel=resolveModel(sp.pmodel)||null; p.psel=sp.psel|0;
         p.cp=Array.isArray(sp.cp)?sp.cp.slice(0,8):[1,1,1,0.5,0,0,0.5,0.3];
-        p.au=Object.assign({gain:0.9,semis:0,rate:1,st:0,en:1,fit:0,src:0,pmode:0,chan:0,
-          kmode:0,auto:1,start:0,cues:{}},sp.au||{});
+        p.au=Object.assign({gain:0.9,semis:0,rate:1,st:0,en:1,fit:1,src:0,pmode:0,chan:0,
+          kmode:0,auto:1,start:0,kvol:1,lvol:1,cues:{}},sp.au||{});
         /* v<23: the four keys modes were cue / pitch / freeze / gran, and
            whether the loop ran by itself was a consequence of which one you
            were in. Now it is a flag, and the modes are two:
