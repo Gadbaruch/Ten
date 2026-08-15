@@ -2513,77 +2513,217 @@ const OPTRACK={
         seed:{p1:4,p2:16,p3:0},
         dial:{p:'p1',n:()=>16,lbl:v=>(v+1)+'/16 hits'}},
   /* NAV SCOPES: the letter takes you to the thing (making one if the rack has
-     none) and the strip's own keys edit it — ↑↓ value, ←→ params. Digits jump
-     between the instances. The scope adds nothing the strip cannot do; it is
-     a way of ARRIVING. */
+     none) and then the whole keyboard is THAT thing's control surface, exactly
+     the way the arp's is — see MAGNETIZED, below, for what the `mag` row says.
+     Digits jump between the instances, and a digit past the last one makes
+     another. ⌫ removes.
+
+     MAGNETIZED. These used to be a way of ARRIVING and nothing more: the
+     letter moved the cursor and then let go of it, so the arrows fell back to
+     whatever the page was doing and the next keypress edited something else.
+     With the channel strip closed they did nothing at all, which made the
+     strip a MODE you had to be in to edit a channel. Held, the scope now owns
+     the arrows and -/= wherever you are, and the strip — when it is open —
+     follows along as a VIEW of what you are dialling.
+
+     One row per scope, and the row is data, not a branch:
+       amt   -/=      the thing you always reach for (a route's amount, an
+                      effect's mix). Absent where the thing has none.
+       pri   ↑↓       the dial the scope opens on
+       sec   ←→       the second dial
+       keys  letters  sub-fields by their own letter (env: a d s r)
+     Any of them may be a spec KEY or a function of the slot, for the fields
+     that change with what the slot is — a synced LFO dials divisions, not Hz.
+     ↑↓ follows whatever `keys` or ←→ last named, so the scope has ONE cursor
+     and every route into it moves the same one. */
   KeyD:{id:'fx',name:'delay',nav:1,
         find:rk=>rk.map((x,i)=>x&&x.typ===1&&!x.off?i:-1).filter(i=>i>=0),
         make:sl=>Object.assign(sl,{typ:1,p1:0.3,p2:0.35,p3:1,p5:0.5,mix:fToVol(40)}),
-        unmake:sl=>Object.assign(sl,{typ:0})},
+        unmake:sl=>Object.assign(sl,{typ:0}),
+        mag:{amt:'mix',pri:'p1',sec:'p2'}},
   KeyE:{id:'mod',name:'env',nav:1,
         find:rk=>rk.map((x,i)=>x&&x.src===1&&!x.off?i:-1).filter(i=>i>=0),
         make:(sl,i)=>Object.assign(sl,mkMod(i),{src:1,off:false}),
         unmake:(sl,i)=>Object.assign(sl,mkMod(i)),
         free:rk=>rk.findIndex(x=>!x||!x.src),
         /* ⌥e + a / d / s / r — the envelope stages by their own letters */
-        jump:{KeyA:'a',KeyD:'d',KeyS:'s',KeyR:'r'}},
+        mag:{amt:'amt',pri:'tmul',sec:'a',keys:{KeyA:'a',KeyD:'d',KeyS:'s',KeyR:'r'}}},
   /* the rest of the channel's front doors, same grammar: the letter takes you
-     there, making one if the rack has none; the strip's own keys edit it;
-     digits jump between instances; ⌫ removes. */
+     there, making one if the rack has none; the arrows are that thing's while
+     you hold it; digits jump between instances; ⌫ removes. */
   KeyF:{id:'flt',name:'filter',nav:1,
         find:rk=>rk.map((x,i)=>x&&x.typ?i:-1).filter(i=>i>=0),
         make:sl=>Object.assign(sl,{typ:1,frq:2000,q:1.5}),
-        unmake:sl=>Object.assign(sl,{typ:0})},
+        unmake:sl=>Object.assign(sl,{typ:0}),
+        /* a filter has no amount of its own until it is a parallel path or a
+           shelf — then the level or the gain IS how much of it you are
+           hearing, and that is what -/= should hold */
+        mag:{amt:sl=>DROUTE[Math.round((sl&&sl.par)||0)]==='par'?'lvl'
+                    :(FLT_GAINY.has(fTy(sl))?'gn':null),
+             pri:'frq',sec:'q'}},
   KeyL:{id:'mod',name:'lfo',nav:1,
         find:rk=>rk.map((x,i)=>x&&x.src===2&&!x.off?i:-1).filter(i=>i>=0),
         make:(sl,i)=>Object.assign(sl,mkMod(i),{src:2,off:false}),
         unmake:(sl,i)=>Object.assign(sl,mkMod(i)),
-        free:rk=>rk.findIndex(x=>!x||!x.src)},
+        free:rk=>rk.findIndex(x=>!x||!x.src),
+        mag:{amt:'amt',pri:sl=>Math.round((sl&&sl.syn)||0)===1?'rdiv':'rate',
+             sec:'wav'}},
   KeyK:{id:'mod',name:'keytrack',nav:1,
         find:rk=>rk.map((x,i)=>x&&x.src===4&&!x.off?i:-1).filter(i=>i>=0),
         make:(sl,i)=>Object.assign(sl,mkMod(i),{src:4,off:false}),
         unmake:(sl,i)=>Object.assign(sl,mkMod(i)),
-        free:rk=>rk.findIndex(x=>!x||!x.src)},
+        free:rk=>rk.findIndex(x=>!x||!x.src),
+        /* nothing but a route: amount is the whole control, and it is on both
+           the dial and the pair, because there is no second thing to reach */
+        mag:{amt:'amt',pri:'amt',sec:'ctr'}},
   Slash:{id:'mod',name:'random',nav:1,
         find:rk=>rk.map((x,i)=>x&&x.src===5&&!x.off?i:-1).filter(i=>i>=0),
         make:(sl,i)=>Object.assign(sl,mkMod(i),{src:5,off:false,rate:6}),
         unmake:(sl,i)=>Object.assign(sl,mkMod(i)),
-        free:rk=>rk.findIndex(x=>!x||!x.src)},
+        free:rk=>rk.findIndex(x=>!x||!x.src),
+        mag:{amt:'amt',pri:'rate',sec:'ctr'}},
   KeyR:{id:'fx',name:'reverb',nav:1,
         find:rk=>rk.map((x,i)=>x&&x.typ===XTYPES.indexOf('verb')&&!x.off?i:-1).filter(i=>i>=0),
         make:sl=>Object.assign(sl,{typ:XTYPES.indexOf('verb'),p1:0.5,p2:0.3,p3:0.5,mix:fToVol(35)}),
-        unmake:sl=>Object.assign(sl,{typ:0})},
+        unmake:sl=>Object.assign(sl,{typ:0}),
+        mag:{amt:'mix',pri:'p1',sec:'p2'}},
   KeyG:{id:'fx',name:'grain',nav:1,
         find:rk=>rk.map((x,i)=>x&&x.typ===XTYPES.indexOf('grain')&&!x.off?i:-1).filter(i=>i>=0),
         make:sl=>Object.assign(sl,{typ:XTYPES.indexOf('grain'),p1:0.4,p2:0.5,p3:0.5,mix:fToVol(45)}),
-        unmake:sl=>Object.assign(sl,{typ:0})},
+        unmake:sl=>Object.assign(sl,{typ:0}),
+        mag:{amt:'mix',pri:'p1',sec:'p2'}},
   KeyS:{id:'fx',name:'saturation',nav:1,
         find:rk=>rk.map((x,i)=>x&&x.typ===XTYPES.indexOf('sat')&&!x.off?i:-1).filter(i=>i>=0),
         make:sl=>Object.assign(sl,{typ:XTYPES.indexOf('sat'),p1:0.35,p2:0.5,p3:0,mix:fToVol(60)}),
-        unmake:sl=>Object.assign(sl,{typ:0})},
+        unmake:sl=>Object.assign(sl,{typ:0}),
+        mag:{amt:'mix',pri:'p1',sec:'p2'}},
   KeyP:{id:'fx',name:'phase',nav:1,
         find:rk=>{const f=[2,3,4,5].map(x=>x);
           return rk.map((x,i)=>x&&f.includes(Math.round(x.typ))&&!x.off?i:-1).filter(i=>i>=0);},
         make:sl=>Object.assign(sl,{typ:XTYPES.indexOf('phase'),p1:0.3,p2:0.5,p3:0.5,mix:fToVol(45)}),
-        unmake:sl=>Object.assign(sl,{typ:0})},
+        unmake:sl=>Object.assign(sl,{typ:0}),
+        mag:{amt:'mix',pri:'p1',sec:'p2'}},
   KeyC:{id:'fx',name:'comp',nav:1,
         find:rk=>{const f=[XTYPES.indexOf('comp'),XTYPES.indexOf('limit'),XTYPES.indexOf('clip')];
           return rk.map((x,i)=>x&&f.includes(Math.round(x.typ))&&!x.off?i:-1).filter(i=>i>=0);},
         make:sl=>Object.assign(sl,{typ:XTYPES.indexOf('comp'),p1:0.4,p2:0.5,p3:0.5,mix:1}),
-        unmake:sl=>Object.assign(sl,{typ:0})},
+        unmake:sl=>Object.assign(sl,{typ:0}),
+        mag:{amt:'mix',pri:'p1',sec:'p2'}},
   KeyQ:{id:'fx',name:'quality',nav:1,
         find:rk=>rk.map((x,i)=>x&&XTYPES[Math.round(x.typ)]==='qual'&&!x.off?i:-1).filter(i=>i>=0),
         make:sl=>Object.assign(sl,{typ:XTYPES.indexOf('qual'),p1:0.5,p2:0.5,p3:0,mix:fToVol(70)}),
-        unmake:sl=>Object.assign(sl,{typ:0})},
+        unmake:sl=>Object.assign(sl,{typ:0}),
+        mag:{amt:'mix',pri:'p1',sec:'p2'}},
   KeyB:{id:'fx',name:'buffer',nav:1,
         find:rk=>rk.map((x,i)=>x&&XTYPES[Math.round(x.typ)]==='buf'&&!x.off?i:-1).filter(i=>i>=0),
         make:sl=>Object.assign(sl,{typ:XTYPES.indexOf('buf'),p1:0.3,p3:0,mix:fToVol(80)}),
-        unmake:sl=>Object.assign(sl,{typ:0})},
+        unmake:sl=>Object.assign(sl,{typ:0}),
+        mag:{amt:'mix',pri:'p1',sec:'p3'}},
   KeyX:{id:'fx',name:'fx',nav:1,
         find:rk=>{const a2=rk.map((x,i)=>x&&x.typ?i:-1).filter(i=>i>=0);
                   return a2.length?a2:[0];},         // empty rack: land on slot 1, make nothing
-        make:sl=>sl, unmake:sl=>Object.assign(sl,{typ:0})},
+        make:sl=>sl, unmake:sl=>Object.assign(sl,{typ:0}),
+        mag:{amt:'mix',pri:'p1',sec:'p2'}},
 };
+/* ---------------- MAGNETIZED SCOPES ------------------------------------
+   Everything a held nav scope does to a slot goes through here, so the scope
+   is one behaviour rather than a branch per letter, and — the point of it —
+   so none of it asks what LAYER you are on. A scope holds an address (channel,
+   rack, slot) and a field, and the strip is told about it afterwards if it
+   happens to be open.
+
+   ←→ IS PINNED TO THE SECONDARY, not a walk through the slot's fields. Both
+   were built and played: walking is the strip's own gesture and it is the
+   right one when you are LOOKING at a list, but with the strip closed there is
+   nothing on screen saying where the cursor now is, so ←→ became a step into
+   the dark and every press needed the flash read back to you. Pinned, the two
+   pairs are two knobs — time and attack, rate and shape — and a held scope is
+   a thing under your hands instead of a menu you are walking. The rest of the
+   fields are the letters' job, which is why `keys` exists. */
+const magKey=(v,sl)=>typeof v==='function'?v(sl):v;
+/* the slot a held scope is pointing at, asked FRESH every press: the spec list
+   changes under you — an lfo that gets synced grows a different rate field,
+   a parallel filter grows a level — and a stale list writes the wrong index */
+function magCtx(H){
+  if(!H||!H.nav)return null;
+  const T2=OPTRACK[H.c], mag=T2&&T2.mag; if(!mag)return null;
+  const pre=S.presets[H.ch]; if(!pre)return null;
+  const mi=MODULES.findIndex(M=>M&&M.id===T2.id); if(mi<0)return null;
+  const holder=modHolder(pre,T2.id), rk=holder[T2.id]; if(!rk)return null;
+  const list=T2.find(rk);
+  /* the scope keeps its own slot — the strip may be closed, and when it is
+     open the digits move both together */
+  let si=H.si;
+  if(si==null||!rk[si])si=list.length?list[0]:0;
+  if(!rk[si])return null;
+  H.si=si;
+  return {T2,mag,pre,holder,mi,si,slot:rk[si],specs:paramsFor(mi,rk[si]),list};
+}
+/* a field of the scope by spec key — null when this slot does not have it,
+   which is a real answer: a buffer effect has no second dial and a plain
+   series filter has no amount, and the scope should say so rather than
+   quietly moving something else */
+function magSpec(C,key){
+  const px=key?C.specs.findIndex(x=>x.key===key):-1;
+  return px<0?null:{px,spec:C.specs[px]};
+}
+/* …except ↑↓, which always has somewhere to be: the field a letter last named
+   if the slot still has it, and the row's primary otherwise. The list changes
+   under a held scope — sync an lfo and `rate` becomes `rdiv` — so this is
+   asked every press rather than stored. */
+const magCur=(H,C)=>(magSpec(C,H.fld)?H.fld:magKey(C.mag.pri,C.slot));
+/* the strip is a VIEW: when it is open on this channel it follows the scope,
+   so what you dial is what you are looking at — and when it is closed nothing
+   here needs it to be open */
+function magSee(H,C,px){
+  if(S.layer<2||S.editSnd!==H.ch)return;
+  S.curMod=C.mi; S.curSlot=C.si; S.slotParam=px;
+}
+const magLbl=(C,f)=>{const F=magSpec(C,f);
+  return F?F.spec.lbl+' '+fmtVal(F.spec,getV(C.holder,C.mi,C.si,F.spec)):'—';};
+const magVal=(C,F)=>fmtVal(F.spec,getV(C.holder,C.mi,C.si,F.spec));
+/* what the scope says when it opens and whenever a letter re-aims it: the row
+   itself, read out — the only place the mapping is ever written down for you */
+function magRead(H,C,head){
+  const A=C.mag.amt?magSpec(C,magKey(C.mag.amt,C.slot)):null;
+  const B=C.mag.sec?magSpec(C,magKey(C.mag.sec,C.slot)):null;
+  return head+'↑↓ '+magLbl(C,magCur(H,C))+
+    (B?' · ←→ '+B.spec.lbl+' '+magVal(C,B):'')+
+    (A?' · -/= '+A.spec.lbl+' '+magVal(C,A):'');
+}
+/* one press of a dial. Same road every other param takes — adjust() for the
+   step, writeParam() for the engine, recAuto() so a scope moved with REC armed
+   lands in the channel's mod loop like any other knob would. */
+function magDial(H,which,d,e){
+  const C=magCtx(H); if(!C)return false;
+  const key=which==='pri'?magCur(H,C)
+           :which==='sec'?magKey(C.mag.sec,C.slot)
+           :magKey(C.mag.amt,C.slot);
+  const F=magSpec(C,key);
+  /* nothing there is worth saying out loud — it is the row telling you what it
+     does have, which is the only documentation a held scope can give */
+  if(!F){flash(magRead(H,C,C.T2.name+' has no '+
+    (which==='amt'?'amount':'second dial')+' — '));return true;}
+  pushUndo(C.T2.name);
+  const nv=adjust(F.spec,getV(C.holder,C.mi,C.si,F.spec),d,kmult(e));
+  writeParam(H.ch,C.mi,C.si,F.px,nv);
+  if(C.holder===C.pre)recAuto(H.ch,C.pre,C.mi,C.si,F.px,nv);
+  if(which==='pri'){magSee(H,C,F.px); H.lbl=F.spec.lbl;}   // ←→ and -/= are knobs, not a cursor
+  flash(C.T2.name+(C.list.length>1?' '+(C.list.indexOf(C.si)+1):'')+
+        ' · '+F.spec.lbl+' '+fmtVal(F.spec,nv));
+  dirty=true; dirtySave=true; return true;
+}
+/* a letter re-aims ↑↓ and shows you what it landed on. It does not change the
+   value: naming a field and moving it are two different presses, the way the
+   strip's cursor and its arrows are. */
+function magAim(H,key){
+  const C=magCtx(H); if(!C)return false;
+  const F=magSpec(C,key); if(!F)return false;
+  H.fld=F.spec.key; H.lbl=F.spec.lbl;
+  magSee(H,C,F.px);
+  flash(magRead(H,C,C.T2.name+' → '));
+  dirty=true; return true;
+}
 const ALTSUS=new Set();     // scopes riding on a held ⌥ after their letter went up
 /* ONE RECORD PER HELD KEY on an audio channel — and `hold`, the last one
    pressed, is a VIEW of that map rather than a second copy of a record in it.
@@ -14653,14 +14793,23 @@ const onKeyDown=e=>{
         list=[free];
         flash(T2.name+' made on ch '+ch);
       }
-      HOLD.opt={c,ch,key,nav:1}; HOLD.optUsed=false; HOLD.optLatch=KM.sl;
+      HOLD.opt={c,ch,key,nav:1,si:list[0],fld:magKey(T2.mag&&T2.mag.pri,rk[list[0]])};
+      HOLD.optUsed=false; HOLD.optLatch=KM.sl;
       if(KM.sl)LATCH.used=true;
       if(S.layer>=2){
         S.editSnd=ch;
         S.curMod=MODULES.findIndex(M2=>M2&&M2.id===T2.id);
         gotoSlot(list[0]);
-        if(list.length>1)flash(T2.name+' — '+list.length+' of them; digits jump between');
       }
+      /* THE ROW, READ OUT. A scope that owns the arrows has to say what they
+         are on before you move them — this is the whole of the mapping, and
+         it prints whether or not the strip is open to show it. */
+      {const C=magCtx(HOLD.opt);
+       if(C){const F=magSpec(C,magCur(HOLD.opt,C));
+             if(F){magSee(HOLD.opt,C,F.px); HOLD.opt.lbl=F.spec.lbl;}
+             flash(magRead(HOLD.opt,C,T2.name+' ch '+ch+
+               (list.length>1?' 1/'+list.length:'')+' · '));}
+       else if(list.length>1)flash(T2.name+' — '+list.length+' of them; digits jump between');}
       dirty=true; return;
     }
     const had=!!optSlot(ch,c,false)&&!optSlot(ch,c,false).off;
@@ -14697,47 +14846,68 @@ const onKeyDown=e=>{
     if(HOLD.opt.nav){
       const pre=S.presets[ch], rk=modHolder(pre,T2.id)[T2.id];
       const list=T2.find(rk);
-      /* digits: the nth instance */
+      /* DIGITS: the nth instance — and the digit PAST the last one makes
+         another. `=` used to be how you grew the family; the amount took it,
+         and this is the better home for it anyway: one row of keys where the
+         number you press is the one you get, whether it is there yet or not. */
       if(/^Digit\d$/.test(e.code)&&!e.repeat){
         e.preventDefault(); HOLD.optUsed=true;
         const n=+e.code.slice(5);
-        if(n>=1&&n<=list.length){ if(S.layer>=2)gotoSlot(list[n-1]);
-          flash(T2.name+' '+n+'/'+list.length); dirty=true; }
-        else flash(T2.name+': '+list.length+' instance'+(list.length>1?'s':''));
+        if(n>=1&&n<=list.length){
+          HOLD.opt.si=list[n-1];
+          if(S.layer>=2&&S.editSnd===ch)gotoSlot(list[n-1]);
+          flash(T2.name+' '+n+'/'+list.length); dirty=true;
+        }else if(n===list.length+1){
+          const free=T2.free?T2.free(rk):rk.findIndex(x=>!x||!x.typ);
+          if(free<0){flash(T2.id.toUpperCase()+' rack is full');return;}
+          pushUndo('add '+T2.name);
+          T2.make(rk[free],free);
+          engine.rebuildRack(ch); engine.refresh(ch);
+          HOLD.opt.si=free;
+          if(S.layer>=2&&S.editSnd===ch)gotoSlot(free);
+          flash(T2.name+' '+(T2.find(rk).length)+' — added'); dirty=true; dirtySave=true;
+        }else flash(T2.name+': '+list.length+' — '+(list.length+1)+' makes another');
         return;
       }
-      /* the envelope stages by their own letters */
-      if(T2.jump&&T2.jump[e.code]&&!e.repeat&&S.layer>=2){
+      /* the sub-fields by their own letters — env's a d s r */
+      if(T2.mag&&T2.mag.keys&&T2.mag.keys[e.code]&&!e.repeat){
         e.preventDefault(); HOLD.optUsed=true;
-        const sl2=rk[S.curSlot], specs=paramsFor(S.curMod,sl2);
-        const px=specs.findIndex(x=>x.key===T2.jump[e.code]);
-        if(px>=0){S.slotParam=px; flash(T2.name+' → '+specs[px].lbl+' '+fmtVal(specs[px],getV(pre,S.curMod,S.curSlot,specs[px]))); dirty=true;}
+        magAim(HOLD.opt,T2.mag.keys[e.code]);
         return;
       }
-      /* = grows the family while the scope is held, - and ⌫ shrink it — the
-         letter is already pointing at the rack, so the chord is one finger */
-      if(e.code==='Equal'&&!e.repeat){
+      /* -/= IS THE AMOUNT, the thing you always reach for: a route's depth, an
+         effect's mix. Repeats, because it is a dial and not a notch. */
+      if((e.code==='Equal'||e.code==='Minus')&&T2.mag&&T2.mag.amt){
         e.preventDefault(); HOLD.optUsed=true;
-        const free=T2.free?T2.free(rk):rk.findIndex(x=>!x||!x.typ);
-        if(free<0){flash(T2.id.toUpperCase()+' rack is full');return;}
-        pushUndo('add '+T2.name);
-        T2.make(rk[free],free);
-        engine.rebuildRack(ch); engine.refresh(ch);
-        if(S.layer>=2)gotoSlot(free);
-        flash(T2.name+' '+(T2.find(rk).length)+' — added'); dirty=true; dirtySave=true;
+        magDial(HOLD.opt,'amt',e.code==='Equal'?1:-1,e);
         return;
       }
-      if((e.code==='Backspace'||e.code==='Minus')&&!e.repeat&&!HOLD.optLatched){
+      if(e.code==='Backspace'&&!e.repeat&&!HOLD.optLatched){
         e.preventDefault(); HOLD.optUsed=true;
-        const si2=(S.layer>=2&&list.includes(S.curSlot))?S.curSlot:list[0];
+        const si2=(HOLD.opt.si!=null&&rk[HOLD.opt.si])?HOLD.opt.si:list[0];
         if(si2!=null&&rk[si2]){pushUndo('remove '+T2.name);
           T2.unmake(rk[si2],si2);
           engine.rebuildRack(ch); engine.refresh(ch);
+          HOLD.opt.si=null;
           flash(T2.name+' removed'); dirty=true; dirtySave=true;}
         return;
       }
-      /* everything else — arrows, letters, space — falls THROUGH: the cursor
-         is already on the thing, so the strip's own editing is the editor */
+      /* THE ARROWS BELONG TO THE SCOPE, and to nothing else, for as long as
+         the letter is down — the whole point of the thing. They used to fall
+         through to the strip, which meant they did nothing at all unless you
+         were already inside it. */
+      if(T2.mag&&(e.code==='ArrowUp'||e.code==='ArrowDown')){
+        e.preventDefault(); HOLD.optUsed=true;
+        magDial(HOLD.opt,'pri',e.code==='ArrowUp'?1:-1,e);
+        return;
+      }
+      if(T2.mag&&(e.code==='ArrowLeft'||e.code==='ArrowRight')){
+        e.preventDefault(); HOLD.optUsed=true;
+        magDial(HOLD.opt,'sec',e.code==='ArrowRight'?1:-1,e);
+        return;
+      }
+      /* everything else — letters, space — falls THROUGH: the keyboard still
+         plays while a scope is held, which is what makes it performable */
     }
     const sl=HOLD.opt.nav?null:optSlot(ch,oc,false);
     if(sl){
@@ -17937,7 +18107,10 @@ function render(){
       +sp(HE.pressure()==null?'d':'a',HE.pressure()==null?'—':HE.pressure().toFixed(2))
       +sp(focusIsStepped()?'d':'a',focusIsStepped()?' step':' dial'):'')+
     (SUS.size?dot+sp('ri',' ⟳ '+SUS.size+' held — tap ⇧ '):'')+
-    (HOLD.optLatched&&HOLD.opt?dot+sp('ri',' ⟳ '+OPTRACK[HOLD.opt.c].name+' ch '+HOLD.opt.ch+' '):'')+
+    /* a LATCHED scope outlives the hand that opened it, so it has to say what
+       its dial is pointing at — the flash that said so has long gone */
+    (HOLD.optLatched&&HOLD.opt?dot+sp('ri',' ⟳ '+OPTRACK[HOLD.opt.c].name+' ch '+HOLD.opt.ch+
+      (HOLD.opt.lbl?' · '+HOLD.opt.lbl:'')+' '):'')+
     /* WHETHER THE SET IS ON A DISK, at a glance. Not knowing was the whole
        problem: an autosave you cannot see is one you find out about afterwards. */
     dot+(FILEH?(FILEOK?sp('a','◆ file'):sp('r','◆ file?')):sp('d','⌘⇧E file'))+
