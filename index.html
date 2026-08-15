@@ -132,9 +132,14 @@
   .rwh line{stroke:var(--fg);stroke-width:1;opacity:.8;stroke-dasharray:4 3;}
   .wlay path{stroke:var(--fg);stroke-width:1;opacity:.5;fill:none;}
   .wtc path{stroke:var(--fg);stroke-width:1.2;opacity:.8;fill:none;}
-  .cuet{position:absolute;left:0;width:100%;height:1px;background:var(--fg);opacity:.65;}
+  .cuet{position:absolute;left:0;width:100%;height:1px;background:var(--fg);opacity:.18;}
+  .cuet.on{height:1.6px;background:#fff;box-shadow:0 0 3px rgba(255,255,255,.55);}
+  .cuel.on{color:#fff;font-weight:700;}
   .crx{position:absolute;left:0;width:100%;background:var(--bg);opacity:.62;}
   .bart{position:absolute;left:0;width:100%;height:1px;background:var(--fg);opacity:.16;}
+  /* the loop's end, when it is not the take's end */
+  .loopend{position:absolute;left:0;width:100%;height:1px;opacity:.55;
+           background:repeating-linear-gradient(90deg,var(--fg) 0 3px,transparent 3px 6px);}
   .cuel{position:absolute;right:1px;font-size:9px;line-height:9px;color:var(--fg);
         opacity:.75;pointer-events:none;}
   .cuel.off{text-decoration:line-through;}
@@ -1026,7 +1031,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.1151';
+const BUILD='2026-08-15.1204';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -10279,6 +10284,15 @@ function _prsAction(d){
     else if(f==='auto'){
       p.au.auto=autoCur(p)?0:1;
       if(!p.au.auto)engine.audStop(pi,AC.currentTime+0.01);
+      else if(T.playing){
+        /* JOIN IN PROGRESS. Switching the loop back on used to wait for the
+           next loop boundary — up to four bars of silence after a keypress
+           that says "loop" — so it starts here, from where the loop would be
+           if it had been running all along. */
+        const l9=S.patterns[S.editPat].lanes[pi], a9=actAt(posNow());
+        engine.audStop(pi,AC.currentTime+0.004);
+        engine.audPlay(pi,AC.currentTime+0.008,l9.len,fmod(posNow()-a9.anchor,l9.len));
+      }
       flash('auto cursor '+(p.au.auto?'loops':'off — the keys are the only playheads'));
     }
     else if(f==='voice'){
@@ -17620,24 +17634,44 @@ function gridHTML(pat,pos,anc,chans){
           const f9=frOf(b9); if(f9<=0.002||f9>=en9)continue;
           ct+='<i class="bart" style="top:'+(f9*H).toFixed(1)+'px"></i>';
         }
+        /* WHERE THE LOOP ENDS, ON THE TAKE. With speed at fit they are the
+           same place and there is nothing to draw. Off fit they part, and
+           this is the only way to see it: the line says how much of the take
+           the loop actually gets through — short of the bottom means the
+           tail never plays, past the bottom means it never finishes. */
+        if(!Math.round(au9.fit)){
+          const fe=frOf(LN2);
+          if(fe>0.02&&fe<en9-0.01)
+            ct+='<i class="loopend" style="top:'+(fe*H).toFixed(1)+'px"></i>';
+        }
         /* the cue marks are the cuts themselves now — no beat arithmetic in
            between, because a transient is a place in the take, not a beat */
         const cutL=engine.audCuts(i)||[];
+        /* which cues are under a finger right now — the only ones that get
+           a line rather than a letter */
+        const held9=new Set();
+        for(const k9 in (AUD.gk||{})){const h9=AUD.gk[k9];
+          if(h9&&h9.pi===i&&h9.sl!=null)held9.add(h9.sl);}
+        if(AUD.hold&&AUD.hold.pi===i&&AUD.hold.sl!=null)held9.add(AUD.hold.sl);
         for(let k2=0;k2<cutL.length;k2++){
           const cu=cues[k2]||{};
           const fr9=cutAt(i,k2);
           if(fr9<0||fr9>=en9)continue;
-          /* A CUE CARRIES ITS OWN LEVEL, and a cue at zero is a key that
-             does nothing with nothing on screen to say why. The tick and its
-             letter now dim with the cue's volume and strike through at
-             silence — the state that ate an afternoon. */
+          /* THE LETTER IS THE MARK; the line is only for the one you are
+             playing. Twenty-six bright rules across the take drowned the
+             waveform they were supposed to describe — so the tick sits at
+             the edge of visible and lights up only while its own key is
+             down. A cue at zero still strikes through: it is a key that
+             does nothing, and nothing else on screen says so. */
           const vol9=cu.vol??1, sil9=vol9<0.005;
-          ct+='<i class="cuet" style="top:'+(fr9*H).toFixed(1)+'px;opacity:'+
-              (sil9?0.2:0.35+0.4*Math.min(1,vol9)).toFixed(2)+'"></i>';
+          const lit9=held9.has(k2);
+          ct+='<i class="cuet'+(lit9?' on':'')+'" style="top:'+(fr9*H).toFixed(1)+
+              'px;opacity:'+(lit9?1:sil9?0.12:0.18).toFixed(2)+'"></i>';
           const lk=KBSEQ[k2];
           if(lk&&Math.round(au9.kmode||0)===0)
-            ct+='<i class="cuel'+(sil9?' off':'')+'" style="top:'+(fr9*H-6).toFixed(1)+
-                'px;opacity:'+(sil9?0.5:0.45+0.35*Math.min(1,vol9)).toFixed(2)+'">'+
+            ct+='<i class="cuel'+(sil9?' off':'')+(lit9?' on':'')+'" style="top:'+
+                (fr9*H-6).toFixed(1)+'px;opacity:'+
+                (lit9?1:sil9?0.35:0.3+0.25*Math.min(1,vol9)).toFixed(2)+'">'+
                 lk.slice(3).toLowerCase()+'</i>';}
         if(ct)h+='<div class="alay" style="height:'+H+'px;width:'+CW.toFixed(1)+'px">'+ct+'</div>';
       }
