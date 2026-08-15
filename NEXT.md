@@ -152,17 +152,18 @@ gesture would mean different things on different channels.
    and the rest reach two dials and their mix from the scope, and the strip for
    everything else — add `keys` to a row when a third dial earns a letter.
 
-1. **KILL `center` ON MOD ROUTES** (agreed 2026-08-15). It is a second way to
-   say what the destination already says: a modulator's centre is where the
-   knob sits when nothing is driving it, which IS the destination's stored
-   value. Two controls for one idea — the same confusion the key vol / loop vol
-   pair had. Before deleting: check whether any saved preset has a non-zero
-   `ctr` doing real work, and if so FOLD it into the destination's stored value
-   on migration rather than dropping it.
-   With it: **enter on a mod slot jumps to its destination**. Same gesture as
-   `⌥\` stepping between automated knobs and taking you there, which already
-   works — making enter mean "go to what this points at" everywhere is more of
-   the homogenisation Gad is after.
+1. **`center` IS DEAD — DONE.** The audit it asked for found exactly ONE
+   non-zero `ctr` in 180 library entries (factory VEP9, lfo→cutoff, amt 25 /
+   ctr 70), and it was folded rather than dropped: 678Hz → 7607Hz, which is the
+   same place the LFO used to swing around. keytrack and random lost their
+   second dial (`mag.sec`) — amount was always their whole control.
+   ONE THING CENTER DID THAT NOTHING ELSE DOES: a pressure→amp route could
+   start at SILENCE (ctr −100) so a note had to be pressed into existence. The
+   resting point is full now and a negative amount presses DOWN from it. If the
+   swell-from-nothing gesture is wanted back it needs its own home, not a
+   second centre.
+   Still open from that entry: **enter on a mod slot jumps to its destination**.
+   Same gesture as `⌥\` stepping between automated knobs and taking you there.
 
 2. **MONO CUE RELEASE THROUGH THE RACK.** The live keyboard path is momentary
    and measured so — with auto on and off, the cursor is gone within 150ms of

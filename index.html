@@ -603,7 +603,7 @@ const mkLfo =()=>({dst:0,idx:0,wav:0,rate:5,amt:30});
    Each route = a target (dst enum or learned tgt) + amount + center bias. */
 /* slot# 0 is 'all' and that is the sensible default: a route you have just
    made should affect the whole thing, and you narrow it if you want to. */
-const mkRoute=()=>({dst:0,idx:0,amt:100,ctr:0,tgt:null});
+const mkRoute=()=>({dst:0,idx:0,amt:100,tgt:null});
 const mkMod =i=>({src:0,rsel:0,routes:[mkRoute()],a:0.005,d:0.15,s:0.7,r:0.2,crv:0,
                   wav:0,rate:5,ph:0,syn:0,rdiv:4,ltr:0,
                   fch:1,fa:0.01,fr:0.15,fg:4});
@@ -641,10 +641,32 @@ function fixAmpIdx(slot){
 }
 function modToRoutes(p){
   const fix=slot=>{if(slot&&slot.mod)for(const m of slot.mod)if(m&&('dst' in m)){
-    m.routes=[{dst:m.dst||0,idx:m.idx??0,amt:m.amt??100,ctr:0,tgt:m.tgt||null}]; m.rsel=0;
+    m.routes=[{dst:m.dst||0,idx:m.idx??0,amt:m.amt??100,tgt:m.tgt||null}]; m.rsel=0;
     delete m.dst;delete m.idx;delete m.amt;delete m.tgt;}};
-  const fixC=slot=>{if(slot&&slot.mod)for(const m of slot.mod)if(m&&m.routes)   // v14 min/max → center
-    for(const rt of m.routes){if(!('ctr' in rt))rt.ctr=0;delete rt.min;delete rt.max;}};
+  /* CENTER IS GONE, and this is where it is paid off rather than dropped. A
+     modulator's centre is where the knob sits when nothing is driving it,
+     which IS the destination's stored value — two controls for one idea, the
+     same confusion the key vol / loop vol pair had. So: fold each non-zero
+     `ctr` into the value it was offsetting, through the very destApply the
+     audio path used to apply it with, and the sound comes out where it was.
+     Audited before cutting, across all 180 library entries and the live set:
+     exactly ONE route had a non-zero centre (factory VEP9, an lfo on the
+     cutoff at amt 25 / ctr 70), so this is a one-preset migration and not a
+     minefield. An address that will not resolve simply loses the offset —
+     there is nothing to fold it INTO. */
+  const fixC=slot=>{if(slot&&slot.mod)for(const m of slot.mod)if(m&&m.routes)
+    for(const rt of m.routes){
+      const c=(rt.ctr||0)/100;
+      if(c&&rt.addr){
+        const w=autoWhere(slot,rt.addr);
+        if(w&&w.spec&&w.mi>=0){
+          const holder=modHolder(slot,MODULES[w.mi].id);
+          const base=getV(holder,w.mi,w.si,w.spec);
+          if(Number.isFinite(base))setV(holder,w.mi,w.si,w.spec,destApply(w.spec,base,c/2));
+        }
+      }
+      delete rt.ctr; delete rt.min; delete rt.max;
+    }};
   /* THE ONE THAT BROKE THE SNARE. Making "amp + slot n" mean operator n was
      right, but every preset ever saved wrote slot 1 on its amp route meaning
      "the voice" — so overnight half the desk had NO amp envelope. Without one
@@ -757,7 +779,7 @@ function foldMod(p){
      sounds that have been around longest. */
   if(!p||p._folded)return addrMod(p);
   const out=[];
-  const R=(dst,idx,amt)=>({dst,idx:idx??1,amt,ctr:0,tgt:null});
+  const R=(dst,idx,amt)=>({dst,idx:idx??1,amt,tgt:null});
   /* In the legacy env/lfo format `idx` only ever meant a slot for FILTER and
      OP targets; on amp and pitch it was carried along meaninglessly and every
      recipe in the file wrote 1. Under the new rule 1 is "operator 1", so those
@@ -795,14 +817,14 @@ function foldMod(p){
 /* PLAY 'rpit': a fresh pitch offset per note. Returns the SOUNDING midi —
    callers keep the original note for kit-pad selection, so a kit repitches the
    pad you hit — even across octaves — instead of jumping to another pad. */
-function rpitApply(midi,sl){
+function rpitApply(midi,sl,pre){
   if(Math.random()>=clamp(sl.p3??100,0,100)/100)return midi;
   const dir=Math.round(sl.p5||0);
   const r=()=>dir===1?Math.random():dir===2?-Math.random():Math.random()*2-1;
   let m=midi, semis=Math.round(sl.p2||0);
   if(semis){
     m=Math.round(midi+r()*semis);
-    if(Math.round(sl.p4||0)===1)m=snapToPCs(m,pcsNow());   // stay in key
+    if(Math.round(sl.p4||0)===1&&!isChordMaster(pre))m=snapToPCs(m,pcsNow());   // stay in key
   }
   return m+r()*(sl.p1||0)/100;                             // cents ride on top
 }
@@ -1057,8 +1079,18 @@ const heldPCs=new Map();               // pitch-class -> count, from GLOBAL chor
    lurched at the end of each chord — the harmony has to hold until you change
    it, or until the chord slot goes back to `local` and hands the scale back. */
 let chordHold=[];
-const anyGlobalChord=()=>S.presets.some(p=>p&&p.ply&&
-  p.ply.some(sl=>sl.typ===1&&!sl.off&&Math.round(sl.p3===undefined?1:sl.p3)===1));
+const isGlobalChordSlot=sl=>sl&&sl.typ===1&&!sl.off&&Math.round(sl.p3===undefined?1:sl.p3)===1;
+const anyGlobalChord=()=>S.presets.some(p=>p&&p.ply&&p.ply.some(isGlobalChordSlot));
+/* A CHORD MASTER DOES NOT FOLLOW ITSELF. The channel holding a global chord is
+   what pcsNow() is reporting, so snapping ITS notes to that same set is a
+   feedback loop wearing a scale: the notes you are playing get quantized to
+   the chord they are themselves defining, which is at best redundant and at
+   worst moves them. trigger() already knew this and asked inline; nothing else
+   did — the grid drew a master's notes snapped to its own chord (Gad watched
+   them move), the note-fx repitcher snapped through it, the ratchet spread
+   snapped through it, and rpit's stay-in-key snapped through it. One test,
+   asked everywhere. */
+const isChordMaster=p=>!!(p&&p.ply&&p.ply.some(isGlobalChordSlot));
 const pcsNow=()=>heldPCs.size?[...heldPCs.keys()]
   :(chordHold.length&&anyGlobalChord()?chordHold:scalePCs());
 function addPC(pc){heldPCs.set(pc,(heldPCs.get(pc)||0)+1);}
@@ -1076,7 +1108,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.2213';
+const BUILD='2026-08-15.2222';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1420,7 +1452,7 @@ const MOD_P=sl=>{                    // unified: source picks which extra fields
        the filter is one idea; velocity that closes it is another, and there
        was no way to ask for the second. */
     SP('amt','amt','lin',{min:-200,max:200,step:5,fmt:v=>v+'%', get:m=>modRt(m).amt, set:(m,v)=>modRt(m).amt=v}),
-    SP('center','ctr','lin',{min:-100,max:100,step:5,fmt:v=>(v>0?'+':'')+v+'%', get:m=>modRt(m).ctr||0, set:(m,v)=>modRt(m).ctr=v})];
+    ];
   if(s===0)return base.slice(0,5);  // off: src+route+dest+slot#+amt navigate; set src to activate
   if(s===1)return base.concat([
     /* TIME ×: one dial over all four stages, right after the routing —
@@ -2650,13 +2682,15 @@ const OPTRACK={
         free:rk=>rk.findIndex(x=>!x||!x.src),
         /* nothing but a route: amount is the whole control, and it is on both
            the dial and the pair, because there is no second thing to reach */
-        mag:{amt:'amt',pri:'amt',sec:'ctr'}},
+        /* nothing but a route: amount is the whole control, on both the dial
+           and the pair, because there is no second thing left to reach */
+        mag:{amt:'amt',pri:'amt'}},
   Slash:{id:'mod',name:'random',nav:1,
         find:rk=>rk.map((x,i)=>x&&x.src===5&&!x.off?i:-1).filter(i=>i>=0),
         make:(sl,i)=>Object.assign(sl,mkMod(i),{src:5,off:false,rate:6}),
         unmake:(sl,i)=>Object.assign(sl,mkMod(i)),
         free:rk=>rk.findIndex(x=>!x||!x.src),
-        mag:{amt:'amt',pri:'rate',sec:'ctr'}},
+        mag:{amt:'amt',pri:'rate'}},
   KeyR:{id:'fx',name:'reverb',nav:1,
         find:rk=>rk.map((x,i)=>x&&x.typ===XTYPES.indexOf('verb')&&!x.off?i:-1).filter(i=>i>=0),
         make:sl=>Object.assign(sl,{typ:XTYPES.indexOf('verb'),p1:0.5,p2:0.3,p3:0.5,mix:fToVol(35)}),
@@ -4922,7 +4956,8 @@ function scheduleRange(from,to){
           else if(id==='rpit'){let m2=midi2+Math.round((r*2-1)*7);
             /* kit pads are drums: the scale never touches them, not even
                through a master note-fx */
-            if(CFG.scaleOn&&!isDrumCat(chP.cat))m2=snapToPCs(m2,pcsNow()); midi2=m2;}
+            if(CFG.scaleOn&&!isDrumCat(chP.cat)&&!isChordMaster(chP))m2=snapToPCs(m2,pcsNow());
+            midi2=m2;}
           else if(id==='octs')midi2+=r<0.33?-12:r>0.67?12:0;
           else if(id==='chop')dur2=Math.max(0.05,dur2*0.33);
           else if(id==='rtch')rt=Math.max(rt,3);
@@ -5298,7 +5333,7 @@ class Voice{
                         amt:rt.amt,ph:me.ph??m.ph,free:Math.round(m.ltr||0)===1,mi:mi2});
       }
     }
-    /* amp-target mods (vel/key/rnd/center) scale the envelope PEAK — never a DC
+    /* amp-target mods (vel/key/rnd) scale the envelope PEAK — never a DC
        floor on the gain node, or the note could never fall to silence */
     let ampBias=0;
     this.opBias={};                      // amp+slot n: scales operator n instead
@@ -5306,7 +5341,7 @@ class Voice{
       for(const rt of effRoutes(m)){ if(rt.dst!==1)continue;
         if(Math.round(rt.idx||0)>=1){    // one operator, not the whole voice
           const si4=clamp(Math.round(rt.idx),1,10)-1, A2=(rt.amt||0)/100;
-          let b2=(rt.ctr||0)/100;
+          let b2=0;
           if(m.src===3)b2+=clamp(vel,0,1)*A2;
           else if(m.src===4)b2+=clamp((midi-60)/24,-2,2)*A2;
           else if(m.src===5)b2+=(Math.random()*2-1)*A2;
@@ -5317,7 +5352,6 @@ class Voice{
         if(m.src===3)ampBias+=clamp(vel,0,1)*A;
         else if(m.src===4)ampBias+=clamp((midi-60)/24,-2,2)*A;
         else if(m.src===5)ampBias+=(Math.random()*2-1)*A;
-        ampBias+=(rt.ctr||0)/100;
       }}
     if(ampBias)this.amp=clamp(this.amp*(1+ampBias),0,this.amp*3);
     /* AMP + all = the voice, AMP + n = operator n's level. It used to be
@@ -5902,10 +5936,11 @@ class Voice{
           cs.start(at); this.nodes.push(cs);
           bag.push({p:cs.offset,sc:A,base:0});
         }else if(rt.dst===1){                    // amp: a post-vca gain, base + press×amt
-          /* center sets where an unpressed note sits: 0 leaves it at full and
-             pressure adds on top, −100% starts it at SILENCE so the note has to
-             be pressed into existence — the breath/swell gesture. */
-          const b0=clamp(1+(rt.ctr||0)/100,0,2);
+          /* an unpressed note sits at FULL and pressure moves it from there —
+             a negative amount presses it down, a positive one presses it up.
+             This used to be where `center` chose the resting point; the note's
+             own level is that resting point now. */
+          const b0=1;
           if(!this.pGain){this.pGain=ac.createGain(); this.pGain.gain.value=b0;}
           else this.pGain.gain.value=b0;
           bag.push({p:this.pGain.gain,sc:A,base:b0});
@@ -5913,19 +5948,6 @@ class Voice{
       }
     }
     /* center: a per-route DC bias on the target (independent of the source) */
-    for(const m of md){
-      if(m.off||!m.src||!m.routes)continue;
-      for(const rt of effRoutes(m)){
-        const c=(rt.ctr||0)/100; if(!c||!rt.dst)continue;
-        if(rt.dst===3){const ps=this._fltP(rt.idx,'detune');
-          if(ps.length){const cs=ac.createConstantSource();cs.offset.value=clamp(c*2400,-4800,4800);
-            for(const pm of ps)cs.connect(pm);cs.start(at);this.nodes.push(cs);}}
-        else if(rt.dst===2){const cs=ac.createConstantSource();cs.offset.value=c;
-          for(const tg of Object.values(this.opDet).flat()){if(tg.sc<1)continue;
-            const g2=ac.createGain();g2.gain.value=tg.sc*12;cs.connect(g2);g2.connect(tg.pm);}
-          cs.start(at);this.nodes.push(cs);}
-      }
-    }
     /* learned targets (cmd+C/V): route the source onto any resolvable live param */
     for(const m of md){
       if(m.off||!m.src||!m.routes)continue;
@@ -5935,8 +5957,7 @@ class Voice{
         const t=rt.tgt||(rt.addr&&!effRoute(rt).dst?rt.addr:null);
         if(!t)continue;
         const rp=this._modParam(t); if(!rp||!rp.params.length)continue;
-        const A=(rt.amt||0)/100, dep=rp.cents?A*4800:A*(rp.range||1), cbias=(rt.ctr||0)/100;
-        const cAmt=rp.cents?cbias*2400:cbias*(rp.range||1);
+        const A=(rt.amt||0)/100, dep=rp.cents?A*4800:A*(rp.range||1);
         for(const param of rp.params){
           if(m.src===1){                             // env → param
             const T4=clamp(m.tmul??1,0.1,4);
@@ -5958,7 +5979,6 @@ class Voice{
             const vv=m.src===3?clamp(vel,0,1):m.src===4?clamp((midi-60)/24,-2,2):(Math.random()*2-1);
             const cs=ac.createConstantSource(); cs.offset.value=vv*dep; cs.connect(param); cs.start(at); this.nodes.push(cs);
           }
-          if(cAmt){const cs=ac.createConstantSource(); cs.offset.value=cAmt; cs.connect(param); cs.start(at); this.nodes.push(cs);}
         }
       }
     }
@@ -5988,7 +6008,6 @@ class Voice{
         const lo=sp2.node, lg=ac.createGain();
         if(sp2.osc&&m.ph)E.setWave(lo,LFOW_PW[m.wav]??0,m.ph);
         lg.gain.value=clamp((rt.amt||0)/100,-1,1);       // amt 100 = the full field
-        const cb=(rt.ctr||0)/100; if(cb)pvPan.pan.value=clamp(cb,-1,1);
         lo.connect(lg); lg.connect(pvPan.pan); lo.start(at); this.nodes.push(lo);
         (this.lfoN=this.lfoN||[]).push({lo,lg,mi:mi3,base:rt.amt});
       }
@@ -7253,7 +7272,7 @@ class Engine{
                200 on a bipolar source reaches both ends of whatever it is
                pointed at, and 100 reaches half. It used to be span-per-100%
                against a span it had guessed wrong. */
-            const v=destApply(sp,base,((rt.amt||0)*src+(rt.ctr||0))/200);
+            const v=destApply(sp,base,(rt.amt||0)*src/200);
             const id=pi+'.'+a.rack+'.'+h.si+'.'+sp.key;
             touched[id]=1;
             this._ctrlHeld[id]={pi,si:h.si,key:sp.key,base,rack:a.rack};
@@ -8227,7 +8246,7 @@ class Engine{
     const p0=kp?{...chan,ply:kp.ply}:chan;
     const plyE=this.ovRack(pi,'ply',p0.ply);
     const p=plyE===p0.ply?p0:{...p0,ply:plyE};
-    const isMaster=p.ply.some(sl=>sl.typ===1&&!sl.off&&Math.round(sl.p3===undefined?1:sl.p3)===1);
+    const isMaster=isChordMaster(p);
     /* global scaling: snap non-drum channels to the held chord (from a chord-
        master channel) or to the global scale. masters define, they don't follow */
     if(CFG.scaleOn&&!isDrumCat(p.cat)&&!isMaster)midi=snapToPCs(midi,pcsNow());
@@ -8265,7 +8284,7 @@ class Engine{
        so arpTick does it there instead of once for the whole held note. */
     const rpS=arpIdx<0?p.ply.find(sl=>sl.typ===13&&!sl.off):null;
     if(rpS&&!(Math.round(rpS.p6||0)===1&&durSec!=null))     // same double-apply
-      midis=midis.map(m=>rpitApply(m,rpS));
+      midis=midis.map(m=>rpitApply(m,rpS,p));
     const rpPre=!!(rpS&&Math.round(rpS.p6||0)===1);
     if((chordPre||rpPre)&&durSec==null&&T.playing)   // live play: write every sounding note into the lane
       for(const m of midis)recPlayNote(pi,posNow(),Math.round(m),vel,0.25);
@@ -8423,7 +8442,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
             if(!(en.until>t||(!en.heard&&(en.born??-1e9)<=t+1e-9)))continue;
             en.heard=true;
             let m2=en.midi+Math.round((h8(en.born??0,k*7+3)*2-1)*sprd);
-            if(snapS)m2=snapToPCs(m2,pcsNow());
+            if(snapS&&!isChordMaster(S.presets[pi]))m2=snapToPCs(m2,pcsNow());
             const bg=t+grooveOff(pi,t);
             const vv=clamp(en.vel*(1-Math.abs(ric)*0.4*Math.min(1,k/24)),0.05,1);
             const v=this.noteOn(gridTime(bg),pi,m2,vv,en.pad??en.midi);
@@ -8497,7 +8516,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
         }
         const rpA=rack.find(sl=>sl.typ===13&&!sl.off);
         for(const m of hits){
-          const v=this.noteOn(gridTime(bg),pi,rpA?rpitApply(m,rpA):m,pick.vel,pick.pad??m);
+          const v=this.noteOn(gridTime(bg),pi,rpA?rpitApply(m,rpA,S.presets[pi]):m,pick.vel,pick.pad??m);
           v.release(gridTime(bg+div*0.85));
           if(Math.round(arp.p6||0)===1)             // stage=pre: the recorder captures the arp output
             recPlayNote(pi,bg,m,pick.vel,div*0.85);
@@ -10767,7 +10786,7 @@ const trSemis=p=>(p.tr||0)*12+(p.trs||0);
 function heardMidi(pi,midi){
   const p=S.presets[pi]; if(!p)return midi;
   let m=midi+trSemis(p);
-  if(CFG.scaleOn&&!isDrumCat(p.cat))m=snapToPCs(m,pcsNow());
+  if(CFG.scaleOn&&!isDrumCat(p.cat)&&!isChordMaster(p))m=snapToPCs(m,pcsNow());
   return m;
 }
 const trLabel=p=>{const st=trSemis(p);return st?(st>0?'+':'')+st+'st':'0st';};
