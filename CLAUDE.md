@@ -124,6 +124,24 @@ The row a held scope owns is four pairs now: `↑↓` primary · `←→` second
 `-/=` amount · `[ ]` TYPE (which reverb, which filter shape, which effect).
 Each is a cell on `mag` and may be a function of the slot.
 
+**WHO OWNS A SCOPE LETTER — one rule, and it decides the whole gesture:**
+
+    HELD scope   (its letter is still down)   its letters are SUB-FIELDS
+    RIDING scope (letter up, ⌥ still down)    its letters SWITCH scope
+
+So `⌥`+hold `e` reaches a/d/s/r, and `⌥`+tap `e` then tap `f` walks from the
+env to the filter without ever letting go of `⌥`. `ALTSUS.has(HOLD.opt.c)` is
+the test for which case you are in.
+
+The digits, the arrows, `-/=` and `[ ]` are deliberately OUTSIDE this — they
+work whether the letter is down or not, because holding a letter to change
+slot is the one thing Gad ruled out. Switching out of a riding scope must
+`ALTSUS.delete` the old letter: its key-up has already happened, so nothing
+else will ever take it out.
+
+The cost, and it is real: while a scope rides, the ~15 OPTRACK letters no
+longer play notes — they switch. Every other letter still plays.
+
 The rule behind all three: **a key that is holding something open is not also a
 modifier of it.** Any new modifier in a scope gets asked that question.
 

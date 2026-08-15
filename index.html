@@ -1061,7 +1061,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.2123';
+const BUILD='2026-08-15.2130';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -15200,19 +15200,30 @@ const onKeyDown=e=>{
      &&!ALTSUS.size&&!HOLD.opt&&!MODPICK){
     e.preventDefault(); rollSlot(); return;
   }
-  /* A HELD SCOPE'S OWN LETTERS COME FIRST, and this test is the whole of why
-     ⌥e + a/d/s/r never worked. All four of the envelope's stage letters are
-     ALSO scope letters — arp, delay, saturation, reverb — and this block runs
-     before the held-scope block below, so `d` under a held env quietly threw
-     the env away and opened DELAY instead: the slot fell back to that rack's
-     first, the field became p1, and from there the arrows and -/= were dialling
-     a delay time with nothing on screen saying so. The `keys` row is a claim on
-     those letters for as long as the letter that opened the scope is down. */
-  if(OPTRACK[e.code]&&altOf(e)&&!e.repeat&&S.layer>=1&&!e.metaKey&&!e.ctrlKey&&!ALTSUS.size
-     &&!(HOLD.opt&&HOLD.opt.nav&&OPTRACK[HOLD.opt.c]&&OPTRACK[HOLD.opt.c].mag
+  /* WHO OWNS A SCOPE LETTER, in one rule: a scope you are still HOLDING keeps
+     its letters as sub-fields; a scope only RIDING on ⌥ gives them back to
+     switching. So ⌥+hold e reaches a d s r (the envelope's stages), and ⌥+tap
+     e then tap f walks you from the env to the filter without letting go of ⌥.
+     Both halves were broken and in opposite directions. All four of env's
+     stage letters are also scope letters — arp, delay, saturation, reverb —
+     and this block runs first, so `d` under a held env threw the env away and
+     opened DELAY with nothing on screen saying so. Then ALTSUS blocked this
+     block outright, so once a scope was riding you could not switch to another
+     one at all: you had to let go of ⌥, losing the scope, and start again.
+     The digits are deliberately NOT part of this — 1 2 3 walk the instances
+     whether the letter is down or not, because holding a letter to change slot
+     is the thing Gad specifically did not want. Same for the arrows, -/= and
+     [ ]: none of them ever depended on the letter. */
+  if(OPTRACK[e.code]&&altOf(e)&&!e.repeat&&S.layer>=1&&!e.metaKey&&!e.ctrlKey
+     &&(!ALTSUS.size||(HOLD.opt&&ALTSUS.has(HOLD.opt.c)))
+     &&!(HOLD.opt&&HOLD.opt.nav&&!ALTSUS.has(HOLD.opt.c)
+         &&OPTRACK[HOLD.opt.c]&&OPTRACK[HOLD.opt.c].mag
          &&OPTRACK[HOLD.opt.c].mag.keys&&OPTRACK[HOLD.opt.c].mag.keys[e.code])){
     e.preventDefault();
     const c=e.code;
+    /* switching out of a riding scope: the letter that was holding it has
+       already gone up, so nothing else will ever take it out of ALTSUS */
+    if(HOLD.opt&&HOLD.opt.c!==c&&ALTSUS.has(HOLD.opt.c))ALTSUS.delete(HOLD.opt.c);
     if(HOLD.opt&&HOLD.opt.c===c&&HOLD.optLatched){   // the way out is the key you came in on
       HOLD.opt=null; HOLD.optLatched=false;
       flash(OPTRACK[c].name+' scope released — the digits are the desk again');
