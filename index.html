@@ -1031,7 +1031,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.1350';
+const BUILD='2026-08-15.1354';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -10179,12 +10179,16 @@ const GRANF=[
 const AUDF=[
  /* the tape's SOUND rack: how the clip plays. Identity — keys mode, sample,
     input, channels, fit, gain — lives on the Instrument row. */
- /* SYNC: does the take keep the clock. Off is tape — pitch drags speed with
-    it, varispeed, the way a record does. On is the stretch: the take holds
-    its timing and pitch moves alone inside the cursor, which is what the
-    window dial shapes. (This was called 'link', describing the mechanism
-    rather than the question.) */
- SP('sync','pmode','enum',{opts:['off','on']}),
+ /* HOW THIS CHANNEL READS ITS TAKE, and the only thing on the page that
+    changes what the other dials mean:
+      tape    — resample; pitch rides speed, the way a record does
+      stretch — the dual-tap; the take holds its timing, pitch moves alone,
+                and `window` is the character of it
+      grain   — the cloud; the playhead becomes a spray of short reads
+    It writes the two things underneath (pmode, and whether size is at its
+    top) so nothing is stored twice, and the page shows only the dials the
+    mode actually uses. */
+ SP('mode','cmode','enum',{opts:['tape','stretch','grain']}),
  /* SPEED, WITH FIT AT THE CENTRE. Fit is the resting state — the loop sets
     the rate — so it belongs in the middle of the dial rather than at the
     bottom, where it read as "slowest". Up from centre is faster by hand;
@@ -10231,6 +10235,35 @@ GRANF.forEach(sp9=>{sp9.st='gr';});
 /* both racks carry a pool picker and the page only needs one — and the
    instrument row has one anyway, first field after engine */
 const AUDALL=()=>AUDF.concat(GRANF.filter(sp9=>sp9.key!=='_pool'));
+/* the mode a channel is in, read off the two things that define it when the
+   field itself has never been touched — so an old set opens in the mode it
+   was already behaving as */
+const cmodeOf=p=>{
+  const au=(p&&p.au)||{}, gr=(p&&p.gr)||{};
+  if(Number.isFinite(au.cmode))return clamp(Math.round(au.cmode),0,2);
+  if((gr.size??0.12)<0.999)return 2;
+  return Math.round(au.pmode||0)?1:0;
+};
+/* …and the two things it writes. A mode change never loses the grain size
+   you had: it is parked on the channel and handed back when you return. */
+function applyCmode(pi){
+  const p=S.presets[pi]; if(!p)return;
+  const m=clamp(Math.round((p.au||{}).cmode??0),0,2);
+  p.gr=p.gr||{};
+  if(m===2){ if((p.gr.size??1)>=0.999)p.gr.size=p.gr._gsz??0.12; }
+  else { if((p.gr.size??0.12)<0.999)p.gr._gsz=p.gr.size; p.gr.size=1; p.au.pmode=m===1?1:0; }
+  engine.granNode(pi); engine.granCfg(pi); engine.audLive(pi);
+}
+/* the dials this mode uses — the page and the cursor walk this, while the
+   full list stays the address book for mods and automation */
+const AUDPAGE=()=>{
+  const p=S.presets[S.editSnd], m=cmodeOf(p);
+  const keep=new Set(m===2
+    ?['cmode','rate','kvol','lvol']
+    :m===1?['cmode','rate','wnd','kvol','lvol']
+          :['cmode','rate','kvol','lvol']);
+  return AUDALL().filter(sp=>sp.st==='gr'?m===2:keep.has(sp.key));
+};
 function codeAction(d,m){
   const pre=S.presets[S.editSnd], i=clamp(S.curParam,0,7);
   const spec=CODEF()[i];
@@ -10257,7 +10290,7 @@ function audAction(d,m){
      the cloud-only handler is why a dial turned there recorded no automation
      and why the page changed shape when you switched keys mode. */
   if(isWtCh(S.editSnd)){wtAction(d,m);return;}
-  const pre=S.presets[S.editSnd], all=AUDALL();
+  const pre=S.presets[S.editSnd], all=AUDPAGE();
   const spec=all[clamp(S.curParam,0,all.length-1)];
   if(spec.st==='gr'){          // the cloud's half of the page, on a tape channel
     pre.gr=pre.gr||{};
@@ -10274,6 +10307,11 @@ function audAction(d,m){
   const cur=spec.get?spec.get(pre.au):pre.au[spec.key]??0;
   const nv=adjust(spec,cur,d,m);
   if(spec.set)spec.set(pre.au,nv); else pre.au[spec.key]=nv;
+  if(spec.key==='cmode'){applyCmode(S.editSnd);
+    flash('mode → '+['tape · resample, pitch rides speed',
+      'stretch · timing held, window is the character',
+      'grain · the playhead becomes a cloud'][cmodeOf(pre)]);
+    dirty=true; dirtySave=true; return;}
   if(spec.key==='wnd')engine.audWnd(S.editSnd);
   engine.audLive(S.editSnd);         // …and the take that is already running hears it
   recAutoAud(S.editSnd,pre,'aud',spec,spec.get?spec.get(pre.au):pre.au[spec.key]);
@@ -10640,7 +10678,7 @@ function resetParam(){
        what a fresh channel has. */
     const pre9=S.presets[S.editSnd];
     if(isAudioCh(S.editSnd)){
-      const all9=AUDALL(), sp9=all9[clamp(S.curParam,0,all9.length-1)];
+      const all9=AUDPAGE(), sp9=all9[clamp(S.curParam,0,all9.length-1)];
       if(!sp9)return true;
       pushUndo('reset');
       if(sp9.st==='gr'){
@@ -14692,7 +14730,7 @@ const onKeyDown=e=>{
        aims at the engine's own rack. */
     if(M.id==='osc'&&(isWtCh(S.editSnd)||isGranCh(S.editSnd)||isAudioCh(S.editSnd))){
       const page=isWtCh(S.editSnd)?{specs:WTF,rack:'osc',slot:0}
-        :{specs:AUDALL(),rack:'aud',slot:0};
+        :{specs:AUDPAGE(),rack:'aud',slot:0};
       const spec=page.specs[clamp(S.curParam,0,page.specs.length-1)];
       if(spec&&spec.st==='gr')page.rack='grn';   // the cloud's dials keep their own rack
       if(!spec||spec.type==='enum'){flash((spec?spec.lbl:'that')+' is a menu — modulation needs a range');return;}
@@ -15357,7 +15395,7 @@ const onKeyDown=e=>{
         if(M2.prs)return instFields().length;
         if(M2.flat)return M2.flat.length;
         if(M2.id==='osc'&&isCodeCh(S.editSnd))return CODEF().length;
-        if(M2.id==='osc'&&isAudioCh(S.editSnd))return AUDALL().length;
+        if(M2.id==='osc'&&isAudioCh(S.editSnd))return AUDPAGE().length;
         if(M2.id==='osc'&&isWtCh(S.editSnd))return WTF.length;
         if(M2.slot){const base=paramsFor(mi2,modHolder(pre2,M2.id)[M2.id][S.curSlot]).length;
           return base+(freeSlotHere(pre2)!=null&&mi2===S.curMod?1:0);}
@@ -18472,10 +18510,11 @@ function renderSnd(L,pos){
     L.push('');
     const GDEF2={pos:0,spray:0.05,size:0.12,dens:20,semis:0,jit:0,shape:0.5,rev:0.1,
       width:0.5,scan:1,gain:0.8,fade:0.06,flow:0.5,dif:0,live:0,frz:0,fb:0,pmode:0};
-    const all=AUDALL(), gr2=pre.gr||{};
+    const all=AUDPAGE(), gr2=pre.gr||{};
     /* the tape's numbers on the first rows, the cloud's under them: one page,
        because one node plays both and every key mode can use either */
-    const rows=[all.slice(0,AUDF.length),all.slice(AUDF.length)];
+    const nAu=all.filter(x=>x.st!=='gr').length;
+    const rows=[all.slice(0,nAu),all.slice(nAu)];
     rows.forEach((seg,r0)=>{
       if(!seg.length)return;
       let lr='   ', vr='   ';
@@ -18485,7 +18524,7 @@ function renderSnd(L,pos){
         if(!chunk.length)break;
         if(part>0){L.push(lr); L.push(vr); lr='   '; vr='   ';}
         chunk.forEach((pspec,j)=>{
-          const i=(r0===0?0:AUDF.length)+part*half+j, foc=i===S.curParam;
+          const i=(r0===0?0:nAu)+part*half+j, foc=i===S.curParam;
           const store=pspec.st==='gr'?gr2:pre.au;
           const raw=pspec.get?pspec.get(store)
             :store[pspec.key]??(pspec.st==='gr'?GDEF2[pspec.key]:0);
@@ -18495,7 +18534,7 @@ function renderSnd(L,pos){
         });
       }
       L.push(lr); L.push(vr);
-      if(r0===0)L.push('   '+sp('d','── the same take, through the cloud ──'));
+      if(r0===0&&rows[1].length)L.push('   '+sp('d','── the same take, through the cloud ──'));
     });
     L.push('');
     L.push('   '+sp('d','speed at its bottom detent is FIT: the loop sets the rate · link on = pitch drags speed (tape) · window is the stretch'));
