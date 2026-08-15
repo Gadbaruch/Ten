@@ -37,14 +37,45 @@ Gran is pitch keys with the loop off. None of them are modes any more.
 
 ## What is next, in order
 
-1. **THE ARP ON POLY + POSITION** — Gad still reports held keys playing nothing
+0. **MAGNETIZE THE SCOPE HOLDS** (agreed with Gad 2026-08-15, his framing, and
+   the next thing to build). A held scope should be a complete little editor,
+   not a jump: `⌥e` moves the cursor and then lets go of it, so the arrows fall
+   back to whatever the page was doing and the next keypress edits something
+   else. While a scope is held, the arrows and `-/=` belong to THAT scope and
+   nothing else — and it must work with the channel strip CLOSED, which is the
+   bigger win, because it makes the strip a view rather than a mode.
+   Write it as a TABLE, one row per scope, not as branches:
+     `-/=`  amount        (the thing you always reach for)
+     `↑↓`   primary       (env: time · lfo: rate · flt: cutoff)
+     `←→`   secondary     (env: attack · lfo: shape · flt: reso)
+     letters  sub-fields  (env: a d s r)
+   Prototype on `env` first and settle one open question: whether `←→` walks
+   WITHIN the scope's fields (better when a scope has more than two knobs) or
+   stays pinned to one secondary. Try both before writing the table.
+   Related and already done: `scopeStepped()` — n/i/sc/v/m arrows are notches;
+   c and r still dial, in both senses (repeat runs AND the step is multiplied
+   by key pressure).
+
+1. **KILL `center` ON MOD ROUTES** (agreed 2026-08-15). It is a second way to
+   say what the destination already says: a modulator's centre is where the
+   knob sits when nothing is driving it, which IS the destination's stored
+   value. Two controls for one idea — the same confusion the key vol / loop vol
+   pair had. Before deleting: check whether any saved preset has a non-zero
+   `ctr` doing real work, and if so FOLD it into the destination's stored value
+   on migration rather than dropping it.
+   With it: **enter on a mod slot jumps to its destination**. Same gesture as
+   `⌥\` stepping between automated knobs and taking you there, which already
+   works — making enter mean "go to what this points at" everywhere is more of
+   the homogenisation Gad is after.
+
+2. **THE ARP ON POLY + POSITION** — Gad still reports held keys playing nothing
    there. The twelve-cue jump had two causes (piano mapping 29e7608, channel
    transpose in slot space fac7260) and both are fixed; this is a third thing
    and it has never been diagnosed. Build the readout before touching code —
    log what `cueNote` receives from the ply delegation with poly + arp + keys
    on position, and compare against mono.
 
-2. **Level across the size dial — PARTIALLY DONE (eddae35, d7abace).**
+3. **Level across the size dial — PARTIALLY DONE (eddae35, d7abace).**
    Predicting it (window rms x 0.5 x sqrt(duty) x norm) took the worst case
    from 5.7x to ~3x; MEASURING it — an rms of the cloud against the take's own
    level, slewed into a compensation — did better again. Against a clean read
@@ -53,11 +84,11 @@ Gran is pitch keys with the loop off. None of them are modes any more.
    which is a poor estimate of a slow-moving carrier; try integrating over a
    real span before adding more gain.
 
-3. **Width as a stereo spread** rather than random placement per cursor.
+4. **Width as a stereo spread** rather than random placement per cursor.
    Whole notes are centred now (they keep the take's own stereo); grains
    still scatter, which is right for grains and wrong as a "width" control.
 
-4. **More factory phrases** — `python3 tools/gen_samples.py <name>` re-rolls
+5. **More factory phrases** — `python3 tools/gen_samples.py <name>` re-rolls
    one, no args does the shelf. Prompts are the shelf; see the docstring for
    what to ask for (phrases, never one-shots).
 
@@ -74,6 +105,18 @@ Gran is pitch keys with the loop off. None of them are modes any more.
   writes NaN into the param, `audLive` posts the NaN to the worklet, and the
   channel outputs NaN from then on — silent, and no reload of your reasoning
   will fix it. If a bus reads NaN mid-session, reload before diagnosing.
+- **YOUR TEST TAB RECEIVES GAD'S REAL KEYSTROKES.** The browse window is headed
+  and focused, so anything he types lands in whatever tab is fronted — including
+  the one you are measuring in. State moves under a probe mid-run (curPreset
+  went 7 → 3 → 2 during one measurement and produced a bug that did not exist).
+  Pin the state immediately before each measurement, or swallow trusted key
+  events in the test tab — and if you do that, CLOSE that tab the moment you are
+  done, because it also swallows his.
+- **Never close the last tab.** `closetab` on all-but-one is a loop that eats his
+  window when the ids have moved. Check `tabs` first and leave one alive.
+- **`npx serve` caches.** A reload can come back with the previous file. Load
+  with `?cb=$RANDOM` and check a distinctive token from your edit is in the page
+  before believing a measurement.
 - **Measure, do not model.** Every real bug this week was found by asking
   the running engine what its state was: audPlay's arguments logged from
   both builds, cursor positions sampled over time, the seven-case matrix
