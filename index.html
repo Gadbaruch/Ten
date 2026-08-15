@@ -752,7 +752,15 @@ function foldMod(p){
      OP targets; on amp and pitch it was carried along meaninglessly and every
      recipe in the file wrote 1. Under the new rule 1 is "operator 1", so those
      have to come across as 0 = all or half the library loses its envelope. */
-  const fixIdx=(dst,idx)=>(dst===1||dst===2)?0:idx;
+  /* …but ONLY the 1. This zeroed every amp and pitch index, not just the
+     legacy one, so an envelope aimed at operator 3 came out of the fold aimed
+     at the VOICE — and a voice amp envelope with its sustain at zero closes
+     the whole channel. That is what "op2 on ring with sustain 0 shuts op1 up"
+     is: nothing to do with ring, which is only where it shows first, because a
+     ring pair is the one arrangement where you can hear one operator's
+     envelope acting on another operator's sound. Aim an envelope at any single
+     operator and it silenced all of them. 2..10 mean what they say now. */
+  const fixIdx=(dst,idx)=>((dst===1||dst===2)&&Math.round(idx||0)<=1)?0:idx;
   for(const e of (p.env||[]))if(e&&e.dst>0&&Math.abs(e.amt)>0.5&&ENV2MD[e.dst])
     out.push({src:1,rsel:0,routes:[R(ENV2MD[e.dst],fixIdx(ENV2MD[e.dst],e.idx),e.amt)],a:e.a,d:e.d,s:e.s,r:e.r,crv:e.crv||0,wav:0,rate:5,ph:0});
   for(const l of (p.lfo||[]))if(l&&l.dst>0&&Math.abs(l.amt)>0.5&&LFO2MD[l.dst])
@@ -1051,7 +1059,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.1641';
+const BUILD='2026-08-15.1801';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
