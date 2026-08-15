@@ -1031,7 +1031,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.1240';
+const BUILD='2026-08-15.1251';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -3889,9 +3889,22 @@ let fxwReady=false;
          following it. This has to happen before the "nothing to do" exits,
          because with the loop running and no keys down that is exactly the
          state a granulated loop looks like from here. */
-      this.car=null;
+      this.car=null; this.carSh=1;
       for(const c9 of this.cx)
-        if(c9.car&&c9.dur===Infinity&&!c9.rel){this.car=Math.max(0,Math.min(1,c9.ph/(len||1)));break;}
+        if(c9.car&&c9.dur===Infinity&&!c9.rel){
+          this.car=Math.max(0,Math.min(1,c9.ph/(len||1)));
+          /* the carrier's own shifter comes with it: with sync on, the take's
+             PITCH dial is heard through the grains, because the carrier
+             itself is silent and they are doing its reading. Without this,
+             pitch did nothing at all on a granulated loop and you had two
+             pitch dials of which only one worked. */
+          /* the carrier's whole reading speed, not just its shifter: its step
+             carries the fit rate and free-mode pitch, its shift carries sync
+             pitch, and a grain doing the carrier's reading has to do it at
+             the same speed or the granulated loop sits an octave off the
+             clean one */
+          this.carSh=(c9.step||1)*(c9.shift||1);
+          break;}
       this.carMute=this.car!=null&&P.size<0.999;
       if(this.carMute&&!this.autoV){        // the loop's own grain train
         this.autoV=1; this.vs.set('auto',{ratio:1,vel:0.9,next:this.tick,env:1,rel:0});
@@ -3982,7 +3995,8 @@ let fxwReady=false;
                             :((C.pos+this.scanPh)%1+1)%1;
             const st9=Math.max(0,Math.min(len-2,
               (base9+(Math.random()*2-1)*C.spray*0.5)*len));
-            const step9=v.ratio*Math.pow(2,(C.semis+(Math.random()*2-1)*C.jit)/12);
+            const step9=v.ratio*(this.carMute?this.carSh:1)
+              *Math.pow(2,(C.semis+(Math.random()*2-1)*C.jit)/12);
             const rev9=Math.random()<C.rev;
             /* A WHOLE NOTE IS NOT A GRAIN: throwing it to a random point in
                the field the way the spray does gave every key a different
@@ -4017,7 +4031,8 @@ let fxwReady=false;
           const base=car9!=null?car9
                     :live?(((this.rw/len)-0.05-C.pos*0.9)%1+1)%1
                          :((C.pos+this.scanPh)%1+1)%1;
-          const step0=v.ratio*Math.pow(2,(C.semis+(Math.random()*2-1)*C.jit)/12);
+          const step0=v.ratio*(this.carMute?this.carSh:1)
+            *Math.pow(2,(C.semis+(Math.random()*2-1)*C.jit)/12);
           /* pitch safety: the grain may not eat more than half the buffer */
           let dur=Math.max(128,Math.round(C.size*sampleRate));
           const span=Math.abs(step0)*dur;
@@ -7909,9 +7924,12 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
       /* a cue plays until you let go, so it loops the crop rather than
          running off the end; the auto cursor is re-fired each cycle and
          keeps its hard stop */
-      /* a cue loops the crop, and so does anything running BACKWARDS —
-         otherwise a reverse playhead reaches the start and stops dead */
-      wrap:(cue||rate<0)?1:0, lo:off*sr9,
+      /* EVERY tape cursor wraps the crop. The auto cursor used to stop dead
+         at the end of the take, which was invisible while it was fitted —
+         it reached the end exactly as the cycle re-fired it — and became
+         "changing pitch stops the loop" the moment pitch moved the rate and
+         the two stopped coinciding. Its life still ends it each cycle. */
+      wrap:1, lo:off*sr9,
       /* the loop is the carrier: with no cue behind it, this is the
          autonomous playhead the cloud follows */
       car:cue?0:1,
@@ -10150,9 +10168,13 @@ const AUDF=[
     playhead can do is run the other way. */
  SP('speed','rate','lin',{min:-4,max:4,step:0.05,
    fmt:v=>Math.abs(v)<0.2?'fit':(v<0?'\u25c0 \u00d7':'\u00d7')+Math.abs(+v).toFixed(2).replace(/0$/,''),
-   get:o=>Math.round(o.fit||0)?0:(o.rate??1),
-   set:(o,v)=>{if(Math.abs(v)<0.2){o.fit=1;}
-     else{o.fit=0; o.rate=+(+v).toFixed(2);}}}),
+   /* THE DIAL KEEPS ITS OWN POSITION. Deriving it from fit meant every step
+      out of the centre was read back as 0 and the next step started from 0
+      again — the dial could not leave the detent it was sitting in. */
+   get:o=>Number.isFinite(o.spd)?o.spd:(Math.round(o.fit||0)?0:(o.rate??1)),
+   set:(o,v)=>{o.spd=+(+v).toFixed(2);
+     if(Math.abs(o.spd)<0.125){o.fit=1;}
+     else{o.fit=0; o.rate=Math.abs(o.spd)<0.25?(o.spd<0?-0.25:0.25):o.spd;}}}),
  /* the stretch's character: how far apart the two taps sit */
  SP('window','wnd','lin',{min:5,max:300,step:5,fmt:v=>Math.round(v)+'ms'}),
  /* TWO LEVELS, because there are two ways this channel makes sound and they
@@ -17854,8 +17876,10 @@ function gridHTML(pat,pos,anc,chans){
          and each grain's own playhead at the loudness it has this instant,
          so a grain fades in and out where it actually is instead of
          blinking at one brightness. */
+        /* the cloud belongs to the channel, not to one keys mode: with the
+           loop granulated its grains are the sound in cue mode too */
         const gst=(engine.gn&&engine.gn[i]&&engine.gn[i].stat)||null;
-        if(isGranCh(i)&&gst){
+        if(gst&&(isGranCh(i)||(gst.g|0)>0||(gst.v|0)>0)){
           let gd='';
           if(Number.isFinite(gst.cpos)){
             const spr=Math.max(0.006,Math.min(1,gst.cspr||0));
