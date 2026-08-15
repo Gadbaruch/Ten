@@ -125,7 +125,37 @@ Gran is pitch keys with the loop off. None of them are modes any more.
 ## The measurement kit
 
 `tools/stamp.sh` writes the build string; the `build` settings row fetches
-the served copy to compare. The seven-case matrix (plain, sync +12, free +7,
-channel select, hard pan, crop, rate 0.5) plus four cue jumps is the
-regression net for anything touching the engine — run it against the
-previous commit served alongside, not against remembered numbers.
+the served copy to compare.
+
+**`tools/probe.sh <name> [k=v …] [--ab <url>]`** is the analyser, written once
+instead of hand-typed into the browser every session. `tools/probe.js` is the
+library it runs inside the page; the wrapper carries the arguments in, prints a
+table, and with `--ab` runs the IDENTICAL script against a second build and
+prints the delta — which is how "measure against the previous build" stops
+being a rule you remember and starts being one keystroke.
+
+    tools/probe.sh help
+    tools/probe.sh preset names=SNR,S909,S808,S606 note=48   # peak Hz + centroid
+    tools/probe.sh matrix ch=8                               # the regression net
+    tools/probe.sh cursor chs=9                              # tv / g / tpos
+    tools/probe.sh key code=KeyC ctrl=1                      # is this binding free?
+    tools/probe.sh matrix --ab https://gadbaruch.github.io/Ten/
+
+Every probe pins curPreset/editSnd/layer immediately before measuring and
+swallows TRUSTED key events for the length of the run, removing the listener in
+a finally — so Gad's typing cannot walk the state mid-probe and the tab is his
+again the moment it returns. No probe ever closes a tab.
+
+The seven-case matrix (plain, sync +12, free +7, channel select, hard pan,
+crop, rate 0.5) plus four cue jumps is the regression net for anything touching
+the engine — `tools/probe.sh matrix --ab <the previous build>`, not remembered
+numbers. It controls what it measures: position keys, loop on, **poly** (a cue
+jump SPAWNS a cursor, and in mono cueNote moves a head that is not there, so
+all four cue rows read silence), and the cloud parked at size 1 so the rows are
+repeatable to ~1% instead of swinging 40% on grain randomness. `grains=1`
+measures the cloud too, and accepts the noise.
+
+To A/B against an old commit, extract it somewhere the dev server already
+reaches and open it on a DIFFERENT HOSTNAME — `127.0.0.1` against `localhost`
+— or it shares localStorage with the current build and its stored library
+shadows its own factory presets, which is the LIBV trap wearing a second hat.
