@@ -1061,7 +1061,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.2130';
+const BUILD='2026-08-15.2142';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -2484,11 +2484,30 @@ function adjust(spec,v,dir,m=1){
    binding through rs() — otherwise reaching for latch would fire all of them.
    The `!KM.sl` fallback keeps synthetic events (and any state desync after a
    focus loss) behaving as plain shift rather than dying silently. */
-const KM={sl:false,sr:false,srLatch:false,altLatch:false};
+/* THREE ROLES, THREE KEYS — the restructure Gad asked for, and the reason it
+   is worth doing is that left shift was carrying two of them at once.
+     KM.sl   THE LATCH, and it is the WIN key now, not left shift. Every one of
+             the two dozen places that reads KM.sl still reads it; only who
+             sets it moved, which is why this is a rename in behaviour and not
+             in code.
+     KM.shl  the physical LEFT SHIFT, which is now the GLOBAL modifier — the
+             instrument-wide settings, quantize and the click and the rest,
+             plus ⇧+esc for the settings panel.
+     KM.sr   the physical RIGHT SHIFT, which is now ONLY navigation and dials:
+             loop lengths, the coarse step, walking a rack.
+   Latch on left shift is what forced the compromise two rounds ago, where ⇧
+   inside a held scope had to stop arming the latch so it could be the coarse
+   step. With latch elsewhere, ⇧ can be both again — it is not the latch at
+   all any more. */
+const KM={sl:false,shl:false,sr:false,srLatch:false,altLatch:false};
+/* WHAT THE LATCH IS, physically. Gad's board sends one of these from its win
+   key — macOS binds none of them, which is exactly why they were already the
+   sound scope's stand-ins before the sound scope moved to backslash. */
+const LATCHKEY=c=>c==='ScrollLock'||c==='Pause'||c==='Insert';
 /* Latch works on the MODIFIERS too: hold latch, tap shift or option, and it
    stays down until you tap it again. Two-handed chords on a laptop keyboard
    are the thing that stops being playable first. */
-const rs=e=>KM.srLatch||(!!e.shiftKey&&(KM.sr||!KM.sl));
+const rs=e=>KM.srLatch||(!!e.shiftKey&&(KM.sr||!KM.shl));
 const altOf=e=>KM.altLatch||!!e.altKey;
 /* ⌘ IS ⌘ AND ⌃ IS NOT. Control used to stand in for command so the shortcuts
    worked on a PC, which was fine while control meant nothing on its own — it
@@ -2509,7 +2528,7 @@ const ctlOf=e=>altOf(e)&&!e.metaKey&&!e.ctrlKey&&!ALTSUS.size;
 /* ⌃ IS THE INSTRUMENT: quantize, tempo, the click — the settings you set and
    then live inside. Reach matters for performance keys; these are not that,
    and giving them their own modifier keeps ⌥ purely the channel's. */
-const gblOf=e=>!e.metaKey&&!altOf(e)&&(!!e.ctrlKey||(KM.sr&&!!e.shiftKey));
+const gblOf=e=>!e.metaKey&&!altOf(e)&&(!!e.ctrlKey||(KM.shl&&!!e.shiftKey));
 const LATCH={held:false,used:false,on:false};
 /* HELD KEYS SCOPE THE ARROWS. The arrows always mean "adjust"; the key you are
    holding says adjust WHAT. tab = the loop, m = tempo. `used` records whether
@@ -2764,7 +2783,10 @@ function magRead(H,C,head){
 const magMult=(e,H)=>{
   const riding=!!(H&&H.c&&ALTSUS.has(H.c));
   if(!riding&&altOf(e))return 0.1;
-  return (e.shiftKey||KM.srLatch)?10:1;
+  /* rs(), not e.shiftKey: the coarse step is navigation, which is the RIGHT
+     shift's whole job now. Left shift is the global modifier and must not
+     quietly multiply a param by ten on its way to something else. */
+  return (rs(e)||KM.srLatch)?10:1;
 };
 /* one press of a dial. Same road every other param takes — adjust() for the
    step, writeParam() for the engine, recAuto() so a scope moved with REC armed
@@ -2894,13 +2916,13 @@ const MOM={};
 const noteLatch=new Set(), SUS=new Set();
 function latchArmHeld(){
   if(HOLD.ms&&!HOLD.msLatched)HOLD.msLatch=true;
-  /* …but NOT a magnetized scope, where ⇧ is the coarse step. Both cannot be
-     true of one key: reaching for ⇧ to take a bigger bite out of a decay also
-     armed the latch, so the scope stayed open after everything was released
-     and went on eating the arrows with nothing on screen saying why. That is
-     "shift breaks the magnet". A nav scope is still latched the other way —
-     hold ⇧ BEFORE the letter and KM.sl arms it at the open. */
-  if(HOLD.opt&&!HOLD.optLatched&&!HOLD.opt.nav)HOLD.optLatch=true;
+  /* A MAGNETIZED SCOPE CAN BE LATCHED AGAIN. It had to be exempted while the
+     latch was on left shift, because ⇧ inside a held scope is the coarse step
+     and one key cannot be both — reaching for a bigger bite out of a decay
+     also armed the latch and the scope stayed open afterwards. The latch is
+     the win key now and shares nothing with the step, so the exemption is
+     gone and holding a scope open works the way every other hold does. */
+  if(HOLD.opt&&!HOLD.optLatched)HOLD.optLatch=true;
   if(HOLD.tab)HOLD.tabLatch=true;
   if(HOLD.r)HOLD.rLatch=true;                 // reaching for latch AFTER ` still latches the roll
   for(const k of kbHeld)noteLatch.add(k);     // ...and after a note, while it is still down
@@ -12749,6 +12771,10 @@ let eraseHold=null, muteHold=null, stepCur=0, stepWalked=false, taps=[];
 const BRK={l:false,r:false};
 /* …and the same for the octave pair, for the same reason */
 const OCT={l:false,r:false};
+/* escape's hold: null when the key is up, a record while it is down. `mic`
+   says the hold went long enough to claim the key, which is what stops the
+   key-up from ALSO escaping. */
+let ESCH=null;
 let gridAt=-1;                        // which L entry is the grid's markup
 const rawAt=new Set();                // ...and which others are markup too
 const kbHeld=new Set();               // note keys physically down, for chord-vs-sequence
@@ -15010,6 +15036,29 @@ const arrowAlias=(e,kind)=>{
     shiftKey:e.shiftKey,repeat:e.repeat}));
   return true;
 };
+/* the tap half of escape, run from the key-up so the hold can claim the key
+   instead. Everything it does is what it always did, in the order it did it. */
+function escapeAction(e){
+  /* whatever else escape does, it lets go of a scope first — a latched one
+     has no other way out if you have forgotten it is open */
+  if(HOLD.i){HOLD.i=false; HOLD.iUsed=false; flash('instrument scope closed'); dirty=true; return;}
+  if(HE.cancelCalib())return;
+  if(HE.cancelLearn())return;
+  if(CHSEL.size){CHSEL.clear(); flash('channel selection cleared'); dirty=true; return;}
+  if(SELALL!=null){SELALL=null; flash('note selection cleared'); dirty=true; return;}
+  const h=curHolder();
+  if(S.layer===3&&MODULES[S.curMod].prs&&S.libStash){   // leaving explorer: restore what you came in with
+    const st=S.libStash; S.libStash=null;
+    if(JSON.stringify(st.data)!==JSON.stringify(presetData(S.presets[S.editSnd]))){
+      applyPresetData(S.editSnd,st.name,st.cat,st.data);
+      flash('↩ back to your '+st.name);
+    }
+  }
+  if(rs(e))S.layer=1;
+  else if(h.state==='edit')h.state='on';
+  else surface();
+  dirty=true;
+}
 const onKeyDown=e=>{
   if(e.isTrusted){MODS.shift=e.shiftKey; MODS.alt=e.altKey; MODS.ctrl=e.ctrlKey; MODS.meta=e.metaKey;
     /* A LOST SHIFT KEY-UP LATCHES EVERYTHING YOU PLAY. Left shift is the latch,
@@ -15019,7 +15068,7 @@ const onKeyDown=e=>{
        lost note-off, a latch nobody asked for, which is why pressing the key
        again always cleared it — the way out of a latch IS the key you came in
        on. Every trusted event carries the truth about shift; believe it. */
-    if(!e.shiftKey&&e.code!=='ShiftLeft'&&e.code!=='ShiftRight'){KM.sl=false; KM.sr=false;}}
+    if(!e.shiftKey&&e.code!=='ShiftLeft'&&e.code!=='ShiftRight'){KM.shl=false; KM.sr=false;}}
   syncCaps(e);
   filePerm();          // a keypress is the gesture the file handle needs
   /* THE BOARD MAY SEND THE SAME ARROW ITSELF. A key bound by its sensor that is
@@ -15070,7 +15119,8 @@ const onKeyDown=e=>{
      the test, and PrintScreen sets no flag at all — so with the mic on that key
      every chord read as a clean tap and latched the mic open. Any other key
      pressed while the mic key is held is the same gesture either way. */
-  else if(MIC._down&&!MICKEY(e.code))MIC._used=true;
+  else if(MIC._down&&!MICKEY(e.code)&&e.code!=='Escape')MIC._used=true;
+  if(ESCH&&e.code!=='Escape')ESCH.used=true;
   /* THE BROWSER OWNS ITS OWN KEYS while it is open — but only the ones it
      uses. Letters still play, because hearing the channel is the whole reason
      you are choosing where to send a modulator. */
@@ -15104,9 +15154,15 @@ const onKeyDown=e=>{
      event or every ⌃+letter the instrument already had would die with it.
      What it means is decided by the letter that follows. */
   if(e.code==='ControlLeft'&&!e.repeat){HOLD.t=true; HOLD.tUsed=false;}
-  if(e.code==='ShiftLeft'){const fresh=!KM.sl; KM.sl=true;
+  if(LATCHKEY(e.code)){const fresh=!KM.sl; KM.sl=true;
+    e.preventDefault();
     if(PICK){PICK.peek=true; dirty=true;}
     if(!e.repeat&&fresh){LATCH.used=false; latchArmHeld();} return;}
+  /* LEFT SHIFT IS THE GLOBAL MODIFIER NOW and carries no latch, so it must not
+     swallow its own event: gblOf reads KM.shl and the letter after it decides
+     what happens. */
+  if(e.code==='ShiftLeft'){KM.shl=true;
+    if(PICK){PICK.peek=true; dirty=true;}}
   if(e.code==='ShiftRight'){KM.sr=true;
     if(PICK){PICK.peek=true; dirty=true;}
     if(!e.repeat){
@@ -15899,26 +15955,29 @@ const onKeyDown=e=>{
   }
   if(c==='Enter'){e.preventDefault(); if(!e.repeat)diveIn(); return;}
   if(c==='Escape'){e.preventDefault();
-    /* whatever else escape does, it lets go of a scope first — a latched one
-       has no other way out if you have forgotten it is open */
-    if(HOLD.i){HOLD.i=false; HOLD.iUsed=false; flash('instrument scope closed'); dirty=true; return;}
-    if(HE.cancelCalib())return;
-    if(HE.cancelLearn())return;
-    if(CHSEL.size){CHSEL.clear(); flash('channel selection cleared'); dirty=true; return;}
-    if(SELALL!=null){SELALL=null; flash('note selection cleared'); dirty=true; return;}
-    const h=curHolder();
-    if(S.layer===3&&MODULES[S.curMod].prs&&S.libStash){   // leaving explorer: restore what you came in with
-      const st=S.libStash; S.libStash=null;
-      if(JSON.stringify(st.data)!==JSON.stringify(presetData(S.presets[S.editSnd]))){
-        applyPresetData(S.editSnd,st.name,st.cat,st.data);
-        flash('↩ back to your '+st.name);
-      }
+    if(e.repeat)return;
+    /* ESCAPE IS ALSO THE MIC, and the two are told apart by the clock rather
+       than by a modifier: a TAP escapes, a HOLD opens the mic while you lean
+       on it. That ordering matters and is not the obvious one — the mic must
+       NOT open on the key going down, because getUserMedia asks permission the
+       first time and every escape you ever press would have gone through a
+       browser prompt to get there. So the hold arms a timer and escape's own
+       work happens on the way UP, where it can still see that nothing else
+       was pressed.
+       ⇧+esc is the settings panel, which used to be what plain escape did from
+       the pattern layer — a place you go on purpose, so it gets the modifier
+       and the emergency exit stays bare. */
+    if(KM.shl&&e.shiftKey){
+      if(S.layer!==-1){S.layer=-1; S.sessSel=null;} else S.layer=1;
+      dirty=true; return;
     }
-    if(rs(e))S.layer=1;
-    else if(h.state==='edit')h.state='on';
-    else if(S.layer===1){S.layer=-1;S.sessSel=null;}   // up from the pattern = settings
-    else surface();
-    dirty=true; return;}
+    ESCH={at:performance.now(),used:false,mic:false};
+    ESCH.timer=setTimeout(()=>{ if(!ESCH)return;
+      ESCH.mic=true; MIC._down=true; MIC._used=false; MIC._latch=KM.sl;
+      if(KM.sl)LATCH.used=true;
+      if(MIC.latched)MIC._unlatch=true; else micOn();
+    },200);
+    return;}
   if(c==='CapsLock'){e.preventDefault(); return;}   // the state is read, not toggled
   /* ` IS THE INSTRUMENT and \\ IS THE DICE. They swapped places: the scope you
      reach for constantly wanted the key under your finger, and the one that
@@ -15937,8 +15996,7 @@ const onKeyDown=e=>{
      exactly as they did (↑↓ preset · ⇧↑↓ engine · ←→ type · ⇧←→ model);
      the punctuation is a second way in that does not need a hand on the
      arrows at all. */
-  if((c==='Backslash'||c==='ScrollLock'||c==='Pause'||c==='Insert')
-     &&S.layer>0&&!e.repeat&&!e.metaKey&&!altOf(e)){
+  if(c==='Backslash'&&S.layer>0&&!e.repeat&&!e.metaKey&&!altOf(e)){
     e.preventDefault(); HOLD.i=true; HOLD.iUsed=false; return;}
   if(c==='Slash'&&!altOf(e)){e.preventDefault();
     if(!e.repeat){HOLD.r=true; HOLD.rUsed=false; HOLD.rLatch=KM.sl; if(KM.sl)LATCH.used=true;}
@@ -17347,7 +17405,7 @@ const onKeyUp=e=>{
     if(!used&&S.layer>0){EXP.bump(rs(e)?0.2:0.05);
       flash('vel '+Math.round(clamp(CFG.kvel??0.9,0.02,1)*127));}
     return;}
-  if((c==='Backslash'||c==='ScrollLock'||c==='Pause'||c==='Insert')&&HOLD.i){
+  if(c==='Backslash'&&HOLD.i){
     HOLD.i=false; HOLD.iUsed=false; return;}
   if(c==='Slash'&&HOLD.r){
     /* The roll fires HERE, not on the press — and only if the PRESS armed the
@@ -17424,7 +17482,23 @@ const onKeyUp=e=>{
       for(const k of [...ALTSUS]){ALTSUS.delete(k);
         document.dispatchEvent(new KeyboardEvent('keyup',{code:k,bubbles:true}));}
     return;}
-  if(c==='ShiftLeft'){
+  if(c==='Escape'&&ESCH){
+    const H=ESCH; ESCH=null;
+    if(H.timer)clearTimeout(H.timer);
+    if(H.mic){
+      /* the mic claimed this press — end it exactly the way the mic key does */
+      const used=MIC._used, un=MIC._unlatch;
+      MIC._down=false; MIC._used=false; MIC._unlatch=false;
+      if(un||used)micOff();
+      else if(MIC._latch){MIC.latched=true; flash('⟳ mic latched — esc again turns it off');}
+      else if(!MIC.latched)micOff();
+      MIC._latch=false;
+      dirty=true; return;
+    }
+    if(!H.used)escapeAction(e);
+    return;
+  }
+  if(LATCHKEY(c)){
     KM.sl=false;
     /* tapped alone = clear every mute and solo. Held with something else it is
        the latch modifier, and that combination has already set LATCH.used. */
@@ -17435,6 +17509,7 @@ const onKeyUp=e=>{
     }
     LATCH.used=false; return;
   }
+  if(c==='ShiftLeft'){KM.shl=false; return;}
   if(GMCODE[c]!==undefined&&gmHeld[GMCODE[c]]!==undefined){
     delete gmHeld[GMCODE[c]];
     if(!gmOn().length)flash('note fx off');
@@ -17464,7 +17539,9 @@ const onKeyUp=e=>{
   if(c==='Backspace'){
     if(eraseHold)spanUnmark(S.patterns[S.editPat].lanes[focusCh()]);
     eraseHold=null;muteHold=null;BRK.l=false;BRK.r=false;OCT.l=false;OCT.r=false;
-    HOLD.a=false;clearTimeout(delHoldTimer);}
+    HOLD.a=false;KM.shl=false;
+    if(ESCH){clearTimeout(ESCH.timer); ESCH=null;}
+    clearTimeout(delHoldTimer);}
   if(rPend[c]){
     const r=rPend[c];
     /* SAME RULE AS THE RECORDER: the length is the held gesture. r.ts is the

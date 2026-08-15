@@ -145,6 +145,33 @@ longer play notes — they switch. Every other letter still plays.
 The rule behind all three: **a key that is holding something open is not also a
 modifier of it.** Any new modifier in a scope gets asked that question.
 
+## THE FOUR MODIFIERS, and which is which
+
+Rearranged 2026-08-15 (Gad). Each one now means exactly one thing:
+
+    win (ScrollLock/Pause/Insert)  LATCH — notes, scopes, rec, mute/solo.
+                                   `KM.sl`, and every reader of it is
+                                   unchanged: only who SETS it moved.
+    left shift   `KM.shl`          GLOBAL — the instrument-wide settings:
+                                   ⇧q quantize · ⇧o overdub · ⇧b tap tempo ·
+                                   ⇧m click · ⇧esc settings. `gblOf()`.
+    right shift  `KM.sr`           NAVIGATION and DIALS only — loop lengths,
+                                   the coarse step, walking a rack. `rs()`.
+    left ctrl    `HOLD.t`          TOOLS — c/x/v, z (⇧z redo), s. A second ⌘.
+    ⌥                              the CHANNEL's scopes, unchanged.
+
+Latch was on left shift and that is what forced the compromise where ⇧ inside
+a held scope could not arm a latch (it had to be the coarse step). With latch
+on its own key both are true again and the exemption is gone.
+
+**Escape is the mic AND the way out**, told apart by the clock: a TAP escapes,
+a HOLD past 200ms opens the mic while you lean on it. The order matters —
+the mic must not open on the key going DOWN, because getUserMedia prompts for
+permission the first time and every escape you ever pressed would have gone
+through a browser dialog to get there. So escape's own work runs from the
+key-UP, where it can still see whether anything else was pressed.
+Right ctrl is still a mic key as a fallback.
+
 ## Scope
 
 Ship exactly what was asked, and say plainly what it breaks. Do not widen a
