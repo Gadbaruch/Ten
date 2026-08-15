@@ -752,7 +752,15 @@ function foldMod(p){
      OP targets; on amp and pitch it was carried along meaninglessly and every
      recipe in the file wrote 1. Under the new rule 1 is "operator 1", so those
      have to come across as 0 = all or half the library loses its envelope. */
-  const fixIdx=(dst,idx)=>(dst===1||dst===2)?0:idx;
+  /* …but ONLY the 1. This zeroed every amp and pitch index, not just the
+     legacy one, so an envelope aimed at operator 3 came out of the fold aimed
+     at the VOICE — and a voice amp envelope with its sustain at zero closes
+     the whole channel. That is what "op2 on ring with sustain 0 shuts op1 up"
+     is: nothing to do with ring, which is only where it shows first, because a
+     ring pair is the one arrangement where you can hear one operator's
+     envelope acting on another operator's sound. Aim an envelope at any single
+     operator and it silenced all of them. 2..10 mean what they say now. */
+  const fixIdx=(dst,idx)=>((dst===1||dst===2)&&Math.round(idx||0)<=1)?0:idx;
   for(const e of (p.env||[]))if(e&&e.dst>0&&Math.abs(e.amt)>0.5&&ENV2MD[e.dst])
     out.push({src:1,rsel:0,routes:[R(ENV2MD[e.dst],fixIdx(ENV2MD[e.dst],e.idx),e.amt)],a:e.a,d:e.d,s:e.s,r:e.r,crv:e.crv||0,wav:0,rate:5,ph:0});
   for(const l of (p.lfo||[]))if(l&&l.dst>0&&Math.abs(l.amt)>0.5&&LFO2MD[l.dst])
@@ -1053,7 +1061,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.1641';
+const BUILD='2026-08-15.2028';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1331,11 +1339,6 @@ const OSC_P=sl=>[
   SP('fine','fine','lin',{min:-100,max:100,step:5,fmt:v=>v+'c'}),
   SP('phase','ph','lin',{min:0,max:355,step:5,fmt:v=>v+'°'}),
   SP('trig','phm','enum',{opts:['rtrg','free']})];
-const AMP_P=()=>[
-  SP('type','typ','enum',{opts:DTYPES}),
-  SP('drive','drv','lin',{min:0,max:1,step:0.05}),
-  SPMIX(),
-  SP('route','par','enum',{opts:DROUTE})];
 /* peaking and the two shelves are the only types with a gain; on a lowpass it
    is a control that does nothing, sitting in the row you walk through most. */
 const FLT_GAINY=new Set(['peq','lsh','hsh']);
@@ -1360,24 +1363,6 @@ const FLT_P=sl=>[
   .concat(DROUTE[Math.round((sl&&sl.par)||0)]==='par'
     ?[SP('level','lvl','lin',{min:0,max:2,step:0.05,
         fmt:v=>Math.round((v??1)*100)+'%'})]:[]);
-const ENV_P=()=>[
-  SP('dest','dst','enum',{opts:EDST}),
-  SP('slot#','idx','lin',{min:0,max:10,step:1,fmt:v=>v?String(v):'all'}),
-  SP('amt','amt','lin',{min:-200,max:200,step:5,fmt:v=>v+'%'}),
-  SP('atk','a','time'),SP('dec','d','time'),
-  SP('sus','s','lin',{min:0,max:1,step:0.05}),SP('rel','r','time'),
-  /* A NUMBER, NOT THREE WORDS. 0 is a straight line, positive bends it convex
-     (fast attack, punchy decay) and negative concave (soft swell, long tail),
-     and how far you push it is the whole point — three named settings could
-     not say "a bit". +200 is 4× the exponent, -200 is a quarter of it. */
-  SP('curve','crv','lin',{min:-200,max:200,step:10,big:50,
-     fmt:v=>v?(v>0?'+':'')+Math.round(v):'lin'})];
-const LFO_P=()=>[
-  SP('dest','dst','enum',{opts:LDST}),
-  SP('slot#','idx','lin',{min:0,max:10,step:1,fmt:v=>v?String(v):'all'}),
-  SP('wave','wav','enum',{opts:LFOW}),
-  SP('rate','rate','time',{min:0.05,max:40,fmt:fHz}),
-  SP('amt','amt','lin',{min:0,max:100,step:5,fmt:v=>v+'%'})];
 const MOD_P=sl=>{                    // unified: source picks which extra fields show
   const s=Math.round(sl.src||0);
   const nR=(sl.routes||[]).length||1;
@@ -1558,7 +1543,14 @@ const FX_P=sl=>{
             fmt:(v,m)=>Math.round((m&&m.rv)||0)===0?fT(vrbSec(v)):Math.round(0.2+v*4.3)+'s'}),
          SP('damp','p2','lin',{min:0,max:1,step:0.05}),
          SP('width','p3','lin',{min:0,max:1,step:0.05}),
-         SP('pre','p5','lin',{min:0,max:1,step:0.05,
+         /* PRE DEFAULTS TO OFF, and it has to say so here: a slot saved before
+            pre-delay existed has no p5, and reading that as undefined printed
+            NaNms and wrote NaN into the slot the first time you nudged it — and
+            a NaN p5 survives `??` on the way to the plate's AudioParam, which
+            is a throw, which is the whole channel. The engine already reads a
+            missing p5 as 0 and builds no delay node at all; this is the dial
+            saying the same thing. */
+         SP('pre','p5','lin',{min:0,max:1,step:0.05,get:o=>o.p5??0,
             fmt:v=>v<0.005?'off':Math.round(v*200)+'ms'}),
          SPMIX()],
     limit:[SP('ceil','p1','lin',{min:0,max:1,step:0.05,fmt:v=>Math.round(-30+v*30)+'dB'}),
@@ -1635,21 +1627,6 @@ const FX_P=sl=>{
     bld:[SP('hp','p1','lin',{min:0,max:1,step:0.02,fmt:v=>xHz(v)}),
          SP('wet','p2','lin',{min:0,max:1,step:0.05}),
          SP('time','p3','enum',{opts:['1/16','1/8','1/8.','1/4']})],
-    dist:[SP('curve','p3','enum',{opts:DTYPES.slice(1)}),  // the old AMP distortions, now an fx
-         SP('in','p5','lin',{min:0,max:1,step:0.05,
-            fmt:v=>((v-0.5)*24>0?'+':'')+Math.round((v-0.5)*24)+'dB'}),
-         SP('drive','p1','lin',{min:0,max:1,step:0.05}),
-         /* crush quantises AMPLITUDE only; the grit of a bitcrusher is sample
-            RATE reduction, which had no control at all. Doubles as the tone
-            lowpass the retired `drv` used to have and dist lost. */
-         SP(DTYPES[clamp(Math.round(sl.p3||0),0,8)+1]==='crush'?'rate':'tone','p2','lin',
-            {min:0,max:1,step:0.05,
-             fmt:v=>DTYPES[clamp(Math.round(sl.p3||0),0,8)+1]==='crush'
-               ?'/'+(1+Math.round(Math.pow(v,2)*40))
-               :fF(clamp(700*Math.pow(28.6,v),700,20000))}),
-         SP('out','p7','lin',{min:0,max:1,step:0.05,
-            fmt:v=>((v-0.5)*24>0?'+':'')+Math.round((v-0.5)*24)+'dB'}),
-         SPMIX()],
     filt:(()=>{
       const ty=XFT[clamp(Math.round(sl.p3||0),0,XFT.length-1)];
       const a=[SP('type','p3','enum',{opts:XFT})];   // the selector is 'fx' now
@@ -5314,8 +5291,19 @@ class Voice{
           (this.opGains[b.i]=this.opGains[b.i]||[]).push(fg);
           (this.opAmt[b.i]=this.opAmt[b.i]||[]).push({g:fg,sc:dep*kIdx});
         }else if(b.op.mode===2){
+          /* RING IS A DEPTH, NOT A GATE. The base gain was 0, so the carrier
+             existed only while the modulator was producing signal — textbook
+             four-quadrant multiplication, and a trap the moment anything takes
+             the modulator to zero: an envelope reaching its sustain, a level
+             turned down, an LFO at the bottom. Every one of those took the
+             CARRIER to silence with it, which is not what a level knob on an
+             operator reads like.
+             Base 1 with the modulator added at depth: nothing at zero is the
+             dry carrier, full depth is the ring, and the whole range between
+             them is a mix you can envelope through without the sound
+             disappearing. */
           const rj=outN[j]!==undefined?j:0;
-          const rg=ac.createGain(); rg.gain.value=0;
+          const rg=ac.createGain(); rg.gain.value=1;
           const sg=ac.createGain(); sg.gain.value=b.op.amt;
           outN[rj].connect(rg); b.s.connect(sg); sg.connect(rg.gain);
           outN[rj]=rg;
@@ -19337,43 +19325,6 @@ function masterRack(L){
   L.push(lr); L.push(vr);
 }
 const getSP=(o,spec)=>specVal(o,spec,'fx',0);   // master inserts and dj pads are fx slots
-function renderMaster(L){
-  if(!Array.isArray(S.master)){S.master=mkMaster(); dirtySave=true;
-    flash('master rack was malformed — rebuilt from defaults');}
-  const onDj=S.mDj!=null;
-  let tabs='  ';
-  S.master.forEach((sl2,i)=>{
-    const ab=sl2.typ?XTYPES[sl2.typ]:'···';
-    const lbl=` ${(i+1)%10}${ab}${sl2.typ?(Math.round(sl2.rt)===1?'ˢ':'ᵐ'):''} `;
-    tabs+=(!onDj&&i===(S.mSlot||0)?spH('i',lbl,'msl',i):(sl2.typ?spH('a',lbl,'msl',i):spH('d',lbl,'msl',i)));
-  });
-  L.push(tabs);
-  let djr='  ';
-  S.dj.forEach((sl2,i)=>{
-    const on=djHeld[i]||djLatch[i]||djAuto[i];
-    const lbl=` ${DJKEYS[i]}${sl2.typ?XTYPES[sl2.typ]:'···'}${djLatch[i]?'●':on?'▸':''} `;
-    djr+=(onDj&&i===S.mDj?spH('i',lbl,'dj',i):on?spH('r',lbl,'dj',i):(sl2.typ?spH('a',lbl,'dj',i):spH('d',lbl,'dj',i)));
-  });
-  L.push(djr+sp('d',' hold=audition ⇧=latch'));
-  L.push('');
-  const sl=onDj?S.dj[S.mDj]:S.master[S.mSlot||0];
-  const specs=onDj?FX_P(sl):FX_P(sl).concat([SP('route','rt','enum',{opts:['mstr','send']})]);
-  S.mParam=Math.min(S.mParam||0,specs.length-1);
-  let lr='   ', vr='   ';
-  specs.forEach((pspec,i)=>{
-    const foc=i===S.mParam;
-    /* ...through getSP like every other fx row: reading the key raw skipped
-       both the spec's own accessor and the rack's resting value. */
-    const v=fmtVal(pspec,getSP(sl,pspec));
-    lr+=(foc?spH('a','▸'+pad(pspec.lbl,9),'mst',i):spH('d',' '+pad(pspec.lbl,9),'mst',i))+' ';
-    vr+=(foc?spH('i',' '+pad(v,9),'mst',i):spH('v',' '+pad(v,9),'mst',i))+' ';
-  });
-  L.push(lr); L.push(vr);
-  L.push('');
-  L.push('   '+sp('d','digits = master slots · letters = dj pads (a s d f g h j k l ;) · ↑↓ value · ⌫ '+(onDj?'reset pad':'clear')));
-  L.push('   '+sp('d','route: ˢsend = parallel bus (channels feed it via an fx \'send\' slot) · ᵐmstr = mix insert'));
-  L.push('   '+sp('d','dj pads play from ARRANGE: hold = momentary · shift = latch · rec/edit = automation (≈)'));
-}
 
 /* the picker, drawn like every other rack: a row of cells, one lit */
 /* TWO LINES. This had grown a title, two lines of instructions, a blank, the
