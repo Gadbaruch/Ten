@@ -85,6 +85,22 @@ carrier sampled every 150ms across a x4 length change whose old cycle ended at
     no relock    1 1 1 1 1 0 0 0 0 0 0 0
     with relock  1 1 1 1 1 1 1 1 1 1 1 1
 
+## The keyboard moved (2026-08-15, Gad)
+
+  pattern edit   caps        →  ⇧p        a latching OS key was the wrong
+                                          shape for a mode you flick
+  sound scope    `           →  \         + its own row: \+[ ] presets ·
+                                          \+; ' types · \+, . engines
+  modcap         \           →  `         (the swap). Was called "automation";
+                                          it is where captured knob moves live
+                                          AND where you arm the capture:
+                                          hold ` + tab arms the focused
+                                          channel from ANY layer.
+
+`HOLD.a` is modcap's hold. The ` + tab branch is asked FIRST in the tab
+handler, ahead of the audio channel's own three meanings for it, or the
+gesture would mean different things on different channels.
+
 ## What is next, in order
 
 0. **MAGNETIZE THE SCOPE HOLDS — DONE.** A held nav scope is a complete little

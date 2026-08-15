@@ -1061,7 +1061,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.2056';
+const BUILD='2026-08-15.2107';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -2811,6 +2811,8 @@ const WAVEC=new Map();      // rendered waveform columns, by buffer+height
 const BUFID=new WeakMap(); let bufSeq=0;
 const bufId=b=>{let v=BUFID.get(b); if(!v){v=++bufSeq; BUFID.set(b,v);} return v;};
 const HOLD={tab:false,tabAt:0,tabUsed:false,tabLatch:false,m:false,mUsed:false,
+            a:false,aUsed:false,     // MODCAP: ` — the captured knobs, and arming their capture
+
             opt:null,optUsed:false,optLatch:false,optLatched:false,   // OPT: a rack grabbed by its letter
             ms:null,msLatch:false,msLatched:false,msUsed:false,   // MUTE/SOLO: ⌥m and ⌥s, and the digits that follow
             c:false,cUsed:false,     // CHANNEL: the mix of the channel you are on
@@ -2834,6 +2836,17 @@ let SELALL=null;               // the channel whose notes cmd+A selected, or nul
    the channel-rack layer; shift on these two keys means nothing else at
    layer 1+, and the left shift still latches the scope like everywhere. */
 const MSCOPE={Semicolon:'mute',Quote:'solo'};
+/* ⇧p — PATTERN EDIT, off caps and onto a key you can flick. Toggles the
+   holder you are looking at between stepping notes in and playing live; rec
+   still wins, because arming a take must not be silently swapped for step
+   entry. */
+function patEditToggle(){
+  const h=curHolder();
+  if(h.state==='rec'){flash('rec is armed — ⏎ or tab first'); return;}
+  h.state=h.state==='edit'?'on':'edit';
+  flash(h.state==='edit'?'▦ pattern edit':'▶ live play');
+  dirty=true;
+}
 /* channels picked out for something that acts on several at once */
 const CHSEL=new Set();
 /* WHO AN ACTION IS FOR. Everything that does something to a channel asks this
@@ -14867,9 +14880,11 @@ function syncCaps(e){
   const on=e.getModifierState('CapsLock');
   if(on===capsWas)return;
   capsWas=on;
-  const h=curHolder();
-  if(on){ if(h.state!=='rec'){h.state='edit'; flash('▦ pattern edit');} }
-  else if(h.state==='edit'){h.state='on'; flash('▶ live play');}
+  /* CAPS NO LONGER TOGGLES PATTERN EDIT — it is ⇧p now, because a LATCHING key
+     is the wrong shape for a mode you flick in and out of: the OS holds it, so
+     the state could disagree with the instrument after any focus loss, and it
+     could never be chorded with anything. The state is still read here so a
+     board that reports caps does not confuse anything else. */
   dirty=true;
 }
 let capsWas=false;
@@ -15114,6 +15129,9 @@ const onKeyDown=e=>{
     return;
   }
   /* ⇧; / ⇧' — mute and solo */
+  if(e.code==='KeyP'&&e.shiftKey&&!altOf(e)&&!e.repeat&&S.layer>=1&&!e.metaKey&&!e.ctrlKey
+     &&!HOLD.q&&!ALTSUS.size&&!HOLD.opt&&!HOLD.i){
+    e.preventDefault(); patEditToggle(); return;}
   if(MSCOPE[e.code]&&e.shiftKey&&!altOf(e)&&!e.repeat&&S.layer>=1&&!e.metaKey&&!e.ctrlKey&&!HOLD.q&&!ALTSUS.size&&!HOLD.opt){
     e.preventDefault();
     const kind=MSCOPE[e.code];
@@ -15376,6 +15394,27 @@ const onKeyDown=e=>{
   }
   AC.resume();
   const c=e.code;
+  /* THE SOUND SCOPE'S OWN ROW. Held \ turns the punctuation under it into the
+     three questions you ask of a channel — which patch, which kind, which
+     engine — so picking a sound never needs a hand on the arrows. Tested
+     before the pan, the octave and mute/solo, every one of which owns one of
+     these keys when no scope is held. Repeats run: walking a preset list is a
+     dial, not a notch. */
+  if(HOLD.i&&!e.metaKey&&!e.ctrlKey&&!altOf(e)&&
+     ['BracketLeft','BracketRight','Semicolon','Quote','Comma','Period'].includes(c)){
+    e.preventDefault();
+    const dI=(c==='BracketRight'||c==='Quote'||c==='Period')?1:-1;
+    const whatI=(c==='BracketLeft'||c==='BracketRight')?'prst'
+               :(c==='Semicolon'||c==='Quote')?'type':'engine';
+    const tgI=chTargets();
+    if(tgI.length>1){
+      const keep=S.curPreset, keepE=S.editSnd;
+      tgI.forEach(i=>{S.curPreset=i; S.editSnd=i; instAction(whatI,dI);});
+      S.curPreset=keep; S.editSnd=keepE;
+      chSay(whatI+' '+(dI>0?'+':'\u2212')+'1',tgI.length);
+    }else instAction(whatI,dI);
+    HOLD.iUsed=true; return;
+  }
   /* HELP IS F1 AND ONLY F1. '?' is shift+'/', and '/' is the dice — one key
      with three intensities is the whole idea, so the shifted half cannot also
      be a different feature. */
@@ -15463,7 +15502,26 @@ const onKeyDown=e=>{
          two of the three gestures were dead at any moment and the key behaved
          differently depending on a screen you were not looking at. */
       const noteCh=S.layer>=2?S.editSnd:S.curPreset;
-      if(S.layer>=1&&isAudioCh(noteCh)&&MIC.on){
+      /* MODCAP + REC ARMS THE KNOBS, from wherever you are, and it is asked
+         FIRST — before the audio channel's own three meanings for tab. Held `
+         says "this take is about the params", and on a channel with a take in
+         it that has to outrank grabbing the jam or opening the mic, or the
+         gesture would mean something different depending on which channel you
+         happened to be standing on. Capturing a knob move used to require
+         being on layer 2+ AND arming there, so the one thing automation is for
+         — reach over, sweep something, keep it — was gated behind navigating
+         to the page first. */
+      if(HOLD.a&&S.layer>=1){
+        const ca=focusCh(), ml=S.presets[ca].modLoop;
+        const patA=S.patterns[S.editPat];
+        if(patA.state!=='rec'){pushUndo('modcap');patA.state='rec';}
+        if(ml.state!=='rec')ml.state='rec';
+        HOLD.aUsed=true; HOLD.tabUsed=true;
+        if(S.aView===null){S.aView=0; S.aAddr=(aFront(S.presets[ca])||{}).k??null;}
+        flash('\u25cf modcap armed on '+S.presets[ca].name+
+              ' \u2014 move anything and it is captured'+(T.playing?'':' \u2014 press space'));
+      }
+      else if(S.layer>=1&&isAudioCh(noteCh)&&MIC.on){
         /* the mic is ALREADY listening — tab is retro for sound: the last
            loop-length of air goes straight into the lane, aligned to now */
         const lane2=S.patterns[S.editPat].lanes[noteCh];
@@ -15734,22 +15792,28 @@ const onKeyDown=e=>{
      bar is a shape next to the notes it is opening under.
      Backslash because it was one of five keys left, and because it sits under
      the brackets that walk between the knobs. */
-  if(c==='Backslash'&&!e.repeat&&!e.metaKey&&!altOf(e)&&!PICK&&!DPICK){
+  if(c==='Backquote'&&!e.repeat&&!e.metaKey&&!altOf(e)&&!PICK&&!DPICK){
     e.preventDefault();
-    if(S.aView!==null){S.aView=null; flash('automation hidden'); dirty=true; return;}
+    /* MODCAP — Gad's name, and the better one: this is not a view of a thing
+       called "automation", it is where captured knob moves live and where you
+       arm the capture. Held with rec it arms that capture on the focused
+       channel from ANY layer (see the tab handler), which is the gesture the
+       overlay always implied and never had. */
+    HOLD.a=true; HOLD.aUsed=false;
+    if(S.aView!==null){S.aView=null; flash('modcap hidden'); dirty=true; return;}
     const pre=S.presets[S.curPreset], ls=autoLanes(pre);
     S.aView=0; S.aAddr=ls.length?(aFront(pre)||ls[0]).k:null;
-    flash(ls.length?'automation — '+ls.length+' knob'+(ls.length>1?'s':'')+' on '+pre.name
-                   :'automation — nothing recorded on '+pre.name+' yet');
+    flash(ls.length?'modcap — '+ls.length+' knob'+(ls.length>1?'s':'')+' on '+pre.name
+                   :'modcap — nothing captured on '+pre.name+' yet  (hold ` + tab to arm)');
     dirty=true; return;
   }
-  /* ⌥\ walks the automated knobs — one key past the overlay toggle it
-     belongs to, forward normally and backward with ⇧, because the brackets
-     it lived on are the pan now */
-  if(c==='Backslash'&&altOf(e)&&!e.metaKey&&!PICK&&!DPICK){
+  /* ⌥` walks the captured knobs — the same key as the overlay it belongs to,
+     forward normally and backward with ⇧, because the brackets it lived on
+     are the pan now */
+  if(c==='Backquote'&&altOf(e)&&!e.metaKey&&!PICK&&!DPICK){
     e.preventDefault();
     if(e.repeat)return;
-    if(S.aView===null){flash('\\ shows the automation first');return;}
+    if(S.aView===null){flash('` shows the modcap first');return;}
     const pre=S.presets[S.curPreset], ls=autoLanes(pre);
     if(ls.length<2){flash(ls.length?'only one knob is automated here':'nothing recorded on '+pre.name);return;}
     const at=Math.max(0,aIndexOf(ls,S.aAddr));
@@ -15797,8 +15861,16 @@ const onKeyDown=e=>{
      of them in the board's own software hands it to TEN completely — no ⌘ for
      the browser to answer, no latch to get stuck, just a hold like the ` it
      stands in for. */
-  if((c==='Backquote'||c==='ScrollLock'||c==='Pause'||c==='Insert')
-     &&S.layer>0&&!e.repeat&&!e.metaKey){
+  /* SOUND IS ON \ NOW, and the automation overlay took the ` it vacated. They
+     swapped for the same reason they swapped the last time: the one you reach
+     for constantly wants the key under your finger, and \ sits with the
+     brackets and the punctuation that this scope now uses as its own row —
+     \+[ ] presets, \+; ' types, \+, . engines. The arrows still work
+     exactly as they did (↑↓ preset · ⇧↑↓ engine · ←→ type · ⇧←→ model);
+     the punctuation is a second way in that does not need a hand on the
+     arrows at all. */
+  if((c==='Backslash'||c==='ScrollLock'||c==='Pause'||c==='Insert')
+     &&S.layer>0&&!e.repeat&&!e.metaKey&&!altOf(e)){
     e.preventDefault(); HOLD.i=true; HOLD.iUsed=false; return;}
   if(c==='Slash'&&!altOf(e)){e.preventDefault();
     if(!e.repeat){HOLD.r=true; HOLD.rUsed=false; HOLD.rLatch=KM.sl; if(KM.sl)LATCH.used=true;}
@@ -17198,7 +17270,7 @@ const onKeyUp=e=>{
     if(!used&&S.layer>0){EXP.bump(rs(e)?0.2:0.05);
       flash('vel '+Math.round(clamp(CFG.kvel??0.9,0.02,1)*127));}
     return;}
-  if((c==='Backquote'||c==='ScrollLock'||c==='Pause'||c==='Insert')&&HOLD.i){
+  if((c==='Backslash'||c==='ScrollLock'||c==='Pause'||c==='Insert')&&HOLD.i){
     HOLD.i=false; HOLD.iUsed=false; return;}
   if(c==='Slash'&&HOLD.r){
     /* The roll fires HERE, not on the press — and only if the PRESS armed the
@@ -17256,6 +17328,7 @@ const onKeyUp=e=>{
       dirty=true;}
     return;}
   if(c==='KeyM'&&HOLD.m){HOLD.m=false; HOLD.mUsed=false; return;}
+  if(c==='Backquote'&&HOLD.a){HOLD.a=false; HOLD.aUsed=false;}
   if(c==='BracketLeft')BRK.l=false;
   if(c==='BracketRight')BRK.r=false;
   if((c==='ShiftLeft'||c==='ShiftRight')&&PICK){PICK.peek=false; dirty=true;}
@@ -17311,7 +17384,7 @@ const onKeyUp=e=>{
   }
   if(c==='Backspace'){
     if(eraseHold)spanUnmark(S.patterns[S.editPat].lanes[focusCh()]);
-    eraseHold=null;muteHold=null;BRK.l=false;BRK.r=false;clearTimeout(delHoldTimer);}
+    eraseHold=null;muteHold=null;BRK.l=false;BRK.r=false;HOLD.a=false;clearTimeout(delHoldTimer);}
   if(rPend[c]){
     const r=rPend[c];
     /* SAME RULE AS THE RECORDER: the length is the held gesture. r.ts is the

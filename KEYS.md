@@ -3,7 +3,7 @@
 Generated from `index.html` by `tools/keymap.py`. Do not hand-edit —
 regenerate it. A key table that is written by hand is wrong within a week.
 
-185 bindings across 38 keys.
+200 bindings across 41 keys.
 
 ## What is still free
 
@@ -22,188 +22,203 @@ inside an existing held scope.
 
 | Key | Context | Line | Does |
 |---|---|---|---|
-| `KeyB` | ⌘ + ⌃ | 8898 |  |
-| `KeyB` | ⌃ | 15501 | tap tempo, on repeated taps |
-| `KeyC` | ⌘ | 8967 | copy out of what you are looking at |
-| `KeyC` | — | 15047 | MOD learn: arm on a mod slot, map on a target param |
-| `KeyC` | — | 15049 | MOD learn: arm on a mod slot, map on a target param |
-| `KeyC` | ⌃ | 15494 | ⌃c — this channel's patch, as JSON, on the clipboard |
-| `KeyC` | hold c + hold v | 16653 |  |
-| `KeyC` | hold c | 16819 | vel  |
-| `KeyE` | — | 15040 | cmd+↑↓ = per-note prep tweak |
-| `KeyI` | — | 15043 | cmd+↑↓ = per-note prep tweak |
-| `KeyK` | ⌘ + ⌥ + ⇧ + layer 1+ | 14791 | ◎ source →  |
-| `KeyL` | ⌘ | 14780 |  |
-| `KeyM` | hold q + ⌥ + ⇧ + dest browser + set picker + layer 2+ | 15312 | nothing to modulate here |
-| `KeyM` | hold q + ⌃ | 15490 | click  |
-| `KeyM` | hold q + hold n + hold m | 16652 |  |
-| `KeyM` | hold m | 16885 | the digit is no longer held |
-| `KeyN` | ⌘ | 14774 | start a new set? enter confirms · esc cancels |
-| `KeyN` | hold digit + ⌥ | 16188 |  |
-| `KeyN` | hold q + hold n + hold m | 16652 |  |
-| `KeyN` | hold n | 16823 | vel  |
-| `KeyO` | ⌃ | 15496 | ⌃o — how recording meets what is there |
-| `KeyQ` | hold q + ⌃ + layer 1+ | 15545 | Q — tap toggles live quantize · s snaps recorded notes · digits set the grid |
-| `KeyQ` | hold q + ⌃ | 15552 | ⌃q = live-quantize toggle, everywhere |
-| `KeyQ` | hold q + hold n + hold m | 16652 |  |
-| `KeyQ` | hold q | 16879 | live quantize  |
-| `KeyS` | ⌘ | 14767 | straight back to where it lives |
-| `KeyS` | hold q + ⌃ | 15517 | …unless the q scope is open: q+s = snap |
-| `KeyS` | hold q + layer 1+ | 15526 |  |
-| `KeyS` | hold c + hold v | 16653 |  |
-| `KeyS` | — | 16878 | live quantize  |
-| `KeyT` | layer 0 | 15510 | t = timeline on/off (focus mode) |
-| `KeyV` | — | 15047 | MOD learn: arm on a mod slot, map on a target param |
-| `KeyV` | hold digit + ⌥ | 16192 |  |
-| `KeyV` | hold c + hold v | 16653 |  |
-| `KeyV` | hold v | 16824 | vel  |
-| `KeyX` | — | 15047 | MOD learn: arm on a mod slot, map on a target param |
-| `KeyX` | — | 15049 | MOD learn: arm on a mod slot, map on a target param |
-| `KeyZ` | ⇧ | 15044 | cmd+↑↓ = per-note prep tweak |
-| `ArrowDown` | — | 3070 | OFFSET the content — vertical, like the grid |
-| `ArrowDown` | — | 14726 | destination cleared |
-| `ArrowDown` | dest browser + set picker | 14728 | destination cleared |
-| `ArrowDown` | — | 14967 |  |
-| `ArrowDown` | — | 15003 | down = finer, the way the list reads |
-| `ArrowDown` | — | 15004 | down = finer, the way the list reads |
-| `ArrowDown` | — | 15045 | cmd+↑↓ = per-note prep tweak |
-| `ArrowDown` | — | 15072 | the way in is the way out |
-| `ArrowDown` | — | 15096 | the dice key: a whole song (⇧⌥ = wild) |
-| `ArrowDown` | — | 15818 | THE SCALE: ←→ scale · ↑↓ key |
-| `ArrowDown` | — | 15821 | THE SCALE: ←→ scale · ↑↓ key |
-| `ArrowDown` | — | 15908 | bpm  |
-| `ArrowDown` | — | 16046 | master — ←→ picks a channel, 0 stays here |
-| `ArrowLeft` | — | 3094 | UNIT SIZE — horizontal |
-| `ArrowLeft` | — | 8905 |  |
-| `ArrowLeft` | — | 8916 | no backups yet |
-| `ArrowLeft` | — | 8983 | inside the set: pick a channel |
-| `ArrowLeft` | — | 14723 | destination cleared |
-| `ArrowLeft` | — | 14972 |  |
-| `ArrowLeft` | — | 15007 | ⌥a+⌫ = take it out for good |
-| `ArrowLeft` | layer -1 | 15071 | the way in is the way out |
-| `ArrowLeft` | — | 15076 | ⇧←→ jumps section, like ⇧←→ jumps rack |
-| `ArrowLeft` | — | 15818 | THE SCALE: ←→ scale · ↑↓ key |
-| `ArrowLeft` | — | 15923 |  |
-| `ArrowRight` | — | 3094 | UNIT SIZE — horizontal |
-| `ArrowRight` | — | 3095 | UNIT SIZE — horizontal |
-| `ArrowRight` | — | 8905 |  |
-| `ArrowRight` | set picker | 8906 |  |
-| `ArrowRight` | — | 8916 | no backups yet |
-| `ArrowRight` | set picker | 8917 | no backups yet |
-| `ArrowRight` | — | 8983 | inside the set: pick a channel |
-| `ArrowRight` | — | 8984 | inside the set: pick a channel |
-| `ArrowRight` | — | 14723 | destination cleared |
-| `ArrowRight` | dest browser + set picker | 14724 | destination cleared |
-| `ArrowRight` | — | 14972 |  |
-| `ArrowRight` | hold ⌥rack | 14974 | - = walk the rate |
-| `ArrowRight` | — | 15007 | ⌥a+⌫ = take it out for good |
-| `ArrowRight` | — | 15008 | ⌥a+⌫ = take it out for good |
-| `ArrowRight` | layer -1 | 15071 | the way in is the way out |
-| `ArrowRight` | — | 15076 | ⇧←→ jumps section, like ⇧←→ jumps rack |
-| `ArrowRight` | — | 15077 | ⇧←→ jumps section, like ⇧←→ jumps rack |
-| `ArrowRight` | — | 15818 | THE SCALE: ←→ scale · ↑↓ key |
-| `ArrowRight` | — | 15821 | THE SCALE: ←→ scale · ↑↓ key |
-| `ArrowRight` | — | 15923 |  |
-| `ArrowRight` | — | 15924 |  |
-| `ArrowUp` | — | 3070 | OFFSET the content — vertical, like the grid |
-| `ArrowUp` | — | 3071 | OFFSET the content — vertical, like the grid |
-| `ArrowUp` | — | 14726 | destination cleared |
-| `ArrowUp` | — | 14967 |  |
-| `ArrowUp` | hold ⌥rack | 14969 |  |
-| `ArrowUp` | — | 15003 | down = finer, the way the list reads |
-| `ArrowUp` | — | 15045 | cmd+↑↓ = per-note prep tweak |
-| `ArrowUp` | ⌥ + ⇧ + layer 2+ | 15046 | MOD learn: arm on a mod slot, map on a target param |
-| `ArrowUp` | — | 15072 | the way in is the way out |
-| `ArrowUp` | — | 15096 | the dice key: a whole song (⇧⌥ = wild) |
-| `ArrowUp` | — | 15107 | the dice key: a whole song (⇧⌥ = wild) |
-| `ArrowUp` | — | 15818 | THE SCALE: ←→ scale · ↑↓ key |
-| `ArrowUp` | — | 15821 | THE SCALE: ←→ scale · ↑↓ key |
-| `ArrowUp` | — | 15821 | THE SCALE: ←→ scale · ↑↓ key |
-| `ArrowUp` | — | 15908 | bpm  |
-| `ArrowUp` | ⌘ + ⌥ | 15911 | bpm  |
-| `ArrowUp` | — | 16046 | master — ←→ picks a channel, 0 stays here |
-| `ArrowUp` | — | 16047 | master — ←→ picks a channel, 0 stays here |
-| `Backquote` | — | 15459 | DJ pads: full home row |
-| `Backquote` | hold ` | 16828 | what the dice are for |
-| `Backslash` | ⌘ + ⌥ + dest browser + set picker | 15396 | automation hidden |
-| `Backslash` | ⌘ + ⌥ + dest browser + set picker | 15408 | \\ shows the automation first |
-| `Backspace` | — | 3105 | ⟲ loop length cleared |
-| `Backspace` | — | 3113 | nothing recorded to restore  (⇧⌫ clears the loop length) |
-| `Backspace` | ⇧ | 8955 | slot  |
-| `Backspace` | — | 14730 | destination cleared |
-| `Backspace` | hold ⌥rack | 14953 |  |
-| `Backspace` | hold ⌥rack | 15016 | ⌥a+⌫ = take it out for good |
-| `Backspace` | — | 15232 | cue  |
-| `Backspace` | — | 15244 | cue  |
-| `Backspace` | hold n + hold digit | 15558 |  |
-| `Backspace` | hold c | 15563 | press space — erase happens as the playhead passes |
-| `Backspace` | hold tab + ⇧ | 15573 | press space — erase happens as the playhead passes |
-| `Backspace` | hold tab | 15580 | nothing loaded |
-| `Backspace` | hold tab + hold digit + layer 2+ | 15588 | nothing loaded |
-| `Backspace` | — | 15603 | no automation on  |
-| `Backspace` | — | 16929 |  |
-| `BracketLeft` | ⌘ + dest browser + set picker | 15287 | the pan keys dial too |
-| `BracketRight` | ⌘ + dest browser + set picker | 15287 | the pan keys dial too |
-| `BracketRight` | — | 15289 | the pan keys dial too |
-| `CapsLock` | — | 15449 | the state is read, not toggled |
-| `Comma` | — | 14990 | , . = octaves |
-| `Comma` | ⌘ + ⌥ | 15481 | keyboard vel  |
-| `Enter` | — | 8908 |  |
-| `Enter` | — | 8921 | no backups yet |
-| `Enter` | — | 8990 | this empties all  |
-| `Enter` | — | 14735 |  |
-| `Enter` | layer -1 | 15071 | the way in is the way out |
-| `Enter` | — | 15075 | the way in is the way out |
-| `Enter` | — | 15427 | instrument scope closed |
-| `Enter` | layer -1 | 16773 | macOS reports caps going OFF on the keyup |
-| `Equal` | — | 14948 |  |
-| `Equal` | hold ⌥rack | 14950 |  |
-| `Equal` | — | 14986 | - = walk the rate |
-| `Equal` | — | 14987 | , . = octaves |
-| `Equal` | hold tab + ⌘ + ⌃ | 15189 |  |
-| `Equal` | ⌘ + layer 2+ | 15202 |  |
-| `Equal` | — | 15204 |  |
-| `Equal` | ⌘ + ⌃ + ⌥ + layer 2+ | 15215 |  |
-| `Equal` | — | 15218 |  |
-| `Equal` | — | 15232 | cue  |
-| `Equal` | — | 15237 | cue  |
-| `Equal` | hold tab + ⌘ + ⌥ + dest browser + set picker | 15263 |  |
-| `Equal` | ⇧ | 15265 |  |
-| `Escape` | — | 8895 | cancelled |
-| `Escape` | dest browser + set picker | 14722 | destination cleared |
-| `Escape` | — | 15059 |  |
-| `Escape` | layer -1 | 15071 | the way in is the way out |
-| `Escape` | — | 15074 | the way in is the way out |
-| `Escape` | — | 15428 | instrument scope closed |
-| `Escape` | layer -1 | 16773 | macOS reports caps going OFF on the keyup |
-| `F1` | — | 15059 |  |
-| `Insert` | — | 15459 | DJ pads: full home row |
-| `Insert` | hold ` | 16828 | what the dice are for |
-| `Minus` | — | 14948 |  |
-| `Minus` | — | 14986 | - = walk the rate |
-| `Minus` | hold tab + ⌘ + ⌃ | 15189 |  |
-| `Minus` | — | 15193 |  |
-| `Minus` | ⌘ + layer 2+ | 15202 |  |
-| `Minus` | ⌘ + ⌃ + ⌥ + layer 2+ | 15215 |  |
-| `Minus` | — | 15232 | cue  |
-| `Minus` | hold tab + ⌘ + ⌥ + dest browser + set picker | 15263 |  |
-| `Pause` | — | 15459 | DJ pads: full home row |
-| `Pause` | hold ` | 16828 | what the dice are for |
-| `Period` | — | 14990 | , . = octaves |
-| `Period` | — | 14991 | there is no zeroth octave |
-| `Period` | ⌘ + ⌥ | 15481 | keyboard vel  |
-| `Period` | — | 15482 | keyboard vel  |
-| `ScrollLock` | — | 15459 | DJ pads: full home row |
-| `ScrollLock` | hold ` | 16828 | what the dice are for |
-| `Slash` | set picker | 8936 | slot  |
-| `Slash` | ⌘ + ⌃ + ⌥ + layer 2+ | 14834 | the way out is the key you came in on |
-| `Slash` | — | 15072 | the way in is the way out |
-| `Slash` | — | 15109 | the dice key: a whole song (⇧⌥ = wild) |
-| `Slash` | ⌥ | 15462 | DJ pads: full home row |
-| `Slash` | layer -1 | 16773 | macOS reports caps going OFF on the keyup |
-| `Slash` | hold / | 16830 | what the dice are for |
-| `Space` | — | 8966 | copy out of what you are looking at |
-| `Space` | — | 15125 | rec unlatched |
-| `Tab` | — | 15126 | rec unlatched |
-| `Tab` | — | 16945 | latch overlapped the hold: rec stays on |
-| `Tab` | — | 16976 | the hold ended and nothing latched it: rec off |
+| `KeyB` | ⌘ + ⌃ | 9083 |  |
+| `KeyB` | ⌃ | 15914 | tap tempo, on repeated taps |
+| `KeyC` | ⌘ | 9152 | copy out of what you are looking at |
+| `KeyC` | — | 15388 | MOD learn: arm on a mod slot, map on a target param |
+| `KeyC` | — | 15390 | MOD learn: arm on a mod slot, map on a target param |
+| `KeyC` | ⌃ | 15907 | ⌃c — this channel's patch, as JSON, on the clipboard |
+| `KeyC` | hold c + hold v | 17098 |  |
+| `KeyC` | hold c | 17264 | vel  |
+| `KeyE` | — | 15381 | cmd+↑↓ = per-note prep tweak |
+| `KeyI` | — | 15384 | cmd+↑↓ = per-note prep tweak |
+| `KeyK` | ⌘ + ⌥ + ⇧ + layer 1+ | 15118 | ◎ source →  |
+| `KeyL` | ⌘ | 15107 |  |
+| `KeyM` | hold q + ⌥ + ⇧ + dest browser + set picker + layer 2+ | 15711 | nothing to modulate here |
+| `KeyM` | hold q + ⌃ | 15903 | click  |
+| `KeyM` | hold q + hold n + hold m | 17097 |  |
+| `KeyM` | hold m | 17330 | the digit is no longer held |
+| `KeyN` | ⌘ | 15101 | start a new set? enter confirms · esc cancels |
+| `KeyN` | hold digit + ⌥ | 16633 |  |
+| `KeyN` | hold q + hold n + hold m | 17097 |  |
+| `KeyN` | hold n | 17268 | vel  |
+| `KeyO` | ⌃ | 15909 | ⌃o — how recording meets what is there |
+| `KeyP` | ⌘ + ⌃ + ⌥ + ⇧ + layer 1+ | 15132 | the way out is the key you came in on |
+| `KeyQ` | hold q + ⌃ + layer 1+ | 15958 | Q — tap toggles live quantize · s snaps recorded notes · digits set the grid |
+| `KeyQ` | hold q + ⌃ | 15965 | ⌃q = live-quantize toggle, everywhere |
+| `KeyQ` | hold q + hold n + hold m | 17097 |  |
+| `KeyQ` | hold q | 17324 | live quantize  |
+| `KeyS` | ⌘ | 15094 | straight back to where it lives |
+| `KeyS` | hold q + ⌃ | 15930 | …unless the q scope is open: q+s = snap |
+| `KeyS` | hold q + layer 1+ | 15939 |  |
+| `KeyS` | hold c + hold v | 17098 |  |
+| `KeyS` | — | 17323 | live quantize  |
+| `KeyT` | layer 0 | 15923 | t = timeline on/off (focus mode) |
+| `KeyV` | — | 15388 | MOD learn: arm on a mod slot, map on a target param |
+| `KeyV` | hold digit + ⌥ | 16637 |  |
+| `KeyV` | hold c + hold v | 17098 |  |
+| `KeyV` | hold v | 17269 | vel  |
+| `KeyX` | — | 15388 | MOD learn: arm on a mod slot, map on a target param |
+| `KeyX` | — | 15390 | MOD learn: arm on a mod slot, map on a target param |
+| `KeyZ` | ⇧ | 15385 | cmd+↑↓ = per-note prep tweak |
+| `ArrowDown` | — | 3145 | OFFSET the content — vertical, like the grid |
+| `ArrowDown` | — | 15053 | destination cleared |
+| `ArrowDown` | dest browser + set picker | 15055 | destination cleared |
+| `ArrowDown` | — | 15308 |  |
+| `ArrowDown` | — | 15344 | down = finer, the way the list reads |
+| `ArrowDown` | — | 15345 | down = finer, the way the list reads |
+| `ArrowDown` | — | 15386 | cmd+↑↓ = per-note prep tweak |
+| `ArrowDown` | — | 15434 | the way in is the way out |
+| `ArrowDown` | — | 15458 | the dice key: a whole song (⇧⌥ = wild) |
+| `ArrowDown` | — | 16232 | THE SCALE: ←→ scale · ↑↓ key |
+| `ArrowDown` | — | 16235 | THE SCALE: ←→ scale · ↑↓ key |
+| `ArrowDown` | — | 16322 | bpm  |
+| `ArrowDown` | ⇧ | 16340 |  |
+| `ArrowDown` | — | 16491 | master — ←→ picks a channel, 0 stays here |
+| `ArrowLeft` | — | 3169 | UNIT SIZE — horizontal |
+| `ArrowLeft` | — | 9090 |  |
+| `ArrowLeft` | — | 9101 | no backups yet |
+| `ArrowLeft` | — | 9168 | inside the set: pick a channel |
+| `ArrowLeft` | — | 15050 | destination cleared |
+| `ArrowLeft` | — | 15313 |  |
+| `ArrowLeft` | — | 15348 | ⌥a+⌫ = take it out for good |
+| `ArrowLeft` | layer -1 | 15433 | the way in is the way out |
+| `ArrowLeft` | — | 15438 | ⇧←→ jumps section, like ⇧←→ jumps rack |
+| `ArrowLeft` | — | 16232 | THE SCALE: ←→ scale · ↑↓ key |
+| `ArrowLeft` | — | 16368 |  |
+| `ArrowRight` | — | 3169 | UNIT SIZE — horizontal |
+| `ArrowRight` | — | 3170 | UNIT SIZE — horizontal |
+| `ArrowRight` | — | 9090 |  |
+| `ArrowRight` | set picker | 9091 |  |
+| `ArrowRight` | — | 9101 | no backups yet |
+| `ArrowRight` | set picker | 9102 | no backups yet |
+| `ArrowRight` | — | 9168 | inside the set: pick a channel |
+| `ArrowRight` | — | 9169 | inside the set: pick a channel |
+| `ArrowRight` | — | 15050 | destination cleared |
+| `ArrowRight` | dest browser + set picker | 15051 | destination cleared |
+| `ArrowRight` | — | 15313 |  |
+| `ArrowRight` | hold ⌥rack | 15315 | - = walk the rate |
+| `ArrowRight` | — | 15348 | ⌥a+⌫ = take it out for good |
+| `ArrowRight` | — | 15349 | ⌥a+⌫ = take it out for good |
+| `ArrowRight` | layer -1 | 15433 | the way in is the way out |
+| `ArrowRight` | — | 15438 | ⇧←→ jumps section, like ⇧←→ jumps rack |
+| `ArrowRight` | — | 15439 | ⇧←→ jumps section, like ⇧←→ jumps rack |
+| `ArrowRight` | — | 16232 | THE SCALE: ←→ scale · ↑↓ key |
+| `ArrowRight` | — | 16235 | THE SCALE: ←→ scale · ↑↓ key |
+| `ArrowRight` | — | 16368 |  |
+| `ArrowRight` | — | 16369 |  |
+| `ArrowUp` | — | 3145 | OFFSET the content — vertical, like the grid |
+| `ArrowUp` | — | 3146 | OFFSET the content — vertical, like the grid |
+| `ArrowUp` | — | 15053 | destination cleared |
+| `ArrowUp` | — | 15308 |  |
+| `ArrowUp` | hold ⌥rack | 15310 |  |
+| `ArrowUp` | — | 15344 | down = finer, the way the list reads |
+| `ArrowUp` | — | 15386 | cmd+↑↓ = per-note prep tweak |
+| `ArrowUp` | ⌥ + ⇧ + layer 2+ | 15387 | MOD learn: arm on a mod slot, map on a target param |
+| `ArrowUp` | — | 15434 | the way in is the way out |
+| `ArrowUp` | — | 15458 | the dice key: a whole song (⇧⌥ = wild) |
+| `ArrowUp` | — | 15469 | the dice key: a whole song (⇧⌥ = wild) |
+| `ArrowUp` | — | 16232 | THE SCALE: ←→ scale · ↑↓ key |
+| `ArrowUp` | — | 16235 | THE SCALE: ←→ scale · ↑↓ key |
+| `ArrowUp` | — | 16235 | THE SCALE: ←→ scale · ↑↓ key |
+| `ArrowUp` | — | 16322 | bpm  |
+| `ArrowUp` | ⌘ + ⌥ | 16325 | bpm  |
+| `ArrowUp` | ⇧ | 16340 |  |
+| `ArrowUp` | — | 16344 | crop  |
+| `ArrowUp` | — | 16491 | master — ←→ picks a channel, 0 stays here |
+| `ArrowUp` | — | 16492 | master — ←→ picks a channel, 0 stays here |
+| `Backquote` | ⌘ + ⌥ + dest browser + set picker | 15795 | modcap hidden |
+| `Backquote` | ⌘ + ⌥ + dest browser + set picker | 15813 | ` shows the modcap first |
+| `Backquote` | — | 17331 | the digit is no longer held |
+| `Backslash` | — | 15872 | DJ pads: full home row |
+| `Backslash` | hold ` | 17273 | what the dice are for |
+| `Backspace` | — | 3180 | ⟲ loop length cleared |
+| `Backspace` | — | 3188 | nothing recorded to restore  (⇧⌫ clears the loop length) |
+| `Backspace` | ⇧ | 9140 | slot  |
+| `Backspace` | — | 15057 | destination cleared |
+| `Backspace` | hold ⌥rack | 15294 |  |
+| `Backspace` | hold ⌥rack | 15357 | ⌥a+⌫ = take it out for good |
+| `Backspace` | — | 15617 | cue  |
+| `Backspace` | — | 15629 | cue  |
+| `Backspace` | hold n + hold digit | 15971 |  |
+| `Backspace` | hold c | 15976 | press space — erase happens as the playhead passes |
+| `Backspace` | hold tab + ⇧ | 15986 | press space — erase happens as the playhead passes |
+| `Backspace` | hold tab | 15993 |  |
+| `Backspace` | hold tab + hold digit + layer 2+ | 16002 | nothing loaded |
+| `Backspace` | — | 16017 | no automation on  |
+| `Backspace` | — | 17385 |  |
+| `BracketLeft` | — | 15407 |  |
+| `BracketLeft` | ⌘ + dest browser + set picker | 15672 |  |
+| `BracketLeft` | — | 15674 |  |
+| `BracketLeft` | — | 17332 | the digit is no longer held |
+| `BracketRight` | — | 15406 |  |
+| `BracketRight` | — | 15407 |  |
+| `BracketRight` | ⌘ + dest browser + set picker | 15672 |  |
+| `BracketRight` | — | 15688 | the pan keys dial too |
+| `BracketRight` | — | 17333 | the digit is no longer held |
+| `CapsLock` | — | 15854 | the state is read, not toggled |
+| `Comma` | — | 15331 | , . = octaves |
+| `Comma` | ⌘ + ⌥ | 15894 | keyboard vel  |
+| `Enter` | — | 9093 |  |
+| `Enter` | — | 9106 | no backups yet |
+| `Enter` | — | 9175 | this empties all  |
+| `Enter` | — | 15062 |  |
+| `Enter` | layer -1 | 15433 | the way in is the way out |
+| `Enter` | — | 15437 | the way in is the way out |
+| `Enter` | — | 15832 | instrument scope closed |
+| `Enter` | layer -1 | 17218 | macOS reports caps going OFF on the keyup |
+| `Equal` | — | 15289 |  |
+| `Equal` | hold ⌥rack | 15291 |  |
+| `Equal` | — | 15327 | - = walk the rate |
+| `Equal` | — | 15328 | , . = octaves |
+| `Equal` | hold tab + ⌘ + ⌃ | 15570 |  |
+| `Equal` | ⌘ + layer 2+ | 15587 |  |
+| `Equal` | — | 15589 |  |
+| `Equal` | ⌘ + ⌃ + ⌥ + layer 2+ | 15600 |  |
+| `Equal` | — | 15603 |  |
+| `Equal` | — | 15617 | cue  |
+| `Equal` | — | 15622 | cue  |
+| `Equal` | hold tab + ⌘ + ⌥ + dest browser + set picker | 15648 |  |
+| `Equal` | ⇧ | 15650 |  |
+| `Escape` | — | 9080 | cancelled |
+| `Escape` | dest browser + set picker | 15049 | destination cleared |
+| `Escape` | — | 15421 |  |
+| `Escape` | layer -1 | 15433 | the way in is the way out |
+| `Escape` | — | 15436 | the way in is the way out |
+| `Escape` | — | 15833 | instrument scope closed |
+| `Escape` | layer -1 | 17218 | macOS reports caps going OFF on the keyup |
+| `F1` | — | 15421 |  |
+| `Insert` | — | 15872 | DJ pads: full home row |
+| `Insert` | hold ` | 17273 | what the dice are for |
+| `Minus` | — | 15289 |  |
+| `Minus` | — | 15327 | - = walk the rate |
+| `Minus` | hold tab + ⌘ + ⌃ | 15570 |  |
+| `Minus` | — | 15574 |  |
+| `Minus` | ⌘ + layer 2+ | 15587 |  |
+| `Minus` | ⌘ + ⌃ + ⌥ + layer 2+ | 15600 |  |
+| `Minus` | — | 15617 | cue  |
+| `Minus` | hold tab + ⌘ + ⌥ + dest browser + set picker | 15648 |  |
+| `Pause` | — | 15872 | DJ pads: full home row |
+| `Pause` | hold ` | 17273 | what the dice are for |
+| `Period` | — | 15331 | , . = octaves |
+| `Period` | — | 15332 | there is no zeroth octave |
+| `Period` | — | 15406 |  |
+| `Period` | ⌘ + ⌥ | 15894 | keyboard vel  |
+| `Period` | — | 15895 | keyboard vel  |
+| `Quote` | — | 15406 |  |
+| `Quote` | — | 15408 |  |
+| `ScrollLock` | — | 15872 | DJ pads: full home row |
+| `ScrollLock` | hold ` | 17273 | what the dice are for |
+| `Semicolon` | — | 15408 |  |
+| `Slash` | set picker | 9121 | slot  |
+| `Slash` | ⌘ + ⌃ + ⌥ + layer 2+ | 15164 |  |
+| `Slash` | — | 15434 | the way in is the way out |
+| `Slash` | — | 15471 | the dice key: a whole song (⇧⌥ = wild) |
+| `Slash` | ⌥ | 15875 | DJ pads: full home row |
+| `Slash` | layer -1 | 17218 | macOS reports caps going OFF on the keyup |
+| `Slash` | hold / | 17275 | what the dice are for |
+| `Space` | — | 9151 | copy out of what you are looking at |
+| `Space` | — | 15487 | rec unlatched |
+| `Tab` | — | 15488 | rec unlatched |
+| `Tab` | — | 17401 | latch overlapped the hold: rec stays on |
+| `Tab` | — | 17432 | the hold ended and nothing latched it: rec off |
