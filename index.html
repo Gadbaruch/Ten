@@ -1051,7 +1051,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.1624';
+const BUILD='2026-08-15.1632';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -2346,6 +2346,11 @@ function focusIsStepped(){
      still stops a bounce from moving anything twice. */
   return false;
 }
+/* the scopes whose arrows are notches rather than a continuum: n transposes in
+   octaves and semitones, i walks engines and presets, sc walks scales and keys.
+   v (velocity) and m (tempo) are left out on purpose — those ARE continua and
+   the dial belongs on them. */
+const scopeStepped=()=>!!(HOLD.n||HOLD.i||HOLD.sc);
 function arepStop(){if(AREP.timer){clearTimeout(AREP.timer);AREP.timer=null;}
   if(AREP.stopT){clearTimeout(AREP.stopT);AREP.stopT=null;} AREP.code=null;}
 function arepStart(code){
@@ -2354,11 +2359,18 @@ function arepStart(code){
   /* LEFT AND RIGHT ARE STEPPED. Moving the cursor is a discrete act — one
      place per press, like fn — and only a VALUE is worth running through. */
   if(code!=='ArrowUp'&&code!=='ArrowDown')return;
+  /* AND NOT WHILE A STEPPED SCOPE IS OPEN. focusIsStepped() answers a question
+     about the PARAMETER under the cursor, and with a scope held the arrows are
+     not on a parameter at all — they are moving an octave, an engine or a key,
+     every one of which is one press one step. Without this, holding a scope and
+     touching an arrow ran the transpose through its whole range at 30ms a step,
+     faster the harder you pressed: a dial where there should be a notch. */
+  if(scopeStepped())return;
   AREP.code=code;
   const step=()=>{
     if(!AREP.code)return;
     if(HE.on&&HE.driver()==null){arepStop(); return;}     // the driving key is gone
-    if(focusIsStepped()){arepStop(); return;}   // a menu moved once and that is all
+    if(focusIsStepped()||scopeStepped()){arepStop(); return;}   // a menu moved once and that is all
     for(const kind of ['keydown','keyup'])
       document.dispatchEvent(new KeyboardEvent(kind,
         Object.assign({code:AREP.code,key:AREP.code,bubbles:true},modsOf())));
@@ -2961,7 +2973,24 @@ function fmtVal(spec,v){
 }
 
 /* ---------------- factory presets ------------------------------------ */
-function mkP(name,cat,fn){const p=basePreset(name);p.cat=cat;fn(p);return p;}
+/* A DRUM IS TUNED, NOT PLAYED. Every one of these was voiced against middle C,
+   and the home row is C3 now — so left alone they would all have dropped an
+   octave with the keyboard, which puts an 808 kick at 24Hz: under the bottom of
+   a speaker. They keep the pitch they were tuned to. It is a RATIO, not a fixed
+   note: the drums still follow the keyboard exactly as they always did, they
+   just start from where they sounded right. */
+function drumUp(p){
+  const o0=p.osc&&p.osc[0];
+  if(o0&&!isNoiseW(o0.wav)&&o0.wav!==9){o0.rat=+((o0.rat||1)*2).toFixed(4); return p;}
+  /* a noise or sampler root is not a pitch — doubling it would change the
+     NOISE rather than the note, so the tonal operators move instead */
+  for(let i=1;i<10;i++){const o=p.osc&&p.osc[i];
+    if(o&&!isNoiseW(o.wav)&&o.wav!==9)o.rat=+((o.rat||1)*2).toFixed(4);}
+  return p;
+}
+function mkP(name,cat,fn){const p=basePreset(name);p.cat=cat;fn(p);
+  if(DRUMCATS.includes(cat))drumUp(p);
+  return p;}
 /* A SOUND TAKEN OFF THE DESK, NOT TRANSCRIBED. The recipes above were written
    by hand in the legacy env/lfo shape; these are dumps of racks that were built
    by playing, in the shape the racks are actually in. Hand-copying one of those
@@ -8854,7 +8883,7 @@ function libAll(){
        first. Dropping the factory half is the only way anyone already carrying
        a library ever sees them: without it the stored copies shadow the
        definitions in this file forever. */
-    const keep=v<27?items.filter(en=>en&&!en.factory):items;  // v4-8 levels · v9-11 voicings · v13 SNGB/LDGB · v15 KKGB/HHGB · v16 tuning + envelopes retranslated · v19 VABGA out · v26 snares rebuilt
+    const keep=v<28?items.filter(en=>en&&!en.factory):items;  // v4-8 levels · v9-11 voicings · v13 SNGB/LDGB · v15 KKGB/HHGB · v16 tuning + envelopes retranslated · v19 VABGA out · v26 snares rebuilt
     libStore(keep);
     return libCache=keep;
   }
@@ -8875,7 +8904,7 @@ function libNos(){
   }
   return libNoCache=m;
 }
-const LIBV=27;   // bump BOTH: libStore writes it, libAll checks it
+const LIBV=28;   // bump BOTH: libStore writes it, libAll checks it
 function libStore(a){libMigrated=true; libCache=null; libNoCache=null;
   const out=(a||[]).map(en=>en&&en.data?{...en,data:portPreset(en.data,true)}:en);
   try{localStorage.setItem(LIBKEY,JSON.stringify({v:LIBV,items:out}));}catch(_){} if(typeof prepCache!=='undefined')prepCache.clear();}
@@ -9329,6 +9358,7 @@ function genPreset(cat,rnd,wild=0.5){
      slot with a source, an amount and nothing to point at is the "many slots
      occupied by unassigned things" that a dice roll left behind. */
   p._addr=false; addrMod(p);
+  if(DRUMCATS.includes(cat))drumUp(p);   // same reason as mkP: a drum is tuned, not played
   return p;
 }
 /* ---- '/' random button: beat / lane / slot generators ---------------- */
