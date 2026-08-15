@@ -6,6 +6,12 @@
       "runtimeExecutable": "npx",
       "runtimeArgs": ["serve", "-l", "3031", "."],
       "port": 3031
+    },
+    {
+      "name": "ten-main",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["serve", "-l", "3032", "."],
+      "port": 3032
     }
   ]
 }

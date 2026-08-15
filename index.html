@@ -1061,7 +1061,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.1910';
+const BUILD='2026-08-15.1954';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -5457,24 +5457,34 @@ class Voice{
           (this.opGains[b.i]=this.opGains[b.i]||[]).push(fg);
           (this.opAmt[b.i]=this.opAmt[b.i]||[]).push({g:fg,sc:dep*kIdx});
         }else if(b.op.mode===2){
-          /* RING IS A DEPTH, NOT A GATE. The base gain was 0, so the carrier
-             existed only while the modulator was producing signal — textbook
-             four-quadrant multiplication, and a trap the moment anything takes
-             the modulator to zero: an envelope reaching its sustain, a level
-             turned down, an LFO at the bottom. Every one of those took the
-             CARRIER to silence with it, which is not what a level knob on an
-             operator reads like.
-             Base 1 with the modulator added at depth: nothing at zero is the
-             dry carrier, full depth is the ring, and the whole range between
-             them is a mix you can envelope through without the sound
-             disappearing. */
+          /* RING IS A DEPTH, NOT A GATE — and full depth has to BE a ring.
+             Base 0 with the modulator alone is textbook four-quadrant
+             multiplication, and a trap the moment anything takes the modulator
+             to zero: an envelope reaching its sustain, a level turned down, an
+             LFO at the bottom. Every one of those took the CARRIER to silence
+             with it, which is not what a level knob reads like. Base 1 with the
+             modulator added on top fixed that and cost the effect its teeth:
+             1+m at full level is half dry by amplitude, so the top of the knob
+             was a 50% AM and ring read as the weakest of the six modes.
+                gain = 1 - amt + amt*mod
+             is both. Zero is the dry carrier. Full is 0+mod — a true ring, no
+             dry left in it, twice what the knob used to reach. And the dry
+             trim is a SECOND gain on the same amt, fed by a constant -1, so an
+             envelope closing the operator opens the dry back up in step
+             instead of closing the channel: sustain 0 lands on the plain
+             carrier, which is what "no ring" should sound like. */
           const rj=outN[j]!==undefined?j:0;
           const rg=ac.createGain(); rg.gain.value=1;
-          const sg=ac.createGain(); sg.gain.value=b.op.amt;
+          const sg=ac.createGain(); sg.gain.value=b.op.amt;      // wet: +amt*mod
+          const dc=ac.createConstantSource(); dc.offset.value=-1;
+          const cg=ac.createGain(); cg.gain.value=b.op.amt;      // dry trim: -amt
+          dc.connect(cg); cg.connect(rg.gain); dc.start(at); this.nodes.push(dc);
           outN[rj].connect(rg); b.s.connect(sg); sg.connect(rg.gain);
           outN[rj]=rg;
-          (this.opGains[b.i]=this.opGains[b.i]||[]).push(sg);
-          (this.opAmt[b.i]=this.opAmt[b.i]||[]).push({g:sg,sc:1});
+          /* both halves are the operator's level, so every path that moves it —
+             env, lfo, a live edit — moves them together and the crossfade holds */
+          (this.opGains[b.i]=this.opGains[b.i]||[]).push(sg,cg);
+          (this.opAmt[b.i]=this.opAmt[b.i]||[]).push({g:sg,sc:1},{g:cg,sc:1});
         }else{                                    // 'add' and 'sync' both just sum
           /* …but a scan DRIVER is a modulator, not a voice. It is only there to
              say where the sample is read from, and summing it in would put a
@@ -5538,9 +5548,23 @@ class Voice{
         const base=g.gain.value;
         const lo=w>0?base*(1-w):base, hi=w>0?base:base*(1+w);
         if(e2.lp>0.001){this._loopEnv(g.gain,lo,hi,e2.s,e2,at);continue;}
+        const sus=lo+(hi-lo)*e2.s;
         g.gain.setValueAtTime(lo,at);
         g.gain.linearRampToValueAtTime(hi,at+a);
-        g.gain.setTargetAtTime(lo+(hi-lo)*e2.s,at+a,Math.max(0.005,e2.d/3));
+        /* AN OPERATOR LEVEL HAS TO LAND, and the amp envelope's shape does not
+           make it. setTargetAtTime is an asymptote: at tau=d/3 the decay is
+           still at 5% of peak when d has elapsed. On the VCA 5% is −26dB and
+           you call that gone — but this gain is an FM index scaled by up to
+           24, so 5% is an index of 1.2, which is a bright buzzing tone sitting
+           there for the whole note. That is "sustain at zero and the fm is
+           still going": not the depth, the tail.
+           tau=d/5 gets to 0.7% by d, and the hard landing at the end of the
+           decay makes the floor EXACT rather than approached — so sustain 0
+           means zero, on every mode, at every amount. It is inaudible on the
+           way down (0.7% of an index is nothing) and it is what makes a short
+           decay actually short. */
+        g.gain.setTargetAtTime(sus,at+a,Math.max(0.004,e2.d/5));
+        g.gain.setValueAtTime(sus,at+a+Math.max(0.006,e2.d));
       }
     }
 
@@ -14798,7 +14822,17 @@ const onKeyDown=e=>{
      &&!ALTSUS.size&&!HOLD.opt&&!MODPICK){
     e.preventDefault(); rollSlot(); return;
   }
-  if(OPTRACK[e.code]&&altOf(e)&&!e.repeat&&S.layer>=1&&!e.metaKey&&!e.ctrlKey&&!ALTSUS.size){
+  /* A HELD SCOPE'S OWN LETTERS COME FIRST, and this test is the whole of why
+     ⌥e + a/d/s/r never worked. All four of the envelope's stage letters are
+     ALSO scope letters — arp, delay, saturation, reverb — and this block runs
+     before the held-scope block below, so `d` under a held env quietly threw
+     the env away and opened DELAY instead: the slot fell back to that rack's
+     first, the field became p1, and from there the arrows and -/= were dialling
+     a delay time with nothing on screen saying so. The `keys` row is a claim on
+     those letters for as long as the letter that opened the scope is down. */
+  if(OPTRACK[e.code]&&altOf(e)&&!e.repeat&&S.layer>=1&&!e.metaKey&&!e.ctrlKey&&!ALTSUS.size
+     &&!(HOLD.opt&&HOLD.opt.nav&&OPTRACK[HOLD.opt.c]&&OPTRACK[HOLD.opt.c].mag
+         &&OPTRACK[HOLD.opt.c].mag.keys&&OPTRACK[HOLD.opt.c].mag.keys[e.code])){
     e.preventDefault();
     const c=e.code;
     if(HOLD.opt&&HOLD.opt.c===c&&HOLD.optLatched){   // the way out is the key you came in on
