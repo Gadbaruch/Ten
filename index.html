@@ -1031,7 +1031,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.1459';
+const BUILD='2026-08-15.1519';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1527,6 +1527,38 @@ const FX_P=sl=>{
          SP('depth','p2','lin',{min:0,max:1,step:0.05}),SPMIX()],
     roll:[SP('div','p1','lin',{min:0,max:3,step:1,fmt:v=>['1/4','1/8','1/16','1/32'][clamp(Math.round(v),0,3)]}),
          SP('fdbk','p2','lin',{min:0,max:1,step:0.05}),SPMIX()],
+    /* SAT HAD NO ROW AT ALL, and it is the one type that most needed one.
+       drv and crush were folded INTO it — both are hidden from the fx menu and
+       rewrite themselves as sat with a curve index — so its `curve` dial IS the
+       list of distortion types that used to be up on the fx menu. Missing from
+       this table, the slot showed the fx menu, the sat/tape menu, and nothing
+       else: nine curves, the drive, the tone and both gains, all live in the
+       engine and unreachable from the page. That is exactly what "sat lost all
+       its types and just has tape now" was — the second menu was the family
+       picker, and it was the only thing left to look at.
+       p3 indexes DTYPES FROM 1: DTYPES[0] is 'off', and an fx that is off has
+       the fx menu for that. */
+    sat:[SP('drive','p1','lin',{min:0,max:1,step:0.05}),
+         SP('curve','p3','enum',{opts:DTYPES.slice(1)}),
+         /* ONE DIAL, TWO MEANINGS, because the engine has two: on the crush
+            curve p2 is the sample-rate divider, on every other curve it is the
+            lowpass after the shaper. Showing it as 'tone' while it decimates
+            was how the bitcrusher read as a broken tone control. */
+         DTYPES[clamp(Math.round(sl.p3||0),0,8)+1]==='crush'
+           ?SP('rate','p2','lin',{min:0,max:1,step:0.05,
+              fmt:v=>'÷'+(1+Math.round(v*v*40))})
+           :SP('tone','p2','lin',{min:0,max:1,step:0.05,
+              fmt:v=>{const f=clamp(700*Math.pow(28.6,v),700,20000);
+                return f>=1000?(f/1000).toFixed(1)+'k':Math.round(f)+'Hz';}}),
+         /* IN AND OUT DEFAULT TO THE CENTRE, and they have to say so here: a
+            slot saved before these existed has no p5 or p7, and reading one as
+            0 puts the dial at −12dB — so simply LOOKING at the gain would have
+            turned the effect down the first time you nudged it. */
+         SP('in','p5','lin',{min:0,max:1,step:0.05,get:o=>o.p5??0.5,
+            fmt:v=>{const db=(v-0.5)*24.1; return (db>0?'+':'')+db.toFixed(1)+'dB';}}),
+         SP('out','p7','lin',{min:0,max:1,step:0.05,get:o=>o.p7??0.5,
+            fmt:v=>{const db=(v-0.5)*24.1; return (db>0?'+':'')+db.toFixed(1)+'dB';}}),
+         SPMIX()],
     tape:[SP('wow','p1','lin',{min:0,max:1,step:0.05}),
          SP('sat','p2','lin',{min:0,max:1,step:0.05}),SPMIX()],
     grs8:[SP('pat','p1','lin',{min:0,max:4,step:1,fmt:v=>['half','off8','gate8','fade','trip'][clamp(Math.round(v),0,4)]}),
@@ -7852,7 +7884,14 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
         act2.forEach(n2=>n2.heard=true);
         if(!act2.length)continue;
         const seq=[];
-        for(let o=0;o<octs;o++)for(const n2 of act2)
+        /* AN OCTAVE IS NOT A PLACE. On a position-keys audio channel a letter
+           names a CUE, and a cue travels as a note — so stacking octaves on it
+           walks twelve cues along, which on a chopped break is a different
+           sample entirely. Exactly the category error transpose and the octave
+           arrows were cured of; the arp walks the cues you are holding and
+           does not invent new ones above them. */
+        const octs9=(isAudioCh(pi)&&!kmodeOf(S.presets[pi]))?1:octs;
+        for(let o=0;o<octs9;o++)for(const n2 of act2)
           seq.push({midi:n2.midi+o*12*oDir,vel:n2.vel,pad:(n2.pad??n2.midi)+o*12*oDir});
         const mode=mode0==='order'?'up':mode0;   // order walks the pool sequence with up's stepping
         /* CHORD MODE: the rhythm of an arp with the voicing of a chord — every
@@ -15853,7 +15892,16 @@ const onKeyDown=e=>{
          chords stack cues, the arp steps through the ones you are holding,
          and every one of them ends up in cueNote. Without a slot the direct
          path stays, because it carries the grab semantics the tape wants. */
-      if((S.presets[pi].ply||[]).some(sl=>sl.typ&&!sl.off)){
+      /* …BUT ONLY WHILE SOMETHING IS DRIVING THE RACK. Every live play effect
+         — arp, euclid, ratchet, cycle, spray — is scheduled against the beat,
+         and handing a key to one of them means the key itself makes no sound:
+         trigger() files the note in the arp pool and returns an empty handle,
+         waiting for a step that only arrives while the transport rolls. With
+         the transport STOPPED that step never comes, so on a channel carrying
+         an arp the letters went completely silent — and a cue jump is a
+         gesture you make with the transport stopped all the time. THAT is
+         "held keys don't play notes". Rolling, the rack still owns them. */
+      if(T.playing&&(S.presets[pi].ply||[]).some(sl=>sl.typ&&!sl.off)){
         const cuts8=engine.audCuts(pi)||[];
         const ki8=KBSEQ.indexOf(c);
         if(ki8>=0&&cuts8.length){
