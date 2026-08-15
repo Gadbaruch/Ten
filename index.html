@@ -1031,7 +1031,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.1342';
+const BUILD='2026-08-15.1350';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -7966,7 +7966,12 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
   cueNote(at,pi,midi,vel){
     if(!this.audBuf[pi])return null;
     const cuts=this.audCuts(pi)||[]; if(!cuts.length)return null;
-    const sl=((Math.round(midi)-60)%cuts.length+cuts.length)%cuts.length;
+    /* TRANSPOSE AND THE OCTAVE ARROWS ARE INERT HERE. They are pitch, and a
+       cue is a place — but a cue travels as a note, so an octave up arrived
+       as "twelve cues along", which on a chopped break is a different sample
+       entirely. The channel's transpose is taken back out: the cue you press
+       is the cue you get. In pitch mode it still means an octave. */
+    const sl=((Math.round(midi)-60-trSemis(S.presets[pi]))%cuts.length+cuts.length)%cuts.length;
     const au=S.presets[pi].au||{};
     const cue=Object.assign({},(au.cues||{})[sl]||{o:0,semis:0,vol:1,pan:0},
       {vel:vel??1,frac:cutAt(pi,sl)});
