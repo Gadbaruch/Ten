@@ -1061,7 +1061,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.2142';
+const BUILD='2026-08-15.2155';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -2670,10 +2670,28 @@ const OPTRACK={
         make:sl=>Object.assign(sl,{typ:XTYPES.indexOf('buf'),p1:0.3,p3:0,mix:fToVol(80)}),
         unmake:sl=>Object.assign(sl,{typ:0}),
         mag:{amt:'mix',pri:'p1',sec:'p3'}},
+  /* ⌥O — THE SOUND RACK, the one door the table was missing. An operator is
+     not made or unmade, it is switched on: all ten always exist, so `find`
+     lists the live ones and the digits land on them directly.
+     Six pairs, which is what pushed MAGPAIR into being a table:
+       digits  which operator      ↑↓  ratio        ←→  fine
+       [ ]     wave                -/= level        , . width      ; ' mode  */
+  KeyO:{id:'osc',name:'sound',nav:1,
+        find:rk=>rk.map((x,i)=>x&&!x.off?i:-1).filter(i=>i>=0),
+        make:(sl,i)=>Object.assign(sl,{off:false,amt:sl.amt>0.001?sl.amt:0.5}),
+        unmake:sl=>Object.assign(sl,{off:true}),
+        free:rk=>rk.findIndex(x=>x&&x.off),
+        mag:{amt:'amt',pri:'rat',sec:'fine',typ:'wav',wid:'pw',mde:'mode'}},
   KeyX:{id:'fx',name:'fx',nav:1,
         find:rk=>{const a2=rk.map((x,i)=>x&&x.typ?i:-1).filter(i=>i>=0);
                   return a2.length?a2:[0];},         // empty rack: land on slot 1, make nothing
-        make:sl=>sl, unmake:sl=>Object.assign(sl,{typ:0}),
+        /* the generic door has to be able to MAKE one, which it could not:
+           its make was a no-op so that ⌥x on an empty rack could land on slot
+           1 without inventing an effect. But ⇧= means "another slot" and there
+           has to be something there for [ ] to then choose the type of, so a
+           new one arrives as a delay and is one keypress from anything else. */
+        make:sl=>Object.assign(sl,sl.typ?{}:{typ:1,p1:0.3,p2:0.35,p3:1,p5:0.5,mix:fToVol(40)}),
+        unmake:sl=>Object.assign(sl,{typ:0}),
         /* the generic fx door: its TYPE is which effect the slot is, which is
            the most useful [ ] on the whole table */
         mag:{amt:'mix',pri:'p1',sec:'p2',typ:'typ'}},
@@ -2694,6 +2712,18 @@ const OPTRACK={
    a thing under your hands instead of a menu you are walking. The rest of the
    fields are the letters' job, which is why `keys` exists. */
 const magKey=(v,sl)=>typeof v==='function'?v(sl):v;
+/* THE KEY PAIRS A HELD SCOPE OWNS, as a table rather than four hand-written
+   handlers. Each row is two keys and the `mag` cell they reach for; a scope
+   that has no such cell says so and reads its row back instead of quietly
+   moving something else. Adding a pair to a scope is now one entry in its mag
+   object, which is what let the osc rack arrive with six of them. */
+const MAGPAIR=[
+  {lo:'Minus',        hi:'Equal',         cell:'amt', lbl:'-/=', dial:1},
+  {lo:'BracketLeft',  hi:'BracketRight',  cell:'typ', lbl:'[ ]'},
+  {lo:'Comma',        hi:'Period',        cell:'wid', lbl:', .', dial:1},
+  {lo:'Semicolon',    hi:'Quote',         cell:'mde', lbl:"; '"},
+];
+const magPairFor=code=>MAGPAIR.find(P=>P.lo===code||P.hi===code)||null;
 /* the slot a held scope is pointing at, asked FRESH every press: the spec list
    changes under you — an lfo that gets synced grows a different rate field,
    a parallel filter grows a level — and a stale list writes the wrong index */
@@ -2757,13 +2787,15 @@ function magSecStepped(H){
 /* what the scope says when it opens and whenever a letter re-aims it: the row
    itself, read out — the only place the mapping is ever written down for you */
 function magRead(H,C,head){
-  const A=C.mag.amt?magSpec(C,magKey(C.mag.amt,C.slot)):null;
   const B=C.mag.sec?magSpec(C,magKey(C.mag.sec,C.slot)):null;
-  const Tp=C.mag.typ?magSpec(C,magKey(C.mag.typ,C.slot)):null;
-  return head+'↑↓ '+magLbl(C,magCur(H,C))+
-    (B?' · ←→ '+B.spec.lbl+' '+magVal(C,B):'')+
-    (A?' · -/= '+A.spec.lbl+' '+magVal(C,A):'')+
-    (Tp?' · [ ] '+Tp.spec.lbl+' '+magVal(C,Tp):'');
+  let out=head+'↑↓ '+magLbl(C,magCur(H,C))+
+    (B?' · ←→ '+B.spec.lbl+' '+magVal(C,B):'');
+  for(const P of MAGPAIR){
+    if(!C.mag[P.cell])continue;
+    const F=magSpec(C,magKey(C.mag[P.cell],C.slot));
+    if(F)out+=' · '+P.lbl+' '+F.spec.lbl+' '+magVal(C,F);
+  }
+  return out;
 }
 /* PARAM FOCUS: THE MODIFIERS INSIDE A HELD SCOPE. ⌥ is fine, ⇧ is coarse —
    and inside a held scope BOTH shifts are the coarse one. rs() ignores the
@@ -2795,13 +2827,13 @@ function magDial(H,which,d,e){
   const C=magCtx(H); if(!C)return false;
   const key=which==='pri'?magCur(H,C)
            :which==='sec'?magKey(C.mag.sec,C.slot)
-           :which==='typ'?magKey(C.mag.typ,C.slot)
-           :magKey(C.mag.amt,C.slot);
+           :magKey(C.mag[which],C.slot);
   const F=magSpec(C,key);
   /* nothing there is worth saying out loud — it is the row telling you what it
      does have, which is the only documentation a held scope can give */
-  if(!F){flash(magRead(H,C,C.T2.name+' has no '+
-    (which==='amt'?'amount':which==='typ'?'type':'second dial')+' — '));return true;}
+  if(!F){const P=MAGPAIR.find(x=>x.cell===which);
+    flash(magRead(H,C,C.T2.name+' has no '+
+      (P?P.lbl:which==='sec'?'second dial':which)+' — '));return true;}
   pushUndo(C.T2.name);
   const nv=adjust(F.spec,getV(C.holder,C.mi,C.si,F.spec),d,magMult(e,H));
   writeParam(H.ch,C.mi,C.si,F.px,nv);
@@ -2809,6 +2841,37 @@ function magDial(H,which,d,e){
   if(which==='pri'){magSee(H,C,F.px); H.lbl=F.spec.lbl; H.stp=magStp(F.spec);}   // ←→ and -/= are knobs, not a cursor
   flash(C.T2.name+(C.list.length>1?' '+(C.list.indexOf(C.si)+1):'')+
         ' · '+F.spec.lbl+' '+fmtVal(F.spec,nv));
+  dirty=true; dirtySave=true; return true;
+}
+/* GROW OR SHRINK THE FAMILY a held scope is pointing at — one more filter,
+   one fewer operator. The same two calls the digits and ⌫ already make, in
+   one place, because ⇧ on any of the scope's pairs now asks for it too. */
+function magGrow(H,d){
+  const T2=OPTRACK[H.c]; if(!T2||!T2.nav)return false;
+  const pre=S.presets[H.ch]; if(!pre)return false;
+  const rk=modHolder(pre,T2.id)[T2.id];
+  if(d>0){
+    const free=T2.free?T2.free(rk):rk.findIndex(x=>!x||!x.typ);
+    if(free<0){flash(T2.name+': the rack is full');return true;}
+    pushUndo('add '+T2.name);
+    T2.make(rk[free],free);
+    engine.rebuildRack(H.ch); engine.refresh(H.ch);
+    H.si=free;
+    if(S.layer>=2&&S.editSnd===H.ch)gotoSlot(free);
+    flash(T2.name+' '+T2.find(rk).length+' — added');
+  }else{
+    const list=T2.find(rk);
+    const si=(H.si!=null&&rk[H.si])?H.si:list[0];
+    if(si==null||!rk[si]){flash('nothing to remove');return true;}
+    if(list.length<=1){flash(T2.name+': that is the last one');return true;}
+    pushUndo('remove '+T2.name);
+    T2.unmake(rk[si],si);
+    engine.rebuildRack(H.ch); engine.refresh(H.ch);
+    const left=T2.find(rk);
+    H.si=left.length?left[0]:null;
+    if(S.layer>=2&&S.editSnd===H.ch&&H.si!=null)gotoSlot(H.si);
+    flash(T2.name+' removed — '+left.length+' left');
+  }
   dirty=true; dirtySave=true; return true;
 }
 /* a letter re-aims ↑↓ and shows you what it landed on. It does not change the
@@ -15386,23 +15449,27 @@ const onKeyDown=e=>{
         magAim(HOLD.opt,T2.mag.keys[e.code]);
         return;
       }
-      /* -/= IS THE AMOUNT, the thing you always reach for: a route's depth, an
-         effect's mix. Repeats, because it is a dial and not a notch. */
-      if((e.code==='Equal'||e.code==='Minus')&&T2.mag&&T2.mag.amt){
-        e.preventDefault(); HOLD.optUsed=true;
-        magDial(HOLD.opt,'amt',e.code==='Equal'?1:-1,e);
-        return;
-      }
-      /* [ ] IS THE TYPE — which reverb, which saturation curve, which filter
-         shape, and on the generic fx door which effect the slot is at all.
-         The one question every one of these racks asks that the two dials and
-         the amount could not reach, so it was a trip to the strip. A menu, so
-         one press one option: no repeat. */
-      if((e.code==='BracketLeft'||e.code==='BracketRight')&&T2.mag&&!e.repeat){
-        e.preventDefault(); HOLD.optUsed=true;
-        magDial(HOLD.opt,'typ',e.code==='BracketRight'?1:-1,e);
-        return;
-      }
+      /* THE PAIRS, from the table: -/= the amount · [ ] the type · , . the
+         width · ; ' the mode. A pair marked `dial` repeats because it is a
+         value; the others are menus, one press one option.
+         ⇧ ON THE PAIR ADDS OR REMOVES A SLOT — the global modifier, because
+         growing a rack is structural rather than a value. `=` alone could not
+         take it back: it is the amount, and Gad asked for both. Digits past
+         the last instance still make one too, so there are two ways in. */
+      {const P=magPairFor(e.code);
+       if(P&&T2.mag&&(P.dial||!e.repeat)){
+         e.preventDefault(); HOLD.optUsed=true;
+         if(KM.shl&&e.shiftKey&&!e.repeat){
+           /* the SCOPE's own make/unmake, not the page's addSlotHere — that
+              one works on the strip's cursor and knows nothing about which
+              rack the letter opened, so it grew the wrong thing or nothing.
+              This is the same door the digit-past-the-last goes through. */
+           magGrow(HOLD.opt,e.code===P.hi?1:-1);
+           return;
+         }
+         magDial(HOLD.opt,P.cell,e.code===P.hi?1:-1,e);
+         return;
+       }}
       if(e.code==='Backspace'&&!e.repeat&&!HOLD.optLatched){
         e.preventDefault(); HOLD.optUsed=true;
         const si2=(HOLD.opt.si!=null&&rk[HOLD.opt.si])?HOLD.opt.si:list[0];

@@ -120,9 +120,15 @@ arrows, `-/=` and the letters belong to THAT param, and so do the modifiers:
 - Neither shift may close a scope ⌥ is still holding. ⇧R can hold one open by
   itself, so its release closes the ones IT holds — check ⌥ first.
 
-The row a held scope owns is four pairs now: `↑↓` primary · `←→` secondary ·
-`-/=` amount · `[ ]` TYPE (which reverb, which filter shape, which effect).
-Each is a cell on `mag` and may be a function of the slot.
+The row a held scope owns is the two arrow pairs plus a TABLE of key pairs,
+`MAGPAIR`, so adding one to a scope is one entry in its `mag` object:
+
+    ↑↓  pri     ←→  sec     -/= amt     [ ] typ     , . wid     ; ' mde
+
+Each cell may be a function of the slot. `⇧` (the global modifier) on ANY pair
+grows or shrinks the family through `magGrow`, which calls the scope's own
+`make`/`unmake` — never the page's `addSlotHere`, which works on the strip's
+cursor and knows nothing about which rack the letter opened.
 
 **WHO OWNS A SCOPE LETTER — one rule, and it decides the whole gesture:**
 
