@@ -859,7 +859,12 @@ const KEYN=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
 /* THE LOOK, as numbers you can turn. Every fill on screen is derived from
    these three, so tuning the feel is three knobs rather than a hunt through
    hex literals. Lightness is in percent. */
-const CFG=Object.assign({overdub:0,listen:1,defLen:1,scaleOn:1,key:0,scale:0,wild:35,amix:1,qOn:1,vgrid:1,
+/* smix OFF by default (Gad): the per-channel trim is a good safety net and a
+   bad surprise — a channel quietly getting quieter while you are setting it up
+   reads as a bug in the channel. Opt in from settings.
+   A config already saved keeps whatever it has; this is the default for a
+   machine that has never set one. */
+const CFG=Object.assign({overdub:0,listen:1,defLen:1,scaleOn:1,key:0,scale:0,wild:35,amix:0,qOn:1,vgrid:1,
   uiCell:9,uiLift:11,uiDim:5,uiText:62,theme:'dark',font:'mono',rowH:14},
   (()=>{try{return JSON.parse(localStorage.getItem('ten-cfg'))||{};}catch(_){return{};}})());
 const saveCfg=()=>{try{localStorage.setItem('ten-cfg',JSON.stringify(CFG));}catch(_){}};
@@ -1071,7 +1076,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.2205';
+const BUILD='2026-08-15.2213';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -2525,10 +2530,18 @@ const altOf=e=>KM.altLatch||!!e.altKey;
 const cmdOf=e=>!!e.metaKey;
 /* the TOOLS layer: left control, and only the left one — see the block in
    onKeyDown for why the side is the whole design */
-/* HOLD.t, not e.ctrlKey — PrintScreen sets no modifier flag at all, so asking
-   the event which modifiers are down would answer "none" for exactly the key
-   Gad's board sends. The hold is the truth. */
-const toolsOf=e=>HOLD.t&&!e.metaKey&&!altOf(e);
+/* EITHER SIGNAL, because relying on only one of them broke it both ways.
+   HOLD.t is needed for PrintScreen, which sets no modifier flag at all — ask
+   the event what is held and it answers "nothing" for exactly the key some
+   boards send. But HOLD.t alone is worse: it is set by the CONTROL KEY'S OWN
+   keydown, and that is the single event most likely to go missing — held
+   before the page took focus, swallowed during a re-render, or lost the way
+   any modifier key-down can be. Then ctrl+z did nothing at all and there was
+   nothing on screen to say why.
+   So: the hold OR the flag. Any control is tools, whichever side it is on and
+   whether or not we saw it arrive — unless the mic is actually open, which is
+   the one case where a control is doing something else. */
+const toolsOf=e=>(HOLD.t||!!e.ctrlKey)&&!MIC._down&&!e.metaKey&&!altOf(e);
 /* THE FUNCTION LAYER IS ⌥. It was ⌃ for a day, and control is the one
    modifier a left hand cannot reach while it plays. ⌥S and ⌥A keep their old
    meanings (solo, the arp grab) — they were never bare letters. The one true
@@ -2808,7 +2821,7 @@ function magRead(H,C,head){
     const F=magSpec(C,magKey(C.mag[P.cell],C.slot));
     if(F)out+=' · '+P.lbl+' '+F.spec.lbl+' '+magVal(C,F);
   }
-  return out;
+  return out+(C.list.length?'  ·  ⇧-/= slot '+C.list.length:'');
 }
 /* PARAM FOCUS: THE MODIFIERS INSIDE A HELD SCOPE. ⌥ is fine, ⇧ is coarse —
    and inside a held scope BOTH shifts are the coarse one. rs() ignores the
@@ -14644,6 +14657,11 @@ function retroCapture(){
   const pi=S.layer>=2?S.editSnd:S.curPreset, lane=S.patterns[S.editPat].lanes[pi];
   if(isAudioCh(pi)&&!retroBuf[pi].some(n=>n.cue!==undefined||n.pk!==undefined||n.fz!==undefined)){
     flash('audio channel — tab records the input');return;}
+  /* A LANE THAT HAS NEVER BEEN SET TAKES defLen. Retro cuts "the last cycle of
+     the loop as set" — but on a fresh lane there is no length you set, and it
+     was using the Looper's own construction default instead of the one bar
+     count in settings that exists precisely to answer this. */
+  if(lane.auto){lane.unit='B'; lane.count=DEFLENS[CFG.defLen];}
   const L=lane.len||4, nowB=gridNow(), anc=editAnchor();
   const patEmpty=S.patterns[S.editPat].lanes.every(l=>l===lane||!l.events.length);
   pushUndo('retro');
@@ -15479,11 +15497,15 @@ const onKeyDown=e=>{
       {const P=magPairFor(e.code);
        if(P&&T2.mag&&(P.dial||!e.repeat)){
          e.preventDefault(); HOLD.optUsed=true;
-         if(KM.shl&&e.shiftKey&&!e.repeat){
-           /* the SCOPE's own make/unmake, not the page's addSlotHere — that
-              one works on the strip's cursor and knows nothing about which
-              rack the letter opened, so it grew the wrong thing or nothing.
-              This is the same door the digit-past-the-last goes through. */
+         /* ⇧ -/= ADDS AND REMOVES A SLOT, which is what -/= meant under the
+            focus key before the amount took it, and Gad wants it back. EITHER
+            shift, deliberately: having it depend on which one is a trap, and
+            the amount losing its coarse step costs far less than not being
+            able to grow a rack. The other pairs keep ⇧ as the coarse step.
+            Through the SCOPE's own make/unmake — not the page's addSlotHere,
+            which works on the strip's cursor and knows nothing about which
+            rack the letter opened, so it grew the wrong thing or nothing. */
+         if(P.cell==='amt'&&e.shiftKey&&!e.repeat){
            magGrow(HOLD.opt,e.code===P.hi?1:-1);
            return;
          }
@@ -16161,7 +16183,10 @@ const onKeyDown=e=>{
     if(!e.repeat){HOLD.m=true; HOLD.mUsed=false;
       S.metro=!S.metro; flash('click '+(S.metro?'on':'off')); dirty=true;}
     return;}
-  if(c==='KeyC'&&gblOf(e)&&!e.repeat){e.preventDefault();   // ⌃c — this channel's patch, as JSON, on the clipboard
+  /* ⇧c, not ⌃c: tools owns every control now, and copy is what a person means
+     by control-c. This is the CHANNEL'S PATCH as JSON — an instrument-wide
+     utility, so it sits with the other things left shift carries. */
+  if(c==='KeyC'&&KM.shl&&e.shiftKey&&!e.ctrlKey&&!e.repeat){e.preventDefault();
     copyPatch(); return;}
   if(c==='KeyO'&&gblOf(e)&&!e.repeat){               // ⌃o — how recording meets what is there
     CFG.overdub=CFG.overdub?0:1; saveCfg();
@@ -16473,14 +16498,20 @@ const onKeyDown=e=>{
     }
     else {
       const si=n===0?9:n-1, M=MODULES[S.curMod];
-      if(si===S.curSlot&&M.slot&&!M.prs){        // same slot again = bypass on/off
+      /* BYPASS IS ⇧+DIGIT, not the same digit twice. Re-pressing a digit to
+         make sure you are on the right slot is a natural thing to do and it
+         was destructive — Gad kept bypassing things by accident. A plain digit
+         only ever SELECTS now; the shift says you meant it. */
+      if(e.shiftKey&&M.slot&&!M.prs){
         const sl=modHolder(S.presets[S.editSnd],M.id)[M.id][si];
+        if(!sl){dirty=true; return;}
         pushUndo('bypass');
         sl.off=sl.off?0:1;
         engine.rebuildRack(S.editSnd); engine.refresh(S.editSnd);
         if(M.id==='osc')engine.oscLive(S.editSnd,'off');   // mute the operator now, not next note
-        flash(M.name+' slot '+((si+1)%10)+(sl.off?' BYPASSED':' back on'));
+        flash(M.name+' slot '+((si+1)%10)+(sl.off?' BYPASSED':' back on')+'   (⇧+digit toggles)');
         dirtySave=true;
+        if(si!==S.curSlot)gotoSlot(si);        // bypassing another slot goes there too
       }else gotoSlot(si);      // and land on the param you last edited there
     }
     dirty=true; return;
