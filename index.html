@@ -1031,7 +1031,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.1411';
+const BUILD='2026-08-15.1454';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1800,9 +1800,7 @@ function autoWhere(pre,a){
      audio param was silently unautomatable. Same address shape, different
      shelf to look on. */
   if(a.rack==='aud'||a.rack==='grn'){
-    const specs=a.rack==='aud'
-      ?AUDF.concat(AUDTAKE,[SP('pitch','semis','lin',{min:-24,max:24,step:1,fmt:v=>v+'st'})])
-      :GRANF;
+    const specs=a.rack==='aud'?AUDADDR():GRANF;
     const px=specs.findIndex(x=>x.key===a.key&&x.lbl===a.lbl);
     if(px<0)return null;
     return {mi:-1,si:0,px,spec:specs[px],rack:a.rack};
@@ -2064,12 +2062,10 @@ function modDests_(pre){
        stretch window was invented and simply never appeared here — and the
        next one added would have been missing too. Menus stay out: a
        modulator needs a range, not a choice. */
-    for(const sp of AUDF.concat(AUDTAKE,
-        [SP('pitch','semis','lin',{min:-24,max:24,step:1,fmt:v=>v+'st'})])){
+    for(const sp of AUDADDR()){
       if(sp.type==='enum'||sp.key==='_pool')continue;
       add('aud',0,sp,'');
     }
-    add('aud',0,SP('gain','gain','lin',{min:0,max:1,step:0.05}),'');   // moved to the inst row, still a dest
   }
   if(engineGranP(pre)||pre.cat==='audio')for(const sp of GRANF)add('grn',0,sp,'');
   for(const sp of VOICE_P){
@@ -2509,7 +2505,19 @@ const OPTRACK={
         make:sl=>sl, unmake:sl=>Object.assign(sl,{typ:0})},
 };
 const ALTSUS=new Set();     // scopes riding on a held ⌥ after their letter went up
-const AUD={hold:null};      // the audio slice key currently down, and its cue
+/* ONE RECORD PER HELD KEY on an audio channel — and `hold`, the last one
+   pressed, is a VIEW of that map rather than a second copy of a record in it.
+   It used to be a stored slot written alongside every gk entry, so two places
+   had to be cleared in step and any path that cleared one and not the other
+   left a phantom behind: a hold pointing at a key that had been released, or a
+   key whose hold the next finger down had quietly reassigned. Derived, they
+   cannot disagree — there is only ever one record and one place it lives. */
+const AUD={
+  gk:{},
+  _last:null,
+  get hold(){const k=this._last; return (k&&this.gk[k])||null;},
+  set hold(h){this._last=h?h.c:null;},
+};
 const WAVEC=new Map();      // rendered waveform columns, by buffer+height
 /* …and the buffer has to be told apart by IDENTITY. Keying on its length
    meant every four-second take drew the FIRST four-second take this channel
@@ -8716,7 +8724,7 @@ function libNos(){
   }
   return libNoCache=m;
 }
-const LIBV=24;   // bump BOTH: libStore writes it, libAll checks it
+const LIBV=25;   // bump BOTH: libStore writes it, libAll checks it
 function libStore(a){libMigrated=true; libCache=null; libNoCache=null;
   const out=(a||[]).map(en=>en&&en.data?{...en,data:portPreset(en.data,true)}:en);
   try{localStorage.setItem(LIBKEY,JSON.stringify({v:LIBV,items:out}));}catch(_){} if(typeof prepCache!=='undefined')prepCache.clear();}
@@ -10146,13 +10154,16 @@ function prsFieldDefs(){
     ||(engine.granName||[])[S.editSnd]||'\u2014'};
 
   if(p.cat==='audio')return [
-    /* the tape's SETUP: identity, not sound design */
+    /* the tape's SETUP: identity, not sound design. Cropping and tuning the
+       take are sound design — they went back to the page. What is left is the
+       set of answers you give a channel ONCE: what it plays, what the letters
+       do, whether the loop runs by itself and how loud it runs. */
     chEng, chSmp,
-    {k:'start',v:()=>Math.round((clamp((p.au||{}).st??0,0,0.98))*100)+'%'},
-    {k:'end',  v:()=>Math.round((clamp((p.au||{}).en??1,0,1))*100)+'%'},
-    {k:'pitch',v:()=>(((p.au||{}).semis??0)>0?'+':'')+((p.au||{}).semis??0)+'st'},
     {k:'keys mode',v:()=>kmodeOf(p)?'pitch':'position'},
     {k:'auto',v:()=>autoCur(p)?'loop':'off'},
+    /* the loop's own fader, beside the loop's own switch — the keys have
+       velocity and their own level over on the sound page */
+    {k:'loop vol',v:()=>Math.round(clamp((p.au||{}).lvol??1,0,1)*100)+'%'},
     {k:'voice',v:()=>['poly','mono','legato'][clamp(Math.round((p.vox||{}).mode||0),0,2)]},
     ...(kmodeOf(p)?[{k:'from',v:()=>Math.round((p.au||{}).start||0)?'here':'pos'}]:[]),
     {k:'input', v:()=>['mic','mstr'][Math.round((p.au||{}).src||0)]},
@@ -10243,19 +10254,35 @@ const AUDF=[
      else{o.fit=0; o.rate=Math.abs(o.spd)<0.25?(o.spd<0?-0.25:0.25):o.spd;}}}),
  /* the stretch's character: how far apart the two taps sit */
  SP('window','wnd','lin',{min:5,max:300,step:5,fmt:v=>Math.round(v)+'ms'}),
- /* TWO LEVELS, because there are two ways this channel makes sound and they
-    are not the same instrument: the auto cursor rolling underneath, and the
-    cursors your fingers spawn on top. One fader for both meant balancing a
-    grab against the loop by turning the loop down and losing the grab too. */
- SP('key vol','kvol','lin',{min:0,max:1.5,step:0.05,fmt:v=>Math.round(v*100)+'%'}),
- SP('loop vol','lvol','lin',{min:0,max:1.5,step:0.05,fmt:v=>Math.round(v*100)+'%'}),
 ];
-/* start, end and the sample itself belong to the TAKE, not to how a playhead
-   reads it — they moved to the instrument row, where the sample already was.
-   The sound page is playheads only now. */
+/* WHAT THE TAKE IS, as opposed to how a playhead reads it. These went to the
+   instrument row when the sound page was cut down to playheads, and that was
+   the wrong cut: cropping a loop and tuning it are things you do WHILE you
+   listen, over and over, and the instrument row is the page you visit once to
+   set the channel up. They are back on the page, where a dial you turn in
+   performance belongs — and being page dials they record automation now,
+   which they never could on the instrument row. */
 const AUDTAKE=[
  SP('start','st','lin',{min:0,max:0.98,step:0.01,fmt:v=>Math.round(v*100)+'%'}),
  SP('end','en','lin',{min:0.02,max:1,step:0.01,fmt:v=>Math.round(v*100)+'%'}),
+ SP('pitch','semis','lin',{min:-24,max:24,step:1,fmt:v=>(v>0?'+':'')+v+'st'}),
+];
+/* ONE LEVEL HERE, NOT TWO. There were two faders side by side — one for the
+   loop rolling underneath, one for the cursors your fingers spawn — and a
+   pair of near-identical dials in the same place is a puzzle, not a control.
+   The loop's own fader belongs next to the loop's own switch, so it moved to
+   the instrument row; what stays on the sound page is the KEYS' level, beside
+   the dials that shape what a key spawns. Both rest at the top and only cut,
+   so nothing is quietly attenuating a channel you have not touched. */
+const AUDLVL=[
+ SP('key vol','kvol','lin',{min:0,max:1,step:0.05,fmt:v=>Math.round(v*100)+'%'}),
+];
+/* on the INSTRUMENT row rather than the page — but where a dial lives and
+   whether something can drive it are different questions, so they are listed
+   here for the mod matrix and the automation to find */
+const AUDINST=[
+ SP('gain','gain','lin',{min:0,max:1,step:0.05,fmt:v=>Math.round(v*100)+'%'}),
+ SP('loop vol','lvol','lin',{min:0,max:1,step:0.05,fmt:v=>Math.round(v*100)+'%'}),
 ];
 
 const CODEF=()=>Array.from({length:8},(_,i)=>{
@@ -10269,10 +10296,22 @@ const CODEF=()=>Array.from({length:8},(_,i)=>{
    scan. The page is the tape's numbers followed by the cloud's, and each
    spec remembers which store it writes to. */
 AUDF.forEach(sp9=>{sp9.st='au';});
+AUDTAKE.forEach(sp9=>{sp9.st='au';});
+AUDLVL.forEach(sp9=>{sp9.st='au';});
+AUDINST.forEach(sp9=>{sp9.st='au';});
 GRANF.forEach(sp9=>{sp9.st='gr';});
 /* both racks carry a pool picker and the page only needs one — and the
    instrument row has one anyway, first field after engine */
-const AUDALL=()=>AUDF.concat(GRANF.filter(sp9=>sp9.key!=='_pool'));
+const AUDALL=()=>AUDF.concat(AUDTAKE,AUDLVL,GRANF.filter(sp9=>sp9.key!=='_pool'));
+/* every dial this channel owns, page or row — the address book a mod or an
+   automation resolves against */
+const AUDADDR=()=>AUDF.concat(AUDTAKE,AUDLVL,AUDINST);
+/* what an au field is when the channel has never had one written. The cloud's
+   half of the page has had this table since it existed; the tape's half read
+   ??0 instead, which is invisible while every preset comes from basePreset and
+   wrong the moment one does not — an unset `end` would read 0% and the first
+   arrow press would move it to 1%, cropping the take to nothing. */
+const AUDDEF={st:0,en:1,semis:0,gain:0.9,kvol:1,lvol:1,wnd:50,rate:1,spd:0,fit:1,cmode:0,pmode:0};
 /* the mode a channel is in, read off the two things that define it when the
    field itself has never been touched — so an old set opens in the mode it
    was already behaving as */
@@ -10297,9 +10336,9 @@ function applyCmode(pi){
 const AUDPAGE=()=>{
   const p=S.presets[S.editSnd], m=cmodeOf(p);
   const keep=new Set(m===2
-    ?['cmode','rate','kvol','lvol']
-    :m===1?['cmode','rate','wnd','kvol','lvol']
-          :['cmode','rate','kvol','lvol']);
+    ?['cmode','rate','st','en','semis','kvol']
+    :m===1?['cmode','rate','wnd','st','en','semis','kvol']
+          :['cmode','rate','st','en','semis','kvol']);
   return AUDALL().filter(sp=>sp.st==='gr'?m===2:keep.has(sp.key));
 };
 function codeAction(d,m){
@@ -10342,9 +10381,14 @@ function audAction(d,m){
     flash('grain '+spec.lbl+' = '+fmtVal(spec,spec.get?spec.get(pre.gr):pre.gr[spec.key]));
     dirty=true; dirtySave=true; return;
   }
-  const cur=spec.get?spec.get(pre.au):pre.au[spec.key]??0;
+  const cur=spec.get?spec.get(pre.au):pre.au[spec.key]??AUDDEF[spec.key]??0;
   const nv=adjust(spec,cur,d,m);
   if(spec.set)spec.set(pre.au,nv); else pre.au[spec.key]=nv;
+  /* THE CROP CANNOT INVERT. Both ends used to be clamped against each other by
+     the instrument row's own handler; on the page they go through the generic
+     adjust(), which only knows the spec's own floor and ceiling. */
+  if(spec.key==='st')pre.au.st=Math.min(pre.au.st,(pre.au.en??1)-0.02);
+  if(spec.key==='en')pre.au.en=Math.max(pre.au.en,(pre.au.st??0)+0.02);
   if(spec.key==='cmode'){applyCmode(S.editSnd);
     flash('mode → '+['tape · resample, pitch rides speed',
       'stretch · timing held, window is the character',
@@ -10486,7 +10530,7 @@ function _prsAction(d){
     dirty=true; dirtySave=true; return;
   }
   if(p.cat==='audio'
-     &&['keys mode','auto','start','end','pitch','from','voice','input','chan','gain'].includes(f)){
+     &&['keys mode','auto','loop vol','from','voice','input','chan','gain'].includes(f)){
     pushUndo('audio setup');
     p.au=p.au||{};
     if(f==='keys mode'){
@@ -10529,12 +10573,8 @@ function _prsAction(d){
       flash('input → '+['mic','resample the master'][p.au.src]);}
     else if(f==='chan'){p.au.chan=fmod(Math.round(p.au.chan||0)+(d>0?1:-1),3);
       flash('chan → '+['stereo','left','right'][p.au.chan]);}
-    else if(f==='start'){p.au.st=clamp(+((p.au.st??0)+d*0.01).toFixed(3),0,0.98);
-      engine.audLive(pi); flash('start '+Math.round(p.au.st*100)+'%');}
-    else if(f==='end'){p.au.en=clamp(+((p.au.en??1)+d*0.01).toFixed(3),(p.au.st??0)+0.02,1);
-      engine.audLive(pi); flash('end '+Math.round(p.au.en*100)+'%');}
-    else if(f==='pitch'){p.au.semis=clamp(Math.round((p.au.semis??0)+d),-24,24);
-      engine.audLive(pi); flash('pitch '+(p.au.semis>0?'+':'')+p.au.semis+'st');}
+    else if(f==='loop vol'){p.au.lvol=clamp(+((p.au.lvol??1)+d*0.05).toFixed(2),0,1);
+      engine.audLive(pi); flash('loop vol '+Math.round(p.au.lvol*100)+'%');}
     else if(f==='gain')p.au.gain=clamp((p.au.gain??0.9)+d*0.05,0,1);
     dirty=true; dirtySave=true; return;
   }
@@ -16088,6 +16128,90 @@ const scopeHeldOn=c=>
   (c==='KeyV'&&HOLD.v)||(c==='KeyC'&&HOLD.c)||(c==='KeyS'&&HOLD.sc)||
   (HOLD.opt&&c===HOLD.opt.c&&!HOLD.optLatched)||
   (HOLD.ms&&c===HOLD.ms.c&&!HOLD.msLatched);
+/* WHAT A KEY WAS HOLDING ON AN AUDIO CHANNEL, ENDED — pulled out of the
+   key-up so the three things that can end a hold all end it the same way: the
+   finger leaving, the tab losing focus, and the sweeper finding a hold nobody
+   is holding. It used to live only in the key-up, so a lost key-up left the
+   entry in AUD.gk forever: the loop had been stopped for the grab and the only
+   thing that would ever start it again was the release that never came. That
+   is the hang where the channel goes silent and stays silent until a reload.
+   Returns 'stop' when the key-up should go no further, 'went' when a hold
+   ended but the rest of the key-up still applies, '' when there was none. */
+function endAudHold(c){
+  /* the two kinds of hold live in the same map and end differently: a pitch
+     key lets its spawner go, a position key ends its own cursor and leaves
+     the rest of the chord alone */
+  if(AUD.gk&&AUD.gk[c]&&AUD.gk[c].kind==='pmono'){
+    const h8=AUD.gk[c]; delete AUD.gk[c];
+    if(AUD.hold===h8)AUD.hold=null;
+    if(!Object.keys(AUD.gk).some(k8=>(AUD.gk[k8]||{}).kind==='pmono'))
+      engine.audPitch(h8.pi,0);
+    dirty=true; return 'stop';
+  }
+  const hg9=(AUD.gk&&AUD.gk[c]&&AUD.gk[c].kind==='pitch')?AUD.gk[c]:null;
+  if(hg9||(AUD.hold&&AUD.hold.c===c&&(AUD.hold.pk!==undefined||AUD.hold.gsh))){
+    const src9=hg9||AUD.hold;
+    const {pi,pk,gsh,fz,midi,press,tr}=src9;
+    if(hg9)delete AUD.gk[c];
+    if(AUD.hold===src9)AUD.hold=null;
+    const lane=S.patterns[S.editPat].lanes[pi], L=lane.len;
+    const durB=Math.max(0.05,press!=null?(AC.currentTime-press)/spb():0.25);
+    if(pk!==undefined){engine.audPitch(pi,0);
+      engine.audGain(pi,(S.presets[pi].au||{}).gain??0.9);
+      retroBuf[pi].push({t:tr,pk,dur:durB});
+      if(S.patterns[S.editPat].state==='rec'){
+        const qt=fmod(tr-editAnchor(),L);
+        lane.clear(ev=>ev.pk===pk&&Math.abs(ev.t-qt)<1e-6);
+        lane.events.push({t:qt,pk,dur:durB,born:performance.now()}); dirtySave=true;}}
+    if(gsh){try{gsh.release(AC.currentTime);}catch(_){}
+      engine._ctrlPut('grn',pi,0,'pos',undefined);
+      engine._ctrlPut('grn',pi,0,'scan',undefined);
+      retroBuf[pi].push({t:tr,fz,midi,dur:durB});
+      if(S.patterns[S.editPat].state==='rec'){
+        const qt=fmod(tr-editAnchor(),L);
+        lane.clear(ev=>ev.fz!==undefined&&ev.midi===midi&&Math.abs(ev.t-qt)<1e-6);
+        lane.events.push({t:qt,fz,midi,dur:durB,born:performance.now()}); dirtySave=true;}}
+    if(retroBuf[pi].length>512)retroBuf[pi].shift();
+    dirty=true; return 'went';
+  }
+  else if((AUD.gk&&AUD.gk[c])||(AUD.hold&&AUD.hold.c===c)){
+    const hj9=(AUD.gk&&AUD.gk[c])||AUD.hold;
+    const {pi,sl,press,tr,gsh,tid}=hj9;
+    if(AUD.gk)delete AUD.gk[c];
+    if(AUD.hold===hj9)AUD.hold=null;
+    if(gsh){try{gsh.release(AC.currentTime);}catch(_){}
+      engine._ctrlPut('grn',pi,0,'pos',undefined);}
+    /* this key's cursor only — the others are still held. The loop comes back
+       when the last finger leaves, which is what a grab has always meant. */
+    if(tid)engine.audOff(pi,tid);
+    const others9=Object.keys(AUD.gk||{}).some(k9=>(AUD.gk[k9]||{}).pi===pi);
+    if(!others9)engine.audStop(pi);
+    const lane=S.patterns[S.editPat].lanes[pi], L=lane.len;
+    /* the jump's length is the held gesture, like a note's */
+    const durB=Math.max(0.05,press!=null?(AC.currentTime-press)/spb():0.25);
+    if(sl!=null&&tr!=null){
+      retroBuf[pi].push({t:tr,cue:sl,dur:durB});
+      if(retroBuf[pi].length>512)retroBuf[pi].shift();
+      if(S.patterns[S.editPat].state==='rec'){
+        const qt=fmod(tr-editAnchor(),L);
+        lane.clear(ev=>ev.cue===sl&&Math.abs(ev.t-qt)<1e-6);
+        lane.events.push({t:qt,cue:sl,dur:durB,born:performance.now()});
+        dirtySave=true;
+      }
+    }
+    /* RESUME ONLY WHAT WAS RUNNING. Letting go of a cue restarted the cycle
+       in phase whether or not the auto cursor was on — so with auto OFF, a
+       grab you released handed you the take playing from the loop position,
+       all the way to its end, sounding for all the world like the cue had
+       never stopped. */
+    if(T.playing&&autoCur(S.presets[pi])&&!others9){
+      const a2=actAt(posNow());
+      engine.audPlay(pi,AC.currentTime+0.006,L,fmod(posNow()-a2.anchor,L));
+    }
+    dirty=true; return 'went';
+  }
+  return '';
+}
 const onKeyUp=e=>{
   if(e.isTrusted){MODS.shift=e.shiftKey; MODS.alt=e.altKey; MODS.ctrl=e.ctrlKey; MODS.meta=e.metaKey;
     if(!e.shiftKey){KM.sl=false; KM.sr=false;}}
@@ -16100,7 +16224,11 @@ const onKeyUp=e=>{
      hangs: there the modified letter never became a note in the first place.
      A latched note is the one exception; latch means the release is not the
      end, and the normal path knows how to hold it. */
-  if(EXP.synth&&liveV[c]&&!noteLatch.has(c)){kbHeld.delete(c); endNote(c); dirty=true; return;}
+  /* …and an audio hold ends with it. A key on an audio channel with a play
+     slot running is BOTH — a voice in liveV and a grab in AUD.gk — so
+     returning here on the voice alone left the grab behind, and with it the
+     stopped loop, until the sweeper came round 400ms later. */
+  if(EXP.synth&&liveV[c]&&!noteLatch.has(c)){kbHeld.delete(c); endAudHold(c); endNote(c); dirty=true; return;}
   /* A BOUNCE IS NOT A RELEASE — but a release must still stop the repeat, and
      asking whether ANY key is down cannot tell them apart while the other hand
      is holding a note. So the key-up arms a stop a moment ahead: a bounce
@@ -16328,78 +16456,8 @@ const onKeyUp=e=>{
       if(ml.state==='rec'){ml.state='on';dirty=true;dirtySave=true;}
     }
   }
-  /* the two kinds of hold live in the same map and end differently: a pitch
-     key lets its spawner go, a position key ends its own cursor and leaves
-     the rest of the chord alone */
-  if(AUD.gk&&AUD.gk[c]&&AUD.gk[c].kind==='pmono'){
-    const h8=AUD.gk[c]; delete AUD.gk[c];
-    if(AUD.hold===h8)AUD.hold=null;
-    if(!Object.keys(AUD.gk).some(k8=>(AUD.gk[k8]||{}).kind==='pmono'))
-      engine.audPitch(h8.pi,0);
-    dirty=true; return;
-  }
-  const hg9=(AUD.gk&&AUD.gk[c]&&AUD.gk[c].kind==='pitch')?AUD.gk[c]:null;
-  if(hg9||(AUD.hold&&AUD.hold.c===c&&(AUD.hold.pk!==undefined||AUD.hold.gsh))){
-    const src9=hg9||AUD.hold;
-    const {pi,pk,gsh,fz,midi,press,tr}=src9;
-    if(hg9)delete AUD.gk[c];
-    if(AUD.hold===src9)AUD.hold=null;
-    const lane=S.patterns[S.editPat].lanes[pi], L=lane.len;
-    const durB=Math.max(0.05,press!=null?(AC.currentTime-press)/spb():0.25);
-    if(pk!==undefined){engine.audPitch(pi,0);
-      engine.audGain(pi,(S.presets[pi].au||{}).gain??0.9);
-      retroBuf[pi].push({t:tr,pk,dur:durB});
-      if(S.patterns[S.editPat].state==='rec'){
-        const qt=fmod(tr-editAnchor(),L);
-        lane.clear(ev=>ev.pk===pk&&Math.abs(ev.t-qt)<1e-6);
-        lane.events.push({t:qt,pk,dur:durB,born:performance.now()}); dirtySave=true;}}
-    if(gsh){try{gsh.release(AC.currentTime);}catch(_){}
-      engine._ctrlPut('grn',pi,0,'pos',undefined);
-      engine._ctrlPut('grn',pi,0,'scan',undefined);
-      retroBuf[pi].push({t:tr,fz,midi,dur:durB});
-      if(S.patterns[S.editPat].state==='rec'){
-        const qt=fmod(tr-editAnchor(),L);
-        lane.clear(ev=>ev.fz!==undefined&&ev.midi===midi&&Math.abs(ev.t-qt)<1e-6);
-        lane.events.push({t:qt,fz,midi,dur:durB,born:performance.now()}); dirtySave=true;}}
-    if(retroBuf[pi].length>512)retroBuf[pi].shift();
-    dirty=true;
-  }
-  else if((AUD.gk&&AUD.gk[c])||(AUD.hold&&AUD.hold.c===c)){
-    const hj9=(AUD.gk&&AUD.gk[c])||AUD.hold;
-    const {pi,sl,press,tr,gsh,tid}=hj9;
-    if(AUD.gk)delete AUD.gk[c];
-    if(AUD.hold===hj9)AUD.hold=null;
-    if(gsh){try{gsh.release(AC.currentTime);}catch(_){}
-      engine._ctrlPut('grn',pi,0,'pos',undefined);}
-    /* this key's cursor only — the others are still held. The loop comes back
-       when the last finger leaves, which is what a grab has always meant. */
-    if(tid)engine.audOff(pi,tid);
-    const others9=Object.keys(AUD.gk||{}).some(k9=>(AUD.gk[k9]||{}).pi===pi);
-    if(!others9)engine.audStop(pi);
-    const lane=S.patterns[S.editPat].lanes[pi], L=lane.len;
-    /* the jump's length is the held gesture, like a note's */
-    const durB=Math.max(0.05,press!=null?(AC.currentTime-press)/spb():0.25);
-    if(sl!=null&&tr!=null){
-      retroBuf[pi].push({t:tr,cue:sl,dur:durB});
-      if(retroBuf[pi].length>512)retroBuf[pi].shift();
-      if(S.patterns[S.editPat].state==='rec'){
-        const qt=fmod(tr-editAnchor(),L);
-        lane.clear(ev=>ev.cue===sl&&Math.abs(ev.t-qt)<1e-6);
-        lane.events.push({t:qt,cue:sl,dur:durB,born:performance.now()});
-        dirtySave=true;
-      }
-    }
-    /* RESUME ONLY WHAT WAS RUNNING. Letting go of a cue restarted the cycle
-       in phase whether or not the auto cursor was on — so with auto OFF, a
-       grab you released handed you the take playing from the loop position,
-       all the way to its end, sounding for all the world like the cue had
-       never stopped. */
-    if(T.playing&&autoCur(S.presets[pi])&&!others9){
-      const a2=actAt(posNow());
-      engine.audPlay(pi,AC.currentTime+0.006,L,fmod(posNow()-a2.anchor,L));
-    }
-    dirty=true;
-  }
+  /* a hold ends the same way whoever ends it — see endAudHold */
+  if(endAudHold(c)==='stop')return;
   /* THE ANALOG STREAM DECIDES WHEN AN ANALOG NOTE ENDS. The board keeps
      sending ordinary key-ups of its own — rapid trigger fires one every time
      the key crosses its actuation point on the way back up — and letting those
@@ -16525,6 +16583,34 @@ function sweepStuckNotes(){
     if(HE.on&&HE.holds(c))continue;                            // the sensor still reads it down
     endNote(c); dirty=true;
   }
+  /* THE SAME QUESTION, ASKED OF THE AUDIO CHANNEL'S HOLDS — and it needed
+     asking, because their failure is worse than a stuck note. A cue grab
+     STOPS the autonomous cursor for as long as the key is down, and the only
+     thing that ever starts it again is the release. Lose that release and the
+     channel is not sounding a note nobody is holding; it is sounding NOTHING,
+     silently, held down by a finger that left, and no key you press brings the
+     loop back. Every route out of the app took that path: cmd-tab, a modifier
+     swallowing the key-up, the board and the sensor disagreeing about who owns
+     a letter. The blur handler now ends them outright and this catches the
+     rest, on the same 400ms tick as the notes. */
+  for(const c of Object.keys(AUD.gk||{})){
+    const h7=AUD.gk[c];
+    /* THE BACKSTOP, for the one case the question above cannot answer: a
+       key-up the browser never delivered at all, which leaves kbHeld saying
+       the finger is still there. Nothing in the page can tell that apart from
+       a real hold, so this is a time limit and not a diagnosis — half a minute,
+       long enough that no gesture reaches it and short enough that a channel
+       cannot go quietly dead for the rest of the session. It says so out loud,
+       because a control that lets go by itself and does not mention it is a
+       second mystery on top of the first. */
+    if(h7&&h7.press!=null&&AC.currentTime-h7.press>30){
+      endAudHold(c); flash('released a stuck hold on ch'+((h7.pi|0)+1)+' — its key-up never arrived');
+      dirty=true; continue;
+    }
+    if(kbHeld.has(c)||noteLatch.has(c)||SUS.has(c)||ALTSUS.has(c))continue;
+    if(HE.on&&HE.holds(c))continue;
+    endAudHold(c); dirty=true;
+  }
 }
 setInterval(()=>{sweepStuckNotes(); sweepOrphanVoices();},400);
 window.addEventListener('blur',()=>{
@@ -16542,13 +16628,19 @@ window.addEventListener('blur',()=>{
   KM.srLatch=false; KM.altLatch=false;
   eraseHold=null;
   for(const c in liveV){liveV[c]&&liveV[c].release&&liveV[c].release(AC.currentTime);delete liveV[c];}
+  /* …and every audio hold, through the real release path rather than a delete:
+     a grab that is dropped has a loop to hand back, and dropping the record
+     without running it is how you cmd-tab away and come back to a dead
+     channel. kbHeld/SUS/noteLatch are already cleared above, so nothing here
+     thinks a finger is still down. */
+  for(const c of Object.keys(AUD.gk||{}))endAudHold(c);
   for(let i=0;i<10;i++){engine.monoClear(i); engine.seqClear(i);}
   for(const c in pend)delete pend[c];
 });
 
 /* ---------------- persistence + migration ---------------------------- */
 const LS='ten-v1';
-const SAVEV=24;                       // bump BOTH: serialize writes it, load checks it
+const SAVEV=25;                       // bump BOTH: serialize writes it, load checks it
 /* v22: granular is the audio channel's MODE (au.amode), never a cat — old
    'gran' spellings are normalized on the way in */
 /* WHAT A SAVE SAYS vs WHAT THE RUNTIME USES.
@@ -16707,6 +16799,11 @@ function load(json){
            that jumps was built when size meant grains only, so it is opened
            all the way — turning it down is now a thing you choose. */
         if(o.v<24&&Math.round(p.au.kmode||0)===0){p.gr=p.gr||{}; p.gr.size=1;}
+        /* v<25: the two levels used to go to 150%, sitting on the sound page
+           as a pair. They rest at the top and only cut now — one of them on
+           the instrument row beside the loop switch, the other on the page
+           beside the dials that shape a key. */
+        p.au.kvol=clamp(p.au.kvol??1,0,1); p.au.lvol=clamp(p.au.lvol??1,0,1);
         if(o.v<23){
           const km=Math.round(p.au.kmode||0), gran=Math.round(p.au.amode||0)===1;
           p.au.auto=gran?0:1;
@@ -18565,7 +18662,7 @@ function renderSnd(L,pos){
           const i=(r0===0?0:nAu)+part*half+j, foc=i===S.curParam;
           const store=pspec.st==='gr'?gr2:pre.au;
           const raw=pspec.get?pspec.get(store)
-            :store[pspec.key]??(pspec.st==='gr'?GDEF2[pspec.key]:0);
+            :store[pspec.key]??(pspec.st==='gr'?GDEF2[pspec.key]:AUDDEF[pspec.key]??0);
           const v=fmtVal(pspec,raw), cw=pspec.w?15:7;
           lr+=(foc?spH('a','▸'+pad(pspec.lbl,cw),'cp',i):spH('d',' '+pad(pspec.lbl,cw),'cp',i))+' ';
           vr+=(foc?spH('i',' '+pad(v,cw),'cp',i):spH('v',' '+pad(v,cw),'cp',i))+' ';
