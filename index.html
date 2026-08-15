@@ -2560,14 +2560,14 @@ const OPTRACK={
            hearing, and that is what -/= should hold */
         mag:{amt:sl=>DROUTE[Math.round((sl&&sl.par)||0)]==='par'?'lvl'
                     :(FLT_GAINY.has(fTy(sl))?'gn':null),
-             pri:'frq',sec:'q',keys:{KeyT:'typ'}}},
+             pri:'frq',sec:'q'}},
   KeyL:{id:'mod',name:'lfo',nav:1,
         find:rk=>rk.map((x,i)=>x&&x.src===2&&!x.off?i:-1).filter(i=>i>=0),
         make:(sl,i)=>Object.assign(sl,mkMod(i),{src:2,off:false}),
         unmake:(sl,i)=>Object.assign(sl,mkMod(i)),
         free:rk=>rk.findIndex(x=>!x||!x.src),
         mag:{amt:'amt',pri:sl=>Math.round((sl&&sl.syn)||0)===1?'rdiv':'rate',
-             sec:'wav',keys:{KeyW:'wav',KeyY:'syn'}}},
+             sec:'wav'}},
   KeyK:{id:'mod',name:'keytrack',nav:1,
         find:rk=>rk.map((x,i)=>x&&x.src===4&&!x.off?i:-1).filter(i=>i>=0),
         make:(sl,i)=>Object.assign(sl,mkMod(i),{src:4,off:false}),
@@ -2708,7 +2708,7 @@ function magDial(H,which,d,e){
   const nv=adjust(F.spec,getV(C.holder,C.mi,C.si,F.spec),d,kmult(e));
   writeParam(H.ch,C.mi,C.si,F.px,nv);
   if(C.holder===C.pre)recAuto(H.ch,C.pre,C.mi,C.si,F.px,nv);
-  if(which==='pri')magSee(H,C,F.px);       // ←→ and -/= are knobs, not a cursor
+  if(which==='pri'){magSee(H,C,F.px); H.lbl=F.spec.lbl;}   // ←→ and -/= are knobs, not a cursor
   flash(C.T2.name+(C.list.length>1?' '+(C.list.indexOf(C.si)+1):'')+
         ' · '+F.spec.lbl+' '+fmtVal(F.spec,nv));
   dirty=true; dirtySave=true; return true;
@@ -2719,24 +2719,9 @@ function magDial(H,which,d,e){
 function magAim(H,key){
   const C=magCtx(H); if(!C)return false;
   const F=magSpec(C,key); if(!F)return false;
-  H.fld=F.spec.key;
+  H.fld=F.spec.key; H.lbl=F.spec.lbl;
   magSee(H,C,F.px);
   flash(magRead(H,C,C.T2.name+' → '));
-  dirty=true; return true;
-}
-/* the other answer to the ←→ question, kept side by side while both were
-   played: the pair WALKS the slot's fields and ↑↓ dials whichever one it
-   lands on — the strip's gesture, without the strip. */
-let MAGSIDE='pin';
-function magStep(H,d){
-  const C=magCtx(H); if(!C)return false;
-  const cur=magCur(H,C);
-  let px=C.specs.findIndex(x=>x.key===cur);
-  if(px<0)px=0;
-  px=fmod(px+d,C.specs.length);
-  H.fld=C.specs[px].key;
-  magSee(H,C,px);
-  flash(C.T2.name+' → '+magLbl(C,H.fld));
   dirty=true; return true;
 }
 const ALTSUS=new Set();     // scopes riding on a held ⌥ after their letter went up
@@ -14821,7 +14806,7 @@ const onKeyDown=e=>{
          it prints whether or not the strip is open to show it. */
       {const C=magCtx(HOLD.opt);
        if(C){const F=magSpec(C,magCur(HOLD.opt,C));
-             if(F)magSee(HOLD.opt,C,F.px);
+             if(F){magSee(HOLD.opt,C,F.px); HOLD.opt.lbl=F.spec.lbl;}
              flash(magRead(HOLD.opt,C,T2.name+' ch '+ch+
                (list.length>1?' 1/'+list.length:'')+' · '));}
        else if(list.length>1)flash(T2.name+' — '+list.length+' of them; digits jump between');}
@@ -14918,8 +14903,7 @@ const onKeyDown=e=>{
       }
       if(T2.mag&&(e.code==='ArrowLeft'||e.code==='ArrowRight')){
         e.preventDefault(); HOLD.optUsed=true;
-        const d9=e.code==='ArrowRight'?1:-1;
-        if(MAGSIDE==='walk')magStep(HOLD.opt,d9); else magDial(HOLD.opt,'sec',d9,e);
+        magDial(HOLD.opt,'sec',e.code==='ArrowRight'?1:-1,e);
         return;
       }
       /* everything else — letters, space — falls THROUGH: the keyboard still
@@ -18123,7 +18107,10 @@ function render(){
       +sp(HE.pressure()==null?'d':'a',HE.pressure()==null?'—':HE.pressure().toFixed(2))
       +sp(focusIsStepped()?'d':'a',focusIsStepped()?' step':' dial'):'')+
     (SUS.size?dot+sp('ri',' ⟳ '+SUS.size+' held — tap ⇧ '):'')+
-    (HOLD.optLatched&&HOLD.opt?dot+sp('ri',' ⟳ '+OPTRACK[HOLD.opt.c].name+' ch '+HOLD.opt.ch+' '):'')+
+    /* a LATCHED scope outlives the hand that opened it, so it has to say what
+       its dial is pointing at — the flash that said so has long gone */
+    (HOLD.optLatched&&HOLD.opt?dot+sp('ri',' ⟳ '+OPTRACK[HOLD.opt.c].name+' ch '+HOLD.opt.ch+
+      (HOLD.opt.lbl?' · '+HOLD.opt.lbl:'')+' '):'')+
     /* WHETHER THE SET IS ON A DISK, at a glance. Not knowing was the whole
        problem: an autosave you cannot see is one you find out about afterwards. */
     dot+(FILEH?(FILEOK?sp('a','◆ file'):sp('r','◆ file?')):sp('d','⌘⇧E file'))+
