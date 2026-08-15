@@ -1549,7 +1549,8 @@ const FX_P=sl=>{
          spring    a dispersion chain — allpasses smear the highs ahead of the
                    lows, which is the boing. Cheaper still.
          room      four diffusers and one short delay. Nearly free.
-       `mode` sits on p4, which verb never used, and rounds to 0 — so every
+       `mode` is `rv`, a field of its own rather than one of the p-slots —
+       mkFx says why — and a field that is not there rounds to 0, so every
        preset already saved keeps the convolver it was built with. */
     verb:[SP('mode','rv','enum',{opts:['convolve','plate','spring','room'],
             get:o=>Math.round(o.rv||0), set:(o,v)=>{o.rv=Math.round(v);}}),
