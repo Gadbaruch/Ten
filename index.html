@@ -1031,7 +1031,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.1210';
+const BUILD='2026-08-15.1233';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1800,7 +1800,9 @@ function autoWhere(pre,a){
      audio param was silently unautomatable. Same address shape, different
      shelf to look on. */
   if(a.rack==='aud'||a.rack==='grn'){
-    const specs=a.rack==='aud'?AUDF:GRANF;
+    const specs=a.rack==='aud'
+      ?AUDF.concat(AUDTAKE,[SP('pitch','semis','lin',{min:-24,max:24,step:1,fmt:v=>v+'st'})])
+      :GRANF;
     const px=specs.findIndex(x=>x.key===a.key&&x.lbl===a.lbl);
     if(px<0)return null;
     return {mi:-1,si:0,px,spec:specs[px],rack:a.rack};
@@ -2062,7 +2064,8 @@ function modDests_(pre){
        stretch window was invented and simply never appeared here — and the
        next one added would have been missing too. Menus stay out: a
        modulator needs a range, not a choice. */
-    for(const sp of AUDF){
+    for(const sp of AUDF.concat(AUDTAKE,
+        [SP('pitch','semis','lin',{min:-24,max:24,step:1,fmt:v=>v+'st'})])){
       if(sp.type==='enum'||sp.key==='_pool')continue;
       add('aud',0,sp,'');
     }
@@ -3658,7 +3661,7 @@ let fxwReady=false;
             shift:Number.isFinite(m.sh)&&m.sh>0?m.sh:1,ch:m.ch|0,
             gl:Number.isFinite(m.gl)?m.gl:1,gr:Number.isFinite(m.gr)?m.gr:1,
             end:m.end,gain:m.gain??1,life:m.durF||1e12,
-            dur:Infinity,wrap:m.wrap?1:0,lo:m.lo||0,vel:1,shp:0.5,
+            dur:Infinity,wrap:m.wrap?1:0,lo:m.lo||0,vel:1,shp:0.5,car:m.car?1:0,
             n:0,env:0,rel:0,relAt:0,tp:0};
           this.tv.set(m.id,c9); this.cx.push(c9);}}
         else if(m.t==='toff'){const v=this.tv.get(m.id); if(v)v.rel=1;}
@@ -3771,6 +3774,16 @@ let fxwReady=false;
           }else if(grain){
             if(!(c.n<c.dur)){dead=1;break;}    // !(a<b) also culls a NaN dur
             amp=this.env(c.n/c.dur,c.shp)*c.vel*0.5;
+          }else if(c.car&&this.carMute){
+            /* silent, but still moving: it is the position the cloud reads */
+            if(c.relAt&&f0+k>=c.relAt)c.rel=1;
+            c.env+=(c.rel||c.n>=c.life)?-rT:aT;
+            if(c.env>1)c.env=1;
+            if(c.env<=0&&(c.rel||c.n>=c.life)){dead=1;break;}
+            if(!c.wrap&&c.ph>=c.end-1){c.rel=1;continue;}
+            if(c.step!==c.sTgt)c.step+=(c.sTgt-c.step)*sT;
+            c.ph+=c.step; c.n++;
+            continue;
           }else{
             if(c.relAt&&f0+k>=c.relAt)c.rel=1;
             c.env+=(c.rel||c.n>=c.life)?-rT:aT;
@@ -3872,6 +3885,17 @@ let fxwReady=false;
         }
       }
       const len=live?this.ring.length:this.len;
+      /* WHERE THE AUTONOMOUS PLAYHEAD IS, and whether the cloud should be
+         following it. This has to happen before the "nothing to do" exits,
+         because with the loop running and no keys down that is exactly the
+         state a granulated loop looks like from here. */
+      this.car=null;
+      for(const c9 of this.cx)
+        if(c9.car&&c9.dur===Infinity&&!c9.rel){this.car=Math.max(0,Math.min(1,c9.ph/(len||1)));break;}
+      this.carMute=this.car!=null&&P.size<0.999;
+      if(this.carMute&&!this.autoV){        // the loop's own grain train
+        this.autoV=1; this.vs.set('auto',{ratio:1,vel:0.9,next:this.tick,env:1,rel:0});
+      }else if(!this.carMute&&this.autoV){this.vs.delete('auto'); this.autoV=0;}
       if(!len||!this.vs.size&&!this.cx.length){this.tick+=N; return true;}
       /* nothing but tape cursors: skip the cloud's half entirely */
       if(!this.vs.size&&!this.ng){
@@ -3982,8 +4006,16 @@ let fxwReady=false;
         while(v.next<this.tick+N&&this.ng<64){
           const pre=Math.max(0,Math.round(v.next-this.tick));
           this.stat++;
-          /* live: pos 0 reads just behind the write head, 1 reaches back */
-          const base=live?(((this.rw/len)-0.05-C.pos*0.9)%1+1)%1
+          /* THE CLOUD FOLLOWS THE PLAYHEAD. A carrier is the autonomous
+             cursor — the loop — and when one exists the grains are sprayed
+             around WHERE IT IS rather than around a dial of their own. That
+             is the whole unification: the cloud is not a second instrument
+             reading the same take, it is what any playhead does when its
+             grains are shorter than the take. With no carrier (a key on its
+             own, or the loop switched off) pos and scan still say where. */
+          const car9=this.car;
+          const base=car9!=null?car9
+                    :live?(((this.rw/len)-0.05-C.pos*0.9)%1+1)%1
                          :((C.pos+this.scanPh)%1+1)%1;
           const step0=v.ratio*Math.pow(2,(C.semis+(Math.random()*2-1)*C.jit)/12);
           /* pitch safety: the grain may not eat more than half the buffer */
@@ -7827,7 +7859,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     this._lastTid=id;
     e.node.port.postMessage({t:'tape',id,frame:Math.round(at*AC.sampleRate),
       pos:P9.pos,end:P9.end,rate:P9.rate,base:P9.base,free:P9.free?1:0,sh:P9.sh,
-      ch:P9.ch,gl:P9.gl,gr:P9.gr,gain:P9.gain,wrap:P9.wrap?1:0,lo:P9.lo||0,
+      ch:P9.ch,gl:P9.gl,gr:P9.gr,gain:P9.gain,wrap:P9.wrap?1:0,lo:P9.lo||0,car:P9.car?1:0,
       durF:Math.round(P9.durSec*AC.sampleRate)});
     return true;
   }
@@ -7868,7 +7900,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     this.audPlay2(pi,at,lenBeats,skipBeats,cue,{
       pos:(off+skipBuf)*sr9,
       end:en*len9,
-      rate:Math.max(0.05,rate)*k9,
+      rate:(rate<0?Math.min(-0.05,rate):Math.max(0.05,rate))*k9,
       base:baseRate*k9,
       free:!sync,
       sh:sync?Math.pow(2,semis/12):1,
@@ -7877,7 +7909,12 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
       /* a cue plays until you let go, so it loops the crop rather than
          running off the end; the auto cursor is re-fired each cycle and
          keeps its hard stop */
-      wrap:cue?1:0, lo:off*sr9,
+      /* a cue loops the crop, and so does anything running BACKWARDS —
+         otherwise a reverse playhead reaches the start and stops dead */
+      wrap:(cue||rate<0)?1:0, lo:off*sr9,
+      /* the loop is the carrier: with no cue behind it, this is the
+         autonomous playhead the cloud follows */
+      car:cue?0:1,
       /* a key-spawned cursor carries the key level and its velocity; the auto
          cursor carries the loop level. cue.vol is the cue's own trim. */
       gain:(au.gain??0.9)*(cue?(cue.vol??1)*(au.kvol??1)*(cue.vel??1):(au.lvol??1)),
@@ -7885,7 +7922,8 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
          material remaining ahead of it, which for a cue near the end is a
          fraction of a second — so it died exactly where it should have
          wrapped. The key's release ends it, and so do stop, choke and panic. */
-      durSec:cue?1e6:Math.min(loopSec-skipSec,(dur-skipBuf)/rate)});
+      durSec:(cue||rate<0)?1e6
+        :Math.min(loopSec-skipSec,(dur-skipBuf)/Math.abs(rate))});
     return this._lastTid;
   }
   /* a fade-out then the stop, so a released cue does not click on the way out */
@@ -7970,7 +8008,10 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     const rate=sync?baseRate:baseRate*Math.pow(2,semis/12);
     const k9=buf.sampleRate/AC.sampleRate;
     try{e9.node.port.postMessage({t:'tset',
-      rate:Math.max(0.05,rate)*k9, base:baseRate*k9,
+      /* a negative rate is a real rate: a floor of +0.05 turned reverse into
+         a very slow forward, and dividing the take's remaining length by it
+         gave the voice a negative life, so it died on arrival */
+      rate:(rate<0?Math.min(-0.05,rate):Math.max(0.05,rate))*k9, base:baseRate*k9,
       sh:sync?Math.pow(2,semis/12):1, end:en*buf.length,
       gain:(au.gain??0.9)*(ask.cue?(ask.cue.vol??1)*(au.kvol??1)*(ask.cue.vel??1)
                                    :(au.lvol??1))});}catch(_){}
@@ -10036,10 +10077,13 @@ function prsFieldDefs(){
   if(p.cat==='audio')return [
     /* the tape's SETUP: identity, not sound design */
     chEng, chSmp,
+    {k:'start',v:()=>Math.round((clamp((p.au||{}).st??0,0,0.98))*100)+'%'},
+    {k:'end',  v:()=>Math.round((clamp((p.au||{}).en??1,0,1))*100)+'%'},
+    {k:'pitch',v:()=>(((p.au||{}).semis??0)>0?'+':'')+((p.au||{}).semis??0)+'st'},
     {k:'keys mode',v:()=>kmodeOf(p)?'pitch':'position'},
     {k:'auto',v:()=>autoCur(p)?'loop':'off'},
     {k:'voice',v:()=>['poly','mono','legato'][clamp(Math.round((p.vox||{}).mode||0),0,2)]},
-    ...(kmodeOf(p)?[{k:'start',v:()=>Math.round((p.au||{}).start||0)?'here':'pos'}]:[]),
+    ...(kmodeOf(p)?[{k:'from',v:()=>Math.round((p.au||{}).start||0)?'here':'pos'}]:[]),
     {k:'input', v:()=>['mic','mstr'][Math.round((p.au||{}).src||0)]},
     {k:'chan',  v:()=>['stereo','left','right'][clamp(Math.round((p.au||{}).chan||0),0,2)]},
     {k:'gain',  v:()=>((p.au||{}).gain??0.9).toFixed(2)}];
@@ -10093,20 +10137,22 @@ const GRANF=[
 const AUDF=[
  /* the tape's SOUND rack: how the clip plays. Identity — keys mode, sample,
     input, channels, fit, gain — lives on the Instrument row. */
- SP('pitch','semis','lin',{min:-24,max:24,step:1,fmt:v=>v+'st'}),
- /* LINK is the old free/sync toggle said as what it does: on, pitch drags
-    speed with it and the take is tape; off, the take keeps its timing and
-    pitch moves alone inside the cursor. Same field underneath. */
- SP('link','pmode','enum',{opts:['on','off']}),
- /* SPEED SWALLOWED FIT. They were one question — what sets the rate — asked
-    on two pages: a toggle over on the instrument row and a dial here, and
-    with the toggle on the dial did nothing at all, which is exactly what it
-    looked like. Turn speed below ×0.25 and it reads `fit`: the loop sets the
-    rate. Turn up from there and you are driving it by hand again. */
- SP('speed','rate','lin',{min:0.2,max:4,step:0.05,
-   fmt:v=>v<0.25?'fit':'\u00d7'+(+v).toFixed(2).replace(/0$/,''),
-   get:o=>Math.round(o.fit||0)?0.2:(o.rate??1),
-   set:(o,v)=>{if(v<0.25)o.fit=1; else {o.fit=0; o.rate=+(+v).toFixed(2);}}}),
+ /* SYNC: does the take keep the clock. Off is tape — pitch drags speed with
+    it, varispeed, the way a record does. On is the stretch: the take holds
+    its timing and pitch moves alone inside the cursor, which is what the
+    window dial shapes. (This was called 'link', describing the mechanism
+    rather than the question.) */
+ SP('sync','pmode','enum',{opts:['off','on']}),
+ /* SPEED, WITH FIT AT THE CENTRE. Fit is the resting state — the loop sets
+    the rate — so it belongs in the middle of the dial rather than at the
+    bottom, where it read as "slowest". Up from centre is faster by hand;
+    down from centre is the same speeds BACKWARDS, because the other thing a
+    playhead can do is run the other way. */
+ SP('speed','rate','lin',{min:-4,max:4,step:0.05,
+   fmt:v=>Math.abs(v)<0.2?'fit':(v<0?'\u25c0 \u00d7':'\u00d7')+Math.abs(+v).toFixed(2).replace(/0$/,''),
+   get:o=>Math.round(o.fit||0)?0:(o.rate??1),
+   set:(o,v)=>{if(Math.abs(v)<0.2){o.fit=1;}
+     else{o.fit=0; o.rate=+(+v).toFixed(2);}}}),
  /* the stretch's character: how far apart the two taps sit */
  SP('window','wnd','lin',{min:5,max:300,step:5,fmt:v=>Math.round(v)+'ms'}),
  /* TWO LEVELS, because there are two ways this channel makes sound and they
@@ -10115,14 +10161,13 @@ const AUDF=[
     grab against the loop by turning the loop down and losing the grab too. */
  SP('key vol','kvol','lin',{min:0,max:1.5,step:0.05,fmt:v=>Math.round(v*100)+'%'}),
  SP('loop vol','lvol','lin',{min:0,max:1.5,step:0.05,fmt:v=>Math.round(v*100)+'%'}),
+];
+/* start, end and the sample itself belong to the TAKE, not to how a playhead
+   reads it — they moved to the instrument row, where the sample already was.
+   The sound page is playheads only now. */
+const AUDTAKE=[
  SP('start','st','lin',{min:0,max:0.98,step:0.01,fmt:v=>Math.round(v*100)+'%'}),
  SP('end','en','lin',{min:0.02,max:1,step:0.01,fmt:v=>Math.round(v*100)+'%'}),
- SP('smpl','_pool','lin',{min:0,max:31,step:1,w:2,
-   fmt:v=>POOL[Math.round(v)]?POOL[Math.round(v)].name:'\u2014',
-   get:()=>{const i=POOL.findIndex(p2=>p2.buf===engine.audBuf[S.editSnd]); return i<0?0:i;},
-   set:(o,v)=>{const pi=S.editSnd, e2=POOL[clamp(Math.round(v),0,Math.max(0,POOL.length-1))];
-     if(!e2){flash('pool is empty — record (\u2303+tab) or drop audio first');return;}
-     engine.setChanBuf(pi,e2.buf,e2.name);}}),
 ];
 
 const CODEF=()=>Array.from({length:8},(_,i)=>{
@@ -10319,7 +10364,7 @@ function _prsAction(d){
     dirty=true; dirtySave=true; return;
   }
   if(p.cat==='audio'
-     &&['keys mode','auto','start','voice','input','chan','gain'].includes(f)){
+     &&['keys mode','auto','start','end','pitch','from','voice','input','chan','gain'].includes(f)){
     pushUndo('audio setup');
     p.au=p.au||{};
     if(f==='keys mode'){
@@ -10354,7 +10399,7 @@ function _prsAction(d){
       flash('voice → '+['poly (a cursor per key)','mono (one cursor, moved)',
         'legato (one cursor, glided)'][p.vox.mode]);
     }
-    else if(f==='start'){
+    else if(f==='from'){
       p.au.start=Math.round(p.au.start||0)?0:1;
       flash('keys start '+(p.au.start?'where the loop is (freeze)':'at the pos dial'));
     }
@@ -10362,6 +10407,12 @@ function _prsAction(d){
       flash('input → '+['mic','resample the master'][p.au.src]);}
     else if(f==='chan'){p.au.chan=fmod(Math.round(p.au.chan||0)+(d>0?1:-1),3);
       flash('chan → '+['stereo','left','right'][p.au.chan]);}
+    else if(f==='start'){p.au.st=clamp(+((p.au.st??0)+d*0.01).toFixed(3),0,0.98);
+      engine.audLive(pi); flash('start '+Math.round(p.au.st*100)+'%');}
+    else if(f==='end'){p.au.en=clamp(+((p.au.en??1)+d*0.01).toFixed(3),(p.au.st??0)+0.02,1);
+      engine.audLive(pi); flash('end '+Math.round(p.au.en*100)+'%');}
+    else if(f==='pitch'){p.au.semis=clamp(Math.round((p.au.semis??0)+d),-24,24);
+      engine.audLive(pi); flash('pitch '+(p.au.semis>0?'+':'')+p.au.semis+'st');}
     else if(f==='gain')p.au.gain=clamp((p.au.gain??0.9)+d*0.05,0,1);
     dirty=true; dirtySave=true; return;
   }
@@ -15588,11 +15639,12 @@ const onKeyDown=e=>{
         flash('cue '+(sl+1)+'/'+nS+' · '+(vm9===2?'glide':'moved'));
         dirty=true; return;
       }
-      /* THE AUTO CURSOR DIES AT THE JUMP, NOT AT THE KEYPRESS — stopping on
-         the way in cut the tape the moment your finger moved and left a hole
-         until quantize came round. Only the FIRST key does it: the ones after
-         it are joining a chord, not replacing what is already grabbed. */
-      if(first9)engine.audStop(pi,atP);
+      /* POLY DOES NOT TOUCH THE LOOP. A key adds a playhead; it does not
+         take the autonomous one away — that is what mono is for, and the
+         two were conflated because a jump used to be the only thing a key
+         could do. With auto off there is nothing to keep anyway, so the
+         first key still clears whatever the last one left. */
+      if(first9&&!autoCur(S.presets[pi]))engine.audStop(pi,atP);
       /* AND THE JUMP IS A CURSOR LIKE ANY OTHER. At the top of the size dial
          it is one clean unbroken read — the tape jump, exactly as it was.
          Turn size down and the same jump becomes a cloud AT THAT POINT in
