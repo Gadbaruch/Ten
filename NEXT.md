@@ -121,32 +121,84 @@ carrier sampled every 150ms across a x4 length change whose old cycle ended at
 handler, ahead of the audio channel's own three meanings for it, or the
 gesture would mean different things on different channels.
 
-## 0. THE FILTER ENVELOPE'S RESTING POINT — diagnosed, not fixed
+## 0. THE FILTER ENVELOPE — THE 350Hz HALF IS FIXED, THE RESTING POINT IS NOT
 
-Gad: play a long note, let it settle, tweak the cutoff by ear, and the NEXT
-note's sustain does not land where you put it. Reproduced and the arithmetic
-is exact. In the dst===3 env block:
+### FIXED: the dial was not in the sound at all (2026-08-16)
 
-    base    = the stored cutoff
+The 350 that blocked this entry was not a probe artifact, it was the bug. A
+BiquadFilterNode is born at **350Hz — its factory default** — and the builder
+only ever SCHEDULED the cutoff, `bq.frequency.setValueAtTime(fFrq, at)`. `at`
+is always in the future (a note starts at `currentTime+0.005` at the earliest,
+further out under live quantize), and an AudioParam's `.value` reports what it
+is NOW. So the env block's `const base = ps[0].value` read 350 on every note,
+then `setValueAtTime(base, at)` overwrote the builder's own correct event with
+it. **The cutoff dial did nothing whatsoever once an env was routed to it.**
+
+Same probe, both builds, reading back the base the env actually used
+(`this.fEnvs`, which stores it):
+
+    dial          previous build        now
+    1000          350  → 5600 → 3500    1000 → 16000 → 10000
+     400          350  → 5600 → 3500     400 →  6400 →  4000
+    6000          350  → 5600 → 3500    6000 → 20000 → 20000
+    24dB          [350, 350]            [1000, 1000]
+    comb bank     [350 ×5]              [1000, 1879, 2717.6, 3530.8, 4325.8]
+
+Three different dials producing one identical sweep is the whole report. The
+fix is `setFrq(param,hz)` in the filter builder — write `.value` AND schedule
+it, which is exactly what `setF` already did for oscillator pitch and the same
+reason ("an oscillator is born at 440Hz"). The base is also read PER PARAM now
+rather than off `ps[0]`, which is what keeps a bank's peaks at their own
+multiples of the cutoff instead of collapsing all five onto the first.
+
+`fBase[i]=fFrq` in the builder is written twice and read nowhere — the right
+value was sitting there the whole time.
+
+### STILL OPEN: where the dial sits in the sweep
+
+Unchanged and now measurable, because the base is real:
+
     peak    = base · 2^(amt/100·5)
     sustain = base + (peak−base)·s  =  base · K,  K = 1+(2^(amt/100·5)−1)·s
 
-So the knob writes the FLOOR while your ear is tuning the SUSTAIN, and the
-next note re-derives the sweep from the new floor.
+The dial is the FLOOR while your ear tunes the SUSTAIN, so tuning by ear
+writes the floor and the next note re-derives from it. Making the stored value
+the RESTING value (divide out by K, migrate by multiplying) is the principle
+that killed `center` — but see the table below before doing it to one
+destination in isolation.
 
-THE FIX, and it is the same principle that killed `center`: the stored value
-is the RESTING value. Divide it back out by K to find where the sweep starts,
-and migrate old patches by multiplying by K so they settle exactly where they
-always did (verified in isolation: 800 → 8000 matches the old sustain for
-amt 80 / s 0.6). s then says how much extra the ATTACK adds, and the resting
-point stops moving when you change it.
+## 0b. WHICH SOURCE MEANS WHAT — Gad's wider suspicion, measured
 
-NOT SHIPPED. It changes every filter envelope in the instrument and the probe
-harness could not confirm the live value — a sounding voice read 350Hz where
-the maths says 1000, which means the filter node is being built from something
-other than the stored frq and THAT has to be understood first. Do not land
-this without reading a real note's filter frequency at sustain and watching it
-match the dial.
+Gad, 2026-08-16: "this may not be only env or only filter, it's how mods are
+applied to any sources." He is right, and the split is structural:
+
+**The env is the only source that WRITES its target. Every other source ADDS
+to it.** lfo, vel, key, rnd, press and flw all connect a node into `detune`
+(or a gain), where the resting value is structurally 0 and there is no base to
+get wrong. Only the env schedules absolute values, so only the env needs a
+base — which is why only the env could read 350, and why only the env has an
+opinion about where the dial sits.
+
+Measured on real notes, one route at a time, amt 80 / s 0.6:
+
+    env → filt       dial is the FLOOR      (was broken; now 1000 → 16000 → 10000)
+    env → pitch      dial is the FLOOR      261.6 → 792.9 → 580.5, predicted 580.4
+    env → op level   dial is the PEAK       1.0 → 0.68, the env presses DOWN from it
+    lfo → anything   dial is the CENTRE     bipolar swing in cents
+    vel/key/rnd      dial is the value at zero source
+    press / flw      dial is the RESTING point (this is what killing `center` bought)
+
+Three conventions for "what does the number on screen mean" among the env
+destinations alone, and `env → op level` ALREADY uses the resting-point
+convention that section 0 wants to give the filter. So the resting-point
+change is not a filter question, it is one decision across env → filt, env →
+pitch and env → op level at once. Decide it there, once, or the instrument
+gets a fourth convention.
+
+Caveat on the numbers above: `AudioParam.value` never reflects a CONNECTED
+input, only the intrinsic value — so the connected sources (lfo/vel/press)
+read back as the bare dial and their motion has to be measured from rendered
+audio, not from the param. That is a probe limitation, not a finding.
 
 ## What is next, in order
 
@@ -234,6 +286,23 @@ match the dial.
   are spawning — identically on HEAD and on your branch. Reload first.
 - **Syntax checks pass on TDZ bugs.** `const` at line 11000 used at line 200
   parses fine and kills the keyboard at runtime. Exercise a keystroke.
+- **`.value` IS NOT WHAT YOU SCHEDULED, AND IT IS NOT WHAT IS CONNECTED.** Two
+  ways it lies, and the filter env fell for both. (1) A param written only with
+  `setValueAtTime(v, at)` reads back as the node's FACTORY DEFAULT until `at`
+  arrives — 350Hz on a biquad, 440Hz on an oscillator — and `at` is always in
+  the future. Write `.value` as well as scheduling if anything will read it.
+  (2) `.value` never includes a CONNECTED input; an LFO or constant source
+  feeding `detune` moves the sound and not the number. Reading a modulated
+  param and getting the bare dial back does not mean the mod is dead.
+- **`$B eval` only wraps your file in an async IIFE if it contains a top-level
+  `await`.** Without one you get `SyntaxError: Illegal return statement` and no
+  hint why. `await Promise.resolve();` at the top is enough.
+- **The headless browse tab can have a dead audio clock.** `AC.state` says
+  `running` while `currentTime` never leaves `baseLatency`, so every scheduled
+  automation reads flat at its intrinsic value and a working build looks
+  broken. Check `currentTime` actually advances before believing a flat trace.
+  Measurements that read state synchronously (what base did the ctor use)
+  survive this; anything that needs the graph to RENDER does not.
 - **`adjust()` wants a NUMBER as its multiplier.** `audAction(1,{})` in a probe
   writes NaN into the param, `audLive` posts the NaN to the worklet, and the
   channel outputs NaN from then on — silent, and no reload of your reasoning

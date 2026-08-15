@@ -1108,7 +1108,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.2250';
+const BUILD='2026-08-15.2323';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -5283,6 +5283,18 @@ class Voice{
     let fHead=null,fTail=null;
     const fPar=[]; this.fPar=fPar;
     const fBase={};
+    /* A FILTER IS BORN AT 350Hz, and the cutoff was only ever SCHEDULED at
+       `at` — which is always in the future (a note starts at currentTime+0.005
+       at the earliest, and further out under live quantize). An AudioParam's
+       `.value` reports its intrinsic value NOW, so anything asking this param
+       what it is while the voice is being built got 350, never the dial.
+       The filter envelope is exactly such a reader: it takes its `base` off
+       this param and re-schedules the whole sweep from it, so a cutoff dialled
+       to 1000 ran 350 → 5600 and settled at 3500 — the dial was not in the
+       sound at all, at any amount. Write the value AND schedule it, which is
+       the same fix and the same reason as setF's `param.value=f0` for
+       oscillator pitch below (an oscillator is born at 440). */
+    const setFrq=(param,hz)=>{param.value=hz; param.setValueAtTime(hz,at);};
     for(let i=0;i<10;i++){
       const f=p.flt[i]; if(!f.typ||f.off)continue;
       /* THE CUTOFF IS THE CUTOFF. This used to be secretly multiplied by the
@@ -5308,7 +5320,7 @@ class Voice{
         for(const pk of peaks){
           const bp=ac.createBiquadFilter();
           bp.type='bandpass';
-          bp.frequency.setValueAtTime(clamp(fFrq*pk.r,20,20000),at);
+          setFrq(bp.frequency,clamp(fFrq*pk.r,20,20000));
           bp._r=pk.r;                          // its place in the shape, for cutLive
           /* narrower as you ask for more resonance, and narrower again the
              higher a peak sits — otherwise the top of a comb is a wash */
@@ -5327,7 +5339,7 @@ class Voice{
       }
       const bq=ac.createBiquadFilter();
       bq.type=FTYPE_W[f.typ]||'lowpass';
-      bq.frequency.setValueAtTime(fFrq,at);
+      setFrq(bq.frequency,fFrq);
       bq.Q.value=f.q; bq.gain.value=f.gn;
       /* 24dB = the same filter twice. Q is split between the stages (√ of the
          total) so doubling the slope does not also double the resonant peak —
@@ -5336,7 +5348,7 @@ class Voice{
       if(Math.round(f.pol||0)===1){
         const bq2=ac.createBiquadFilter();
         bq2.type=bq.type;
-        bq2.frequency.setValueAtTime(fFrq,at);
+        setFrq(bq2.frequency,fFrq);
         const qh=Math.sqrt(Math.max(0.0001,f.q));
         bq.Q.value=qh; bq2.Q.value=qh; bq2.gain.value=f.gn;
         bq.connect(bq2); fOut=bq2;
@@ -5503,20 +5515,28 @@ class Voice{
         const si2=clamp(Math.round(e2.idx),1,10)-1;
         const ps=this.fParams(si2,'frequency');
         if(!ps.length)continue;
-        /* GAD'S REPORT, DIAGNOSED AND NOT YET FIXED — see NEXT.md. base is the
-           stored cutoff, the peak is base·2^(amt/100·5), and the sustain lands
-           at base·K where K = 1+(2^(amt/100·5)−1)·s. So the knob writes the
-           FLOOR while your ear is tuning the SUSTAIN, and the next note
-           re-derives the sweep from the new floor and settles somewhere else.
-           The fix is to make the stored value the settling point (divide it
-           back out by K here, migrate old patches by multiplying by it) — the
-           same principle that killed `center`. Not shipped because it changes
-           every filter envelope in the instrument and the probe harness could
-           not confirm it live; verify against a real note before landing. */
-        const base=ps[0].value;
-        const peak=clamp(base*Math.pow(2,e2.amt/100*5),20,20000);
+        /* HALF OF GAD'S REPORT IS FIXED HERE AND HALF IS STILL OPEN — NEXT.md.
+           FIXED: `base` used to be 350 on every note. It is read off the param,
+           and the builder only ever SCHEDULED the cutoff at `at`, so this read
+           the BiquadFilterNode's factory default and swept from there — dial
+           1000 measured 350 → 5600 → 3500, with the dial nowhere in it. The
+           builder writes `.value` as well as scheduling now (see setFrq), so
+           this reads the real cutoff.
+           STILL OPEN, and it is a design decision, not a bug: the dial is the
+           FLOOR of the sweep while your ear tunes the SUSTAIN, which lands at
+           base·K, K = 1+(2^(amt/100·5)−1)·s. Tune by ear at sustain and you are
+           writing the floor, so the next note re-derives from it. Making the
+           stored value the RESTING value (divide out by K, migrate by
+           multiplying) is the same principle that killed `center` — but it
+           changes every filter envelope in the instrument AND env→pitch has
+           the identical convention while env→op level has the opposite one, so
+           it wants deciding across all three at once rather than here. */
         const a=Math.max(0.001,e2.a);
         for(const pm of ps){
+          /* per-param, not ps[0]: a BANK's peaks sit at their own multiples of
+             the cutoff, and each has to sweep from where it actually is */
+          const base=pm.value;
+          const peak=clamp(base*Math.pow(2,e2.amt/100*5),20,20000);
           pm.cancelScheduledValues(at);
           if(e2.lp>0.001)this._loopEnv(pm,base,peak,e2.s,e2,at);
           else{
