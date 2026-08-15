@@ -791,6 +791,12 @@ const FXDEF={
   1:{p1:0.27,p2:0.35,p3:3,mix:0.2},
 };
 const mkPly =()=>({typ:0,p1:2,p2:0,p3:1,p4:60,p5:0,p6:0});   // p5 spare · p6 stage(post/pre)
+/* A PLAY SLOT WITH HOLES IN IT READS AS `undefined` ON THE PAGE. Several places
+   built one from an object literal carrying p1..p3 only — which is every field
+   those slot types happen to use — and then the arp, which reads p4 and p6, and
+   rpit, which reads p4 and p5, found nothing there. Build them through this and
+   a slot is always whole, whatever the type turns out to need. */
+const ply1=o=>Object.assign(mkPly(),o);
 /* v17 fx migration, applied once per stored rack: standalone drv/crush become
    the equivalent `dist` curve, and verb size moves off the old linear 0.3..4.3s
    dial onto vrbSec() — the same room, a new number. */
@@ -1031,7 +1037,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.1546';
+const BUILD='2026-08-15.1552';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -3025,7 +3031,7 @@ const PRESETS0=()=>[
    Object.assign(p.vox,{uni:2,sprd:8,wide:0.5});
    p.fx[0]={typ:2,p1:0.25,p2:0.3,mix:0.25};
    p.fx[1]={typ:8,p1:0.57,p2:0,mix:0.3};
-   p.ply[0]={typ:1,p1:2,p2:0.012,p3:0};}),
+   p.ply[0]=ply1({typ:1,p1:2,p2:0.012,p3:0});}),
  mkP('LED','lead',p=>{p.osc[0].wav=3;
    p.osc[1]={wav:2,mode:0,dst:0,rat:1,amt:0.4,fine:-7,ph:0,phm:1};
    Object.assign(p.env[0],{a:0.002,d:0.2,s:0.7,r:0.12});
@@ -9282,8 +9288,8 @@ function genPreset(cat,rnd,wild=0.5){
     ?{typ:pick(wild>0.6?[1,2,3,4,5,XDIST,12]:[1,2,4]),p1:+R(0.15,0.5).toFixed(2),p2:+R(0.2,0.5).toFixed(2),mix:+R(0.1,0.2+0.35*wild).toFixed(2)}
     :{typ:8,p1:+R(0.38,0.49+0.28*wild).toFixed(2),p2:0,mix:+R(0.12,0.2+0.25*wild).toFixed(2)};
   if(wild>0.5&&P(0.3))p.fx[1]={typ:pick([1,2,5,12]),p1:+R(0.1,0.5).toFixed(2),p2:+R(0.1,0.5).toFixed(2),mix:+R(0.1,0.35).toFixed(2)};
-  if(cat==='chord'&&P(0.6))p.ply[0]={typ:1,p1:RI(0,4),p2:+R(0,0.02).toFixed(3),p3:1};
-  if((cat==='plk'||cat==='lead')&&wild>0.6&&P(0.2))p.ply[0]={typ:2,p1:2,p2:0,p3:1};
+  if(cat==='chord'&&P(0.6))p.ply[0]=ply1({typ:1,p1:RI(0,4),p2:+R(0,0.02).toFixed(3),p3:1});
+  if((cat==='plk'||cat==='lead')&&wild>0.6&&P(0.2))p.ply[0]=ply1({typ:2,p1:2,p2:0,p3:1});
   if((cat==='lead'||cat==='bass')&&P(0.25))p.vox.glide=+R(0.02,0.1).toFixed(2);
   if(cat==='pad'||cat==='lead'||cat==='chord')Object.assign(p.vox,{uni:pick(wild>0.5?[3,5,7]:[1,3,5]),sprd:RI(6,15)*2});
   if(cat==='bass'){p.vox.mode=1;
@@ -9291,6 +9297,15 @@ function genPreset(cat,rnd,wild=0.5){
   p.mix.lvl=+R(0.25,0.38).toFixed(2);   // supporting, not buried — see MIXT
   foldMod(p);
   genSpice(p,cat,wild,{R,RI,P,pick});
+  /* AND GIVE EVERY ROUTE AN ADDRESS. foldMod() stamps _addr on the way past,
+     and everything above writes routes in the engine's legacy (dst,idx) form
+     AFTER that — so addrMod's own guard turned it into a no-op for exactly the
+     routes that needed it, and better than a quarter of every generated
+     modulator arrived with no address at all. They still SOUNDED, because the
+     legacy pair is what the engine wires, but the rack reads addresses: a mod
+     slot with a source, an amount and nothing to point at is the "many slots
+     occupied by unassigned things" that a dice roll left behind. */
+  p._addr=false; addrMod(p);
   return p;
 }
 /* ---- '/' random button: beat / lane / slot generators ---------------- */
