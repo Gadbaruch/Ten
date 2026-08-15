@@ -474,6 +474,16 @@ const vrbSec=v=>0.05+4.45*Math.pow(clamp(v,0,1),2);
 const vrbInv=s=>clamp(Math.sqrt(Math.max(0,s-0.05)/4.45),0,1);
 const GPATS=[[1,1,1,1,0,0,0,0],[0,0,1,1,0,0,1,1],[1,0,1,0,1,0,1,0],[1,.7,.45,.3,.2,.12,.07,0],[1,0,0,1,0,0,1,0]];
 const PTYPES=['off','chord','arp','grv','prep','rev','rndp','vel','chc','euc','nudge','hmnz','flam','rpit','len','rtc','cyc','spry'];
+/* RETIRED, not deleted. `nudge` was a static ±60ms shift on the play rack —
+   a timing offset dressed as a performance effect, which is groove's job and
+   humanize's, and which Gad is right that nobody reaches for. Moving notes is
+   a thing you do to NOTES, on the grid, with , and . — see the nudge below.
+   The INDEX has to stay: PTYPES is stored by position, so pulling one out
+   would shift hmnz, flam, rpit, len, rtc, cyc and spry down by one and silently
+   re-type every play slot in every saved set. Hidden from the picker instead,
+   and any slot already set to it keeps working — nothing of Gad's changes
+   under him. */
+const PHIDE=new Set([PTYPES.indexOf('nudge')]);
 /* groove templates: f(16th-index) -> -1..1, scaled by amt% * half a 16th */
 const GROOVES=[
  {n:'sw16',f:i=>i%2===1?1:0},
@@ -1061,7 +1071,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.2201';
+const BUILD='2026-08-15.2205';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1676,7 +1686,7 @@ const FX_P=sl=>{
 };
 const PLY_SCOPE=[SP('stage','p6','enum',{opts:['post','pre']})];   // pre = the recorder captures the output
 const PLY_P=sl=>{
-  const base=[SP('type','typ','enum',{opts:PTYPES})];
+  const base=[SP('type','typ','enum',{opts:PTYPES,skip:PHIDE})];
   const T=(...a)=>base.concat(a,PLY_SCOPE);
   if(sl.typ===1){
     const mapOn=Math.round(sl.map||0)===1;
@@ -16098,6 +16108,41 @@ const onKeyDown=e=>{
     const d=c==='Period'?1:-1;
     if(e.shiftKey){EXP.bump(d*0.05);
       flash('keyboard vel '+Math.round(clamp(CFG.kvel??0.9,0.02,1)*127)); return;}
+    /* , AND . ARE THE NUDGE when there is something to nudge, and the octave
+       when there is not — the same contextual rule ↑↓ already follow, where a
+       live selection owns them because moving what you selected is the only
+       reason you selected it.
+       NOTES, finely. ↑↓ move a selection by a whole grid step; these move it by
+       a QUARTER of one, which is the "fine grain note moving" the retired play
+       effect was pretending to be — except on the grid, on the notes you can
+       see, and undoable. */
+    if(SELALL!=null&&S.layer>=1&&!e.repeat){
+      const laneN=S.patterns[S.editPat].lanes[SELALL];
+      if(laneN&&laneN.events.length){
+        pushUndo('nudge');
+        const step=gridOf(laneN)/4, L=laneN.len;
+        laneN.events.forEach(ev=>{ev.t=fmod(ev.t+step*d,L);});
+        flash('◂▸ '+laneN.events.length+' notes '+(d>0?'+':'−')+'¼ '+gridName(gridOf(laneN)));
+        dirty=true; dirtySave=true; return;
+      }
+    }
+    /* SLOTS, by swapping with the neighbour. Only where the order is a CHAIN
+       and moving one means something you can hear — an fx rack is played in
+       order, and so are series filters. The osc rack is deliberately not here:
+       an operator's index is what `dst` routes point AT, so swapping two would
+       silently re-aim every route in the patch. */
+    if(S.layer>=2&&!S.mSel&&!e.repeat&&MODULES[S.curMod]
+       &&['fx','flt'].includes(MODULES[S.curMod].id)){
+      const MN=MODULES[S.curMod], rkN=modHolder(S.presets[S.editSnd],MN.id)[MN.id];
+      const from=clamp(S.curSlot|0,0,rkN.length-1), to=from+d;
+      if(to<0||to>=rkN.length){flash(MN.name+' slot '+((from+1)%10)+' is at the '+(d<0?'start':'end'));return;}
+      pushUndo('move slot');
+      const t=rkN[from]; rkN[from]=rkN[to]; rkN[to]=t;
+      engine.rebuildRack(S.editSnd); engine.refresh(S.editSnd);
+      gotoSlot(to);
+      flash(MN.name+' slot moved '+(d>0?'later':'earlier')+' — now '+((to+1)%10));
+      dirty=true; dirtySave=true; return;
+    }
     OCT[c==='Comma'?'l':'r']=true;
     /* BOTH TOGETHER IS HOME, the same gesture the pan pair has: the two keys
        are the two directions, so holding them at once asks for neither. The
