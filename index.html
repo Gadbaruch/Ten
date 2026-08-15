@@ -1061,7 +1061,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.1954';
+const BUILD='2026-08-15.2004';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -3966,10 +3966,23 @@ let fxwReady=false;
            portamento is when the axis is the take rather than the pitch. */
         else if(m.t==='cmov'){
           const to=Math.max(0,Math.min(1,+m.pos||0))*(this.len||1);
+          /* A JUMP IS A SPLICE, and a splice with no fade is a step in the
+             waveform — which is the click on every cue flip. The old position
+             keeps reading for a few ms under an equal-power fade while the new
+             one comes up: uncorrelated material either side, so sin/cos rather
+             than linear, which holds the level through the middle instead of
+             dipping 3dB. Short enough to land inside the 3ms of pre-roll
+             detectCuts already leaves before each hit, so the transient itself
+             is never faded across — it arrives at full level, on time. */
+          const xn=Math.max(0,Math.round(sampleRate*
+            (Number.isFinite(m.xf)?Math.min(0.03,Math.max(0,m.xf)):0.003)));
           for(const c9 of this.cx){
             if(c9.bus!==(m.bus|0))continue;
             if(m.gl>0.001){c9.gTo=to; c9.gK=1/Math.max(1,m.gl*sampleRate);}
-            else {c9.ph=to; c9.gTo=null;}
+            else {
+              if(xn>0&&Math.abs(to-c9.ph)>1){c9.xPh=c9.ph; c9.xf=xn; c9.xLen=xn;}
+              c9.ph=to; c9.gTo=null;
+            }
           }}
         /* LIVE RE-AIM. Pitch, speed, tempo and the crop used to reach a
            cursor only at its birth, so every one of them meant "next time":
@@ -4092,30 +4105,20 @@ let fxwReady=false;
             c.ph+=(c.gTo-c.ph)*c.gK;
             if(Math.abs(c.gTo-c.ph)<2)c.gTo=null;
           }
-          let l9,r9;
-          if(c.shift!==1){
-            /* PITCH INSIDE THE CURSOR: the head keeps the source's timing and
-               two crossfaded taps drift away from it at (1-ratio) — the trick
-               ten-psh played on the output, aimed at the buffer instead. */
-            c.tp=(c.tp+(1-c.shift)*c.step+W)%W;
-            const p1=c.tp, p2=(c.tp+W*0.5)%W;
-            const w1=Math.sin(Math.PI*p1/W), w2=Math.sin(Math.PI*p2/W);
-            this.tRd(c.ph-p1,SL,SR,len); const a1=this._rl, b1=this._rr;
-            this.tRd(c.ph-p2,SL,SR,len); const a2=this._rl, b2=this._rr;
-            l9=a1*w1+a2*w2; r9=b1*w1+b2*w2;
-          }else if(c.wrap){
-            /* A LOOP HAS ENDS OF ITS OWN. Grains wrap the whole buffer; a
-               key-spawned cursor wraps the CROP, so playing a cue near the
-               end runs on into the start again instead of stopping there. */
-            let i2=c.ph;
-            const lo9=c.lo||0, hi9=c.end||len, w9=Math.max(1,hi9-lo9);
-            if(i2<lo9||i2>=hi9){i2=((i2-lo9)%w9+w9)%w9+lo9; c.ph=i2;}
-            const i0=i2|0, fx=i2-i0, i1=(i0+1)%len;
-            const ef=live?1:Math.min(1,i2/ew,(len-1-i2)/ew);   // a ring has no edges
-            l9=(SL[i0]+(SL[i1]-SL[i0])*fx)*ef;
-            r9=(SR[i0]+(SR[i1]-SR[i0])*fx)*ef;
-          }else{
-            this.tRd(c.ph,SL,SR,len); l9=this._rl; r9=this._rr;
+          /* PITCH INSIDE THE CURSOR: the head keeps the source's timing and
+             two crossfaded taps drift away from it at (1-ratio) — the trick
+             ten-psh played on the output, aimed at the buffer instead. The tap
+             advances ONCE per sample, outside the read, so a splice crossfade
+             reading a second position shares the same pair of taps. */
+          if(c.shift!==1)c.tp=(c.tp+(1-c.shift)*c.step+W)%W;
+          c.ph=this.rdCur(c,c.ph,SL,SR,len,live,ew,W);
+          let l9=this._rl, r9=this._rr;
+          if(c.xf>0){                       // …and the position it jumped FROM, fading out
+            const u=c.xf/c.xLen;
+            c.xPh=this.rdCur(c,c.xPh,SL,SR,len,live,ew,W);
+            const gO=Math.sin(u*1.5707963267948966), gN=Math.cos(u*1.5707963267948966);
+            l9=l9*gN+this._rl*gO; r9=r9*gN+this._rr*gO;
+            c.xPh+=c.step; c.xf--;
           }
           if(c.ch===1)r9=l9; else if(c.ch===2)l9=r9;      // stereo | left | right
           dL[k]+=l9*amp*c.gl;
@@ -4127,6 +4130,37 @@ let fxwReady=false;
           if(cloud)this.ng--; else if(c.id!=null)this.tv.delete(c.id);
         }
       }
+    }
+    /* ONE CURSOR READ, AT WHATEVER PHASE IT IS ASKED FOR. The three ways a
+       cursor can read — through its own shifter, wrapping its crop, or plain —
+       used to be three inline branches, which meant a crossfade wanting a
+       SECOND position would have had to duplicate all of them. Returns the
+       phase it actually read at, because the wrap may have folded it back
+       inside the crop and the caller wants that written back. */
+    rdCur(c,ph,SL,SR,len,live,ew,W){
+      if(c.shift!==1){
+        const p1=c.tp, p2=(c.tp+W*0.5)%W;
+        const w1=Math.sin(Math.PI*p1/W), w2=Math.sin(Math.PI*p2/W);
+        this.tRd(ph-p1,SL,SR,len); const a1=this._rl, b1=this._rr;
+        this.tRd(ph-p2,SL,SR,len); const a2=this._rl, b2=this._rr;
+        this._rl=a1*w1+a2*w2; this._rr=b1*w1+b2*w2;
+        return ph;
+      }
+      if(c.wrap){
+        /* A LOOP HAS ENDS OF ITS OWN. Grains wrap the whole buffer; a
+           key-spawned cursor wraps the CROP, so playing a cue near the end
+           runs on into the start again instead of stopping there. */
+        let i2=ph;
+        const lo9=c.lo||0, hi9=c.end||len, w9=Math.max(1,hi9-lo9);
+        if(i2<lo9||i2>=hi9)i2=((i2-lo9)%w9+w9)%w9+lo9;
+        const i0=i2|0, fx=i2-i0, i1=(i0+1)%len;
+        const ef=live?1:Math.min(1,i2/ew,(len-1-i2)/ew);   // a ring has no edges
+        this._rl=(SL[i0]+(SL[i1]-SL[i0])*fx)*ef;
+        this._rr=(SR[i0]+(SR[i1]-SR[i0])*fx)*ef;
+        return i2;
+      }
+      this.tRd(ph,SL,SR,len);
+      return ph;
     }
     /* one interpolated tape read into a scratch pair — a returned array here
        would allocate once per sample and hand the GC the audio thread */
@@ -10608,7 +10642,7 @@ const GRANF=[
    fmt:v=>v>=0.999?'\u221e tape':Math.round(v*1000)+'ms'}),
  SP('dens','dens','lin',{min:0.5,max:120,step:0.5,fmt:v=>v+'/s'}),
  SP('flow','flow','lin',{min:0,max:1,step:0.05,fmt:v=>v<0.02?'lock':Math.round(v*100)+'%'}),
- SP('gpitch','semis','lin',{min:-24,max:24,step:1,fmt:v=>v+'st'}),
+ SP('gpitch','semis','lin',{min:-24,max:24,step:1,big:12,fmt:v=>v+'st'}),
  SP('jit','jit','lin',{min:0,max:12,step:0.5,fmt:v=>'\u00b1'+v+'st'}),
  SP('shape','shape','lin',{min:0,max:1,step:0.05}),
  SP('rev','rev','lin',{min:0,max:1,step:0.05,fmt:v=>Math.round(v*100)+'%'}),
@@ -10622,7 +10656,8 @@ const GRANF=[
    get:()=>{const i=POOL.findIndex(p2=>p2.buf===(engine.granBuf||[])[S.editSnd]); return i<0?0:i;},
    set:(o,v)=>{const pi=S.editSnd, e2=POOL[clamp(Math.round(v),0,Math.max(0,POOL.length-1))];
      if(!e2){flash('pool is empty — record (\u2303+tab) or drop audio first');return;}
-     engine.granNode(pi); engine.setChanBuf(pi,e2.buf,e2.name);}}),
+     engine.granNode(pi); engine.setChanBuf(pi,e2.buf,e2.name);
+     takeToLane(pi,e2.buf); engine.audLive(pi);}}),
 ];
 /* (granAction lived here: the cloud's own knob handler, writing pre.gr and
    nothing else. audAction covers both halves of the page now, so a dial
@@ -10673,7 +10708,11 @@ const AUDF=[
 const AUDTAKE=[
  SP('start','st','lin',{min:0,max:0.98,step:0.01,fmt:v=>Math.round(v*100)+'%'}),
  SP('end','en','lin',{min:0.02,max:1,step:0.01,fmt:v=>Math.round(v*100)+'%'}),
- SP('pitch','semis','lin',{min:-24,max:24,step:1,fmt:v=>(v>0?'+':'')+v+'st'}),
+ /* ⇧ IS AN OCTAVE HERE, not ten of anything. The generic coarse step is ×10,
+    which on a semitone dial is ten semitones — a minor seventh, a number
+    nobody reaches for. `big` says what coarse MEANS for this param, and for a
+    pitch in semitones it means twelve. Same on the cloud's own pitch below. */
+ SP('pitch','semis','lin',{min:-24,max:24,step:1,big:12,fmt:v=>(v>0?'+':'')+v+'st'}),
 ];
 /* ONE LEVEL HERE, NOT TWO. There were two faders side by side — one for the
    loop rolling underneath, one for the cursors your fingers spawn — and a
@@ -10934,7 +10973,8 @@ function _prsAction(d){
     pushUndo('sample');
     if(engineGranP(p))engine.granNode(pi);
     engine.setChanBuf(pi,nx.buf,nx.name);
-    flash('sample → '+nx.name);
+    const g8=takeToLane(pi,nx.buf); engine.audLive(pi);
+    flash('sample → '+nx.name+takeSay(g8));
     dirty=true; dirtySave=true; return;
   }
   if(p.cat==='audio'
@@ -14068,6 +14108,45 @@ function detectCuts(buf,st,en,n){
   }
   return fr.slice(0,n);
 }
+/* THE TEMPO A LOOP IS PROBABLY AT. Length is the only clue a bare audio file
+   gives you, and it is very nearly enough on its own: a loop is a whole number
+   of beats, and the music people loop lives between 80 and 170bpm — so for
+   almost every real loop exactly ONE musical beat count puts the implied tempo
+   inside that window. brushkit.mp3 is 9.6s: 16 beats is 100bpm and nothing
+   else on the list is even in range. Ties go to the count whose tempo sits
+   nearest the middle of the window (geometric, ~117), then to the rounder
+   count, because loops come in whole bars and powers of two far more often
+   than not. Returns null when nothing fits — a one-shot, a field recording,
+   anything that is not a loop — and then nothing is assumed at all. */
+const TEMPOLO=80, TEMPOHI=170;
+const BEATCANDS=[1,2,3,4,6,8,12,16,24,32,48,64,96,128];
+function guessTake(durSec){
+  if(!(durSec>0.05))return null;
+  const mid=Math.sqrt(TEMPOLO*TEMPOHI);
+  let best=null;
+  for(const b of BEATCANDS){
+    const bpm=60*b/durSec;
+    if(bpm<TEMPOLO-1e-9||bpm>TEMPOHI+1e-9)continue;
+    const d=Math.abs(Math.log2(bpm/mid))+(b%4?0.15:0)+(Math.log2(b)%1?0.05:0);
+    if(!best||d<best.d)best={b,bpm,d};
+  }
+  return best?{beats:best.b,bpm:Math.round(best.bpm*10)/10}:null;
+}
+/* …and a take that lands on a channel brings that length with it, so `fit`
+   has a real number of beats to stretch against instead of whatever the lane
+   happened to be. Never over a lane with something played into it: the guess
+   is worth a lot on an empty channel and is not worth losing a jam for. */
+function takeToLane(pi,buf){
+  const g=guessTake(buf&&buf.duration); if(!g)return null;
+  const lane=S.patterns[S.editPat]&&S.patterns[S.editPat].lanes[pi];
+  if(!lane||lane.events.length)return g;
+  const bars=g.beats/4;
+  if(bars>=1&&Math.abs(bars-Math.round(bars))<1e-9){lane.unit='B'; lane.count=Math.round(bars);}
+  else {lane.unit='b'; lane.count=g.beats;}
+  lane.auto=false;
+  return g;
+}
+const takeSay=g=>g?'  ~'+g.bpm+'bpm, '+g.beats+' beats':'  (no loop tempo fits — left as it was)';
 function audPlace(pi,rec,startBeat,name='mic'){
   /* SILENCE IS NOT A TAKE. A muted mic, a denied permission, a channel with
      nothing routed to it — all of them used to overwrite a loaded sample
@@ -15910,6 +15989,36 @@ const onKeyDown=e=>{
       }
       return;
     }
+    /* ON AN AUDIO CHANNEL ↑↓ CROPS THE TAKE, because on a lane with no cue
+       events tab+↑↓ and tab+-/= were the same gesture wearing two key pairs:
+       loopOps doubles the loop LENGTH, stretchLoop scales the count and the
+       (absent) event times — and with the take fitted to the loop, both come
+       out as "the loop is twice as long, so the take plays half speed". Gad
+       spotted it. The pair that is now redundant takes the job the audio
+       channel actually wants: half as much material, or twice as much, the
+       same ×2/÷2 a midi loop's length does. -/= still stretches the loop.
+       ⇧ is still "offset the content", so it falls through to loopOps. */
+    if((c==='ArrowUp'||c==='ArrowDown')&&!rs(e)){
+      const tgA=chTargets().filter(i=>isAudioCh(i)&&engine.audBuf[i]);
+      if(tgA.length){
+        pushUndo('crop');
+        const f=c==='ArrowUp'?2:0.5;
+        let say='';
+        for(const i of tgA){
+          const p9=S.presets[i]; p9.au=p9.au||{};
+          const st9=clamp(p9.au.st??0,0,0.98);
+          const w9=clamp((clamp(p9.au.en??1,0,1)-st9)*f,0.01,1-st9);
+          p9.au.en=clamp(st9+w9,st9+0.01,1);
+          engine.audLive(i);
+          say=Math.round((p9.au.en-st9)*100)+'% of the take';
+        }
+        /* the cut list is cached against the crop, so it re-detects by itself
+           on the next read — but the page and any running cursor need telling */
+        HOLD.tabUsed=true; dirty=true; dirtySave=true;
+        if(tgA.length>1)chSay('crop '+say,tgA.length); else flash('crop '+say);
+        return;
+      }
+    }
     {const tg=chTargets(), pat=S.patterns[S.editPat];
      let did=false;
      tg.forEach(i=>{ if(loopOps(e,c,pat.lanes[i]))did=true; });
@@ -17625,7 +17734,8 @@ document.addEventListener('drop',e=>{
         pushUndo('audio drop');
         S.presets[pi].cat='audio';
         engine.setChanBuf(pi,buf,f.name.slice(0,18));
-        flash('audio → channel '+pi+' · '+f.name.slice(0,20)+' ('+buf.duration.toFixed(1)+'s)');
+        const g9=takeToLane(pi,buf); engine.audLive(pi);
+        flash('audio → channel '+pi+' · '+f.name.slice(0,20)+' ('+buf.duration.toFixed(1)+'s)'+takeSay(g9));
       }
       dirty=true; dirtySave=true;
     }).catch(()=>flash('could not decode that audio file'));
