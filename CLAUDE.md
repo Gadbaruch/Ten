@@ -8,6 +8,23 @@ config name `ten`).
 and in what order, and the traps that have each cost an hour. This file is the
 rules; that one is the state.
 
+## Starting a thread
+
+Before anything else, get both environments up and hand Gad his:
+
+1. Start the dev server if it is not running (`launch.json` name `ten`, port
+   3031) and **give him the link — `http://localhost:3031/` — in the first
+   reply.** He tests in his OWN Chrome, and he should not have to go looking
+   for the address or wonder whether the server is up.
+2. Open Claude's own tab in the gstack browse window and **cut its speakers
+   immediately**: `engine.comp.disconnect(AC.destination)`. Never assume a tab
+   left open by a previous thread is clean — reload it, and check the build
+   string is the one on disk.
+3. Read `NEXT.md`. This file is the rules; that one is the state.
+
+Localhost for him, not live: he should be testing the build that was just made,
+not the last one pushed. Live is for confirming a ship.
+
 ## The loop, every time
 
 1. Edit `index.html`.

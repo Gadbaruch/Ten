@@ -1061,7 +1061,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.2028';
+const BUILD='2026-08-15.1843';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -2668,10 +2668,16 @@ function magSpec(C,key){
   return px<0?null:{px,spec:C.specs[px]};
 }
 /* …except ↑↓, which always has somewhere to be: the field a letter last named
-   if the slot still has it, and the row's primary otherwise. The list changes
-   under a held scope — sync an lfo and `rate` becomes `rdiv` — so this is
-   asked every press rather than stored. */
-const magCur=(H,C)=>(magSpec(C,H.fld)?H.fld:magKey(C.mag.pri,C.slot));
+   if the slot still has it, the row's primary otherwise, and failing both the
+   first field there is — which is what ⌥x on an empty fx slot lands on, so the
+   dial picks WHICH EFFECT before there is anything for a primary to name. The
+   list changes under a held scope — sync an lfo and `rate` becomes `rdiv` — so
+   this is asked every press rather than stored. */
+function magCur(H,C){
+  if(magSpec(C,H.fld))return H.fld;
+  const p=magKey(C.mag.pri,C.slot);
+  return magSpec(C,p)?p:(C.specs[0]&&C.specs[0].key);
+}
 /* the strip is a VIEW: when it is open on this channel it follows the scope,
    so what you dial is what you are looking at — and when it is closed nothing
    here needs it to be open */
@@ -14805,7 +14811,12 @@ const onKeyDown=e=>{
          are on before you move them — this is the whole of the mapping, and
          it prints whether or not the strip is open to show it. */
       {const C=magCtx(HOLD.opt);
-       if(C){const F=magSpec(C,magCur(HOLD.opt,C));
+       /* the dial is PINNED at the open and does not drift afterwards: on an
+          empty fx slot the primary names a field that is not there yet, and
+          letting it re-resolve every press meant ↑ chose `delay` and the very
+          next ↑ dialled delay's time instead of walking on to the next effect */
+       if(C){HOLD.opt.fld=magCur(HOLD.opt,C);
+             const F=magSpec(C,HOLD.opt.fld);
              if(F){magSee(HOLD.opt,C,F.px); HOLD.opt.lbl=F.spec.lbl;}
              flash(magRead(HOLD.opt,C,T2.name+' ch '+ch+
                (list.length>1?' 1/'+list.length:'')+' · '));}
