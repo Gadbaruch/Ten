@@ -1031,7 +1031,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.1233';
+const BUILD='2026-08-15.1240';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1165,7 +1165,7 @@ const SETTINGS=[
 function basePreset(name){return{
   name, cat:'misc', tr:0, trs:0, prep:null,
   au:{gain:0.9,semis:0,rate:1,st:0,en:1,fit:1,src:0,pmode:0,chan:0,
-      kmode:0,auto:1,start:0,kvol:1,lvol:1,cues:{}},
+      kmode:0,auto:1,start:0,kvol:1,lvol:1,wnd:50,cues:{}},
   osc:rack(mkOsc), amp:rack(mkAmp), flt:rack(mkFlt), env:rack(mkEnv),
   lfo:rack(mkLfo), mod:rack(mkMod), fx:rack(mkFx), ply:rack(mkPly),
   vox:{mode:0,glide:0,uni:1,sprd:12,wide:0.6,slop:0.008},
@@ -10587,7 +10587,58 @@ function resetParam(){
   /* PRST is not a rack — presets have no `prs` key, so resolving a slot here
      threw. The layer-2 guard used to catch it by accident; now it is explicit. */
   if(M.prs)return;
-  if(oscFieldView(mi)){flash('code params: ←→ then ↑↓ · ⌫ resets rack params only');return true;}
+  if(oscFieldView(mi)){
+    /* THE ENGINE PAGES ARE FIELD LISTS, not slot racks, so ⌫ used to say so
+       and stop — which made it the one place in the instrument where the
+       reset key did nothing. Same key, same meaning: put this dial back to
+       what a fresh channel has. */
+    const pre9=S.presets[S.editSnd];
+    if(isAudioCh(S.editSnd)){
+      const all9=AUDALL(), sp9=all9[clamp(S.curParam,0,all9.length-1)];
+      if(!sp9)return true;
+      pushUndo('reset');
+      if(sp9.st==='gr'){
+        const GD9={pos:0,spray:0.05,size:0.12,dens:20,semis:0,jit:0,shape:0.5,rev:0.1,
+          width:0.5,scan:1,gain:0.8,fade:0.06,flow:0.5,dif:0,live:0,frz:0,fb:0,pmode:0};
+        pre9.gr=pre9.gr||{};
+        if(sp9.set)sp9.set(pre9.gr,GD9[sp9.key]); else pre9.gr[sp9.key]=GD9[sp9.key];
+        engine.granNode(S.editSnd); engine.granCfg(S.editSnd);
+        recAutoAud(S.editSnd,pre9,'grn',sp9,sp9.get?sp9.get(pre9.gr):pre9.gr[sp9.key]);
+      }else{
+        const B9=basePreset('').au||{};
+        let dv9=sp9.get?sp9.get(B9):B9[sp9.key];
+        /* a key with no default in the base preset would otherwise write
+           undefined straight into the dial and read back NaN */
+        if(!Number.isFinite(dv9))dv9=Number.isFinite(sp9.min)?sp9.min:0;
+        if(sp9.set)sp9.set(pre9.au,dv9); else pre9.au[sp9.key]=dv9;
+        if(sp9.key==='wnd')engine.audWnd(S.editSnd); else engine.audLive(S.editSnd);
+        recAutoAud(S.editSnd,pre9,'aud',sp9,sp9.get?sp9.get(pre9.au):pre9.au[sp9.key]);
+      }
+      flash(sp9.lbl+' reset — '+fmtVal(sp9,sp9.get
+        ?sp9.get(sp9.st==='gr'?pre9.gr:pre9.au)
+        :(sp9.st==='gr'?pre9.gr:pre9.au)[sp9.key]));
+      dirty=true; dirtySave=true; return true;
+    }
+    if(isWtCh(S.editSnd)){
+      const sp8=WTF[clamp(S.curParam,0,WTF.length-1)];
+      if(!sp8)return true;
+      pushUndo('reset');
+      const oi8=MODULES.findIndex(x=>x&&x.id==='osc');
+      const B8=basePreset('').osc[0];
+      setV(pre9,oi8,0,sp8,B8[sp8.key]);
+      engine.wtLive(S.editSnd,0,sp8.key);
+      flash(sp8.lbl+' reset'); dirty=true; dirtySave=true; return true;
+    }
+    if(isCodeCh(S.editSnd)){
+      const i8=clamp(S.curParam,0,7);
+      pushUndo('reset');
+      pre9.cp=pre9.cp||[1,1,1,0.5,0,0,0.5,0.3];
+      pre9.cp[i8]=[1,1,1,0.5,0,0,0.5,0.3][i8];
+      engine.codeSend(S.editSnd,{t:'p',i:i8,v:pre9.cp[i8]});
+      flash('p'+(i8+1)+' reset'); dirty=true; dirtySave=true; return true;
+    }
+    flash('nothing to reset here'); return true;
+  }
   const pre=S.presets[S.editSnd];
   if(S.prepFocus!=null&&pre.prep&&pre.prep.notes&&pre.prep.notes[S.prepFocus]){
     const slot0=M.flat?null:modHolder(pre,M.id)[M.id][si];
@@ -16482,7 +16533,7 @@ function load(json){
         p.code=sp.code||null; p.pmodel=resolveModel(sp.pmodel)||null; p.psel=sp.psel|0;
         p.cp=Array.isArray(sp.cp)?sp.cp.slice(0,8):[1,1,1,0.5,0,0,0.5,0.3];
         p.au=Object.assign({gain:0.9,semis:0,rate:1,st:0,en:1,fit:1,src:0,pmode:0,chan:0,
-          kmode:0,auto:1,start:0,kvol:1,lvol:1,cues:{}},sp.au||{});
+          kmode:0,auto:1,start:0,kvol:1,lvol:1,wnd:50,cues:{}},sp.au||{});
         /* v<23: the four keys modes were cue / pitch / freeze / gran, and
            whether the loop ran by itself was a consequence of which one you
            were in. Now it is a flag, and the modes are two:
