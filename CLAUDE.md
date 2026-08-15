@@ -158,12 +158,20 @@ Rearranged 2026-08-15 (Gad). Each one now means exactly one thing:
     win (ScrollLock/Pause/Insert)  LATCH — notes, scopes, rec, mute/solo.
                                    `KM.sl`, and every reader of it is
                                    unchanged: only who SETS it moved.
-    left shift   `KM.shl`          GLOBAL — the instrument-wide settings:
+    left shift   `KM.shl`          GLOBAL — and it SILENCES the keyboard while
+                                   it is down, the way ⌃ and ⌘ do, because
+                                   every letter under it is a candidate for an
+                                   instrument-wide setting. The
+                                   instrument-wide settings:
                                    ⇧q quantize · ⇧o overdub · ⇧b tap tempo ·
                                    ⇧m click · ⇧esc settings. `gblOf()`.
     right shift  `KM.sr`           NAVIGATION and DIALS only — loop lengths,
                                    the coarse step, walking a rack. `rs()`.
     left ctrl    `HOLD.t`          TOOLS — c/x/v, z (⇧z redo), s. A second ⌘.
+                 `TOOLKEY`         …and PrintScreen, because Gad's board
+                                   remaps its left control to it. Ask HOLD.t,
+                                   never e.ctrlKey: PrintScreen sets no
+                                   modifier flag at all.
     ⌥                              the CHANNEL's scopes, unchanged.
 
 Latch was on left shift and that is what forced the compromise where ⇧ inside

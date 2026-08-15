@@ -1061,7 +1061,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.2155';
+const BUILD='2026-08-15.2201';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -2515,6 +2515,9 @@ const altOf=e=>KM.altLatch||!!e.altKey;
 const cmdOf=e=>!!e.metaKey;
 /* the TOOLS layer: left control, and only the left one — see the block in
    onKeyDown for why the side is the whole design */
+/* HOLD.t, not e.ctrlKey — PrintScreen sets no modifier flag at all, so asking
+   the event which modifiers are down would answer "none" for exactly the key
+   Gad's board sends. The hold is the truth. */
 const toolsOf=e=>HOLD.t&&!e.metaKey&&!altOf(e);
 /* THE FUNCTION LAYER IS ⌥. It was ⌃ for a day, and control is the one
    modifier a left hand cannot reach while it plays. ⌥S and ⌥A keep their old
@@ -12773,7 +12776,13 @@ const MIC={stream:null,on:false,latched:false,node:null,ring:null,w:0,sr:0,
    ⌃+letter chords (⌃b ⌃c ⌃o ⌃q ⌃m, ⌃+tab) still answer to either control —
    they read e.ctrlKey, not which key it came from — so the tools layer, when
    it grows bindings, has to say what happens to those. */
-const MICKEY=c=>c==='ControlRight'||c==='Fn'||c==='PrintScreen';
+const MICKEY=c=>c==='ControlRight'||c==='Fn';
+/* WHAT THE TOOLS KEY PHYSICALLY IS. Gad's board remaps its left control to
+   PrintScreen, so ControlLeft never arrives and tools never fired — the press
+   went to the MIC instead, which was still claiming PrintScreen from when it
+   was the 60%-board stand-in. Both codes are tools now and the mic keeps the
+   right control, Fn, and escape's hold, so nothing it could do was lost. */
+const TOOLKEY=c=>c==='ControlLeft'||c==='PrintScreen';
 /* ⌥M just made a mod (env by default). While ⌥ is STILL down, one letter
    re-sources it: l lfo, v velocity, k key, / random, e env again. Closed the
    moment ⌥ comes up, so the letters go back to their scopes. */
@@ -15216,7 +15225,8 @@ const onKeyDown=e=>{
   /* TOOLS is TRACKED, not claimed: the key itself must not swallow its own
      event or every ⌃+letter the instrument already had would die with it.
      What it means is decided by the letter that follows. */
-  if(e.code==='ControlLeft'&&!e.repeat){HOLD.t=true; HOLD.tUsed=false;}
+  if(TOOLKEY(e.code)&&!e.repeat){HOLD.t=true; HOLD.tUsed=false;
+    if(e.code==='PrintScreen')e.preventDefault();}   // it is a screenshot on some setups
   if(LATCHKEY(e.code)){const fresh=!KM.sl; KM.sl=true;
     e.preventDefault();
     if(PICK){PICK.peek=true; dirty=true;}
@@ -16862,7 +16872,13 @@ const onKeyDown=e=>{
      both open the volume hold and sound a note */
   /* WITH A SCOPE RIDING ON ⌥ the letters play right through it — that is the
      point of keeping ⌥ down: dial with one hand, hear it with the other. */
-  if(isNoteKey(c)&&!e.repeat&&(S.layer>0||S.layer===-1)&&!e.ctrlKey&&!e.metaKey
+  /* …AND LEFT SHIFT SILENCES THE BOARD, because it is the global modifier now:
+     while it is down every letter is a candidate for an instrument-wide
+     setting, so sounding one as well would mean ⇧q both toggled quantize and
+     played a note. The same rule ⌃ and ⌘ have always had, arriving late
+     because left shift only stopped being the latch an hour ago. `rs()` is
+     untouched — the RIGHT shift is navigation and still plays. */
+  if(isNoteKey(c)&&!e.repeat&&(S.layer>0||S.layer===-1)&&!e.ctrlKey&&!e.metaKey&&!KM.shl
      &&(!altOf(e)||ALTSUS.size>0)&&!scopeHeldOn(c)){
     e.preventDefault();
     /* NOTHING DOUBLES. With an analog board connected, a letter you press is
@@ -17530,7 +17546,7 @@ const onKeyUp=e=>{
       dirty=true;}
     return;}
   if(c==='KeyM'&&HOLD.m){HOLD.m=false; HOLD.mUsed=false; return;}
-  if(c==='ControlLeft'){HOLD.t=false; HOLD.tUsed=false;}
+  if(TOOLKEY(c)){HOLD.t=false; HOLD.tUsed=false;}
   if(c==='BracketLeft')BRK.l=false;
   if(c==='BracketRight')BRK.r=false;
   if(c==='Comma')OCT.l=false;
