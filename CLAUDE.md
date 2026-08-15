@@ -169,9 +169,16 @@ Rearranged 2026-08-15 (Gad). Each one now means exactly one thing:
                                    the coarse step, walking a rack. `rs()`.
     left ctrl    `HOLD.t`          TOOLS — c/x/v, z (⇧z redo), s. A second ⌘.
                  `TOOLKEY`         …and PrintScreen, because Gad's board
-                                   remaps its left control to it. Ask HOLD.t,
-                                   never e.ctrlKey: PrintScreen sets no
-                                   modifier flag at all.
+                                   remaps its left control to it.
+       **TOOLS IS ARMED, NOT HELD.** PrintScreen does not deliver a normal
+       press: the OS treats it as a ONE-SHOT and sends keydown and keyup
+       together, or only the keyup. It worked as the mic because mic on/off is
+       a TOGGLE and a toggle needs one edge; a hold needs the key still down
+       when the letter lands, and it never is. So either edge ARMS the layer,
+       the next c/x/v/z/s spends it, a second tap cancels, and it lapses after
+       2.5s so one edge can never leave it stuck. Edges inside 250ms are ONE
+       tap — the pair belonging to a single press must not read as two, in
+       either direction. A real control key still behaves as a hold.
     ⌥                              the CHANNEL's scopes, unchanged.
 
 Latch was on left shift and that is what forced the compromise where ⇧ inside

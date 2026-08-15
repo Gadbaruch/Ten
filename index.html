@@ -1108,7 +1108,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.2222';
+const BUILD='2026-08-15.2228';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -2560,8 +2560,34 @@ const altOf=e=>KM.altLatch||!!e.altKey;
    worked on a PC, which was fine while control meant nothing on its own — it
    is the FUNCTION LAYER now, and ⌃c has to be "hold volume", not "copy". */
 const cmdOf=e=>!!e.metaKey;
-/* the TOOLS layer: left control, and only the left one — see the block in
-   onKeyDown for why the side is the whole design */
+/* THE TOOLS LAYER, armed rather than held — see the TOOLKEY block in
+   onKeyDown for why. A tap arms it for a short window, the next c/x/v/z/s
+   spends it, tapping again while armed puts it away, and it lapses by itself
+   so a key that only ever sends one edge cannot leave it stuck on. */
+let TOOLT=null, TOOLAT=0;
+function armTools(code){
+  const now=performance.now();
+  /* ONE PHYSICAL TAP IS ONE EDGE OR TWO, and we cannot tell in advance which
+     this board sends — so both arm, and the pair that belongs to the SAME tap
+     must not read as two. Anything inside 250ms of the last edge is the same
+     press still finishing; a genuine second tap after that puts the layer
+     away, so it can always be cancelled. */
+  if(HOLD.t&&code==='PrintScreen'&&now-TOOLAT>250){disarmTools(); flash('tools off'); return;}
+  /* …and the OTHER half of that tap must not turn it straight back on: the
+     cancel happens on one edge and the key still owes us the other. */
+  if(!HOLD.t&&TOOLAT&&now-TOOLAT<250)return;
+  const fresh=!HOLD.t;
+  TOOLAT=now;
+  HOLD.t=true; HOLD.tUsed=false;
+  if(TOOLT)clearTimeout(TOOLT);
+  /* only the one-shot key needs a lapse; a control key clears on its own up */
+  TOOLT=code==='PrintScreen'
+    ? setTimeout(()=>{TOOLT=null; HOLD.t=false; dirty=true;},2500) : null;
+  if(code==='PrintScreen'&&fresh)flash('tools — c/x/v copy cut paste · z undo (⇧z redo) · s save');
+  dirty=true;
+}
+function disarmTools(){ if(TOOLT){clearTimeout(TOOLT); TOOLT=null;} HOLD.t=false; HOLD.tUsed=false;
+  TOOLAT=performance.now(); }
 /* EITHER SIGNAL, because relying on only one of them broke it both ways.
    HOLD.t is needed for PrintScreen, which sets no modifier flag at all — ask
    the event what is held and it answers "nothing" for exactly the key some
@@ -15269,11 +15295,18 @@ const onKeyDown=e=>{
         dirtySave=true;}
       DPICK=null; dirty=true; e.preventDefault(); return;}
   }
-  /* TOOLS is TRACKED, not claimed: the key itself must not swallow its own
-     event or every ⌃+letter the instrument already had would die with it.
-     What it means is decided by the letter that follows. */
-  if(TOOLKEY(e.code)&&!e.repeat){HOLD.t=true; HOLD.tUsed=false;
-    if(e.code==='PrintScreen')e.preventDefault();}   // it is a screenshot on some setups
+  /* TOOLS CANNOT BE A HOLD, and that is the whole bug. PrintScreen — which is
+     what Gad's board sends from its left control — does not deliver a normal
+     press: the OS treats it as a one-shot and fires keydown and keyup together,
+     or only the keyup. It worked as the MIC because mic on/off is a TOGGLE and
+     a toggle needs one event; tools needed the key to still be down when the
+     letter arrived, and by then HOLD.t had already been cleared. So z played a
+     note and nothing flashed, because nothing fired.
+     Armed, not held: either edge arms the layer, the next tools letter spends
+     it, and it lapses on its own so it can never be left stuck. A real control
+     key still behaves like a hold — it re-arms on every repeat and clears on
+     its own key-up — so nothing changes for a board that sends one. */
+  if(TOOLKEY(e.code)){armTools(e.code); if(e.code==='PrintScreen')e.preventDefault();}   // it is a screenshot on some setups
   if(LATCHKEY(e.code)){const fresh=!KM.sl; KM.sl=true;
     e.preventDefault();
     if(PICK){PICK.peek=true; dirty=true;}
@@ -15647,13 +15680,13 @@ const onKeyDown=e=>{
      that does nothing is a bug report waiting to be filed. */
   if(toolsOf(e)&&!e.repeat){
     const K=e.code;
-    if(K==='KeyZ'){e.preventDefault(); HOLD.tUsed=true; (e.shiftKey?doRedo:doUndo)(); return;}
-    if(K==='KeyS'){e.preventDefault(); HOLD.tUsed=true;
+    if(K==='KeyZ'){e.preventDefault(); HOLD.tUsed=true; disarmTools(); (e.shiftKey?doRedo:doUndo)(); return;}
+    if(K==='KeyS'){e.preventDefault(); HOLD.tUsed=true; disarmTools();
       const askWhere=e.shiftKey||S.setSlot==null;
       if(askWhere){PEEKED=null; PICK={mode:'save',sel:S.setSlot??0,confirm:false,peek:false};}
       else saveToSlot(S.setSlot);
       dirty=true; return;}
-    if(K==='KeyC'||K==='KeyX'||K==='KeyV'){e.preventDefault(); HOLD.tUsed=true;
+    if(K==='KeyC'||K==='KeyX'||K==='KeyV'){e.preventDefault(); HOLD.tUsed=true; disarmTools();
       const op=K==='KeyC'?'copy':K==='KeyX'?'cut':'paste';
       if(modLearnOp(op))return;
       clipboardOp(op); return;}
@@ -17641,7 +17674,9 @@ const onKeyUp=e=>{
       dirty=true;}
     return;}
   if(c==='KeyM'&&HOLD.m){HOLD.m=false; HOLD.mUsed=false; return;}
-  if(TOOLKEY(c)){HOLD.t=false; HOLD.tUsed=false;}
+  /* the key-up ARMS it too, because on the keyup-only boards that is the only
+     edge there is. A real control clears instead: it was a genuine hold. */
+  if(TOOLKEY(c)){ if(c==='PrintScreen')armTools(c); else disarmTools(); }
   if(c==='BracketLeft')BRK.l=false;
   if(c==='BracketRight')BRK.r=false;
   if(c==='Comma')OCT.l=false;
