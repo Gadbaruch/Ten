@@ -1051,7 +1051,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.1632';
+const BUILD='2026-08-15.1641';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -2346,11 +2346,14 @@ function focusIsStepped(){
      still stops a bounce from moving anything twice. */
   return false;
 }
-/* the scopes whose arrows are notches rather than a continuum: n transposes in
-   octaves and semitones, i walks engines and presets, sc walks scales and keys.
-   v (velocity) and m (tempo) are left out on purpose — those ARE continua and
-   the dial belongs on them. */
-const scopeStepped=()=>!!(HOLD.n||HOLD.i||HOLD.sc);
+/* EVERY SCOPE'S ARROWS ARE NOTCHES. n transposes in octaves and semitones, i
+   walks engines and presets, sc walks scales and keys, v moves velocity and m
+   the tempo. The last two were left as dials on the argument that velocity and
+   tempo are continua — which is true of the VALUES and false of the gesture:
+   with a scope held you are reaching for a number you have in mind, not
+   sweeping for one, and a control that runs away under a finger you leaned on
+   is the opposite of that. One press, one step, in all of them. */
+const scopeStepped=()=>!!(HOLD.n||HOLD.i||HOLD.sc||HOLD.v||HOLD.m);
 function arepStop(){if(AREP.timer){clearTimeout(AREP.timer);AREP.timer=null;}
   if(AREP.stopT){clearTimeout(AREP.stopT);AREP.stopT=null;} AREP.code=null;}
 function arepStart(code){
