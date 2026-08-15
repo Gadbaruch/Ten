@@ -54,12 +54,34 @@ Gran is pitch keys with the loop off. None of them are modes any more.
 - **A take arrives knowing its tempo** — `guessTake()` picks the beat count
   that puts the implied bpm in 80..170, and the lane takes it on load (never
   over a lane with events in it).
+- **Takes travel with the set.** `audRef()`/`restoreAudio()` — a factory phrase
+  comes back by re-fetch, a dropped or recorded one comes back as a NAMED hole
+  with its channel's settings intact and a flash saying which file to drop.
+  SAVEV 26. Embedding the audio itself is deliberately still not done.
+- **A live re-aim accepted no reverse.** `tset` gated on `m.rate>0`, so every
+  negative rate was dropped and reversing under a sounding take did nothing
+  until the next trigger. Measured forward 0.0207→0.1036, then back to 0.0031
+  and round to 0.9826.
 - **sync and speed are two fields.** They shared one dial with sync at the
   centre detent, so they were mutually exclusive and a mod route on speed had
   to outrank sync to move anything. `audRate()` is the one place the rate is
   decided. Synced-and-double-time is measurable now: 1.2 · 2.4 · 0.6 against
   a fitted 1.2. Old presets migrate through `audSpd()` — the detent reads back
   as sync + ×1 and nothing saved has to move.
+
+## THE RULE: A CHANGE IS NEVER HEARD AS A STOP
+
+Gad, 2026-08-15, and it is a standing rule rather than a bug report: every
+audio change lands instantly, on what is already sounding. A cursor is told
+its rate and its LIFE when it is born, so anything that moves the loop length
+or the tempo has to re-aim all three — rate, life, position — or the take
+carries on at the old speed and then dies at the old cycle end. That gap is
+what "tab+-/= stops the audio" was. `engine.audRelock(pi)` is where the rule
+is kept; call it from anything that changes what a cycle means. Measured, the
+carrier sampled every 150ms across a x4 length change whose old cycle ended at
+1.0s:
+    no relock    1 1 1 1 1 0 0 0 0 0 0 0
+    with relock  1 1 1 1 1 1 1 1 1 1 1 1
 
 ## What is next, in order
 

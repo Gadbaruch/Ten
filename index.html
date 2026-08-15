@@ -1061,7 +1061,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.2015';
+const BUILD='2026-08-15.2026';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -3982,6 +3982,9 @@ let fxwReady=false;
             (Number.isFinite(m.xf)?Math.min(0.03,Math.max(0,m.xf)):0.003)));
           for(const c9 of this.cx){
             if(c9.bus!==(m.bus|0))continue;
+            /* a relock is the LOOP's business: it must not drag a key's own
+               grab along with it, and those share the bus */
+            if(m.car&&!c9.car)continue;
             if(m.gl>0.001){c9.gTo=to; c9.gK=1/Math.max(1,m.gl*sampleRate);}
             else {
               if(xn>0&&Math.abs(to-c9.ph)>1){c9.xPh=c9.ph; c9.xf=xn; c9.xLen=xn;}
@@ -3995,10 +3998,25 @@ let fxwReady=false;
            change or a crop stretch the sound instead of stepping it. */
         else if(m.t==='tset'){
           for(const [id,v] of this.tv){
-            if(Number.isFinite(m.rate)&&m.rate>0){v.sTgt=m.rate; v.base=m.base||m.rate;}
+            /* rate>0 THREW AWAY EVERY REVERSE. A negative rate is a real rate
+               here — it is the whole of how backwards works — so the live
+               re-aim silently refused it and reversing the speed under a
+               sounding take did nothing until the next trigger. Zero is the
+               only rate that is not one. */
+            if(Number.isFinite(m.rate)&&m.rate!==0){
+              v.sTgt=m.rate; v.base=Number.isFinite(m.base)&&m.base!==0?m.base:m.rate;}
             if(Number.isFinite(m.sh)&&m.sh>0)v.shift=m.sh;
             if(Number.isFinite(m.end)&&m.end>0)v.end=m.end;
             if(Number.isFinite(m.gain)&&m.gain>=0)v.gain=m.gain;
+            /* THE CARRIER'S REMAINING LIFE, RE-CUT. A cursor is told how long
+               it lives when it is born, so a loop that grows under it still
+               died at the OLD cycle end and left silence until audCycle came
+               round on the new grid — the gap Gad hears as "tab+-/= stops the
+               audio". Measured from the caller to the next boundary on the new
+               length, and only for the carrier: a key's grab lives until the
+               finger leaves and must not be given a deadline. */
+            if(Number.isFinite(m.left)&&v.car)
+              v.life=v.n+Math.max(1,Math.round(m.left*sampleRate));
           }}
         /* a stop can be SCHEDULED: the sequenced cue lane stops at a beat that
            has not happened yet, so carry the frame and let the voice die there */
@@ -4496,8 +4514,12 @@ function setBpm(v){
   T.bpm=clamp(v,40,280);
   G.b0=gb; G.t0=AC.currentTime;
   /* a fitted take is defined against the tempo, so moving the tempo has to
-     move it NOW — it glides on the voice's own slew, which is a stretch */
-  engine.audLiveAll();
+     move it NOW — it glides on the voice's own slew, which is a stretch.
+     RELOCK, not just re-rate: a tempo change moves the cycle LENGTH too, so
+     the carrier's life was still cut to the old one and a slower tempo left
+     it dying early, one gap per cycle, for the same reason a stretched loop
+     did. Same rule, same call. */
+  engine.audRelockAll();
   dirty=true; dirtySave=true;
 }
 function play(){
@@ -8482,10 +8504,40 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     return a;
   }
   /* mono/legato: send the cursors that are already reading somewhere else */
-  audMove(pi,frac,glideSec,bus){
+  audMove(pi,frac,glideSec,bus,onlyCar){
     const e9=this.gn&&this.gn[pi]; if(!e9||!e9.node)return;
-    try{e9.node.port.postMessage({t:'cmov',pos:frac,gl:glideSec||0,bus:bus|0});}catch(_){}
+    try{e9.node.port.postMessage({t:'cmov',pos:frac,gl:glideSec||0,bus:bus|0,
+      car:onlyCar?1:0});}catch(_){}
   }
+  /* A LENGTH CHANGE IS NOT A STOP — the rule, and this is where it is kept for
+     the loop. Stretching or cropping under a running take used to reach it
+     three ways and land none of them: audLive recomputed the rate from the
+     lenBeats the cursor was BORN with, the cursor kept a life cut to the old
+     cycle and died there, and the head stayed wherever the old rate had
+     carried it. So: the ask is updated first, then the rate, then the life is
+     re-cut to the next boundary on the new grid, and finally the head is put
+     at the point in the take the new loop position asks for — through the same
+     3ms splice a cue flip uses, so it is a seam and not a click.
+     Only under sync: a free take runs at its own speed and the loop has no
+     opinion about where in it you should be. */
+  audRelock(pi){
+    if(!this.audBuf[pi])return;
+    const lane=S.patterns[S.editPat]&&S.patterns[S.editPat].lanes[pi];
+    const L=lane&&lane.len; if(!(L>0))return;
+    const ask=(this.audAsk||[])[pi];
+    if(ask)ask.lenBeats=L;
+    this.audLive(pi);
+    if(!T.playing)return;
+    const a=actAt(posNow()), ph=fmod(posNow()-a.anchor,L);
+    const e9=this.gn&&this.gn[pi];
+    if(e9&&e9.node)
+      try{e9.node.port.postMessage({t:'tset',left:Math.max(0.02,(L-ph)*spb())});}catch(_){}
+    const au=Object.assign({},S.presets[pi].au||{},(this.audOv&&this.audOv[pi])||{});
+    if(!Math.round(au.fit||0))return;
+    const st=clamp(au.st??0,0,0.98), en=clamp(au.en??1,st+0.01,1);
+    this.audMove(pi,st+(ph/L)*(en-st),0,1,1);
+  }
+  audRelockAll(){for(const i of CHANS())if(isAudioCh(i))this.audRelock(i);}
   audOff(pi,id){
     const e9=this.gn&&this.gn[pi]; if(!e9||!e9.node||!id)return;
     try{e9.node.port.postMessage({t:'toff',id});}catch(_){}
@@ -8733,7 +8785,7 @@ fetch('samples/manifest.json').then(r=>r.ok?r.json():null).then(man=>{
   for(const en of man.slice(0,32)){   // the pool itself holds 32
     fetch('samples/'+en.file).then(r=>r.ok?r.arrayBuffer():null)
       .then(ab=>ab&&AC.decodeAudioData(ab))
-      .then(buf=>{if(buf){poolAdd(buf,en.name||en.file.replace(/\.\w+$/,'')); seedCloud();}})
+      .then(buf=>{if(buf){poolAdd(buf,en.name||en.file.replace(/\.\w+$/,''),{k:'f',f:en.file}); seedCloud();}})
       .catch(()=>{});
   }
   setTimeout(()=>seedCloud(true),4000);   // whatever landed, rather than silence
@@ -12494,13 +12546,62 @@ function seedCloud(any){
   if(did)dirty=true;
   return did;
 }
-function poolAdd(buf,name){
+/* WHERE A TAKE CAME FROM, carried on the pool entry so a SET can name it
+   again after a reload. Three origins and only one of them is re-fetchable:
+     {k:'f',f:'brushkit.mp3'}   a factory phrase — the path IS the take
+     {k:'d',f:'mybreak.wav'}    a file you dropped — the browser hands a File
+                                with a name and no readable path, so the name
+                                is every bit of it that can be written down
+     {k:'r'}                    recorded or resampled here; it exists nowhere
+                                but in this session's memory
+   A set stores the reference either way. Factory takes come back by
+   themselves; the other two come back as a NAMED HOLE, so the channel keeps
+   every setting it had and re-dropping the file puts the sound back under
+   them. Embedding the audio itself is the next step and is deliberately not
+   this one. */
+function poolAdd(buf,name,src){
   if(!buf)return -1;
   const i=POOL.findIndex(p2=>p2.buf===buf);
-  if(i>=0)return i;
+  if(i>=0){if(src&&!POOL[i].src)POOL[i].src=src; return i;}
   if(POOL.length>=32)POOL.shift();   // oldest label falls off; anything still referencing the buffer keeps it
-  POOL.push({name:String(name||'take').slice(0,18),buf});
+  POOL.push({name:String(name||'take').slice(0,18),buf,src:src||{k:'r'}});
   return POOL.length-1;
+}
+/* the take on a channel, as something a save can write down */
+function audRef(pi){
+  const buf=engine.audBuf[pi]||(engine.granBuf||[])[pi];
+  if(!buf)return null;
+  const e=POOL.find(p2=>p2.buf===buf);
+  return {n:(e&&e.name)||engine.audName[pi]||'take', src:(e&&e.src)||{k:'r'}};
+}
+/* …and putting them back. Factory files are re-fetched and re-attached to
+   every channel that asked for them; anything else is reported by name rather
+   than silently missing, because "channel 7 is quiet" and "channel 7 wants
+   mybreak.wav" are very different things to be told. */
+function restoreAudio(refs){
+  if(!Array.isArray(refs))return;
+  const want=new Map(), miss=[];
+  refs.forEach((r,i)=>{
+    if(!r||!r.src)return;
+    if(r.src.k==='f'&&r.src.f){
+      if(!want.has(r.src.f))want.set(r.src.f,[]);
+      want.get(r.src.f).push(i);
+    }else miss.push('ch '+i+' \u2192 '+(r.src.f||r.n||'a take from that session'));
+  });
+  for(const [file,chans] of want){
+    const have=POOL.find(p2=>p2.src&&p2.src.k==='f'&&p2.src.f===file);
+    const put=buf=>{ if(!buf)return;
+      for(const i of chans){ engine.granNode(i); engine.setChanBuf(i,buf,file.replace(/\.\w+$/,'')); }
+      engine.audRelockAll(); dirty=true; };
+    if(have){put(have.buf); continue;}
+    fetch('samples/'+file).then(r=>r.ok?r.arrayBuffer():null)
+      .then(ab=>ab&&AC.decodeAudioData(ab))
+      .then(buf=>{ if(buf){poolAdd(buf,file.replace(/\.\w+$/,''),{k:'f',f:file}); put(buf);} })
+      .catch(()=>{});
+  }
+  if(miss.length)setTimeout(()=>flash('this set wants audio that cannot travel with it \u2014 '+
+    miss.slice(0,3).join(' \u00b7 ')+(miss.length>3?' \u00b7 +'+(miss.length-3)+' more':'')+
+    ' \u2014 drop the file on the channel and its settings are all still there'),600);
 }
 const MIC={stream:null,on:false,latched:false,node:null,ring:null,w:0,sr:0,
   _down:false,_used:false,_latch:false};
@@ -14280,7 +14381,7 @@ function audPlace(pi,rec,startBeat,name='mic'){
     else dst[di]=rec[i];
   }
   engine.audBuf[pi]=cv; engine.audName[pi]=name;
-  poolAdd(cv,name+' ch'+pi);
+  poolAdd(cv,name+' ch'+pi,{k:'r'});
   if(engineGranP(S.presets[pi])){engine.granBuf=engine.granBuf||[];
     engine.granBuf[pi]=cv; engine.granSend(pi);}
   S.presets[pi].cat='audio';
@@ -15365,6 +15466,10 @@ const onKeyDown=e=>{
     {const tg=chTargets(), pat=S.patterns[S.editPat], f=c==='Minus'?0.5:2;
      let did=false;
      tg.forEach(i=>{ if(stretchLoop(pat.lanes[i],f))did=true; });
+     /* THE TAKE FOLLOWS THE LENGTH, INSTANTLY. Without this the loop grew and
+        the take carried on at the old rate until its old life ran out, which
+        is a gap you hear as the audio stopping. */
+     tg.forEach(i=>{ if(isAudioCh(i))engine.audRelock(i); });
      if(did){HOLD.tabUsed=true; if(tg.length>1)chSay(f<1?'▸▸ double speed':'▸ half speed',tg.length);}}
     return;
   }
@@ -15751,6 +15856,7 @@ const onKeyDown=e=>{
     HOLD.tabUsed=true; return;}
   if(c==='Backspace'&&HOLD.tab){e.preventDefault();
     if(loopOps(e,c,curLoop()))HOLD.tabUsed=true;
+    chTargets().forEach(i=>{ if(isAudioCh(i))engine.audRelock(i); });
     return;}
   /* ⌫ ON THE SAMPLE FIELD EMPTIES THE CHANNEL. There was no way to take a
      take off a channel at all — you could load another one over it, and that
@@ -16106,7 +16212,7 @@ const onKeyDown=e=>{
           const st9=clamp(p9.au.st??0,0,0.98);
           const w9=clamp((clamp(p9.au.en??1,0,1)-st9)*f,0.01,1-st9);
           p9.au.en=clamp(st9+w9,st9+0.01,1);
-          engine.audLive(i);
+          engine.audRelock(i);
           say=Math.round((p9.au.en-st9)*100)+'% of the take';
         }
         /* the cut list is cached against the crop, so it re-detects by itself
@@ -16119,6 +16225,7 @@ const onKeyDown=e=>{
     {const tg=chTargets(), pat=S.patterns[S.editPat];
      let did=false;
      tg.forEach(i=>{ if(loopOps(e,c,pat.lanes[i]))did=true; });
+     tg.forEach(i=>{ if(isAudioCh(i))engine.audRelock(i); });
      if(did){HOLD.tabUsed=true; if(tg.length>1)chSay('loop',tg.length);}}
     return;
   }
@@ -17368,7 +17475,7 @@ window.addEventListener('blur',()=>{
 
 /* ---------------- persistence + migration ---------------------------- */
 const LS='ten-v1';
-const SAVEV=25;                       // bump BOTH: serialize writes it, load checks it
+const SAVEV=26;                       // bump BOTH: serialize writes it, load checks it
 /* v22: granular is the audio channel's MODE (au.amode), never a cat — old
    'gran' spellings are normalized on the way in */
 /* WHAT A SAVE SAYS vs WHAT THE RUNTIME USES.
@@ -17430,6 +17537,12 @@ function serialize(){return JSON.stringify({v:SAVEV,bpm:T.bpm,metro:S.metro,hum:
   clips:S.clips,scenes:S.scenes,clipAt:S.clipAt,sceneAt:S.sceneAt,
   arr:S.arr,
   patterns:S.patterns.map(p=>({state:p.state==='edit'?'on':p.state,sw:p.sw||0,lanes:p.lanes})),
+  /* THE TAKES TRAVEL WITH THE SET, as far as they can. A set used to save an
+     audio channel's every dial and none of its SOUND, so loading one gave you
+     a perfectly configured silence and no clue which file it wanted. One
+     reference per channel: a factory phrase comes back by itself, and anything
+     else comes back as a named hole with all its settings intact. */
+  aud:S.presets.map((p,i)=>audRef(i)),
   presets:S.presets.map(p=>portPreset({...p,modLoop:p.modLoop.toJSON()},true))});}
 function convertV3Preset(sp,i){ // v3-and-earlier preset data -> v4 racks
   const p=basePreset(sp.name||('P'+i));
@@ -17614,6 +17727,9 @@ function load(json){
     if(S.editSnd<CH_LOW)S.editSnd=CH_LOW;
     for(let i=0;i<10;i++){engine.rebuildRack(i);engine.refresh(i);}
     engine.rebuildMaster();
+    /* …and the takes. Last, after every channel exists and its dials are set,
+       so a re-fetched factory phrase lands on a channel that is ready for it. */
+    restoreAudio(o.aud);
     return true;
   }catch(err){console.warn('load failed',err);return false;}
 }
@@ -17811,7 +17927,7 @@ document.addEventListener('drop',e=>{
   const dropAlt=!!e.altKey;
   if(/audio|\.(wav|mp3|aiff?|m4a|ogg|flac)$/i.test((f.type||'')+f.name)){
     f.arrayBuffer().then(ab=>AC.decodeAudioData(ab)).then(buf=>{
-      poolAdd(buf,f.name.replace(/\.[^.]+$/,''));
+      poolAdd(buf,f.name.replace(/\.[^.]+$/,''),{k:'d',f:f.name});
       if(S.layer>=3&&MODULES[S.curMod]&&MODULES[S.curMod].id==='osc'&&!isAudioCh(S.editSnd)){
         engine.opSamples.set(S.editSnd+':'+S.curSlot,buf);
         S.presets[S.editSnd].osc[S.curSlot].wav=WAVES.indexOf('smp');
