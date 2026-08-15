@@ -1031,7 +1031,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.1538';
+const BUILD='2026-08-15.1546';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -2976,16 +2976,27 @@ const PRESETS0=()=>[
    p.env[2]={dst:2,idx:1,amt:55,a:0.001,d:0.05,s:0,r:0.05};
    p.amp[0]={typ:4,drv:0.35,mix:0.5,par:0};
    p.flt[0].frq=2400; p.vox.mode=1; p.mix.lvl=0.95;}),
- mkP('SNR','snr',p=>{p.osc[0].wav=4;
-   p.osc[1]={wav:1,mode:0,dst:0,rat:2.1,amt:0.5,fine:0,ph:0,phm:0};
-   p.osc[2]={wav:1,mode:0,dst:0,rat:3.15,amt:0.32,fine:0,ph:0,phm:0};
-   Object.assign(p.env[0],{a:0.001,d:0.16,s:0,r:0.07});
-   /* a narrow bandpass threw away most of the drum: measured, this one came
-      out five times quieter than the kick even with its fader at 90% */
-   Object.assign(p.flt[0],{typ:1,frq:6500,q:0.9});
-   p.env[2]={dst:2,idx:1,amt:60,a:0.001,d:0.05,s:0,r:0.05};
-   p.amp[0]={typ:4,drv:0.3,mix:0.45,par:0};
-   p.fx[0]={typ:8,p1:0.47,p2:0,mix:0.2};}),
+ /* THE SNARES, REBUILT. Every one of them was a noise-rooted voice with its
+    tuned shells on ops 1 and 2 — and a noise root made rootFreq 1, so those
+    shells were sounding at two and three HERTZ. What you heard was the noise
+    and nothing else: no body, no crack, no pitch. Measured against the kicks
+    with every fader at 0.8, SNR and S909 peaked at 0.32 to the kick's 0.72 and
+    S606 at 0.091, which is eighteen decibels down and effectively inaudible.
+    They are built the other way up now: a TONAL root carries the shell so its
+    pitch is real, the noise sits on top as the wires, and the sat fx does the
+    makeup the operator sum takes away (ops are summed at 1/sqrt of their total
+    level, so a three-op drum starts life quieter than a one-op kick and no
+    amount of tuning inside the voice gets it back). */
+ mkP('SNR','snr',p=>{                        // the all-purpose one: crisp, modern
+   Object.assign(p.osc[0],{wav:0,rat:0.72,amt:0.5});                          // shell, 188Hz
+   p.osc[1]={wav:0,mode:0,dst:0,rat:1.08,amt:0.26,fine:0,ph:0,phm:0,pw:0.5};  // second mode
+   p.osc[2]={wav:4,mode:0,dst:0,rat:1,amt:1,fine:0,ph:0,phm:1,pw:0.5};        // wires — the loudest thing here
+   Object.assign(p.env[0],{a:0.0004,d:0.15,s:0,r:0.05,crv:45});
+   p.env[2]={dst:2,idx:0,amt:70,a:0.0004,d:0.026,s:0,r:0.03,crv:0};
+   Object.assign(p.flt[0],{typ:2,frq:165,q:0.7});     // hp, out of the kick's way
+   p.fx[0]={typ:XTYPES.indexOf('sat'),p1:0.45,p2:0.66,p3:1,p5:0.5,p7:0.5,mix:0.9};
+   p.fx[1]={typ:8,p1:0.34,p2:0,mix:0.13};
+   p.vox.mode=1; p.mix.lvl=0.59;}),
  mkP('HAT','hh',p=>{p.osc[0].wav=4;
    p.osc[1]={wav:8,mode:0,dst:0,rat:6,amt:0.3,fine:0,ph:0,phm:1};
    Object.assign(p.env[0],{a:0.001,d:0.04,s:0,r:0.025});
@@ -3062,33 +3073,43 @@ const PRESETS0=()=>[
    Object.assign(p.flt[0],{typ:1,frq:2800,q:1});
    p.vox.mode=1; p.mix.lvl=0.92;}),
  mkP('S909','snr',p=>{                       // wires over two tuned heads
-   p.osc[0].wav=4;
-   p.osc[1]={wav:1,mode:0,dst:0,rat:2.1,amt:0.5,fine:0,ph:0,phm:0};
-   p.osc[2]={wav:1,mode:0,dst:0,rat:3.15,amt:0.34,fine:0,ph:0,phm:0};
-   Object.assign(p.env[0],{a:0.001,d:0.19,s:0,r:0.06});
-   Object.assign(p.flt[0],{typ:1,frq:7000,q:0.9});
-   p.env[2]={dst:2,idx:1,amt:55,a:0.001,d:0.04,s:0,r:0.04};
-   p.amp[0]={typ:4,drv:0.28,mix:0.4,par:0};
-   p.fx[0]={typ:8,p1:0.44,p2:0,mix:0.18}; p.mix.lvl=0.7;}),
+   /* the 909 is mostly WIRES — a long bright rattle over a shell you feel more
+      than hear — so the noise carries the level and the heads sit under it */
+   Object.assign(p.osc[0],{wav:0,rat:0.66,amt:0.4});                          // 173Hz
+   p.osc[1]={wav:0,mode:0,dst:0,rat:0.99,amt:0.2,fine:0,ph:0,phm:0,pw:0.5};   // 259Hz
+   p.osc[2]={wav:4,mode:0,dst:0,rat:1,amt:1,fine:0,ph:0,phm:1,pw:0.5};
+   Object.assign(p.env[0],{a:0.0003,d:0.2,s:0,r:0.07,crv:35});
+   p.env[2]={dst:2,idx:0,amt:55,a:0.0003,d:0.03,s:0,r:0.03,crv:0};
+   Object.assign(p.flt[0],{typ:2,frq:190,q:0.7});
+   p.fx[0]={typ:XTYPES.indexOf('sat'),p1:0.38,p2:0.72,p3:0,p5:0.5,p7:0.5,mix:0.85};
+   p.fx[1]={typ:8,p1:0.42,p2:0,mix:0.17};
+   p.vox.mode=1; p.mix.lvl=0.74;}),
  mkP('S808','snr',p=>{                       // the drum louder than the wires
-   /* the two shells sit ABOVE the played note, and the filter is a lowpass, so
-      the tone survives to be heard. A bandpass parked at 1.3k on a drum whose
-      fundamental is under 200Hz removes the exact thing that makes it an 808. */
-   Object.assign(p.osc[0],{wav:1,rat:2.2});
-   p.osc[1]={wav:1,mode:0,dst:0,rat:3.3,amt:0.55,fine:0,ph:0,phm:0};
-   p.osc[2]={wav:4,mode:0,dst:0,rat:1,amt:0.4,fine:0,ph:0,phm:0};
-   Object.assign(p.env[0],{a:0.001,d:0.34,s:0,r:0.1});
-   Object.assign(p.flt[0],{typ:1,frq:3800,q:0.9});
-   p.env[2]={dst:2,idx:1,amt:35,a:0.001,d:0.05,s:0,r:0.05};
-   p.fx[0]={typ:8,p1:0.44,p2:0,mix:0.13}; p.mix.lvl=0.78;}),
+   /* the 808 snare is a TONE with a hiss on it, not a noise burst — two sine
+      shells a fifth apart, ringing on well past the wires */
+   Object.assign(p.osc[0],{wav:0,rat:0.73,amt:0.6});                          // 191Hz
+   p.osc[1]={wav:0,mode:0,dst:0,rat:1.1,amt:0.34,fine:0,ph:0,phm:0,pw:0.5};   // 288Hz
+   p.osc[2]={wav:4,mode:0,dst:0,rat:1,amt:0.9,fine:0,ph:0,phm:1,pw:0.5};
+   Object.assign(p.env[0],{a:0.0006,d:0.3,s:0,r:0.09,crv:30});
+   p.env[2]={dst:2,idx:0,amt:30,a:0.0006,d:0.035,s:0,r:0.04,crv:0};
+   Object.assign(p.flt[0],{typ:2,frq:150,q:0.7});
+   p.fx[0]={typ:XTYPES.indexOf('sat'),p1:0.34,p2:0.6,p3:3,p5:0.5,p7:0.5,mix:0.8};
+   p.fx[1]={typ:8,p1:0.4,p2:0,mix:0.12};
+   p.vox.mode=1; p.mix.lvl=0.92;}),
  mkP('S606','snr',p=>{                       // short, buzzy, no room to speak of
-   p.osc[0].wav=4;
-   p.osc[1]={wav:3,mode:0,dst:0,rat:1.4,amt:0.4,fine:0,ph:0,phm:0};
-   p.osc[2]={wav:1,mode:0,dst:0,rat:1,amt:0.3,fine:0,ph:0,phm:0};
-   Object.assign(p.env[0],{a:0.001,d:0.11,s:0,r:0.04});
-   Object.assign(p.flt[0],{typ:3,frq:2500,q:2.2});
-   p.amp[0]={typ:2,drv:0.35,mix:0.5,par:0};
-   p.fx[0]={typ:8,p1:0.4,p2:0,mix:0.1}; p.mix.lvl=0.6;}),
+   /* the worst of them by a long way — a q-2.2 BANDPASS at 2.5k on a drum
+      whose body is under 300Hz threw away everything either side of a narrow
+      window, and it measured eighteen decibels under the kick. Two square
+      shells for the buzz, a hard short noise, and no bandpass anywhere. */
+   Object.assign(p.osc[0],{wav:3,rat:0.75,amt:0.9,pw:0.42});                  // 196Hz square
+   p.osc[1]={wav:3,mode:0,dst:0,rat:1.16,amt:0.45,fine:0,ph:0,phm:0,pw:0.38};
+   p.osc[2]={wav:4,mode:0,dst:0,rat:1,amt:0.7,fine:0,ph:0,phm:1,pw:0.5};
+   Object.assign(p.env[0],{a:0.0003,d:0.1,s:0,r:0.035,crv:55});
+   p.env[2]={dst:2,idx:0,amt:80,a:0.0003,d:0.02,s:0,r:0.02,crv:0};
+   Object.assign(p.flt[0],{typ:2,frq:210,q:0.8});
+   p.fx[0]={typ:XTYPES.indexOf('sat'),p1:0.55,p2:0.75,p3:2,p5:0.55,p7:0.5,mix:0.95};
+   p.fx[1]={typ:8,p1:0.28,p2:0,mix:0.08};
+   p.vox.mode=1; p.mix.lvl=0.67;}),
  mkP('RIM','perc',p=>{                       // a stick on the rim: all click, no tail
    Object.assign(p.osc[0],{wav:1,rat:5,ph:90});
    p.osc[1]={wav:3,mode:1,dst:0,rat:4,amt:0.5,fine:0,ph:0,phm:0};
@@ -8798,7 +8819,13 @@ function libAll(){
        at the oscillator, and the LFO stopped defaulting to pitch. The FACTORY
        half is ours to replace, so drop it and let libInit() lay it down again;
        anything the user saved is not ours and stays exactly where it is. */
-    const keep=v<19?items.filter(en=>en&&!en.factory):items;  // v4-8 levels · v9-11 voicings · v13 SNGB/LDGB · v15 KKGB/HHGB · v16 tuning + envelopes retranslated · v19 VABGA out
+    /* v26: THE SNARES. Every one of them was built on a noise root with its
+       tuned shells on the ops above — which the pitch fix has just revealed
+       were sounding at two and three hertz — so they have been rebuilt shell
+       first. Dropping the factory half is the only way anyone already carrying
+       a library ever sees them: without it the stored copies shadow the
+       definitions in this file forever. */
+    const keep=v<26?items.filter(en=>en&&!en.factory):items;  // v4-8 levels · v9-11 voicings · v13 SNGB/LDGB · v15 KKGB/HHGB · v16 tuning + envelopes retranslated · v19 VABGA out · v26 snares rebuilt
     libStore(keep);
     return libCache=keep;
   }
@@ -8819,7 +8846,7 @@ function libNos(){
   }
   return libNoCache=m;
 }
-const LIBV=25;   // bump BOTH: libStore writes it, libAll checks it
+const LIBV=26;   // bump BOTH: libStore writes it, libAll checks it
 function libStore(a){libMigrated=true; libCache=null; libNoCache=null;
   const out=(a||[]).map(en=>en&&en.data?{...en,data:portPreset(en.data,true)}:en);
   try{localStorage.setItem(LIBKEY,JSON.stringify({v:LIBV,items:out}));}catch(_){} if(typeof prepCache!=='undefined')prepCache.clear();}
