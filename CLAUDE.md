@@ -104,6 +104,25 @@ after, not a list of files touched.
   into a param, which reaches the worklet, which silences that channel.
 - Syntax checks pass on TDZ bugs. Exercise a keystroke before believing a page.
 
+## PARAM FOCUS — the modifiers inside a held scope
+
+Gad's name for it, and worth having one. While a magnetized scope is open the
+arrows, `-/=` and the letters belong to THAT param, and so do the modifiers:
+
+- `⇧`  coarse step. Both shifts, and it is ONLY a step here — it must not arm
+       the scope's latch, because reaching for a bigger bite out of a decay is
+       not a request to leave the scope open.
+- `⌥`  fine step — but ONLY when the scope is held by its LETTER. Tap the
+       letter and let go and the scope rides on ⌥ through ALTSUS, at which
+       point ⌥ is STRUCTURE, not a modifier: it is down for every arrow you
+       press, so reading it as "fine" pins the step at 0.1 forever and makes ⇧
+       unreachable. `magMult(e,H)` asks which case it is in.
+- Neither shift may close a scope ⌥ is still holding. ⇧R can hold one open by
+  itself, so its release closes the ones IT holds — check ⌥ first.
+
+The rule behind all three: **a key that is holding something open is not also a
+modifier of it.** Any new modifier in a scope gets asked that question.
+
 ## Scope
 
 Ship exactly what was asked, and say plainly what it breaks. Do not widen a

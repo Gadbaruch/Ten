@@ -1061,7 +1061,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.2026';
+const BUILD='2026-08-15.2056';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -2383,12 +2383,25 @@ function focusIsStepped(){
 const scopeStepped=()=>!!(HOLD.n||HOLD.i||HOLD.sc||HOLD.v||HOLD.m);
 function arepStop(){if(AREP.timer){clearTimeout(AREP.timer);AREP.timer=null;}
   if(AREP.stopT){clearTimeout(AREP.stopT);AREP.stopT=null;} AREP.code=null;}
+/* WHICH QUESTION THE REPEAT SHOULD ASK. focusIsStepped() answers for the ↑↓
+   field, and under a magnetized scope ←→ is a DIFFERENT param with its own
+   answer — a filter's reso dials, an lfo's shape is a menu. Asking the wrong
+   one either freezes a knob or runs a menu through its whole list. */
+const arepLR=code=>code==='ArrowLeft'||code==='ArrowRight';
+const arepMag=code=>!!(HOLD.opt&&HOLD.opt.nav&&arepLR(code));
+const arepStepped=code=>arepMag(code)?magSecStepped(HOLD.opt):focusIsStepped();
 function arepStart(code){
   arepStop();
   if(!HE.on||HE.pressure()==null)return;      // a laptop keeps the system's own repeat
   /* LEFT AND RIGHT ARE STEPPED. Moving the cursor is a discrete act — one
-     place per press, like fn — and only a VALUE is worth running through. */
-  if(code!=='ArrowUp'&&code!=='ArrowDown')return;
+     place per press, like fn — and only a VALUE is worth running through.
+     EXCEPT UNDER A MAGNETIZED SCOPE, where ←→ is not a cursor at all: it is
+     the second KNOB, pinned to a value the way ↑↓ is pinned to the first. A
+     knob you lean on should run, and this pair was the one place on the desk
+     that could not — you had to tap out a filter's resonance one press at a
+     time while the cutoff above it dialled. */
+  if(!arepMag(code)&&code!=='ArrowUp'&&code!=='ArrowDown')return;
+  if(arepMag(code)&&magSecStepped(HOLD.opt))return;
   /* AND NOT WHILE A STEPPED SCOPE IS OPEN. focusIsStepped() answers a question
      about the PARAMETER under the cursor, and with a scope held the arrows are
      not on a parameter at all — they are moving an octave, an engine or a key,
@@ -2400,7 +2413,7 @@ function arepStart(code){
   const step=()=>{
     if(!AREP.code)return;
     if(HE.on&&HE.driver()==null){arepStop(); return;}     // the driving key is gone
-    if(focusIsStepped()||scopeStepped()){arepStop(); return;}   // a menu moved once and that is all
+    if(arepStepped(AREP.code)||scopeStepped()){arepStop(); return;}   // a menu moved once and that is all
     for(const kind of ['keydown','keyup'])
       document.dispatchEvent(new KeyboardEvent(kind,
         Object.assign({code:AREP.code,key:AREP.code,bubbles:true},modsOf())));
@@ -2705,6 +2718,16 @@ const magVal=(C,F)=>fmtVal(F.spec,getV(C.holder,C.mi,C.si,F.spec));
 /* a menu is one press one option; everything else is a dial that runs while
    you lean on it — the same question focusIsStepped asks of the page */
 const magStp=spec=>spec.type==='enum'||!!spec.opts;
+/* …and the same question about the ←→ field. Asked FRESH rather than stamped:
+   the slot changes under a held scope (a digit jumps between instances) and
+   the second dial can change shape with it, so a stored answer goes stale in
+   exactly the case the digits exist for. Nothing there is a menu by default —
+   a scope with no second dial must not leave a held arrow running. */
+function magSecStepped(H){
+  const C=magCtx(H); if(!C)return true;
+  const F=magSpec(C,magKey(C.mag.sec,C.slot));
+  return F?magStp(F.spec):true;
+}
 /* what the scope says when it opens and whenever a letter re-aims it: the row
    itself, read out — the only place the mapping is ever written down for you */
 function magRead(H,C,head){
@@ -2714,13 +2737,26 @@ function magRead(H,C,head){
     (B?' · ←→ '+B.spec.lbl+' '+magVal(C,B):'')+
     (A?' · -/= '+A.spec.lbl+' '+magVal(C,A):'');
 }
-/* ⌥ IS FINE AND ⇧ IS COARSE — and inside a held scope BOTH shifts are the
-   coarse one. rs() ignores the left shift everywhere else because that key is
-   LATCH; but latch is a gesture on the scope's LETTER, and a shift chorded
-   with an arrow is nobody's idea of one. Left shift still latches the scope on
-   release exactly as it did — this only stops it from being a dead key on the
-   way there, which read as the arrows breaking under it. */
-const magMult=e=>altOf(e)?0.1:(e.shiftKey||KM.srLatch)?10:1;
+/* PARAM FOCUS: THE MODIFIERS INSIDE A HELD SCOPE. ⌥ is fine, ⇧ is coarse —
+   and inside a held scope BOTH shifts are the coarse one. rs() ignores the
+   left shift everywhere else because that key is LATCH; but latch is a gesture
+   on the scope's LETTER, and a shift chorded with an arrow is nobody's idea
+   of one.
+   ⌥ CANNOT BE THE FINE STEP WHILE IT IS THE THING HOLDING THE SCOPE OPEN, and
+   that is the whole of why ⇧ appeared to do nothing. Tap the letter and let
+   go — the usual way to work, since it frees the hand — and the scope rides on
+   ⌥ through ALTSUS. ⌥ is then down for every arrow you press, so this returned
+   0.1 every time: the fine step was permanently on, ⇧ was unreachable because
+   the first branch had already won, and ⇧↑ moved a time by exactly as much as
+   ↑ did. Measured 1.01 → 1.02 for both.
+   So: while the scope is RIDING on ⌥, ⌥ is structure and not a modifier, and
+   ⇧ is the only thing that scales the step. Hold the letter down instead
+   (⌥ free) and ⌥ is the fine step again, as it always was. */
+const magMult=(e,H)=>{
+  const riding=!!(H&&H.c&&ALTSUS.has(H.c));
+  if(!riding&&altOf(e))return 0.1;
+  return (e.shiftKey||KM.srLatch)?10:1;
+};
 /* one press of a dial. Same road every other param takes — adjust() for the
    step, writeParam() for the engine, recAuto() so a scope moved with REC armed
    lands in the channel's mod loop like any other knob would. */
@@ -2735,7 +2771,7 @@ function magDial(H,which,d,e){
   if(!F){flash(magRead(H,C,C.T2.name+' has no '+
     (which==='amt'?'amount':'second dial')+' — '));return true;}
   pushUndo(C.T2.name);
-  const nv=adjust(F.spec,getV(C.holder,C.mi,C.si,F.spec),d,magMult(e));
+  const nv=adjust(F.spec,getV(C.holder,C.mi,C.si,F.spec),d,magMult(e,H));
   writeParam(H.ch,C.mi,C.si,F.px,nv);
   if(C.holder===C.pre)recAuto(H.ch,C.pre,C.mi,C.si,F.px,nv);
   if(which==='pri'){magSee(H,C,F.px); H.lbl=F.spec.lbl; H.stp=magStp(F.spec);}   // ←→ and -/= are knobs, not a cursor
@@ -2834,7 +2870,13 @@ const MOM={};
 const noteLatch=new Set(), SUS=new Set();
 function latchArmHeld(){
   if(HOLD.ms&&!HOLD.msLatched)HOLD.msLatch=true;
-  if(HOLD.opt&&!HOLD.optLatched)HOLD.optLatch=true;   // reaching for latch after ⌥a still latches
+  /* …but NOT a magnetized scope, where ⇧ is the coarse step. Both cannot be
+     true of one key: reaching for ⇧ to take a bigger bite out of a decay also
+     armed the latch, so the scope stayed open after everything was released
+     and went on eating the arrows with nothing on screen saying why. That is
+     "shift breaks the magnet". A nav scope is still latched the other way —
+     hold ⇧ BEFORE the letter and KM.sl arms it at the open. */
+  if(HOLD.opt&&!HOLD.optLatched&&!HOLD.opt.nav)HOLD.optLatch=true;
   if(HOLD.tab)HOLD.tabLatch=true;
   if(HOLD.r)HOLD.rLatch=true;                 // reaching for latch AFTER ` still latches the roll
   for(const k of kbHeld)noteLatch.add(k);     // ...and after a note, while it is still down
@@ -12669,6 +12711,9 @@ const liveV={}, pend={}, rPend={}, nlive={};
 const livePress={};
 const retroBuf=Array.from({length:10},()=>[]);
 let eraseHold=null, muteHold=null, stepCur=0, stepWalked=false, taps=[];
+/* which pan key is down — the pair means centre, and the pan handler returns
+   before kbHeld is ever written, so it has to keep its own count */
+const BRK={l:false,r:false};
 let gridAt=-1;                        // which L entry is the grid's markup
 const rawAt=new Set();                // ...and which others are markup too
 const kbHeld=new Set();               // note keys physically down, for chord-vs-sequence
@@ -14944,8 +14989,13 @@ const onKeyDown=e=>{
      moves, even on a board (or a key) whose travel we cannot read: at the
      system's own rate rather than by depth, which is the same as it ever was
      rather than nothing at all. */
+  /* arepStepped, not focusIsStepped: under a magnetized scope this decides
+     whether a HELD ←→ may repeat, and focusIsStepped answers for the ↑↓ field.
+     With a dial on the primary and a menu on the secondary — an lfo, whose
+     ←→ is the waveform — it said "not stepped" and let the system's repeat run
+     the wave list end to end under one finger. */
   if(e.isTrusted&&e.repeat&&e.code.indexOf('Arrow')===0
-     &&(AREP.code||focusIsStepped()))return;
+     &&(AREP.code||arepStepped(e.code)))return;
   if(e.isTrusted&&!e.repeat&&e.code.indexOf('Arrow')===0){
     if(AREP.stopT&&AREP.code===e.code){clearTimeout(AREP.stopT); AREP.stopT=null;}  // that was a bounce
     if(arrowRefire(e.code)){e.preventDefault(); return;}
@@ -15563,6 +15613,20 @@ const onKeyDown=e=>{
   }
   if((c==='BracketLeft'||c==='BracketRight')&&!e.metaKey&&!PICK&&!DPICK){
     e.preventDefault();
+    BRK[c==='BracketLeft'?'l':'r']=true;
+    /* BOTH TOGETHER IS CENTRE. The two keys are the two directions, so holding
+       them at once asks for neither — and centring a pan is a thing you want
+       constantly and could otherwise only reach by counting steps back. Squash
+       whatever nudge the first of the two already applied on its way in; they
+       are never pressed at the same millisecond, so without this the centre
+       lands 0.05 off on whichever side you happened to hit first. */
+    if(BRK.l&&BRK.r){
+      const tgC=chTargets();
+      pushUndo('pan centre');
+      tgC.forEach(i=>{S.presets[i].mix.pan=0; engine.refresh(i);});
+      chSay(S.presets[tgC[0]].name+' pan centre',tgC.length);
+      dirty=true; dirtySave=true; return;
+    }
     const d=c==='BracketRight'?1:-1;
     const st=(rs(e)||e.shiftKey?0.25:altOf(e)?0.01:0.05)*dialScale();   // the pan keys dial too
     const tg=chTargets();
@@ -17192,11 +17256,21 @@ const onKeyUp=e=>{
       dirty=true;}
     return;}
   if(c==='KeyM'&&HOLD.m){HOLD.m=false; HOLD.mUsed=false; return;}
+  if(c==='BracketLeft')BRK.l=false;
+  if(c==='BracketRight')BRK.r=false;
   if((c==='ShiftLeft'||c==='ShiftRight')&&PICK){PICK.peek=false; dirty=true;}
   if(PICK&&/^Digit\d$/.test(c)){PICK.dig=0;}   // the digit is no longer held
   if(c==='ShiftRight'){KM.sr=false;
-    for(const k of [...ALTSUS]){ALTSUS.delete(k);
-      document.dispatchEvent(new KeyboardEvent('keyup',{code:k,bubbles:true}));}
+    /* ⇧R CAN HOLD A SCOPE OPEN TOO (see the ALTSUS line in this handler), so
+       its release has to close the ones IT is holding — but it was closing all
+       of them, including every scope ⌥ is still holding down. Reaching for the
+       coarse step and letting go of it dropped the scope entirely: the most
+       direct form of "shift breaks the magnet", measured as the scope going to
+       null with ⌥ never released. If ⌥ is still down it is still holding
+       them, and they stay. */
+    if(!MODS.alt&&!e.altKey)
+      for(const k of [...ALTSUS]){ALTSUS.delete(k);
+        document.dispatchEvent(new KeyboardEvent('keyup',{code:k,bubbles:true}));}
     return;}
   if(c==='ShiftLeft'){
     KM.sl=false;
@@ -17237,7 +17311,7 @@ const onKeyUp=e=>{
   }
   if(c==='Backspace'){
     if(eraseHold)spanUnmark(S.patterns[S.editPat].lanes[focusCh()]);
-    eraseHold=null;muteHold=null;clearTimeout(delHoldTimer);}
+    eraseHold=null;muteHold=null;BRK.l=false;BRK.r=false;clearTimeout(delHoldTimer);}
   if(rPend[c]){
     const r=rPend[c];
     /* SAME RULE AS THE RECORDER: the length is the held gesture. r.ts is the
