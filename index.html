@@ -1037,7 +1037,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.1552';
+const BUILD='2026-08-15.1558';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -11127,14 +11127,38 @@ const EXP={
       this.held[ch+':'+note]={code};
       return;
     }
-    const h=engine.trigger(AC.currentTime+0.005,pi,note,vel);
-    if(T.playing)recPlayNote(pi,posNow(),note,vel,0.25);
-    this.held[ch+':'+note]={h,pi};
+    /* A NOTE OUT OF THE KEYBOARD'S RANGE IS STILL A NOTE. Everything the key
+       path does to one — quantize the moment it sounds, record it at that same
+       moment, give it the length you actually held — this path did none of. It
+       fired immediately, wrote the RAW position into the lane, and stamped
+       every note a flat 0.25 beats however long you leaned on it. On a
+       two-octave laptop map that is invisible, because nothing ever comes down
+       here; on a full-size midi keyboard the middle two octaves quantize and
+       both ends do not, which is exactly the shape of "the quantized recorded
+       notes are wrong". It falls through here for a re-struck note too — a key
+       already sounding fails keyDown — so a fast repeat lost its quantize even
+       in the middle of the board. */
+    const lane=((S.patterns[S.editPat]||{}).lanes||[])[pi];
+    const t0=gridNow();
+    const tr=(CFG.qOn&&lane)?t0+(qnext(t0,gridOf(lane))-t0)*(lane.qlive??1):t0;
+    const at=Math.max(AC.currentTime+0.005,gridTime(tr+grooveOff(pi,tr)));
+    const h=engine.trigger(at,pi,note,vel);
+    /* written now with a provisional length and rewritten at the note-off with
+       the real one, the way the key path already does it — so a note held
+       across a stop is in the lane rather than only in a pending entry */
+    if(T.playing)recPlayNote(pi,tr,note,vel,Math.max(0.05,lane?gridOf(lane):0.25));
+    this.held[ch+':'+note]={h,pi,tr,at,vel,press:AC.currentTime};
   },
   noteOff(ch,note){
     const k=ch+':'+note, v=this.held[k]; if(!v)return; delete this.held[k];
-    if(v.code)this.keyUp(v.code);
-    else if(v.h&&v.h.release)v.h.release(AC.currentTime+0.005);
+    if(v.code){this.keyUp(v.code); return;}
+    if(!v.h)return;
+    /* THE NOTE ON IS QUANTIZED, SO THE NOTE OFF MUST BE. A tap shorter than the
+       quantize delay was releasing a note that had not started yet, and
+       release() clamps to the start — which turns it into a stub. */
+    const dur=Math.max(0.05,(AC.currentTime-(v.press??AC.currentTime))/spb());
+    if(v.h.release)v.h.release(Math.max((v.at??0)+0.02,AC.currentTime+0.005));
+    if(v.tr!=null)recPlayNote(v.pi,v.tr,note,v.vel??0.9,dur);
   },
   voicesOf(ch,note){
     const v=this.held[ch+':'+note]; if(!v)return null;
