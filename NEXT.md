@@ -38,10 +38,17 @@ Gran is pitch keys with the loop off. None of them are modes any more.
    pitching, stretch by stretching, grain by setting the carrier's travel.
    The two words were on the wrong controls.
 
-3. **Level across the size dial.** Granulating the loop drops it from ~0.38
-   to ~0.07 because the cloud bus pays the normalize and its own gain. The
-   same tax the cloud always paid, but now it reads as a jump when you turn
-   size down. Match them.
+3. **Level across the size dial — PARTIALLY DONE (eddae35), finish it.**
+   The predicted compensation (window rms x 0.5 x sqrt(duty) x norm, undone
+   when the cloud does the loop's reading) took the worst case from 5.7x
+   down to ~3x. Against a clean read at 0.319: 300ms 0.189 · 120ms 0.108 ·
+   40ms 0.197. Not flat, and 120ms — the middle of the dial, where most
+   cloud sounds live — is furthest off. The prediction cannot be right:
+   `norm` is slewed and lags a size change, and `flow` randomises spacing so
+   the real overlap is not density x size. MEASURE instead of predict: run
+   an rms of the cloud bus against the carrier's own level and correct from
+   the ratio, slewed. That is a feedback loop, so watch for it fighting the
+   diffuser and the feedback tap, both of which are already in that path.
 
 4. **Width as a stereo spread** rather than random placement per cursor.
    Whole notes are centred now (they keep the take's own stereo); grains
