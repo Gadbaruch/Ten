@@ -1031,7 +1031,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.1519';
+const BUILD='2026-08-15.1526';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -4622,10 +4622,15 @@ class Voice{
       const list=this.opPitch[i]||[];
       for(let u=0;u<list.length;u++){
         const e=list[u], target=bt*Math.pow(2,sprd*(this.uniOff[u]||0)/1200);
+        /* the same re-basing the builder does: ops 1-9 are pitched from the
+           note, not from op 0's root, which is 1 or a playback ratio when op 0
+           is a noise or a sampler. Without it a live ratio edit put the
+           operator back at the wrong pitch the builder had been cured of. */
+        const tTgt=target*(this.rootFreq>0?(this.toneFreq||this.rootFreq)/this.rootFreq:1);
         let f;
         if(e.kind==='smp')f=this.noteRatio*op.rat*Math.pow(2,(op.fine||0)/1200);
-        else if(e.kind==='sync')f=target*syncMasterRat(ops,i);
-        else f=i===0?target:target*op.rat*Math.pow(2,(op.fine||0)/1200);
+        else if(e.kind==='sync')f=tTgt*syncMasterRat(ops,i);
+        else f=i===0?target:tTgt*op.rat*Math.pow(2,(op.fine||0)/1200);
         if(!(f>0))continue;
         e.base=f;
         if(key==='rat'||key==='fine'||key==='dst'){
@@ -4679,6 +4684,16 @@ class Voice{
        can rebuild every operator's frequency from scratch (see oscRefresh) */
     this.noteRatio=noteRatio;
     this.rootFreq=noiseRoot?1:isN?noteRatio:440*Math.pow(2,(midi-69)/12);
+    /* AND THE PITCH A TONAL OPERATOR IS BUILT FROM, which is not the same thing.
+       rootFreq is op 0's root, and when op 0 is a noise or a sampler it is not
+       a frequency at all — it is 1, or a playback ratio. Operators 1-9 were
+       multiplied by it regardless, so a saw put underneath a noise op came out
+       at about one hertz and a saw under a sampler at about one: a flutter, not
+       a note, which is what "the secondary osc is at a super low pitch" is.
+       They are pitched from the note itself now. Op 0's ratio still rides along,
+       because that ratio is the patch's tuning — the octave transpose writes it
+       — and an FM stack has to move with it. */
+    this.toneFreq=440*Math.pow(2,(midi-69)/12);
     const baseTarget=this.rootFreq*ops[0].rat*Math.pow(2,(ops[0].fine||0)/1200);
 
     /* filter chain (per voice): ser slots in series, par slots branch from the
@@ -5038,6 +5053,10 @@ class Voice{
         (this.opAmt[0]=this.opAmt[0]||[]).push({g:g0,sc:1});
       }
       const built=skipOp0?[]:[{i:0,s:src,osc:!isN,f:target,op:ops[0]}];
+      /* the same target, re-based on the note's own frequency — identical to
+         `target` whenever op 0 is tonal (rootFreq IS toneFreq there), and the
+         whole fix when it is not */
+      const tTarget=target*(this.rootFreq>0?this.toneFreq/this.rootFreq:1);
       for(let i=1;i<10;i++){
         const op=ops[i]; if(!op||op.amt<=0.001||op.off)continue;
         const wv=op.wav;
@@ -5046,8 +5065,8 @@ class Voice{
            is exactly a waveform periodic at the master pitch. We bake that shape
            into a PeriodicWave, so it stays band-limited and costs no extra nodes. */
         const sync=op.mode===3&&wv!==4&&wv!==9;
-        const mf=sync?target*syncMasterRat(ops,i):0;
-        const fi=sync?mf:target*op.rat*Math.pow(2,(op.fine||0)/1200);
+        const mf=sync?tTarget*syncMasterRat(ops,i):0;
+        const fi=sync?mf:tTarget*op.rat*Math.pow(2,(op.fine||0)/1200);
         let s2, scanned=false;
         if(wv===9&&Math.round(op.mode)===5&&fxwReady){
           /* SCAN: this sample's playhead is its dst/prev op's WAVEFORM. No
