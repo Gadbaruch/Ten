@@ -23,38 +23,41 @@ Two questions define the keys, and nothing else does:
 existing one, or glides it there. Freeze is pitch keys with `from: here`.
 Gran is pitch keys with the loop off. None of them are modes any more.
 
+## Where the page sits now (88cd60b)
+
+- **Sound page**: mode · speed · [window, stretch only] · start · end · pitch ·
+  key vol, then the cloud's fourteen in grain mode.
+- **Instrument row**: engine · sample · keys mode · auto · loop vol · voice ·
+  [from] · input · chan · gain. Nine fields, readable at a glance.
+- Both levels rest at the top and only cut (SAVEV/LIBV 25).
+- Every audio dial, page or row, is a mod/automation destination — one list,
+  `AUDADDR()`, so a param added anywhere shows up in the matrix by itself.
+- A hold ends through `endAudHold(c)`, called by the key-up, by blur, and by
+  the 400ms sweep; `AUD.hold` is a view of `AUD.gk`, not a copy.
+
 ## What is next, in order
 
-1. **THREE MODES ON THE CLIP RACK**, replacing the `sync` field:
-   - `tape` — resample; pitch rides speed
-   - `stretch` — dual-tap; pitch held; `window` shapes it
-   - `grain` — the cloud
-   The page shows only what the mode uses. Today `window` sits visible and
-   inert in tape, and the cloud dials sit visible and inert at size ∞.
+1. **THE ARP ON POLY + POSITION** — Gad still reports held keys playing nothing
+   there. The twelve-cue jump had two causes (piano mapping 29e7608, channel
+   transpose in slot space fac7260) and both are fixed; this is a third thing
+   and it has never been diagnosed. Build the readout before touching code —
+   log what `cueNote` receives from the ply delegation with poly + arp + keys
+   on position, and compare against mono.
 
-2. **`fit` → `sync`**, staying the centre detent of the speed dial. Gad's
-   framing, and it is right: fitting a take to the loop IS syncing it, and
-   tape/stretch/grain are three MEANS to that one end — tape syncs by
-   pitching, stretch by stretching, grain by setting the carrier's travel.
-   The two words were on the wrong controls.
+2. **Level across the size dial — PARTIALLY DONE (eddae35, d7abace).**
+   Predicting it (window rms x 0.5 x sqrt(duty) x norm) took the worst case
+   from 5.7x to ~3x; MEASURING it — an rms of the cloud against the take's own
+   level, slewed into a compensation — did better again. Against a clean read
+   of 0.318: 300ms 0.112 · 120ms 0.220 · 40ms 0.351. Long grains are still the
+   quiet end. The measurement window is 24 samples strided through the take,
+   which is a poor estimate of a slow-moving carrier; try integrating over a
+   real span before adding more gain.
 
-3. **Level across the size dial — PARTIALLY DONE (eddae35), finish it.**
-   The predicted compensation (window rms x 0.5 x sqrt(duty) x norm, undone
-   when the cloud does the loop's reading) took the worst case from 5.7x
-   down to ~3x. Against a clean read at 0.319: 300ms 0.189 · 120ms 0.108 ·
-   40ms 0.197. Not flat, and 120ms — the middle of the dial, where most
-   cloud sounds live — is furthest off. The prediction cannot be right:
-   `norm` is slewed and lags a size change, and `flow` randomises spacing so
-   the real overlap is not density x size. MEASURE instead of predict: run
-   an rms of the cloud bus against the carrier's own level and correct from
-   the ratio, slewed. That is a feedback loop, so watch for it fighting the
-   diffuser and the feedback tap, both of which are already in that path.
-
-4. **Width as a stereo spread** rather than random placement per cursor.
+3. **Width as a stereo spread** rather than random placement per cursor.
    Whole notes are centred now (they keep the take's own stereo); grains
    still scatter, which is right for grains and wrong as a "width" control.
 
-5. **More factory phrases** — `python3 tools/gen_samples.py <name>` re-rolls
+4. **More factory phrases** — `python3 tools/gen_samples.py <name>` re-rolls
    one, no args does the shelf. Prompts are the shelf; see the docstring for
    what to ask for (phrases, never one-shots).
 
@@ -67,6 +70,10 @@ Gran is pitch keys with the loop off. None of them are modes any more.
   are spawning — identically on HEAD and on your branch. Reload first.
 - **Syntax checks pass on TDZ bugs.** `const` at line 11000 used at line 200
   parses fine and kills the keyboard at runtime. Exercise a keystroke.
+- **`adjust()` wants a NUMBER as its multiplier.** `audAction(1,{})` in a probe
+  writes NaN into the param, `audLive` posts the NaN to the worklet, and the
+  channel outputs NaN from then on — silent, and no reload of your reasoning
+  will fix it. If a bus reads NaN mid-session, reload before diagnosing.
 - **Measure, do not model.** Every real bug this week was found by asking
   the running engine what its state was: audPlay's arguments logged from
   both builds, cursor positions sampled over time, the seven-case matrix
