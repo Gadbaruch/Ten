@@ -12,6 +12,12 @@
       "runtimeExecutable": "npx",
       "runtimeArgs": ["serve", "-l", "3032", "."],
       "port": 3032
+    },
+    {
+      "name": "ten-gad",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["serve", "-l", "3033", "."],
+      "port": 3033
     }
   ]
 }

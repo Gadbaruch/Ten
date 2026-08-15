@@ -1,7 +1,9 @@
 # TEN — where the audio channel stands, and what is next
 
 Written 2026-08-15. Live at gadbaruch.github.io/Ten/ · dev server: `preview_start
-name "ten"` → localhost:3031 (or `ten-main` → 3032 when a worktree holds 3031) · one file, `index.html`, no build step.
+name "ten-gad"` → localhost:3033 is Gad's, `ten-main` → 3032 is Claude's, both
+serving this directory · one file, `index.html`, no build step. See CLAUDE.md
+for who may be destructive where.
 
 ## The model, in one paragraph
 
