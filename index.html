@@ -1108,7 +1108,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.2228';
+const BUILD='2026-08-15.2241';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1188,6 +1188,13 @@ const SETTINGS=[
  {n:'key',g:'Behavior',    v:()=>KEYN[CFG.key],             a:d=>CFG.key=fmod(CFG.key+d,12)},
  {n:'mode',g:'Behavior',   v:()=>SCALES[CFG.scale][0],      a:d=>CFG.scale=fmod(CFG.scale+d,SCALES.length)},
  {n:'vel',g:'Input', v:()=>String(Math.round(clamp(CFG.kvel??0.9,0.02,1)*127)), a:d=>EXP.bump(d*0.05)},
+ /* press the row, then press the key you want. ⌫ on the row puts it back to
+    the defaults; esc cancels a learn that is waiting. */
+ {n:'tools key',g:'Input', v:()=>TOOLLEARN?'press it now…':(CFG.toolKey||'ctrl / prtsc'),
+   a:d=>{ if(d<0&&CFG.toolKey){CFG.toolKey=null; saveCfg(); flash('tools key back to ctrl / prtsc'); return;}
+          TOOLLEARN=true; flash('press the key you want for TOOLS — esc cancels'); }},
+ {n:'last key',g:'Input', v:()=>LASTKEY||'— nothing yet',
+   a:()=>flash(LASTKEY?('last key the page saw: '+LASTKEY):'no key has reached TEN yet')},
  {n:'h trig',g:'Input',h:()=>!HE.on,v:()=>Math.round(HE.cfg().trig*100)+'%', a:d=>HE.set('trig',clamp(HE.cfg().trig+d*0.01,0.02,1))},
  /* WHICH QUESTION THE BOARD IS ASKED. peak: how fast was the fastest frame —
     right on a board that samples on a clock. window: how far did the key get
@@ -2564,7 +2571,7 @@ const cmdOf=e=>!!e.metaKey;
    onKeyDown for why. A tap arms it for a short window, the next c/x/v/z/s
    spends it, tapping again while armed puts it away, and it lapses by itself
    so a key that only ever sends one edge cannot leave it stuck on. */
-let TOOLT=null, TOOLAT=0;
+let TOOLT=null, TOOLAT=0, TOOLCXL=0;
 function armTools(code){
   const now=performance.now();
   /* ONE PHYSICAL TAP IS ONE EDGE OR TWO, and we cannot tell in advance which
@@ -2572,22 +2579,27 @@ function armTools(code){
      must not read as two. Anything inside 250ms of the last edge is the same
      press still finishing; a genuine second tap after that puts the layer
      away, so it can always be cancelled. */
-  if(HOLD.t&&code==='PrintScreen'&&now-TOOLAT>250){disarmTools(); flash('tools off'); return;}
-  /* …and the OTHER half of that tap must not turn it straight back on: the
-     cancel happens on one edge and the key still owes us the other. */
-  if(!HOLD.t&&TOOLAT&&now-TOOLAT<250)return;
+  if(HOLD.t&&code!=='ControlLeft'&&now-TOOLAT>250){disarmTools(1); flash('tools off'); return;}
+  /* …and the OTHER half of THAT tap must not turn it straight back on: a
+     cancel happens on one edge and the key still owes us the other. Only a
+     CANCEL sets that window — a layer that was spent by a letter, or cleared
+     on the way in, must be armable again immediately, and not knowing the
+     difference is what made the learned key look dead. */
+  if(!HOLD.t&&TOOLCXL&&now-TOOLCXL<250)return;
   const fresh=!HOLD.t;
   TOOLAT=now;
   HOLD.t=true; HOLD.tUsed=false;
   if(TOOLT)clearTimeout(TOOLT);
   /* only the one-shot key needs a lapse; a control key clears on its own up */
-  TOOLT=code==='PrintScreen'
-    ? setTimeout(()=>{TOOLT=null; HOLD.t=false; dirty=true;},2500) : null;
-  if(code==='PrintScreen'&&fresh)flash('tools — c/x/v copy cut paste · z undo (⇧z redo) · s save');
+  TOOLT=code==='ControlLeft'
+    ? null : setTimeout(()=>{TOOLT=null; HOLD.t=false; dirty=true;},2500);
+  if(code!=='ControlLeft'&&fresh)flash('tools — c/x/v copy cut paste · z undo (⇧z redo) · s save');
   dirty=true;
 }
-function disarmTools(){ if(TOOLT){clearTimeout(TOOLT); TOOLT=null;} HOLD.t=false; HOLD.tUsed=false;
-  TOOLAT=performance.now(); }
+function disarmTools(cancel){ if(TOOLT){clearTimeout(TOOLT); TOOLT=null;}
+  HOLD.t=false; HOLD.tUsed=false; TOOLAT=0;
+  if(cancel)TOOLCXL=performance.now();   // …only a cancel owes us a paired edge
+}
 /* EITHER SIGNAL, because relying on only one of them broke it both ways.
    HOLD.t is needed for PrintScreen, which sets no modifier flag at all — ask
    the event what is held and it answers "nothing" for exactly the key some
@@ -12850,7 +12862,16 @@ const MICKEY=c=>c==='ControlRight'||c==='Fn';
    went to the MIC instead, which was still claiming PrintScreen from when it
    was the 60%-board stand-in. Both codes are tools now and the mic keeps the
    right control, Fn, and escape's hold, so nothing it could do was lost. */
-const TOOLKEY=c=>c==='ControlLeft'||c==='PrintScreen';
+/* WHATEVER KEY YOU ACTUALLY HAVE. Guessing at a remapped board from the other
+   side of a chat is how three rounds got spent on one modifier: the code was
+   ControlLeft, then PrintScreen, then something neither of us can name. So the
+   instrument learns it — `tools key` in settings, press the row, press your
+   key, done — and the two defaults stay for a board that needs no help.
+   `last key` sits next to it and shows the code of the last key the PAGE saw,
+   on either edge, so "does this key reach TEN at all" is a question you can
+   answer by looking rather than by asking me. */
+const TOOLKEY=c=>c===CFG.toolKey||(!CFG.toolKey&&(c==='ControlLeft'||c==='PrintScreen'));
+let TOOLLEARN=false, LASTKEY='';
 /* ⌥M just made a mod (env by default). While ⌥ is STILL down, one letter
    re-sources it: l lfo, v velocity, k key, / random, e env again. Closed the
    moment ⌥ comes up, so the letters go back to their scopes. */
@@ -15205,6 +15226,16 @@ function escapeAction(e){
   dirty=true;
 }
 const onKeyDown=e=>{
+  if(e.isTrusted&&e.code){LASTKEY=e.code; if(S.layer===-1)dirty=true;}
+  /* the learn is asked FIRST, before any handler can claim the key — the whole
+     point is to catch a key nothing else knows what to do with */
+  if(TOOLLEARN&&e.code&&!e.repeat){
+    e.preventDefault();
+    if(e.code==='Escape'){TOOLLEARN=false; flash('tools key unchanged'); dirty=true; return;}
+    TOOLLEARN=false; CFG.toolKey=e.code; saveCfg(); disarmTools();
+    flash('◎ tools key = '+e.code+'  — tap it, then c/x/v · z · s');
+    dirty=true; return;
+  }
   if(e.isTrusted){MODS.shift=e.shiftKey; MODS.alt=e.altKey; MODS.ctrl=e.ctrlKey; MODS.meta=e.metaKey;
     /* A LOST SHIFT KEY-UP LATCHES EVERYTHING YOU PLAY. Left shift is the latch,
        and its state was believed until a matching key-up arrived — but mashing
@@ -15306,7 +15337,7 @@ const onKeyDown=e=>{
      it, and it lapses on its own so it can never be left stuck. A real control
      key still behaves like a hold — it re-arms on every repeat and clears on
      its own key-up — so nothing changes for a board that sends one. */
-  if(TOOLKEY(e.code)){armTools(e.code); if(e.code==='PrintScreen')e.preventDefault();}   // it is a screenshot on some setups
+  if(TOOLKEY(e.code)){armTools(e.code); if(e.code!=='ControlLeft')e.preventDefault();}   // it is a screenshot on some setups
   if(LATCHKEY(e.code)){const fresh=!KM.sl; KM.sl=true;
     e.preventDefault();
     if(PICK){PICK.peek=true; dirty=true;}
@@ -17529,6 +17560,14 @@ function endAudHold(c){
   return '';
 }
 const onKeyUp=e=>{
+  if(e.isTrusted&&e.code){LASTKEY=e.code; if(S.layer===-1)dirty=true;}
+  /* a key that sends ONLY a key-up can still be learned — that is exactly the
+     kind of key this exists for */
+  if(TOOLLEARN&&e.code&&e.code!=='Escape'){
+    TOOLLEARN=false; CFG.toolKey=e.code; saveCfg(); disarmTools();
+    flash('◎ tools key = '+e.code+'  — tap it, then c/x/v · z · s');
+    dirty=true; return;
+  }
   if(e.isTrusted){MODS.shift=e.shiftKey; MODS.alt=e.altKey; MODS.ctrl=e.ctrlKey; MODS.meta=e.metaKey;
     if(!e.shiftKey){KM.sl=false; KM.sr=false;}}
   const c=e.code;
@@ -17676,7 +17715,11 @@ const onKeyUp=e=>{
   if(c==='KeyM'&&HOLD.m){HOLD.m=false; HOLD.mUsed=false; return;}
   /* the key-up ARMS it too, because on the keyup-only boards that is the only
      edge there is. A real control clears instead: it was a genuine hold. */
-  if(TOOLKEY(c)){ if(c==='PrintScreen')armTools(c); else disarmTools(); }
+  /* ARM ON THE KEY-UP TOO unless we know it is a real control. Anything
+     learned is treated as a possible one-shot, because that is the case that
+     was silently broken: a key whose down edge never arrives, or arrives and
+     departs in the same instant. */
+  if(TOOLKEY(c)){ if(c==='ControlLeft')disarmTools(); else armTools(c); }
   if(c==='BracketLeft')BRK.l=false;
   if(c==='BracketRight')BRK.r=false;
   if(c==='Comma')OCT.l=false;
