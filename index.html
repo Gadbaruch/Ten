@@ -804,7 +804,9 @@ const FXDEF={
      not a free-running slap at a third wet */
   1:{p1:0.27,p2:0.35,p3:3,mix:0.2},
 };
-const mkPly =()=>({typ:0,p1:2,p2:0,p3:1,p4:60,p5:0,p6:0});   // p5 spare · p6 stage(post/pre)
+/* p7/p8 are the chord voicing's spread and bass, added after this factory was
+   written — so a play slot built through it was still short two fields. */
+const mkPly =()=>({typ:0,p1:2,p2:0,p3:1,p4:60,p5:0,p6:0,p7:0,p8:0});   // p5 spare · p6 stage(post/pre)
 /* A PLAY SLOT WITH HOLES IN IT READS AS `undefined` ON THE PAGE. Several places
    built one from an object literal carrying p1..p3 only — which is every field
    those slot types happen to use — and then the arp, which reads p4 and p6, and
@@ -1225,6 +1227,36 @@ const kitHas=(p,midi)=>!!(isKit(p)&&p.kit&&p.kit[pcOf(midi)]);
 function edKit(p){return isKit(p)&&S.prepFocus!=null?kitSlot(p,S.prepFocus,true):null;}
 function modHolder(p,modId){const K=edKit(p);return K||p;}
 const RACK_MK={osc:mkOsc,amp:mkAmp,flt:mkFlt,env:mkEnv,lfo:mkLfo,mod:mkMod,fx:mkFx,ply:mkPly};
+/* WHAT A DIAL READS WHEN THE SLOT HAS NO KEY FOR IT. A slot written before a
+   param existed simply has no such field, and `undefined` walks into the
+   formatter as NaN: the master's reverb — built as {typ,rt,p1,p2,p3,mix} long
+   before pre-delay was a dial — showed `pre  NaNms`, and turning it started
+   from NaN and never came back. Zero is not the answer either; the answer is
+   what the ENGINE plays for a key that is not there, and every rack already
+   states that, because the factories' numbers are the same ones the engine
+   reaches for as `??` fallbacks. So the factory IS the resting value, refined
+   per fx type by FXDEF exactly as a new slot is. The take's dials got this as
+   AUDDEF; this is the same table, for every rack at once. */
+const RACK_DEF={};                 // built once per rack · slot-0-or-not · fx type
+function slotDef(rack,sl,si){
+  const mk=RACK_MK[rack]; if(!mk)return null;
+  const t=rack==='fx'&&sl?Math.round(sl.typ||0):-1, k=rack+(si?1:0)+':'+t;
+  return RACK_DEF[k]||(RACK_DEF[k]=FXDEF[t]?Object.assign(mk(si?1:0),FXDEF[t]):mk(si?1:0));
+}
+/* the read every dial goes through: the slot's own value, then the spec's own
+   `def` where the factory number is not what the engine plays for a missing
+   key (a gain centred at 0.5 is the whole of that list), then the rack's
+   resting one, then zero pulled into the spec's range — 0 for a 0..1 dial,
+   1 for one that counts channels from 1, flat for a signed one. */
+function specVal(o,spec,rack,si){
+  const v=spec.get?spec.get(o):o[spec.key];
+  if(Number.isFinite(v))return v;
+  if(Number.isFinite(spec.def))return spec.def;
+  const d=slotDef(rack,o,si), dv=d?d[spec.key]:undefined;
+  if(Number.isFinite(dv))return dv;
+  const lo=Number.isFinite(spec.min)?spec.min:0;
+  return clamp(0,lo,Number.isFinite(spec.max)?spec.max:Math.max(lo,0));
+}
 
 /* ---------------- param specs ---------------------------------------- */
 const fHz=v=>v>=1?v.toFixed(1)+'Hz':(v*1000).toFixed(0)+'mHz';
@@ -1626,8 +1658,11 @@ const FX_P=sl=>{
       else a.push(SP('freq','p1','lin',{min:0,max:1,step:0.02,
         fmt:v=>xHz(v)}));
       a.push(SP(ty==='fmnt'||ty==='vowel'?'sharp':'reso','p2','lin',{min:0,max:1,step:0.05}));
+      /* centred like sat's in/out, and for the same reason: the shelf a preset
+         predates has no p4, the engine plays it flat (`fx.p4??0.5`), and the
+         factory's 0.3 would have shown −7dB on a filter that is doing nothing. */
       if(ty==='peq'||ty==='lsh'||ty==='hsh')
-        a.push(SP('gain','p4','lin',{min:0,max:1,step:0.05,
+        a.push(SP('gain','p4','lin',{min:0,max:1,step:0.05,def:0.5,
           fmt:v=>((v-0.5)*36>0?'+':'')+Math.round((v-0.5)*36)+'dB'}));
       a.push(SPMIX());
       return a;})(),
@@ -2208,7 +2243,7 @@ function rebindDest(pre,a){
 const slotOf=(pre,mi,si)=>pre[MODULES[mi].id][si];
 /* specs may carry get/set accessors (used for route-nested MOD params) */
 const getV=(pre,mi,si,spec)=>{const o=MODULES[mi].flat?pre[MODULES[mi].id]:slotOf(pre,mi,si);
-  return spec.get?spec.get(o):o[spec.key];};
+  return specVal(o,spec,MODULES[mi].id,si);};
 const setV=(pre,mi,si,spec,v)=>{const o=MODULES[mi].flat?pre[MODULES[mi].id]:slotOf(pre,mi,si);
   if(spec.set)spec.set(o,v); else o[spec.key]=v;};
 
@@ -15845,8 +15880,12 @@ const onKeyDown=e=>{
         const spec2=specs2[clamp(S.mParam|0,0,specs2.length-1)];
         if(spec2){
           pushUndo('dj pad');
+          /* ...off getSP on BOTH branches. The accessor branch already read
+             the resting value; the plain one read the key raw, so a param the
+             slot predates started its first step from undefined and wrote
+             NaN — the dial read right and then broke the moment you turned it. */
           if(spec2.set)spec2.set(sl2,adjust(spec2,getSP(sl2,spec2),d,kmult(e)));
-          else sl2[spec2.key]=adjust(spec2,sl2[spec2.key],d,kmult(e));
+          else sl2[spec2.key]=adjust(spec2,getSP(sl2,spec2),d,kmult(e));
           djApply(true);
           flash('dj '+DJKEYS[dk]+' · '+spec2.lbl+' '+fmtVal(spec2,getSP(sl2,spec2)));
           dirty=true; dirtySave=true;
@@ -15864,7 +15903,7 @@ const onKeyDown=e=>{
       }else{
         pushUndo('master');
         if(spec.set)spec.set(slM,adjust(spec,getSP(slM,spec),d,kmult(e)));
-        else slM[spec.key]=adjust(spec,slM[spec.key],d,kmult(e));
+        else slM[spec.key]=adjust(spec,getSP(slM,spec),d,kmult(e));
         engine.rebuildMaster();
       }
       dirty=true; dirtySave=true; return;
@@ -19296,7 +19335,7 @@ function masterRack(L){
   }
   L.push(lr); L.push(vr);
 }
-const getSP=(o,spec)=>spec.get?spec.get(o):o[spec.key];
+const getSP=(o,spec)=>specVal(o,spec,'fx',0);   // master inserts and dj pads are fx slots
 function renderMaster(L){
   if(!Array.isArray(S.master)){S.master=mkMaster(); dirtySave=true;
     flash('master rack was malformed — rebuilt from defaults');}
@@ -19322,7 +19361,9 @@ function renderMaster(L){
   let lr='   ', vr='   ';
   specs.forEach((pspec,i)=>{
     const foc=i===S.mParam;
-    const v=fmtVal(pspec,sl[pspec.key]??0);
+    /* ...through getSP like every other fx row: reading the key raw skipped
+       both the spec's own accessor and the rack's resting value. */
+    const v=fmtVal(pspec,getSP(sl,pspec));
     lr+=(foc?spH('a','▸'+pad(pspec.lbl,9),'mst',i):spH('d',' '+pad(pspec.lbl,9),'mst',i))+' ';
     vr+=(foc?spH('i',' '+pad(v,9),'mst',i):spH('v',' '+pad(v,9),'mst',i))+' ';
   });
