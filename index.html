@@ -1031,7 +1031,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.1204';
+const BUILD='2026-08-15.1210';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -3658,7 +3658,7 @@ let fxwReady=false;
             shift:Number.isFinite(m.sh)&&m.sh>0?m.sh:1,ch:m.ch|0,
             gl:Number.isFinite(m.gl)?m.gl:1,gr:Number.isFinite(m.gr)?m.gr:1,
             end:m.end,gain:m.gain??1,life:m.durF||1e12,
-            dur:Infinity,wrap:0,vel:1,shp:0.5,
+            dur:Infinity,wrap:m.wrap?1:0,lo:m.lo||0,vel:1,shp:0.5,
             n:0,env:0,rel:0,relAt:0,tp:0};
           this.tv.set(m.id,c9); this.cx.push(c9);}}
         else if(m.t==='toff'){const v=this.tv.get(m.id); if(v)v.rel=1;}
@@ -3776,7 +3776,7 @@ let fxwReady=false;
             c.env+=(c.rel||c.n>=c.life)?-rT:aT;
             if(c.env>1)c.env=1;
             if(c.env<=0&&(c.rel||c.n>=c.life)){dead=1;break;}
-            if(c.ph>=c.end-1){c.rel=1;continue;}
+            if(!c.wrap&&c.ph>=c.end-1){c.rel=1;continue;}
             amp=c.env*c.gain;
           }
           if(c.step!==c.sTgt)c.step+=(c.sTgt-c.step)*sT;   // a bend glides, it does not step
@@ -3796,8 +3796,12 @@ let fxwReady=false;
             this.tRd(c.ph-p2,SL,SR,len); const a2=this._rl, b2=this._rr;
             l9=a1*w1+a2*w2; r9=b1*w1+b2*w2;
           }else if(c.wrap){
+            /* A LOOP HAS ENDS OF ITS OWN. Grains wrap the whole buffer; a
+               key-spawned cursor wraps the CROP, so playing a cue near the
+               end runs on into the start again instead of stopping there. */
             let i2=c.ph;
-            if(i2<0||i2>=len){i2=((i2%len)+len)%len; c.ph=i2;}
+            const lo9=c.lo||0, hi9=c.end||len, w9=Math.max(1,hi9-lo9);
+            if(i2<lo9||i2>=hi9){i2=((i2-lo9)%w9+w9)%w9+lo9; c.ph=i2;}
             const i0=i2|0, fx=i2-i0, i1=(i0+1)%len;
             const ef=live?1:Math.min(1,i2/ew,(len-1-i2)/ew);   // a ring has no edges
             l9=(SL[i0]+(SL[i1]-SL[i0])*fx)*ef;
@@ -7372,6 +7376,12 @@ class Engine{
   noteOn(at,pi,midi,vel,padMidi){
     const p=S.presets[pi];
     if(engineGranP(p))return this.granNote(at,pi,midi,vel,null);
+    /* A CUE IS A NOTE. Position keys used to fire from the key handler and
+       return, which meant the whole PLAY rack — chords, the arp, everything
+       that turns held keys into a pattern — simply did not exist on an audio
+       channel. Coming through here instead, a cue slot is note 60+slot and
+       the rack shapes it exactly like any other note. */
+    if(p.cat==='audio'&&!engineGranP(p))return this.cueNote(at,pi,midi,vel);
     /* MONO STEAL, before anything else. This used to live below the procedural
        early-return, so proc channels never stole at all and mono stacked up
        polyphonically — the old note just kept ringing under the new one. */
@@ -7817,7 +7827,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     this._lastTid=id;
     e.node.port.postMessage({t:'tape',id,frame:Math.round(at*AC.sampleRate),
       pos:P9.pos,end:P9.end,rate:P9.rate,base:P9.base,free:P9.free?1:0,sh:P9.sh,
-      ch:P9.ch,gl:P9.gl,gr:P9.gr,gain:P9.gain,
+      ch:P9.ch,gl:P9.gl,gr:P9.gr,gain:P9.gain,wrap:P9.wrap?1:0,lo:P9.lo||0,
       durF:Math.round(P9.durSec*AC.sampleRate)});
     return true;
   }
@@ -7864,10 +7874,18 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
       sh:sync?Math.pow(2,semis/12):1,
       ch:buf.numberOfChannels>1?Math.round(au.chan||0):0,
       gl:Math.SQRT2*Math.cos(th9), gr:Math.SQRT2*Math.sin(th9),
+      /* a cue plays until you let go, so it loops the crop rather than
+         running off the end; the auto cursor is re-fired each cycle and
+         keeps its hard stop */
+      wrap:cue?1:0, lo:off*sr9,
       /* a key-spawned cursor carries the key level and its velocity; the auto
          cursor carries the loop level. cue.vol is the cue's own trim. */
       gain:(au.gain??0.9)*(cue?(cue.vol??1)*(au.kvol??1)*(cue.vel??1):(au.lvol??1)),
-      durSec:Math.min(loopSec-skipSec,(dur-skipBuf)/rate)});
+      /* A LOOPING CURSOR IS NOT BOUNDED BY WHAT IS LEFT. Its life was the
+         material remaining ahead of it, which for a cue near the end is a
+         fraction of a second — so it died exactly where it should have
+         wrapped. The key's release ends it, and so do stop, choke and panic. */
+      durSec:cue?1e6:Math.min(loopSec-skipSec,(dur-skipBuf)/rate)});
     return this._lastTid;
   }
   /* a fade-out then the stop, so a released cue does not click on the way out */
@@ -7875,6 +7893,38 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
      — which is exactly right for a jump that replaces the loop and exactly
      wrong once several keys are each holding their own. */
   /* the cut list for a channel, cached against the take and the crop */
+  /* one cue jump, note-shaped: a handle that can be released, stolen or
+     choked like a voice, because that is what the rack expects to be given */
+  cueNote(at,pi,midi,vel){
+    if(!this.audBuf[pi])return null;
+    const cuts=this.audCuts(pi)||[]; if(!cuts.length)return null;
+    const sl=((Math.round(midi)-60)%cuts.length+cuts.length)%cuts.length;
+    const au=S.presets[pi].au||{};
+    const cue=Object.assign({},(au.cues||{})[sl]||{o:0,semis:0,vol:1,pan:0},
+      {vel:vel??1,frac:cutAt(pi,sl)});
+    const lane=S.patterns[S.editPat].lanes[pi], L=lane.len||4;
+    const vm=clamp(Math.round((S.presets[pi].vox||{}).mode||0),0,2);
+    if(vm>0){                       // mono/legato: move the head, do not add one
+      const gl=vm===2?Math.max(0.01,(S.presets[pi].vox||{}).glide||0.08):0;
+      this.audMove(pi,cue.frac,gl,1);
+      const shM={_cue:1,midi,released:false,killed:false,press:0,pressN:[],nodes:[],
+        release(){this.released=true;},kill(){this.killed=true;this.released=true;},
+        setPressure(){}};
+      this.act[pi].push(shM);
+      setTimeout(()=>{const a=this.act[pi],i=a.indexOf(shM); if(i>=0)a.splice(i,1);},1500);
+      return shM;
+    }
+    const E=this, tid=this.audPlay(pi,Math.max(at,AC.currentTime+0.004),L,0,cue);
+    const sh={_cue:1,midi,tid,released:false,killed:false,startAt:Math.max(AC.currentTime,at),
+      press:0,pressN:[],nodes:[],
+      release(){ if(this.released)return; this.released=true; E.audOff(pi,this.tid); this._drop(); },
+      kill(){ this.killed=true; this.release(); },
+      setPressure(){}};
+    sh._drop=()=>setTimeout(()=>{const a=E.act[pi],i=a.indexOf(sh); if(i>=0)a.splice(i,1);},1200);
+    this.act[pi].push(sh);
+    if(this.act[pi].length>24){const old9=this.act[pi].shift(); old9&&old9.kill&&old9.kill();}
+    return sh;
+  }
   audCuts(pi){
     const buf=this.audBuf[pi]; if(!buf)return null;
     const au=S.presets[pi].au||{};
@@ -15485,6 +15535,23 @@ const onKeyDown=e=>{
           ' · vel '+Math.round(vel9*127)+(ms9>=2?' · on the grid':''));
         dirty=true; return;
       }
+      /* WITH A PLAY SLOT RUNNING, THE KEY IS A NOTE. Falling through to the
+         ordinary note path is what puts the audio channel inside the rack —
+         chords stack cues, the arp steps through the ones you are holding,
+         and every one of them ends up in cueNote. Without a slot the direct
+         path stays, because it carries the grab semantics the tape wants. */
+      if((S.presets[pi].ply||[]).some(sl=>sl.typ&&!sl.off)){
+        const cuts8=engine.audCuts(pi)||[];
+        const ki8=KBSEQ.indexOf(c);
+        if(ki8>=0&&cuts8.length){
+          const sl8=ki8%cuts8.length;
+          AUD.gk=AUD.gk||{};
+          AUD.gk[c]=AUD.hold={c,pi,kind:'pos',sl:sl8,vel:hitVel,tid:null,
+            press:AC.currentTime,tr:gridNow(),viaPly:1};
+          dirty=true;
+        }
+        /* no return: the note path below takes it from here */
+      }else{
       /* the letters ARE the hits, in time order: z is the take's start, and
          each key after it the next transient along */
       const cuts9=engine.audCuts(pi)||[];
@@ -15557,6 +15624,7 @@ const onKeyDown=e=>{
         (cue.o?' @'+(sl*0.25+cue.o).toFixed(2)+'b':'')+
         ((gr9.size??0.12)<0.999?' · cloud':''));
       dirty=true; return;
+      }
     }
     const pat=S.patterns[S.editPat];
     if(S.layer===1&&pat.state==='edit'){
