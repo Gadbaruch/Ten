@@ -17,8 +17,12 @@ GUARDS = [
     (r'HOLD\.n\b', 'hold n'), (r'HOLD\.v\b', 'hold v'), (r'HOLD\.i\b', 'hold `'),
     (r'HOLD\.m\b', 'hold m'), (r'HOLD\.r\b', 'hold /'), (r'HOLD\.opt', 'hold ⌥rack'),
     (r'HOLD\.dig', 'hold digit'),
-    (r'e\.metaKey|e\.ctrlKey', '⌘'), (r'rs\(e\)|e\.shiftKey', '⇧'),
-    (r'altOf\(e\)|e\.altKey', '⌥'),
+    # the three modifier LAYERS, each behind its own predicate. Without these a
+    # line guarded by gblOf() came out with no context at all, which reads as
+    # "this letter is bound bare" — the most dangerous thing this file can say.
+    (r'cmdOf\(e\)|e\.metaKey', '⌘'), (r'gblOf\(e\)|e\.ctrlKey', '⌃'),
+    (r'ctlOf\(e\)|altOf\(e\)|e\.altKey', '⌥'),
+    (r'rs\(e\)|e\.shiftKey', '⇧'),
     (r'DPICK', 'dest browser'), (r'PICK', 'set picker'),
     (r'S\.mSel', 'master'), (r'inEdit\(\)', 'edit mode'),
     (r'S\.layer\s*===\s*(-?\d)', 'layer %s'),
@@ -63,7 +67,18 @@ def codes_in(name):
     m = re.search(r'const ' + name + r'\s*=\s*\{([^}]*)\}', SRC.read_text(), re.S)
     return set(re.findall(r'(\w+)\s*:', m.group(1))) if m else set()
 
-note = codes_in('NOTEKEYS')          # the musical keyboard
+def seq_in(name):
+    """Every code in a `const NAME=['KeyA','KeyB',…]` list.
+
+    KBSEQ is the FULL keyboard — the default — and it is all twenty-six
+    letters. Without it this file counted only the piano map, and the piano map
+    is an alias (`const NOTEKEYS=NOTEKEYS_PIANO`) that the object-literal regex
+    below cannot see either, so BOTH keyboards were invisible and the map
+    advertised P R U W Y as free letters. Every one of them plays a note."""
+    m = re.search(r'const ' + name + r'\s*=\s*\[(.*?)\]', SRC.read_text(), re.S)
+    return set(re.findall(r"'(\w+)'", m.group(1))) if m else set()
+
+note = codes_in('NOTEKEYS_PIANO') | seq_in('KBSEQ')   # both keyboards
 dj   = codes_in('DJCODE')            # the master's dj pads, same physical row
 taken = note | dj
 
@@ -86,7 +101,11 @@ doc = ["# TEN — key map",
        "",
        "## What is still free",
        "",
-       f"**Letters:** {' '.join(free) if free else 'none'} — every other letter either plays a note or is bound.",
+       f"**Letters:** {' '.join(free) if free else 'none'} — in the full keyboard every"
+       " letter is a note, so a BARE letter is never available. A new letter binding"
+       " has to ride a modifier layer: ⌘, ⌃ or ⌥. Check the table below for what that"
+       " layer already holds, and confirm with"
+       " `tools/probe.sh key code=KeyX ctrl=1` that nothing moves.",
        "",
        f"**Note keys** (cannot be reused): {' '.join(sorted(note))}",
        "",

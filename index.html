@@ -1102,6 +1102,10 @@ const SETTINGS=[
                                   :'piano — home row white, row above black');}},
  /* ↑ on this row asks the server whether you are current, and reloads if not */
  {n:'build',g:'Behavior',  v:()=>BUILD,                    a:()=>checkUpdate()},
+ /* …and this one copies the focused channel's patch out as JSON, so a bug
+    report carries the sound rather than a description of it. The row shows the
+    key because a key nobody can find is a key nobody has. */
+ {n:'copy patch',g:'Behavior', v:()=>'⌃c',            a:()=>copyPatch()},
  {n:'dial',g:'Behavior',   v:()=>CFG.dial?'pressure':'steps',
               a:()=>{CFG.dial=CFG.dial?0:1; saveCfg();
                      flash(CFG.dial?'dial — how deep you press the arrow decides how far the value moves'
@@ -10234,6 +10238,59 @@ function clipboardOp(op){
   }
   dirty=true; dirtySave=true;
 }
+/* ⌃c — THE FOCUSED CHANNEL'S PATCH, ON THE SYSTEM CLIPBOARD, AS JSON.
+   ⌘C above puts a channel on TEN's own clipboard so it can be pasted into
+   another channel; this is the other kind of copy — the one a bug report needs,
+   where the exact patch travels out of the instrument in a form anyone can read
+   and any future session can load back. The build stamp rides along, because
+   "it does this on my machine" is only useful with the machine named.
+
+   ⌃c and not ⌘⇧C: every letter on this keyboard is a note, so a bare key was
+   never available, and Chrome owns ⌘⇧C and ⌘⌥C for its inspector. ⌃ is the
+   instrument's own layer (click, overdub, tempo, scale, quantize) and c was the
+   one letter in it still free — checked with tools/probe.sh key code=KeyC
+   ctrl=1, which moved nothing. It costs right-shift+c, which was a note and is
+   now this: the same trade ⌃m, ⌃o, ⌃b, ⌃s and ⌃q already made. */
+function patchJSON(pi){
+  const p=S.presets[pi];
+  return JSON.stringify({
+    ten:BUILD, at:new Date().toISOString().slice(0,16),
+    ch:pi, name:p.name, cat:p.cat,
+    /* what the patch alone cannot say: an audio channel is its take, and the
+       same patch reads differently under a different keyboard or scale */
+    sample:engine.audName[pi]||(engine.granName||[])[pi]||null,
+    keys:{kbd:kbFull()?'full':'piano', oct:S.oct,
+          scale:CFG.scaleOn?NN[CFG.key||0]+' '+SCALES[CFG.scale||0][0]:'off'},
+    lane:(S.patterns[S.editPat].lanes[pi]||{}).events
+         ?S.patterns[S.editPat].lanes[pi].events.length:0,
+    data:presetData(p)
+  },null,1);
+}
+function copyPatch(){
+  const pi=S.layer>=2?S.editSnd:S.curPreset;
+  const p=S.presets[pi];
+  if(!p){flash('nothing focused to copy');return;}
+  const txt=patchJSON(pi);
+  const done=()=>{flash('▣ '+p.name+' ('+(p.cat||'misc')+') — ch '+pi+', '+
+    Math.round(txt.length/1024*10)/10+'kB of JSON on the clipboard'+
+    (S.mSel?' — the master has no patch, so this is the channel under it':''));
+    dirty=true;};
+  /* the async API is the right one and the only one on a page served over
+     https; execCommand is the fallback for a file:// clone, which this app is
+     meant to boot from */
+  try{
+    navigator.clipboard.writeText(txt).then(done).catch(()=>{legacyCopy(txt)&&done();});
+  }catch(_){ if(legacyCopy(txt))done(); else flash('could not reach the clipboard'); }
+}
+function legacyCopy(txt){
+  try{
+    const ta=document.createElement('textarea');
+    ta.value=txt; ta.style.position='fixed'; ta.style.opacity='0';
+    document.body.appendChild(ta); ta.select();
+    const ok=document.execCommand('copy');
+    ta.remove(); return ok;
+  }catch(_){return false;}
+}
 function initPreset(cat){
   if(cat==='audio'){const p=foldMod(basePreset('INIT'));p.cat='audio';return p;}
   if(cat==='kit'){const p=basePreset('INIT');p.cat='kit';
@@ -15606,6 +15663,8 @@ const onKeyDown=e=>{
     if(!e.repeat){HOLD.m=true; HOLD.mUsed=false;
       S.metro=!S.metro; flash('click '+(S.metro?'on':'off')); dirty=true;}
     return;}
+  if(c==='KeyC'&&gblOf(e)&&!e.repeat){e.preventDefault();   // ⌃c — this channel's patch, as JSON, on the clipboard
+    copyPatch(); return;}
   if(c==='KeyO'&&gblOf(e)&&!e.repeat){               // ⌃o — how recording meets what is there
     CFG.overdub=CFG.overdub?0:1; saveCfg();
     flash(CFG.overdub?'OVERDUB — recording adds to what is there'
