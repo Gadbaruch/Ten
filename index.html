@@ -415,6 +415,37 @@ const MD2LFO={2:1,3:2,1:3,4:4,5:5};                    // MDST → the engine's 
    ±4 octaves of pitch, a² puts vibrato at amt 20 and a drum drop at amt 100.
    Without it a single range would have to choose between them, and the reason
    the old per-source depths existed at all was that nobody could. */
+/* ---------------- FM CANNOT EXCEED NYQUIST ------------------------------
+   An OscillatorNode is band-limited per note, but FM/PM is a modulator wired
+   into `frequency` and NOTHING band-limits those sidebands. Carson: the
+   spectrum spans 2·(Δf + f_mod), so Gad's ch6 op at ratio 16 / index 24 spans
+   800·f0 — 52kHz at the bottom of the keyboard and 419kHz at the top, 2.4x and
+   19x Nyquist. Everything past Nyquist folds back DOWNWARD, so as the note
+   rises the folded content moves the wrong way and drowns the real partials.
+   Measured on his own patch: the spectral centroid sat at 1136/1098/1232/1393
+   across four octaves — pinned, while the fundamental moved by eight — and at
+   the top note the LOUDEST peak in the mix was at 40Hz. That is what "the ops
+   don't track" was.
+
+   Oversampling is the textbook answer and it is the WRONG one here: rendering
+   that patch honestly needs ~19x, and even 4x (already costly) would not come
+   close. At those settings the sound is not representable at 44.1k at all, so
+   the index has to be bounded. Hardware FM has always key-scaled for exactly
+   this reason.
+
+   SOFT, via tanh, so it is a budget and not a cliff: while there is headroom
+   the curve is its own argument and nothing changes (rat 2 index 6 loses 0.3%,
+   rat 4 index 12 loses 0.8% — inaudible), and it only bends once the deviation
+   approaches the room left under Nyquist. Gad's PM op then reads index 21 at
+   C2, 8.9 at C4, 3.9 at C5: it rolls off with pitch instead of turning to mush.
+   COSTS NOTHING AT RUNTIME — one tanh per FM operator per note, no per-sample
+   work anywhere. */
+const fmDepth=(amt,carHz,modHz,isPM)=>{
+  const a0=clamp(amt,0,1), kIdx=6*(1+3*a0*a0);
+  const want=Math.abs(isPM?modHz:carHz)*kIdx;
+  const room=Math.max(0,AC.sampleRate/2*0.95-Math.abs(carHz)-Math.abs(modHz));
+  return room>0?room*Math.tanh(want/room):0;      // the a0=1 full-scale depth
+};
 const MODLOG=new Set(['freq','time']);                 // these modulate in cents
 const MODTAPER=a=>{const x=clamp(a/100,-1,1); return Math.sign(x)*x*x;};
 const MODCENTS=4800;                                   // a log param's full swing
@@ -1154,7 +1185,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-16.1916';
+const BUILD='2026-08-16.1926';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -5255,8 +5286,13 @@ class Voice{
       const fmDep=(op.mode===1||op.mode===4);
       const pr=(fmDep&&this._tf0>0&&this.toneFreq>0)?this.toneFreq/this._tf0:1;
       if(key==='amt'||key==='off'||(fmDep&&(key==='rat'||key==='fine'||key==='dst')))
-        for(const a of (this.opAmt[i]||[]))
-          a.g.gain.setTargetAtTime((op.off?0:op.amt)*a.sc*pr,t,GL);
+        for(const a of (this.opAmt[i]||[])){
+          /* an FM depth is RE-DERIVED at the new pitch, not scaled from the old
+             one: the room left under Nyquist shrinks as the note climbs, so
+             scaling would carry the low note's budget up with it and alias */
+          const sc=a.fm?(a.sc=fmDepth(op.amt,a.cf0*pr,a.mf0*pr,a.pm)):a.sc;
+          a.g.gain.setTargetAtTime((op.off?0:(a.fm?clamp(op.amt,0,1):op.amt))*sc,t,GL);
+        }
       const list=this.opPitch[i]||[];
       for(let u=0;u<list.length;u++){
         const e=list[u], target=bt*Math.pow(2,sprd*(this.uniOff[u]||0)/1200);
@@ -5889,11 +5925,18 @@ class Voice{
              Curved rather than just multiplied: ×6(1+3a²) leaves the bottom of
              the range where it was, so nothing already dialled in moves much,
              and takes the top to twenty-four. That is a scream. */
-          const a0=clamp(b.op.amt,0,1), kIdx=6*(1+3*a0*a0);
-          const fg=ac.createGain(); fg.gain.value=a0*dep*kIdx;
+          const a0=clamp(b.op.amt,0,1), isPM=b.op.mode===4;
+          /* the full-scale depth, held inside the Nyquist budget — see fmDepth.
+             `sc` is what the mod rack scales, so bounding it here bounds an
+             envelope or LFO on the index too, not just the dialled value. */
+          const sc=fmDepth(b.op.amt,tb.f,b.f,isPM);
+          const fg=ac.createGain(); fg.gain.value=a0*sc;
           b.s.connect(fg); fg.connect(tb.s.frequency);
           (this.opGains[b.i]=this.opGains[b.i]||[]).push(fg);
-          (this.opAmt[b.i]=this.opAmt[b.i]||[]).push({g:fg,sc:dep*kIdx});
+          /* cf0/mf0 so a retune can re-derive the budget at the NEW pitch
+             rather than scaling the old one — the room under Nyquist shrinks
+             as the note climbs, which is the whole point */
+          (this.opAmt[b.i]=this.opAmt[b.i]||[]).push({g:fg,sc,fm:true,cf0:tb.f,mf0:b.f,pm:isPM});
         }else if(b.op.mode===2){
           /* RING IS A DEPTH, NOT A GATE — and full depth has to BE a ring.
              Base 0 with the modulator alone is textbook four-quadrant

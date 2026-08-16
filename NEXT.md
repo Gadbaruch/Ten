@@ -578,7 +578,53 @@ CONFIRMED BY CONTROL: same patch with the two depths turned down (op1 0.25,
 op2 0.15) gives centroid ratios 1.6 / 2.06 / 1.35 and a centroid that actually
 climbs 235 → 377 → 777 → 1051. Lower the index and it tracks.
 
-### The fix is a decision, so it is NOT shipped
+### FIXED — a Nyquist budget, soft, at zero CPU
+
+Gad: "do what you think will sound best and be most reliable, don't prioritise
+easiness, but tell me if something is a major cpu eater."
+
+**Oversampling is the textbook answer and it is the wrong one here.** Rendering
+that patch honestly needs ~19x; even 4x, already costly, would not come close.
+At those settings the sound is NOT REPRESENTABLE at 44.1k, so the index has to
+be bounded whatever else is done — which makes the budget the honest fix rather
+than the cheap one. Hardware FM has key-scaled for this reason since the DX7.
+
+`fmDepth(amt,carHz,modHz,isPM)` holds the peak deviation inside the room left
+under Nyquist, SOFT via tanh so it is a budget and not a cliff:
+
+    rat 2  index 6  @C4      1570 -> 1566 dev    (-0.3%, inaudible)
+    rat 4  index 12 @C4      3139 -> 3113 dev    (-0.8%)
+    Gad's PM rat 16          index 21.3 @C2 · 16.0 @C4 · 8.6 @C5 · 3.6 @C6
+
+Ordinary patches are untouched; only the extreme ones roll off, and they roll
+off WITH PITCH instead of turning to mush. `sc` is bounded rather than just the
+dialled gain, so an envelope or LFO on the index cannot push back past Nyquist
+either. A retune RE-DERIVES the budget at the new pitch rather than scaling the
+old one, because the room shrinks as the note climbs.
+
+**CPU: none.** One `tanh` per FM operator per note. No per-sample work anywhere,
+no worklet, no extra nodes.
+
+Measured on Gad's own set, same patch both builds — and note the metric. Once
+the index is key-scaled the CENTROID cannot double: capping absolute bandwidth
+means the spectrum stops scaling with pitch, and that is physics, not a bug.
+What must improve is HARMONICITY, because aliased content folds to arbitrary
+frequencies:
+
+    note   harmonic energy      loudest peak
+     36    18.1% -> 17.9%       harmonic 0.99 -> 0.99   (untouched, as intended)
+     48    18.1% -> 23.8%       harmonic 1.03 -> 0.99
+     60    14.4% -> 24.9%       harmonic 1.01 -> 0.99
+     72    12.4% -> 34.2%       harmonic 0.15 -> 4.97   <- junk to a real 5th
+
+At the top note the loudest thing in the mix was a 40Hz fold; it is a 1300Hz
+fifth harmonic now, and harmonic energy nearly triples.
+
+WHAT IT COSTS: any patch relying on an index past the budget loses brightness
+up top. That IS the aliasing being removed — there was never a clean version of
+that sound — but it will not sound identical.
+
+### The options that were considered and rejected
 
 TEN band-limits its oscillators per note (`setPeriodicWave`), but FM/PM is done
 by connecting a modulator into `frequency`, and those sidebands are not
