@@ -1108,7 +1108,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-15.2323';
+const BUILD='2026-08-16.0730';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -16262,14 +16262,30 @@ const onKeyDown=e=>{
     const d=c==='Period'?1:-1;
     if(e.shiftKey){EXP.bump(d*0.05);
       flash('keyboard vel '+Math.round(clamp(CFG.kvel??0.9,0.02,1)*127)); return;}
-    /* , AND . ARE THE NUDGE when there is something to nudge, and the octave
-       when there is not — the same contextual rule ↑↓ already follow, where a
-       live selection owns them because moving what you selected is the only
-       reason you selected it.
-       NOTES, finely. ↑↓ move a selection by a whole grid step; these move it by
-       a QUARTER of one, which is the "fine grain note moving" the retired play
-       effect was pretending to be — except on the grid, on the notes you can
-       see, and undoable. */
+    /* PARKED, 2026-08-16 (Gad) — BOTH OF THESE STOLE THE OCTAVE, and the rule
+       they broke is the one that decides the whole keyboard:
+
+           A KEY MAY ONLY CHANGE WHAT IT MEANS WHILE A MODIFIER IS HELD.
+
+       Not "while a selection happens to exist", not "while you are on layer 2
+       with an fx rack focused". Context is invisible; a modifier is a thing
+       your hand is doing. `,` and `.` are the OCTAVE, they sit right under the
+       note rows, and reaching for the octave must never depend on what else is
+       true at that moment. ⇧ + , . staying the keyboard velocity is fine —
+       that has a modifier, which is exactly the point.
+
+       Neither idea is bad and neither is deleted. They need a home behind a
+       modifier, or on keys that are not this load-bearing:
+         - FINE NOTE NUDGE (¼ grid step on a selection). The COARSE version is
+           unaffected and still live: select, then ↑↓ moves by a whole grid
+           step. Only the ¼-step fine move is parked.
+         - SLOT SWAP in the fx and flt chains, where order is audible. Also
+           reachable today by re-adding in the order you want.
+       A held scope's own row is the obvious candidate for both — MAGPAIR
+       already gives `, .` to `wid` inside a held scope, which is the shape
+       this wants: a modifier is down, so the key is free to mean something
+       else. Whoever picks this up, put it there, not back here.
+
     if(SELALL!=null&&S.layer>=1&&!e.repeat){
       const laneN=S.patterns[S.editPat].lanes[SELALL];
       if(laneN&&laneN.events.length){
@@ -16280,11 +16296,6 @@ const onKeyDown=e=>{
         dirty=true; dirtySave=true; return;
       }
     }
-    /* SLOTS, by swapping with the neighbour. Only where the order is a CHAIN
-       and moving one means something you can hear — an fx rack is played in
-       order, and so are series filters. The osc rack is deliberately not here:
-       an operator's index is what `dst` routes point AT, so swapping two would
-       silently re-aim every route in the patch. */
     if(S.layer>=2&&!S.mSel&&!e.repeat&&MODULES[S.curMod]
        &&['fx','flt'].includes(MODULES[S.curMod].id)){
       const MN=MODULES[S.curMod], rkN=modHolder(S.presets[S.editSnd],MN.id)[MN.id];
@@ -16297,6 +16308,7 @@ const onKeyDown=e=>{
       flash(MN.name+' slot moved '+(d>0?'later':'earlier')+' — now '+((to+1)%10));
       dirty=true; dirtySave=true; return;
     }
+    */
     OCT[c==='Comma'?'l':'r']=true;
     /* BOTH TOGETHER IS HOME, the same gesture the pan pair has: the two keys
        are the two directions, so holding them at once asks for neither. The

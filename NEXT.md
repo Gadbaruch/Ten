@@ -121,6 +121,36 @@ carrier sampled every 150ms across a x4 length change whose old cycle ended at
 handler, ahead of the audio channel's own three meanings for it, or the
 gesture would mean different things on different channels.
 
+## THE RULE A KEY CHANGES MEANING BY (Gad, 2026-08-16)
+
+    A KEY MAY ONLY CHANGE WHAT IT MEANS WHILE A MODIFIER IS HELD.
+
+Not "while a selection happens to exist", not "while you are on layer 2 with
+an fx rack focused". Context is invisible; a modifier is a thing your hand is
+doing. `,` and `.` are the OCTAVE, they sit right under the note rows, and
+reaching for the octave must never depend on what else is true at that moment.
+
+Two features had quietly taken them with no modifier and are now PARKED —
+commented out in the `Comma||Period` branch, not deleted:
+
+- **fine note nudge**, ¼ grid step on a ⌘A selection. The COARSE version is
+  untouched and still live: select, then ↑↓ moves by a whole grid step.
+- **slot swap** in the fx and flt chains, where order is audible.
+
+Measured against the build before the fix, dispatching the real key:
+
+    context                     before                    after
+    layer 1, ⌘A selection       oct 0, notes +0.0625      oct ∓1, notes still
+    layer 2, fx rack            oct 0, slot cursor moved  oct ∓1, cursor still
+    layer 2, flt rack           oct 0, slot cursor moved  oct ∓1, cursor still
+    ⇧ + , .                     keyboard velocity         unchanged (has a modifier)
+    , and . together            octave centred            unchanged
+
+Both ideas are wanted, neither can live at this level. A held scope's own row
+is the obvious home — MAGPAIR already gives `, .` to `wid` inside a held
+scope, which is exactly the shape: a modifier is down, so the key is free.
+Put them there, not back on the bare key.
+
 ## 0. THE FILTER ENVELOPE — THE 350Hz HALF IS FIXED, THE RESTING POINT IS NOT
 
 ### FIXED: the dial was not in the sound at all (2026-08-16)
