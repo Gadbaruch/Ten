@@ -1185,7 +1185,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-16.1926';
+const BUILD='2026-08-16.2001';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1921,6 +1921,13 @@ const MODULES=[
       if(isKit(S.presets[pi2]))setEngine(pi2,'synth');
       o.mode=k2;}}),
     SP('glide','glide','time',{min:0,max:0.5}),
+    /* THE EXPERIMENT, on a dial so it can be judged by ear. `phase` swaps the
+       operator stack for ten-fmop: a real phase accumulator, band-limit table
+       chosen once per note. Chained FM is what it is for — see NEXT.md 0i.
+       Costs real CPU (per-sample JS per operator per unison voice) and does
+       not carry per-op pitch/level mods yet, so it is not the default. */
+    SP('fm eng','fmw','enum',{opts:['native','phase'],
+      get:o=>Math.round(o.fmw||0), set:(o,v)=>{o.fmw=Math.round(v);}}),
     SP('uni','uni','lin',{min:1,max:7,step:1,fmt:v=>v+'v'}),
     SP('sprd','sprd','lin',{min:0,max:50,step:2,fmt:v=>v+'c'}),
     SP('wide','wide','lin',{min:0,max:1,step:0.05}),
@@ -4824,6 +4831,90 @@ let fxwReady=false;
       return true;
     }
   }
+  /* ten-fmop — AN FM STACK ON A REAL PHASE ACCUMULATOR.
+     Why this exists: an OscillatorNode is a band-limited WAVETABLE oscillator.
+     It picks a table by the absolute value of its frequency, in octave bands,
+     and those thresholds are absolute Hz. Chain two FM ops and the carrier's
+     instantaneous frequency swings through zero and negative (measured on
+     Gad's ch4: op2 ran 803 +- 2488 Hz, op1 262 +- 490 Hz), so the table
+     switches somewhere inside every modulation cycle — and WHERE depends on
+     the note. That is why his patch had a different timbre on every key and
+     would not transpose.
+     A phase accumulator has none of that. Phase runs backwards quite happily
+     when the instantaneous frequency is negative, which is what ideal FM does
+     and what a DX7 has always done, and THE TABLE IS CHOSEN ONCE PER NOTE and
+     never changes under the modulation. That single difference is the fix.
+     It is also true PHASE modulation rather than frequency modulation, so
+     mode 4 stops being a scaling trick standing in for a phase input.
+     Ops are evaluated deepest-modulator-first, so a modulator always reaches
+     its target within the same sample. */
+  var FMTL=2048, FMTM=FMTL-1, FMCACHE={};
+  function fmTable(wav,H){
+    var key=wav+'_'+H, t=FMCACHE[key];
+    if(t)return t;
+    t=new Float32Array(FMTL);
+    for(var n=1;n<=H;n++){
+      var a=0;
+      if(wav===0)a=(n===1)?1:0;                                  // sin
+      else if(wav===1)a=(n%2)?(1/(n*n))*((n%4===1)?1:-1):0;      // tri
+      else if(wav===2)a=1/n*((n%2)?1:-1);                        // saw
+      else if(wav===3)a=(n%2)?1/n:0;                             // sqr
+      else if(wav===5)a=(n<=8)?[1,0.5,0.35,0.25,0.2,0.14,0.1,0.07][n-1]:0;  // org
+      else a=(n===1)?1:0;
+      if(!a)continue;
+      for(var k=0;k<FMTL;k++)t[k]+=a*Math.sin(2*Math.PI*n*k/FMTL);
+    }
+    var pk=0; for(var q=0;q<FMTL;q++){var v=t[q]<0?-t[q]:t[q]; if(v>pk)pk=v;}
+    if(pk>0)for(var q2=0;q2<FMTL;q2++)t[q2]/=pk;
+    FMCACHE[key]=t; return t;
+  }
+  class FMO extends AudioWorkletProcessor{
+    constructor(){
+      super();
+      this.o=[]; this.N=0; this.g=0; this.tg=0; this.dead=false;
+      this.port.onmessage=e=>{
+        var d=e.data;
+        if(d.t==='cfg'){
+          this.o=[];
+          for(var i=0;i<d.ops.length;i++){
+            var s=d.ops[i];
+            /* the band limit is fixed HERE, from the nominal frequency, and is
+               never revisited — that is the whole point of this processor */
+            var H=Math.max(1,Math.min(64,Math.floor(sampleRate*0.45/Math.max(1,s.f))));
+            this.o.push({ph:Math.random()*0.0001,inc:s.f/sampleRate,amp:s.amp,
+                         dep:s.dep,tgt:s.tgt,mode:s.mode,tbl:fmTable(s.wav|0,H),pm:0});
+          }
+          this.N=this.o.length;
+        }
+        else if(d.t==='on'){this.tg=1;}
+        else if(d.t==='off'){this.tg=0;}
+        else if(d.t==='kill'){this.dead=true;}
+      };
+    }
+    process(inp,out){
+      if(this.dead)return false;
+      var L=out[0][0], R=out[0][1]||null, n=L.length, i, k;
+      if(!this.N){for(k=0;k<n;k++){L[k]=0; if(R)R[k]=0;} return true;}
+      for(k=0;k<n;k++){
+        this.g+=(this.tg-this.g)*0.002;          // a short fade so it cannot click
+        var sum=0;
+        for(i=this.N-1;i>=0;i--){
+          var o=this.o[i];
+          var ph=o.ph+o.pm; ph-=Math.floor(ph);
+          var fi=ph*FMTL, i0=fi|0, fr=fi-i0, tb=o.tbl;
+          var v=(tb[i0]+(tb[(i0+1)&FMTM]-tb[i0])*fr)*o.amp;
+          o.pm=0;
+          o.ph+=o.inc; o.ph-=Math.floor(o.ph);
+          if(o.mode===0)sum+=v;
+          else if(o.tgt>=0&&o.tgt<this.N)this.o[o.tgt].pm+=v*o.dep;
+        }
+        var y=sum*this.g;
+        L[k]=y; if(R)R[k]=y;
+      }
+      return true;
+    }
+  }
+  registerProcessor('ten-fmop',FMO);
   registerProcessor('ten-scan',SC);
   registerProcessor('ten-grsyn',GR);
   registerProcessor('ten-buf',B2);
@@ -5701,7 +5792,60 @@ class Voice{
     /* live-edit bookkeeping: the source node and the amt→gain scale per op/uni,
        plus each unison voice's detune offset, so oscRefresh can retune in place */
     this.opNodes={}; this.opAmt={}; this.uniOff=[];
-    for(let u=0;u<uniN;u++){
+    /* PHASE-ACCUMULATOR OPERATORS, behind vox.fmw — the experiment, not the
+       default. Everything downstream is untouched: the stack lands in `merge`
+       exactly where the native oscillators would, so filters, the amp envelope
+       and every mod aimed at amp or the filter still work. What it does NOT
+       carry yet is per-op pitch/level modulation (opPitch/opDet/opGains stay
+       empty), so an env or LFO aimed at an operator does nothing in this mode.
+       Only taken when every operator is a plain oscillator: samples, noise,
+       scan, wavetable and hard sync all still need the native path. */
+    const FMW=Math.round((VX.fmw??0))===1&&fxwReady&&
+      ops.every((o,i)=>!o||o.off||(i>0&&o.amt<=0.001)||
+        (o.wav<4||o.wav===5||o.wav===6||o.wav===7||o.wav===8)&&o.mode!==3&&o.mode!==5);
+    if(FMW){
+      for(let u=0;u<uniN;u++){
+        const off=uniN===1?0:(u/(uniN-1))*2-1;
+        this.uniOff.push(off);
+        const tgt=baseTarget*Math.pow(2,(VX.sprd||0)*off/1200);
+        /* the same graph the native path builds, described rather than wired:
+           index in CYCLES, because a phase accumulator takes phase. The old
+           depth was a FREQUENCY deviation, so index = dev/f_mod — that is what
+           keeps a patch sounding like itself across the two engines. */
+        const list=[], idxOf={};
+        for(let i=0;i<10;i++){
+          const o=ops[i]; if(!o||o.off||(i>0&&o.amt<=0.001))continue;
+          if(i===0&&skipOp0)continue;
+          idxOf[i]=list.length;
+          list.push({i,o,f:tgt*(i===0?1:o.rat)*Math.pow(2,(o.fine||0)/1200)});
+        }
+        if(!list.length)continue;
+        const tgtIx=b=>{
+          const d=b.o.dst||0;
+          if(d>0&&d-1!==b.i&&idxOf[d-1]!==undefined)return idxOf[d-1];
+          for(let j=b.i-1;j>=0;j--)if(idxOf[j]!==undefined)return idxOf[j];
+          return 0;
+        };
+        const cfg=list.map(b=>{
+          const a0=clamp(b.o.amt,0,1), kIdx=6*(1+3*a0*a0);
+          const md=b.i===0?0:Math.round(b.o.mode||0);
+          const carF=(list[tgtIx(b)]||b).f;
+          /* fm scaled the deviation by the CARRIER's frequency, pm by the
+             modulator's own — the only difference between the two modes */
+          const ix=(md===1||md===4)?a0*kIdx*((md===4?b.f:carF)/Math.max(1,b.f)):0;
+          return {f:b.f, amp:md===0?a0*0.9:1, wav:Math.round(b.o.wav||0),
+                  mode:md===0?0:1, tgt:md===0?-1:tgtIx(b), dep:ix/(2*Math.PI)};
+        });
+        const nd=new AudioWorkletNode(ac,'ten-fmop',{numberOfInputs:0,outputChannelCount:[2]});
+        nd.port.postMessage({t:'cfg',ops:cfg});
+        nd.port.postMessage({t:'on'});
+        nd.connect(merge);
+        this.nodes.push(nd);
+        this._fmw=this._fmw||[]; this._fmw.push(nd);
+        if(!firstSrc)firstSrc=nd;
+      }
+    }
+    for(let u=0;!FMW&&u<uniN;u++){
       const off=uniN===1?0:(u/(uniN-1))*2-1;
       this.uniOff.push(off);
       const target=baseTarget*Math.pow(2,(VX.sprd||0)*off/1200);
@@ -6498,7 +6642,21 @@ class Voice{
     g.setTargetAtTime(0,safe,fast?0.0015:0.008);   // fast: mono steal — old tail dies before the new attack
     this._end(safe+(fast?0.03:0.12));
   }
-  _end(t){for(const n of this.nodes){try{n.stop(t);}catch(_){}}}
+  _end(t){for(const n of this.nodes){try{n.stop(t);}catch(_){}}
+    /* an AudioWorkletNode has no stop() and no onended, so an fmw voice would
+       sit in act[] forever — the native path is freed by its source's onended.
+       Tell the processor to return false (which frees it) and splice out here,
+       after the tail the vca is still playing. */
+    if(this._fmw&&!this._fmwEnded){
+      this._fmwEnded=true;
+      const ms=Math.max(0,(t-AC.currentTime)*1000)+150;
+      setTimeout(()=>{
+        for(const n of this._fmw){try{n.port.postMessage({t:'kill'});}catch(_){}
+                                  try{n.disconnect();}catch(_){}}
+        const a=this.eng&&this.eng.act[this.pi];
+        if(a){const i=a.indexOf(this); if(i>=0)a.splice(i,1);}
+      },ms);
+    }}
 }
 
 class Engine{

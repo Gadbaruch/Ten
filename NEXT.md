@@ -767,7 +767,47 @@ ratio went 1.35 → 1.19 and the jumps stayed 0.73..1.38. The budget is not the
 lever, because there IS room under Nyquist here — the fault is the oscillator,
 not the bandwidth.
 
-### THE REAL FIX, and it is the one with a CPU bill
+### BUILT, BEHIND A DIAL — `voice → fm eng → phase` (2026-08-16)
+
+Gad: "im interested to at least try the real but heavy fix." So it exists, as
+an experiment rather than a default: **`ten-fmop`**, an FM stack on a real
+phase accumulator. Phase runs backwards happily when the instantaneous
+frequency goes negative — which is what ideal FM does — and **the band-limit
+table is chosen ONCE PER NOTE and never switched under the modulation.** That
+single difference is the fix. It is also true PHASE modulation, so mode 4 stops
+being a scaling trick standing in for a phase input.
+
+ch4, chromatic, his patch, same everything but the engine:
+
+    native   centroid 1478 1635 1543 1937 2317 2264 1984 1968 1818 …
+             semitone ratios 0.81 .. 1.34        <- jumps, does not transpose
+    phase    centroid 2459 2524 2621 2712 2720 2763 2798 2832 2869 …
+             semitone ratios 1.00 .. 1.04        <- smooth, monotonic
+
+**CPU, measured rather than guessed** — voices piled on until the audio clock
+would fall behind the wall clock:
+
+    8 voices   native ratio 0.9999   phase 1.0001
+    16 voices  native ratio 0.9989   phase 1.0013
+
+16 voices x 3 ops x 3 unison is 144 phase accumulators and it still renders in
+real time, so the bill is far lighter than the 5-10x estimate feared. Caveat:
+this measures WHETHER it keeps up, not how much headroom is left — it cannot
+read the audio thread's actual load, so a slower machine or a heavier patch is
+untested.
+
+WHAT IT DOES NOT DO YET, and why it is not the default:
+- **no per-operator pitch/level modulation.** opPitch/opDet/opGains stay empty
+  in this mode, so an env or LFO aimed at an operator does nothing. Everything
+  aimed at amp, the filter or pan still works, because the stack lands in
+  `merge` exactly where the native oscillators would.
+- **oscillator ops only** — samples, noise, scan, wavetable and hard sync all
+  still take the native path, and the flag silently declines rather than
+  breaking them.
+- the waves are a small additive set (sin/tri/saw/sqr/org); the richer ones
+  fall back to sine.
+
+### THE ORIGINAL SKETCH OF THE FIX, kept for the reasoning
 
 Operators in an **AudioWorklet doing true phase accumulation** — real phase
 modulation rather than frequency modulation of a wavetable oscillator. A phase
