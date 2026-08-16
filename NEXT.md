@@ -184,18 +184,43 @@ multiples of the cutoff instead of collapsing all five onto the first.
 `fBase[i]=fFrq` in the builder is written twice and read nowhere — the right
 value was sitting there the whole time.
 
-### STILL OPEN: where the dial sits in the sweep
+### ALSO FIXED: the dial is where the note SETTLES (2026-08-16)
 
-Unchanged and now measurable, because the base is real:
+Gad: "when I change the freq during play I expect it to sound as I set it,
+even if there are modulations connected to it." The stored cutoff was the
+FLOOR of the sweep, but `cutLive` treats it as the frequency you HEAR — two
+meanings for one number, and the sound jumped between them every time he
+touched the knob. Measured with a live audio clock, dial 1000 → 2000, amt 40 /
+s 0.6 (G=4, K=1+(G−1)·s=2.8):
 
-    peak    = base · 2^(amt/100·5)
-    sustain = base + (peak−base)·s  =  base · K,  K = 1+(2^(amt/100·5)−1)·s
+    step                  previous build        now
+    note settles          2800                  1000   ← the dial
+    turn dial to 2000     2000  (jumps DOWN)    2000   (continuous)
+    next note             5600  (jumps back UP) 2000   ← where his ear left it
 
-The dial is the FLOOR while your ear tunes the SUSTAIN, so tuning by ear
-writes the floor and the next note re-derives from it. Making the stored value
-the RESTING value (divide out by K, migrate by multiplying) is the principle
-that killed `center` — but see the table below before doing it to one
-destination in isolation.
+He tuned 2800 by ear, it fell to 2000 the moment he grabbed the knob, and the
+next note came back at 5600. The sweep is derived BACKWARDS from where it has
+to settle now — `base = dial/K`, peak = base·G — so the sustain lands on the
+dial, cutLive aims where the envelope already sustains (no jump), and the next
+note settles where he left it. Same principle that killed `center`.
+
+The envelope keeps its shape: attack still overshoots to base·G, release still
+falls to base. Verified across amt 40/80, NEGATIVE amt (4000 dial sweeping
+DOWN, settles 3999.3), s=1 and s=0, and with a second mod on the same cutoff:
+
+    case                     dial   floor    peak    settled
+    amt 40 s 0.6             1000   357.1  1428.6    1000.1
+    amt 80 s 0.3             1000   181.8  2909.1    1000.6
+    amt −40 (downward)       4000  7272.7  1818.2    3999.3
+    s=1 (no decay)           1000     250    1000    1000
+    s=0 (falls to floor)     1000    1000    4000    1000.9
+    + press on same cutoff   1000   357.1  1428.6    1000.1
+
+NOT MIGRATED, deliberately. Multiplying stored values by K would preserve the
+old sound, but it clamps away anything whose sustain was over 20kHz and it is
+a save-format change. So SAVEV/LIBV are untouched and stored sets load as-is —
+but a patch with a filter env now SUSTAINS LOWER than it did (by K, up to 10×)
+until it is re-dialled. That is the cost of the number meaning one thing.
 
 ## 0b. WHICH SOURCE MEANS WHAT — Gad's wider suspicion, measured
 
@@ -211,19 +236,29 @@ opinion about where the dial sits.
 
 Measured on real notes, one route at a time, amt 80 / s 0.6:
 
-    env → filt       dial is the FLOOR      (was broken; now 1000 → 16000 → 10000)
+    env → filt       dial is the SETTLING point   ← fixed 2026-08-16, see 0
     env → pitch      dial is the FLOOR      261.6 → 792.9 → 580.5, predicted 580.4
     env → op level   dial is the PEAK       1.0 → 0.68, the env presses DOWN from it
     lfo → anything   dial is the CENTRE     bipolar swing in cents
     vel/key/rnd      dial is the value at zero source
     press / flw      dial is the RESTING point (this is what killing `center` bought)
 
-Three conventions for "what does the number on screen mean" among the env
-destinations alone, and `env → op level` ALREADY uses the resting-point
-convention that section 0 wants to give the filter. So the resting-point
-change is not a filter question, it is one decision across env → filt, env →
-pitch and env → op level at once. Decide it there, once, or the instrument
-gets a fourth convention.
+**env → pitch AND env → op level ARE STILL INCONSISTENT WITH THE FILTER, and
+that is now the open question.** The filter was fixed alone because that is
+what was asked about, and the same gesture on the other two has the same two
+faults: play a note, tune the pitch or the operator level by ear, and the next
+note re-derives from a different meaning of the number you just set.
+
+- `env → pitch` has exactly the old filter bug — the dial is the floor and the
+  sustain is base·2^(amt/100·24/12)·… above it. Same fix shape: divide the
+  stored pitch back out by its own K.
+- `env → op level` is the mirror image: the dial is the PEAK and the envelope
+  presses DOWN from it, so tuning by ear at sustain writes the ceiling. Its
+  live-edit path needs checking too.
+
+Doing all three makes one rule for the whole instrument: **the number on
+screen is where the note settles, and every mod moves you away from it and
+back.** That is already true for press/flw and now for the filter.
 
 Caveat on the numbers above: `AudioParam.value` never reflects a CONNECTED
 input, only the intrinsic value — so the connected sources (lfo/vel/press)

@@ -1108,7 +1108,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-16.0730';
+const BUILD='2026-08-16.0745';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -5515,28 +5515,46 @@ class Voice{
         const si2=clamp(Math.round(e2.idx),1,10)-1;
         const ps=this.fParams(si2,'frequency');
         if(!ps.length)continue;
-        /* HALF OF GAD'S REPORT IS FIXED HERE AND HALF IS STILL OPEN — NEXT.md.
-           FIXED: `base` used to be 350 on every note. It is read off the param,
-           and the builder only ever SCHEDULED the cutoff at `at`, so this read
-           the BiquadFilterNode's factory default and swept from there — dial
-           1000 measured 350 → 5600 → 3500, with the dial nowhere in it. The
-           builder writes `.value` as well as scheduling now (see setFrq), so
-           this reads the real cutoff.
-           STILL OPEN, and it is a design decision, not a bug: the dial is the
-           FLOOR of the sweep while your ear tunes the SUSTAIN, which lands at
-           base·K, K = 1+(2^(amt/100·5)−1)·s. Tune by ear at sustain and you are
-           writing the floor, so the next note re-derives from it. Making the
-           stored value the RESTING value (divide out by K, migrate by
-           multiplying) is the same principle that killed `center` — but it
-           changes every filter envelope in the instrument AND env→pitch has
-           the identical convention while env→op level has the opposite one, so
-           it wants deciding across all three at once rather than here. */
+        /* THE STORED CUTOFF IS WHERE THE NOTE SETTLES, NOT WHERE IT STARTS.
+           Gad, 2026-08-16: "when I change the freq during play I expect it to
+           sound as I set it, even if there are modulations connected to it."
+
+           It used to be the FLOOR, and cutLive treats it as the frequency you
+           HEAR — two meanings for one number, and the sound jumped between
+           them every time he touched the dial. Measured, dial 1000, amt 40,
+           s 0.6 (so G=4, K=1+(G−1)·s=2.8):
+
+               note settles          dial 1000 → heard 2800
+               turn the dial to 2000 dial 2000 → heard 2000   (jumps DOWN)
+               next note             dial 2000 → heard 5600   (jumps back UP)
+
+           So he tuned 2800 by ear, the moment he grabbed the knob it fell to
+           2000, and the next note came back at 5600. Now the sweep is derived
+           BACKWARDS from where it has to settle — base = dial/K — so the
+           sustain lands exactly on the dial, cutLive is aiming at the same
+           place the envelope already sustains at (no jump), and the next note
+           settles where his ear left it. Same principle that killed `center`:
+           the stored value is the RESTING value.
+
+           The attack still overshoots to base·G and the release still falls
+           back to base, which is the floor — an envelope keeps its shape, it
+           just hangs off the dial from the settling point instead of the
+           start. NOT migrated deliberately: multiplying stored values by K
+           would preserve today's sound but clamps away anything whose sustain
+           was over 20kHz, and it is a save-format change. Patches with a
+           filter env sustain lower now until re-dialled.
+
+           env→pitch has the OLD convention still and env→op level has the
+           opposite one again (the dial is its PEAK) — see NEXT.md 0b. Left
+           alone on purpose: this was asked about the filter. */
         const a=Math.max(0.001,e2.a);
+        const G=Math.pow(2,e2.amt/100*5);
+        const K=Math.max(0.03,1+(G-1)*e2.s);     // guard: amt is ±100, so K ≥ 1/32
         for(const pm of ps){
           /* per-param, not ps[0]: a BANK's peaks sit at their own multiples of
-             the cutoff, and each has to sweep from where it actually is */
-          const base=pm.value;
-          const peak=clamp(base*Math.pow(2,e2.amt/100*5),20,20000);
+             the cutoff, and each has to settle at its own place in the shape */
+          const base=clamp(pm.value/K,20,20000);
+          const peak=clamp(base*G,20,20000);
           pm.cancelScheduledValues(at);
           if(e2.lp>0.001)this._loopEnv(pm,base,peak,e2.s,e2,at);
           else{
