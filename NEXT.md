@@ -881,6 +881,16 @@ amount block wrote the raw `op.amt` into them, which scaled every modulator to
 - **oscillator ops only** — samples, noise, scan, wavetable and hard sync all
   still take the native path, and the flag silently declines rather than
   breaking them.
+
+**UNISON IS NOT ONLY DETUNE** (2026-08-16). The phase path had the detune right
+from the start — three nodes at 259.518 / 261.626 / 263.75 for sprd 14, exactly
+±14 cents — but every one of them went straight into `merge`, dead centre and
+sample-aligned, because the native path's other two unison nodes were missing:
+a StereoPanner at `off × wide` and a Delay of `slop × |off|`. That is what "it
+lost its unison spread" was; the pitches were never wrong.
+
+    uni 3  native  side/mid 0.411      uni 1  native  0.006
+    uni 3  phase   side/mid 0.476      uni 1  phase   0.000
 - the waves are a small additive set (sin/tri/saw/sqr/org); the richer ones
   fall back to sine.
 

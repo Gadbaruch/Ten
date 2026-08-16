@@ -1185,7 +1185,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-16.2045';
+const BUILD='2026-08-16.2049';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -5928,10 +5928,22 @@ class Voice{
         });
         const nd=new AudioWorkletNode(ac,'ten-fmop',{numberOfInputs:0,outputChannelCount:[2]});
         nd._f=cfg.map(c=>c.f);          // for the legato retune
-        nd._cfg=cfg;
         nd.port.postMessage({t:'cfg',ops:cfg});
         nd.port.postMessage({t:'on'});
-        nd.connect(merge);
+        /* UNISON IS NOT ONLY DETUNE. The native path also PANS each voice
+           across the field by `wide` and offsets it in time by `slop`, and
+           without them three detuned copies land dead centre and sample-aligned
+           — which is most of what "it lost its unison spread" means. Same two
+           nodes, same order, so the two engines spread identically. */
+        let outN2=nd;
+        if(uniN>1){
+          const pn=ac.createStereoPanner(); pn.pan.value=off*(VX.wide||0);
+          nd.connect(pn); outN2=pn;
+          const dsec=(VX.slop||0)*Math.abs(off);
+          if(dsec>0.0005){const dl=ac.createDelay(0.06); dl.delayTime.value=dsec;
+            outN2.connect(dl); outN2=dl;}
+        }
+        outN2.connect(merge);
         this.nodes.push(nd);
         this._fmw=this._fmw||[]; this._fmw.push(nd);
         /* REGISTER THE WORKLET'S PARAMS WHERE THE MOD RACK ALREADY LOOKS.
