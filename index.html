@@ -1188,7 +1188,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-16.2101';
+const BUILD='2026-08-16.2117';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -4918,6 +4918,10 @@ let fxwReady=false;
           this.glk=1-Math.exp(-128/(gl*sampleRate));
           for(var q=0;q<this.o.length&&q<d.f.length;q++)
             this.o[q].incT=d.f[q]/sampleRate;
+          /* the INDEX moves with the ratio too: ix is a0*kIdx*(carrier/mod), so
+             a live ratio edit changes it even though the amount did not */
+          if(d.dep)for(var q2=0;q2<this.o.length&&q2<d.dep.length;q2++)
+            this.o[q2].dep=d.dep[q2];
         }
         else if(d.t==='on'){this.tg=1;}
         else if(d.t==='off'){this.tg=0;}
@@ -5438,8 +5442,27 @@ class Voice{
     if(this._fmw&&(key==='rat'||key==='fine'||key==='dst')){
       const pr=(this._tf0>0&&this.toneFreq>0)?this.toneFreq/this._tf0:1;
       for(const nd of this._fmw){
-        if(!nd||!nd._f)continue;
-        try{nd.port.postMessage({t:'ret',f:nd._f.map(x=>x*pr),gl:GL});}catch(_){}
+        if(!nd||!nd._ix)continue;
+        /* RE-DERIVED from the ops as they are NOW, not the built frequencies
+           scaled — scaling carries a legato move but ignores a live ratio or
+           fine edit entirely, which is why tweaking `rat` under a held note did
+           not match the retrigger. Same expression the builder uses. */
+        const bt2=nd._tgt*pr;
+        const f2=nd._ix.map(ix=>{
+          const o2=ops[ix]||{};
+          return bt2*(ix===0?1:(o2.rat||1))*Math.pow(2,(o2.fine||0)/1200);
+        });
+        /* depths re-derived from the BUILT amounts, never the current ones —
+           the `g` param already carries a live amount change, and recomputing
+           with the new amt here as well would apply it twice */
+        const dep2=nd._ix.map((ix,k2)=>{
+          const o2=ops[ix]||{}, md2=ix===0?0:Math.round(o2.mode||0);
+          if(md2!==1&&md2!==4)return nd._dep[k2];
+          const a2=clamp(nd._b0[k2]||0,0,1), kI=6*(1+3*a2*a2);
+          const tg2=nd._tg[k2], carF2=(tg2>=0&&f2[tg2])?f2[tg2]:f2[k2];
+          return a2*kI*((md2===4?f2[k2]:carF2)/Math.max(1,f2[k2]))/(2*Math.PI);
+        });
+        try{nd.port.postMessage({t:'ret',f:f2,dep:dep2,gl:GL});}catch(_){}
       }
     }
     for(let i=0;i<10;i++){
@@ -5933,12 +5956,17 @@ class Voice{
              operator silently vanished. sync and scan never get here: the
              eligibility test above sends those patches to the native path. */
           const wm=md===0?0:(md===2?2:1);
-          return {f:b.f, amp:md===0?a0*0.9:1, wav:Math.round(b.o.wav||0),
+          /* op0's gain is amt in the native builder; only ops 1-9 additive get
+             the 0.9. Applying it to op0 too made the phase engine 0.9x quiet. */
+          return {f:b.f, amp:md===0?(b.i===0?a0:a0*0.9):1, wav:Math.round(b.o.wav||0),
                   mode:wm, tgt:md===0?-1:tgtIx(b),
                   dep:ix/(2*Math.PI), ramt:md===2?a0:0};
         });
         const nd=new AudioWorkletNode(ac,'ten-fmop',{numberOfInputs:0,outputChannelCount:[2]});
-        nd._f=cfg.map(c=>c.f);          // for the legato retune
+        nd._f=cfg.map(c=>c.f);
+        nd._tgt=tgt; nd._ix=list.map(b=>b.i);   // to RE-DERIVE on a live edit
+        nd._tg=cfg.map(c=>c.tgt); nd._dep=cfg.map(c=>c.dep);
+        nd._b0=list.map(b=>clamp(b.o.amt,0,1));   // built amounts: `g` owns amt
         nd.port.postMessage({t:'cfg',ops:cfg});
         nd.port.postMessage({t:'on'});
         /* UNISON IS NOT ONLY DETUNE. The native path also PANS each voice

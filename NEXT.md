@@ -718,6 +718,33 @@ So the unification is three things, and only the first two are mechanical:
    Gad's call, not a refactor detail. Nothing above should be built until the
    numbers in it are decided, because they are its central parameter.
 
+## 0k. WHY NATIVE'S LIVE-TWEAK MISMATCH CANNOT BE FIXED IN PLACE
+
+Gad asked for the native one to be fixed too. It cannot be, in the native
+engine, and the measurement says why. Carrier wave changed, everything else
+identical, amt 0.3 -> 0.7 live vs retriggered:
+
+    carrier        native    phase
+    saw            0.804     0.9997
+    SINE           0.909     1.0000
+
+A sine carrier improves native and still does not reach 1. The cause is
+structural: FM on an OscillatorNode modulates its FREQUENCY, so the carrier's
+phase is the INTEGRAL of the modulation — its state depends on the whole
+history of the depth. A note that RAMPED to depth D has accumulated a different
+phase than a fresh note built at D, and with a harmonically rich carrier the
+sidebands from different harmonics overlap and interfere, so that phase
+difference becomes a magnitude difference. Hence saw (0.80) being worse than
+sine (0.91).
+
+TRUE PHASE MODULATION HAS NO SUCH STATE. The carrier's accumulator advances on
+its own nominal schedule and the modulation is an offset applied at read time,
+so the relationship between carrier and modulator is fixed by their frequencies
+alone and is history-free. That is why the phase engine reads 1.0000.
+
+So "fix native" means "make native do phase modulation", which is the phase
+engine. Nothing smaller closes it.
+
 ## 0j. LIVE TWEAK vs RETRIGGER — native mismatches, phase does not
 
 Gad: hold a note, raise op2's level, release, play it again — the retrigger
@@ -917,9 +944,14 @@ lost its unison spread" was; the pitches were never wrong.
     uni 3  native  side/mid 0.411      uni 1  native  0.006
     uni 3  phase   side/mid 0.476      uni 1  phase   0.000
 
-And it tracks the DIAL, which is the thing to check if it is ever reported
-missing again — `wide` 0 / 0.5 / 1 gives native 0 / 0.330 / 0.695 and phase
-0.010 / 0.377 / 0.749.
+And it tracks the DIAL — `wide` 0 / 0.5 / 1 gives native 0 / 0.330 / 0.695 and
+phase 0.010 / 0.377 / 0.749; at wide 1 phase reads 0.840 against native's 0.639.
+
+**BUT THE DIAL IS BUILD-TIME IN BOTH ENGINES**, and that is worth knowing before
+chasing it again: turning `wide` under a SOUNDING note moves nothing in either,
+measured 0 -> 0 on both. The panner is made when the note is. If width is
+reported dead, the question to ask is whether a NEW note was played, and what
+`uni` is — at uni 1 there is no unison to spread and both read mono.
 - the waves are a small additive set (sin/tri/saw/sqr/org); the richer ones
   fall back to sine.
 
