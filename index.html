@@ -1154,7 +1154,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-16.1900';
+const BUILD='2026-08-16.1908';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -5244,8 +5244,19 @@ class Voice{
     const sprd=(this.vx||this.p.vox).sprd||0;
     for(let i=0;i<10;i++){
       const op=ops[i]; if(!op)continue;
-      if(key==='amt'||key==='off')for(const a of (this.opAmt[i]||[]))
-        a.g.gain.setTargetAtTime((op.off?0:op.amt)*a.sc,t,GL);
+      /* AN FM OR PM DEPTH IS A FREQUENCY, NOT A LEVEL. The builder makes it
+         amt x (the carrier's or the modulator's) Hz x kIdx, so it is tied to
+         the pitch the note was BUILT at — and nothing rescaled it on a retune.
+         Every pitch param tracked correctly and the INDEX still halved across
+         one octave of legato (measured 3.744 -> 1.872), which is the timbre
+         sliding dull as you glide up: audibly "the operator is not following"
+         even though its frequency was. add and ring depths ARE levels and must
+         not be touched. */
+      const fmDep=(op.mode===1||op.mode===4);
+      const pr=(fmDep&&this._tf0>0&&this.toneFreq>0)?this.toneFreq/this._tf0:1;
+      if(key==='amt'||key==='off'||(fmDep&&(key==='rat'||key==='fine'||key==='dst')))
+        for(const a of (this.opAmt[i]||[]))
+          a.g.gain.setTargetAtTime((op.off?0:op.amt)*a.sc*pr,t,GL);
       const list=this.opPitch[i]||[];
       for(let u=0;u<list.length;u++){
         const e=list[u], target=bt*Math.pow(2,sprd*(this.uniOff[u]||0)/1200);

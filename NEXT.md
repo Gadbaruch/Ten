@@ -507,6 +507,28 @@ Measured, three oscillators at ratios 1/2/3, legato retune one octave up:
 `retune` carries `_tf0` alongside `_rf0`/`_nr0` now and scales it by the same
 ratio.
 
+### AND THE PITCH TRACKING WAS ONLY HALF OF IT — THE FM DEPTH DID NOT MOVE
+
+Gad, after the above: "other ops besides 1 don't track at all, not only when
+gliding." Measured every operator MODE (add/fm/ring/sync/pm) on fresh notes at
+48/60/72 and across a legato retune, with op 0 as an oscillator, as noise and
+as a sampler: **every pitch param tracks**, and did before this entry too. So
+the literal reading did not reproduce.
+
+What DOES fail is the FM/PM **depth**, and it sounds exactly like an operator
+that is not following. The builder makes the depth `amt × (the carrier's or the
+modulator's) Hz × kIdx` — a FREQUENCY — so it is tied to the pitch the note was
+built at, and nothing rescaled it on a retune:
+
+    before   depth 979.5   modHz 261.6   index 3.744
+    after    depth 979.5   modHz 523.2   index 1.872     <- index HALVED
+    now      depth 1958.7  modHz 523.2   index 3.744     <- holds
+
+The index halving across one octave is the timbre sliding dull as you glide up
+while every frequency tracked perfectly. `oscRefresh` scales those depths by
+`toneFreq/_tf0` now. **add and ring depths are LEVELS and are deliberately not
+touched** — only modes 1 and 4 carry a frequency in their depth.
+
 SEPARATELY, and found on the way: **a SAMPLER did not glide.** Both sampler
 sites wrote their pitch straight in — `pitchParam.setValueAtTime(target,at)`
 for a sampler root, `s2.playbackRate.value=ratio` for a sampler operator —
