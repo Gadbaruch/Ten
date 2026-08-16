@@ -1185,7 +1185,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-16.2033';
+const BUILD='2026-08-16.2045';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -4897,9 +4897,24 @@ let fxwReady=false;
                never revisited — that is the whole point of this processor */
             var H=Math.max(1,Math.min(64,Math.floor(sampleRate*0.45/Math.max(1,s.f))));
             this.o.push({ph:Math.random()*0.0001,inc:s.f/sampleRate,amp:s.amp,
-                         dep:s.dep,tgt:s.tgt,mode:s.mode,tbl:fmTable(s.wav|0,H),pm:0});
+                         dep:s.dep,tgt:s.tgt,mode:s.mode,tbl:fmTable(s.wav|0,H),
+                         pm:0,ramt:s.ramt||0,rgv:1,incT:0});
           }
           this.N=this.o.length;
+        }
+        else if(d.t==='ret'){
+          /* A LEGATO MOVE, as new increments rather than a rebuild — the phase
+             keeps running, which is the whole point of legato. Glided in the
+             LOG domain (one pow per op per block, not per sample) because a
+             glide is musically a constant number of cents per second, not a
+             constant number of Hz. The band-limit table is deliberately NOT
+             re-chosen: switching it mid-glide would be the very click this
+             processor exists to avoid, and for a sine — the usual FM operator
+             — there is only ever one harmonic anyway. */
+          var gl=Math.max(0.001,d.gl||0.004);
+          this.glk=1-Math.exp(-128/(gl*sampleRate));
+          for(var q=0;q<this.o.length&&q<d.f.length;q++)
+            this.o[q].incT=d.f[q]/sampleRate;
         }
         else if(d.t==='on'){this.tg=1;}
         else if(d.t==='off'){this.tg=0;}
@@ -4916,6 +4931,17 @@ let fxwReady=false;
          with its own index rather than assuming either */
       var dP=this.dP||(this.dP=[]), gP=this.gP||(this.gP=[]);
       for(i=0;i<this.N;i++){dP[i]=P['d'+i]; gP[i]=P['g'+i];}
+      if(this.glk){                                  // a retune in flight
+        var still=true;
+        for(i=0;i<this.N;i++){
+          var oi=this.o[i];
+          if(!oi.incT||oi.inc<=0){continue;}
+          var rr=oi.incT/oi.inc;
+          if(rr>0.9999&&rr<1.0001){oi.inc=oi.incT;continue;}
+          oi.inc*=Math.pow(rr,this.glk); still=false;
+        }
+        if(still)this.glk=0;
+      }
       for(k=0;k<n;k++){
         this.g+=(this.tg-this.g)*0.002;          // a short fade so it cannot click
         var sum=0;
@@ -4930,10 +4956,19 @@ let fxwReady=false;
           var ph=o.ph+o.pm; ph-=Math.floor(ph);
           var fi=ph*FMTL, i0=fi|0, fr=fi-i0, tb=o.tbl;
           var v=(tb[i0]+(tb[(i0+1)&FMTM]-tb[i0])*fr)*o.amp*lvl;
+          /* RING arrives from an operator ABOVE this one, which has already
+             been evaluated this sample — so it is waiting here as a multiplier
+             and is spent now. Same shape as the native path: 1-amt+amt*mod, so
+             zero is the dry carrier and full is a true four-quadrant ring with
+             no dry left in it. */
+          if(o.rgv!==1){v*=o.rgv; o.rgv=1;}
           o.pm=0;
           o.ph+=inc; o.ph-=Math.floor(o.ph);
           if(o.mode===0)sum+=v;
-          else if(o.tgt>=0&&o.tgt<this.N)this.o[o.tgt].pm+=v*o.dep;
+          else if(o.tgt>=0&&o.tgt<this.N){
+            if(o.mode===2)this.o[o.tgt].rgv*=(1-o.ramt+o.ramt*v);
+            else this.o[o.tgt].pm+=v*o.dep;
+          }
         }
         var y=sum*this.g;
         L[k]=y; if(R)R[k]=y;
@@ -5391,6 +5426,19 @@ class Voice{
     const ops=this.p.osc, t=Math.max(AC.currentTime,at||0), GL=gl>0?gl:0.02;
     const bt=this.rootFreq*ops[0].rat*Math.pow(2,(ops[0].fine||0)/1200);
     const sprd=(this.vx||this.p.vox).sprd||0;
+    /* THE PHASE ENGINE'S LEGATO. Its operators live inside the worklet, so a
+       retune is a message rather than a param write — and it is sent as the
+       BUILT frequencies scaled by the pitch ratio, so unison spread, ratios and
+       fine all come along without being recomputed. The modulation INDEX needs
+       no correction at all here, unlike the native path: in true phase
+       modulation the index is in cycles and is already pitch-invariant. */
+    if(this._fmw&&(key==='rat'||key==='fine'||key==='dst')){
+      const pr=(this._tf0>0&&this.toneFreq>0)?this.toneFreq/this._tf0:1;
+      for(const nd of this._fmw){
+        if(!nd||!nd._f)continue;
+        try{nd.port.postMessage({t:'ret',f:nd._f.map(x=>x*pr),gl:GL});}catch(_){}
+      }
+    }
     for(let i=0;i<10;i++){
       const op=ops[i]; if(!op)continue;
       /* AN FM OR PM DEPTH IS A FREQUENCY, NOT A LEVEL. The builder makes it
@@ -5405,6 +5453,10 @@ class Voice{
       const pr=(fmDep&&this._tf0>0&&this.toneFreq>0)?this.toneFreq/this._tf0:1;
       if(key==='amt'||key==='off'||(fmDep&&(key==='rat'||key==='fine'||key==='dst')))
         for(const a of (this.opAmt[i]||[])){
+          if(a.fmw){                      // a phase-engine level: a RATIO, not a level
+            a.g.gain.setTargetAtTime(op.off?0:(a.b0>0?clamp(op.amt,0,1)/a.b0:1),t,GL);
+            continue;
+          }
           /* an FM depth is RE-DERIVED at the new pitch, not scaled from the old
              one: the room left under Nyquist shrinks as the note climbs, so
              scaling would carry the low note's budget up with it and alias */
@@ -5865,10 +5917,18 @@ class Voice{
           /* fm scaled the deviation by the CARRIER's frequency, pm by the
              modulator's own — the only difference between the two modes */
           const ix=(md===1||md===4)?a0*kIdx*((md===4?b.f:carF)/Math.max(1,b.f)):0;
+          /* RING is its own mode, not a modulator with no depth — mapping it to
+             1 gave it dep 0, so it neither summed NOR modulated and the
+             operator silently vanished. sync and scan never get here: the
+             eligibility test above sends those patches to the native path. */
+          const wm=md===0?0:(md===2?2:1);
           return {f:b.f, amp:md===0?a0*0.9:1, wav:Math.round(b.o.wav||0),
-                  mode:md===0?0:1, tgt:md===0?-1:tgtIx(b), dep:ix/(2*Math.PI)};
+                  mode:wm, tgt:md===0?-1:tgtIx(b),
+                  dep:ix/(2*Math.PI), ramt:md===2?a0:0};
         });
         const nd=new AudioWorkletNode(ac,'ten-fmop',{numberOfInputs:0,outputChannelCount:[2]});
+        nd._f=cfg.map(c=>c.f);          // for the legato retune
+        nd._cfg=cfg;
         nd.port.postMessage({t:'cfg',ops:cfg});
         nd.port.postMessage({t:'on'});
         nd.connect(merge);
@@ -5888,7 +5948,12 @@ class Voice{
           (this.opPitch[b.i]=this.opPitch[b.i]||[]).push({pm:dPar,base:0,kind:'fmw'});
           const shim={gain:gPar};
           (this.opGains[b.i]=this.opGains[b.i]||[]).push(shim);
-          (this.opAmt[b.i]=this.opAmt[b.i]||[]).push({g:shim,sc:1});
+          /* `g` is a MULTIPLIER over the level already baked into the cfg, so
+             its resting value is 1 — writing the raw amt into it (as the amt
+             block below used to) scaled every modulator down and collapsed the
+             index. b0 is the built amount, so a live amt edit becomes a ratio. */
+          (this.opAmt[b.i]=this.opAmt[b.i]||[]).push(
+            {g:shim,sc:1,fmw:true,b0:clamp(b.o.amt,0,1)});
         });
         if(!firstSrc)firstSrc=nd;
       }

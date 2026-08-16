@@ -855,10 +855,29 @@ build, so `_destOf` and every env, LFO, vel and pressure route reach an operator
 without the rack knowing it is talking to a worklet. Measured: an env aimed at
 op2's pitch writes 731 cents and decays to 720; both routes leave live handles.
 
-WHAT IT DOES NOT DO YET:
-- **a legato retune does not reach it.** The worklet's base pitch is fixed at
-  the note; `oscRefresh` skips `kind:'fmw'` rather than writing an absolute Hz
-  into a cents param. Poly and mono are fine — this is the glide path only.
+**LEGATO RETUNE WORKS TOO** (2026-08-16). A retune is a MESSAGE rather than a
+param write: the built frequencies scaled by the pitch ratio, so unison spread,
+ratios and fine all come along without being recomputed. Glided in the LOG
+domain, one `pow` per op per block, because a glide is a constant number of
+cents per second rather than of Hz. The modulation INDEX needs no correction at
+all — in true phase modulation it is in cycles and already pitch-invariant,
+which is the native path's fmDepth problem simply not existing here. The
+band-limit table is deliberately NOT re-chosen mid-glide; for a sine, the usual
+FM operator, there is only one harmonic anyway. Measured, 3-op chain, +12
+legato, tapped at the node: peak 654.1 → 1305.5, **x1.996**.
+
+**RING WORKS TOO.** It had been mapped to a modulator with zero depth, so it
+neither summed nor modulated and the operator silently vanished. It is its own
+mode now, same 1-amt+amt*mod as the native path. All six modes checked: add,
+fm, ring and pm run in the worklet; sync and scan correctly decline to the
+native path rather than breaking.
+
+ONE TRAP WORTH REMEMBERING: the worklet's `g` params are MULTIPLIERS over the
+level already baked into the cfg, so their resting value is 1. `oscRefresh`'s
+amount block wrote the raw `op.amt` into them, which scaled every modulator to
+0.4x and collapsed the index — and it looked exactly like a broken retune
+(x0.5 instead of x2) while the retune itself was perfect. The shims carry
+`fmw:true` and their built amount now, so a live amt edit becomes a ratio.
 - **oscillator ops only** — samples, noise, scan, wavetable and hard sync all
   still take the native path, and the flag silently declines rather than
   breaking them.
