@@ -393,6 +393,52 @@ const MSRC=['off','env','lfo','vel','key','rnd','press','flw'];   // press = per
 const MDST=['off','amp','pitch','filt','pan','op'];   // + learned tgt address overrides this
 const MD2ENV={1:1,2:2,3:3,5:4};                        // MDST → the engine's env-dst numbering
 const MD2LFO={2:1,3:2,1:3,4:4,5:5};                    // MDST → the engine's lfo-dst numbering
+
+/* ---------------- HOW DEEP IS `amt 100` ---------------------------------
+   Gad, 2026-08-16: "we may have hundreds [of destinations] as we continue."
+   So the depth is DERIVED and never written down twice. A hand-kept table had
+   already drifted with only four destinations in it — _modParam called filter
+   Q `range:14` where its own spec says min 0.1 max 24, and gain `18` where the
+   spec says −18..18. There are 230 SP() declarations and every one carries
+   min/max/type because the UI cannot draw a dial without them. That is the
+   single source of truth; this reads it.
+
+   THE UNIT IS THE PARAM'S OWN. A `freq` spec modulates in CENTS, because a
+   filter CV is 1V/octave and adding cents is what multiplying Hz means; `time`
+   likewise. `lin` adds in its own units. `enum` is a TYPE SELECTOR — 45 of the
+   230 — and is deliberately not a smooth destination: index 0 is usually
+   "off", so a mod aimed at one can silence the slot outright. Sweeping a
+   filter type is a real effect and it wants quantising and an off-safe floor,
+   which is its own piece of work, not a freebie here.
+
+   THE TAPER IS GLOBAL, and it is what makes one range serve two musics: over
+   ±4 octaves of pitch, a² puts vibrato at amt 20 and a drum drop at amt 100.
+   Without it a single range would have to choose between them, and the reason
+   the old per-source depths existed at all was that nobody could. */
+const MODLOG=new Set(['freq','time']);                 // these modulate in cents
+const MODTAPER=a=>{const x=clamp(a/100,-1,1); return Math.sign(x)*x*x;};
+const MODCENTS=4800;                                   // a log param's full swing
+const _mrCache=new Map();
+const MODRANGE=(rack,key,slot)=>{
+  const ck=rack+'|'+key;
+  if(_mrCache.has(ck))return _mrCache.get(ck);
+  let r=null;
+  const mi=MODULES.findIndex(m=>m.id===rack);
+  if(mi>=0){
+    let list=[]; try{list=paramsFor(mi,slot)||[];}catch(_){list=[];}
+    const sp=list.find(s=>s&&s.key===key);
+    if(sp){
+      const lo=Number.isFinite(sp.min)?sp.min:0, hi=Number.isFinite(sp.max)?sp.max:1;
+      r=MODLOG.has(sp.type)?{span:MODCENTS,log:true,type:sp.type}
+       :sp.type==='enum'?{span:0,log:false,type:'enum'}
+       :{span:Math.abs(hi-lo)||1,log:false,type:sp.type||'lin'};
+    }
+  }
+  /* only cache a HIT: paramsFor is slot-dependent, so a miss here may just be
+     a slot whose wave/type does not expose that dial yet */
+  if(r)_mrCache.set(ck,r);
+  return r||{span:1,log:false,type:'lin'};
+};
 const LFOW=['sin','tri','sqr','saw','s&h','drft'], LFOW_W=['sine','triangle','square','sawtooth'];
 /* the two RANDOM waves have no oscillator: a ConstantSource carries scheduled
    values — s&h steps to a fresh one every cycle, drift ramps between them.
@@ -1108,7 +1154,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-16.1647';
+const BUILD='2026-08-16.1700';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -5395,8 +5441,12 @@ class Voice{
                      lrdiv:me.lrdiv,lfit:me.lfit});
         }
         else if(m.src===2&&MD2LFO[rt.dst]&&Math.abs(rt.amt)>0.5)
+          /* `rt` rides along so the LFO resolves its destination through the
+             SAME _destOf every other source uses — the MD2LFO number is kept
+             only for the pan check, which the control tick still owns */
           lfoList.push({dst:MD2LFO[rt.dst],idx:rt.idx,wav:m.wav,rate:lfoHz(me),skw:me.skw||0,
-                        amt:rt.amt,ph:me.ph??m.ph,free:Math.round(m.ltr||0)===1,mi:mi2});
+                        amt:rt.amt,ph:me.ph??m.ph,free:Math.round(m.ltr||0)===1,mi:mi2,
+                        rt,ri:effRoutes(m).indexOf(rt)});
       }
     }
     /* amp-target mods (vel/key/rnd) scale the envelope PEAK — never a DC
@@ -5960,6 +6010,11 @@ class Voice{
       }
     }
 
+    /* EVERY ROUTE LEAVES A LIVE HANDLE HERE — {p, span, mi, ri} — so one
+       engine.modLive(pi) can re-aim all of them from the current preset values
+       instead of each source needing somebody to remember to write it a hook.
+       That is what made 41 of 42 cells in the mod matrix read DEAD. */
+    this.modN=[];
     /* LFO rack (per voice: pitch/filt/amp/op) */
     for(const lf of lfoList){
       /* Math.abs: a NEGATIVE amount is a real setting — the whole point of
@@ -5984,89 +6039,68 @@ class Voice{
           E.setWave(lo,LFOW_PW[lf.wav]??0,deg);
         }else if(lf.ph)E.setWave(lo,LFOW_PW[lf.wav]??0,lf.ph);
       }
-      const A=lf.amt/100;
-      if(lf.dst===1){
-        const ix=clamp(Math.round(lf.idx??0),0,10);
-        const tgs=ix===0?Object.values(this.opDet).flat():(this.opDet[ix-1]||[]);
-        if(!tgs.length){continue;}
-        for(const tg of tgs){
-          const g2=ac.createGain(); g2.gain.value=A*tg.sc;
-          lo.connect(g2); g2.connect(tg.pm);
-        }
+      /* THE SAME RESOLVER AND THE SAME DEPTH AS EVERY OTHER SOURCE. This was
+         four hand-written branches that each picked their own scale — 200
+         cents for pitch, 4800 for the filter, a flat 0.5 for an operator whose
+         gain is in the thousands. One gain node PER TARGET, because a target's
+         span is its own; x0.5 because an LFO is bipolar, so amt 100 swings
+         half the span each way and covers the whole of it peak to peak. */
+      const tg=this._destOf(lf.rt,p);
+      if(!tg.length){continue;}                  // nothing there: never start it
+      for(const t of tg){
+        const span=t.span*(t.amp?this.amp:1)*0.5;
+        const g3=ac.createGain(); g3.gain.value=MODTAPER(lf.amt)*span;
+        lo.connect(g3); g3.connect(t.p);
+        this.modN.push({p:g3.gain,span,mi:lf.mi,ri:lf.ri,kind:'lfo'});
       }
-      else if(lf.dst===2){const ps=this._fltP(lf.idx,'detune');
-        if(!ps.length){continue;} lg.gain.value=A*4800; for(const pm of ps)lg.connect(pm);}
-      else if(lf.dst===3){                       // amp: the voice, or one operator
-        const si3=Math.round(lf.idx||0);
-        if(si3>=1){const al=this._opA(si3); if(!al.length)continue;
-          for(const t of al){const g3=ac.createGain(); g3.gain.value=A*t.sc*0.5;
-            lo.connect(g3); g3.connect(t.g.gain);}}
-        else{lg.gain.value=A*this.amp*0.5; lg.connect(vca.gain);}}
-      else if(lf.dst===5){const al=this._opA(lf.idx); if(!al.length)continue;
-        for(const t of al){const g3=ac.createGain(); g3.gain.value=A*t.sc*0.5;
-          lo.connect(g3); g3.connect(t.g.gain);}}
-      lo.connect(lg); lo.start(at); this.nodes.push(lo);
+      lo.start(at); this.nodes.push(lo);
     }
-    /* vel / key / rnd sources: a per-note constant into each route's target */
-    for(const m of md){
-      if(m.off||m.src<3||m.src>5||!m.routes)continue;
-      const v=m.src===3?clamp(vel,0,1):m.src===4?clamp((midi-60)/24,-2,2):(Math.random()*2-1);
-      for(const rt of effRoutes(m)){
-        if(!rt.dst)continue;
-        const k=v*(rt.amt||0)/100;
-        if(rt.dst===3){                          // filter cutoff (cents)
-          const ps=this._fltP(rt.idx,'detune');
-          if(ps.length){const cs=ac.createConstantSource();cs.offset.value=clamp(k*4800,-9600,9600);
-            for(const pm of ps)cs.connect(pm);cs.start(at);this.nodes.push(cs);}
-        }else if(rt.dst===2){                     // pitch (osc detune)
-          const cs=ac.createConstantSource();cs.offset.value=k;
-          for(const tg of Object.values(this.opDet).flat()){if(tg.sc<1)continue;
-            const g2=ac.createGain();g2.gain.value=tg.sc*6;cs.connect(g2);g2.connect(tg.pm);}
-          cs.start(at);this.nodes.push(cs);
-        }
-        // amp (dst 1) handled by ampBias scaling the envelope peak — never DC on the gain
-      }
-    }
-    /* PRESSURE: same shape as vel/key/rnd, but the constant keeps MOVING while the
-       note is held (setPressure). amp goes through a gain AFTER the vca — never a
-       DC offset on the vca itself, or the envelope could not close the note. */
+    /* EVERY CONSTANT SOURCE, ONE LOOP — vel, key, rnd, press and flw.
+       They were three blocks that disagreed about three things: how deep amt
+       100 is (vel reached pitch at 1200 cents, an LFO at 200, a learned route
+       at 4800), which destinations exist at all (NEITHER vel NOR press could
+       reach an operator — those branches simply were not written), and whether
+       an edit is audible on a sounding note. The only real difference between
+       them is whether the constant is fixed at the note or keeps moving, so
+       that is the only thing left to branch on. Depth, per-target scaling and
+       the live handle are `_destOf` + MODTAPER, the same as every other source.
+
+       amp keeps its two exemptions and they are the old ones, not new special
+       cases: vel/key/rnd scale the envelope PEAK through ampBias rather than
+       adding DC to the gain (a note must still be able to reach silence), and
+       pressure rides a gain AFTER the vca for the same reason. */
     this.pressN=[]; this.press=0; this.pressGlide=0.03;
-    for(const m of md){
-      if(m.off||(m.src!==6&&m.src!==7)||!m.routes)continue;
-      /* A FOLLOWER IS A PRESSURE THAT COMES FROM SOMEWHERE ELSE. Identical
-         plumbing — a constant source per route, offset written from outside —
-         so it reaches the same destinations pressure does, at audio rate,
-         instead of being stuck in the per-frame lane. */
+    this.modN=this.modN||[];
+    for(let mi5=0;mi5<md.length;mi5++){
+      const m=md[mi5];
+      if(!m||m.off||m.src<3||m.src>7||!m.routes)continue;
+      const LIVE=m.src===6||m.src===7;           // press / flw keep moving
       const FL=m.src===7;
       const bag=FL?(this.flwN=this.flwN||[]):this.pressN;
-      if(FL)this.flwMi=(this.flwMi===undefined?md.indexOf(m):this.flwMi);
-      else {this.pressGlide=Math.max(0.005,m.pg??0.03);
-            this.pressCurve=Math.max(0.2,m.pc??1);}
-      for(const rt of effRoutes(m)){
-        if(!rt.dst)continue;
-        const A=(rt.amt||0)/100;
-        if(rt.dst===3){                          // filter cutoff (cents)
-          const ps=this._fltP(rt.idx,'detune');
-          if(!ps.length)continue;
-          const cs=ac.createConstantSource(); cs.offset.value=0;
-          for(const pm of ps)cs.connect(pm);
-          cs.start(at); this.nodes.push(cs);
-          bag.push({p:cs.offset,sc:clamp(A*4800,-9600,9600),base:0});
-        }else if(rt.dst===2){                    // pitch
-          const cs=ac.createConstantSource(); cs.offset.value=0;
-          for(const tg of Object.values(this.opDet).flat()){if(tg.sc<1)continue;
-            const g2=ac.createGain(); g2.gain.value=tg.sc*6; cs.connect(g2); g2.connect(tg.pm);}
-          cs.start(at); this.nodes.push(cs);
-          bag.push({p:cs.offset,sc:A,base:0});
-        }else if(rt.dst===1){                    // amp: a post-vca gain, base + press×amt
-          /* an unpressed note sits at FULL and pressure moves it from there —
-             a negative amount presses it down, a positive one presses it up.
-             This used to be where `center` chose the resting point; the note's
-             own level is that resting point now. */
-          const b0=1;
+      if(LIVE&&FL)this.flwMi=(this.flwMi===undefined?mi5:this.flwMi);
+      if(LIVE&&!FL){this.pressGlide=Math.max(0.005,m.pg??0.03);
+                    this.pressCurve=Math.max(0.2,m.pc??1);}
+      const v=LIVE?0:(m.src===3?clamp(vel,0,1)
+                     :m.src===4?clamp((midi-60)/24,-2,2):(Math.random()*2-1));
+      const rts=effRoutes(m);
+      for(let ri=0;ri<rts.length;ri++){
+        const rt=rts[ri];
+        if(!rt.dst&&!(rt.tgt||rt.addr))continue;
+        if(Math.round(rt.dst||0)===1&&Math.round(rt.idx||0)===0){
+          if(!LIVE)continue;                     // ampBias owns it
+          const b0=1;                            // pressure: a post-vca gain
           if(!this.pGain){this.pGain=ac.createGain(); this.pGain.gain.value=b0;}
           else this.pGain.gain.value=b0;
-          bag.push({p:this.pGain.gain,sc:A,base:b0});
+          bag.push({p:this.pGain.gain,sc:MODTAPER(rt.amt||0),base:b0,mi:mi5,ri,span:1});
+          continue;
+        }
+        for(const t of this._destOf(rt,p)){
+          const dep=MODTAPER(rt.amt||0)*t.span;
+          const cs=ac.createConstantSource();
+          cs.offset.value=LIVE?0:clamp(v*dep,-Math.abs(dep)*2-1,Math.abs(dep)*2+1);
+          cs.connect(t.p); cs.start(at); this.nodes.push(cs);
+          if(LIVE)bag.push({p:cs.offset,sc:dep,base:0,mi:mi5,ri,span:t.span});
+          this.modN.push({p:cs.offset,span:t.span,mi:mi5,ri,kind:LIVE?'live':'fixed',v});
         }
       }
     }
@@ -6256,6 +6290,39 @@ class Voice{
     if(n>=1){const a=this.opAmt&&this.opAmt[clamp(n,1,10)-1]; return a?a.slice():[];}
     return Object.keys(this.opAmt||{}).map(Number).sort((a,b)=>a-b)
       .flatMap(i=>(this.opAmt||{})[i]||[]);
+  }
+  /* ONE DESTINATION RESOLVER. Every (dst,idx) and every learned address comes
+     through here and hands back targets that each carry their OWN full swing,
+     so a depth is always taper(amt) x that swing and `amt 100` means the same
+     thing wherever it is pointed. Two sources of truth, each where it belongs:
+     an OPERATOR GAIN takes its swing from the GRAPH, because an FM depth's real
+     range is amt x carrierHz x kIdx and no UI spec can know the carrier; every
+     other param takes it from its own SP declaration through MODRANGE. */
+  _destOf(rt,p){
+    const A=(!rt.dst&&(rt.tgt||rt.addr))||null;
+    if(A){
+      const rp=this._modParam(A); if(!rp||!rp.params.length)return [];
+      const rack=A.rack||A.mod;
+      const holder=p&&p[rack], slot=Array.isArray(holder)
+        ? holder[A.slot==='*'||A.slot===undefined?0:(A.slot|0)] : null;
+      const mr=MODRANGE(rack,A.key,slot);
+      if(mr.type==='enum')return [];               // a type selector is not a dial
+      return rp.params.map((pm,i)=>({p:pm,
+        span:rp.cents?MODCENTS:(rp.ranges?rp.ranges[i]:(rp.range??mr.span)),
+        log:!!rp.cents}));
+    }
+    const d=Math.round(rt.dst||0), ix=Math.round(rt.idx||0);
+    if(d===1){                                     // amp: the voice, or one operator
+      if(ix>=1)return this._opA(ix).map(t=>({p:t.g.gain,span:t.sc}));
+      return [{p:this.vca.gain,span:this.amp,amp:true}];
+    }
+    if(d===2){                                     // pitch, in cents
+      const tgs=ix===0?Object.values(this.opDet||{}).flat():((this.opDet||{})[ix-1]||[]);
+      return tgs.filter(t=>t.sc>=1).map(t=>({p:t.pm,span:MODCENTS,log:true}));
+    }
+    if(d===3)return this._fltP(ix,'detune').map(pm=>({p:pm,span:MODCENTS,log:true}));
+    if(d===5)return this._opA(ix).map(t=>({p:t.g.gain,span:t.sc}));
+    return [];                                     // 4 = pan: the control tick owns it
   }
   /* A 24dB filter is two nodes, and anything that moves the cutoff has to move
      both or the second stage stays where it was and the slope comes apart. */
@@ -7030,6 +7097,48 @@ class Engine{
           v.vca.gain.setTargetAtTime(v.amp*clamp(Math.abs(rt.amt)/100,0,2)*clamp(me.s,0,1),n,0.05);
         break;
       }
+    }
+  }
+  /* ONE LIVE PATH FOR EVERY ROUTE. The mod matrix read DEAD in 41 of 42 cells
+     because only ever amp+env had a hook written for it: envLive re-aimed the
+     amp sustain, lfoLive re-aimed `m.routes[0]` and nothing else, and vel,
+     press, every second route and every learned target waited for the next
+     note. Every route now leaves a handle at build time, so this re-aims all
+     of them from the current preset values without knowing what they point at.
+     0.02s so a dragged knob is a slide, not a staircase of clicks. */
+  /* NOT `modLive` — that name was already taken by the LFO rate/depth editor
+     600 lines below, and a class body silently lets the later definition win.
+     This one re-aims every route's DEPTH; that one edits one slot's dials. */
+  modReaim(pi){
+    const p=S.presets[pi]; if(!p)return;
+    const md=p.mod||[], n=AC.currentTime;
+    for(const v of this.act[pi]||[]){
+      if(!v.modN||v.killed)continue;
+      for(const h of v.modN){
+        const m=md[h.mi]; if(!m||m.src<2)continue;
+        const rt=(effRoutes(m)||[])[h.ri]; if(!rt)continue;
+        const off=m.off?0:1;
+        /* a fixed source (vel/key/rnd) carries its per-note constant in `v`;
+           an lfo's handle is the depth gain itself; press/flw are re-aimed by
+           setPressure, which reads `sc`, so their handles only need the span */
+        const dep=MODTAPER(rt.amt||0)*h.span*off;
+        try{
+          if(h.kind==='fixed')h.p.setTargetAtTime(dep*(h.v||0),n,0.02);
+          else if(h.kind==='lfo')h.p.setTargetAtTime(dep,n,0.02);
+          else h.sc=dep;                       // live sources: next setPressure uses it
+        }catch(_){}
+      }
+      /* press/flw handles live in their own bags and carry `sc` */
+      for(const bag of [v.pressN,v.flwN]){
+        if(!bag)continue;
+        for(const b of bag){
+          if(b.mi===undefined)continue;
+          const m=md[b.mi]; if(!m)continue;
+          const rt=(effRoutes(m)||[])[b.ri]; if(!rt)continue;
+          b.sc=MODTAPER(rt.amt||0)*(b.span??1)*(m.off?0:1);
+        }
+      }
+      if(v.setPressure)try{v.setPressure(v.press||0);}catch(_){}
     }
   }
   lfoLive(pi){
@@ -9208,7 +9317,8 @@ function applyParam(pi,mi,si,px,v){
   if(M.id==='fx'&&spec.key==='typ'&&FXDEF[Math.round(v)])
     Object.assign(S.presets[pi].fx[si],FXDEF[Math.round(v)]);
   if(M.id==='fx'){ if(!engine.fxLive(pi,si,spec.key))engine.rebuildRack(pi); }
-  else if(M.id==='mix'||M.id==='mod'){engine.refresh(pi); if(M.id==='mod'){engine.lfoLive(pi); engine.envLive(pi);}}
+  else if(M.id==='mix'||M.id==='mod'){engine.refresh(pi);
+    if(M.id==='mod'){engine.lfoLive(pi); engine.envLive(pi); engine.modReaim(pi);}}
   if(isCodeCh(pi)&&(M.id==='flt'||M.id==='mod'||M.id==='vox'))engine.codeCfg(pi);
   else if(M.id==='flt'&&spec.key==='frq')engine.cutLive(pi,si);
   /* these three change what the filter IS, not where it sits, so the graph has

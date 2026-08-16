@@ -332,6 +332,71 @@ than `_fltP`, so idx 0 means slot 1 for envelopes where it means ALL for every
 other source. Left alone deliberately — fixing it changes what existing patches
 with idx 0 do.
 
+## 0f. THE UNIFICATION — LANDED FOR EVERY CONNECTING SOURCE (2026-08-16)
+
+Three pieces, all in:
+
+- **`_destOf(rt,p)`** — ONE resolver. Every (dst,idx) and every learned address
+  comes through it and hands back targets that each carry their own full swing.
+  Two sources of truth, each where it belongs: an OPERATOR GAIN takes its swing
+  from the graph (an FM depth's real range is amt·carrierHz·kIdx, which no UI
+  spec can know), everything else from its own `SP` declaration via `MODRANGE`.
+- **`MODTAPER` + `MODRANGE`** — ONE depth rule, `taper(amt) × the target's own
+  span`, with `taper(a)=sign(a)·a²`. No table; the range is read from the same
+  `min`/`max` the UI draws the dial with, so param 231 is modulatable the day
+  it is added.
+- **`engine.modReaim(pi)`** — ONE live path. Every route leaves a handle
+  `{p,span,mi,ri,kind}` on the voice, so one call re-aims all of them from the
+  current preset values without knowing what they point at.
+
+**NOT `modLive` — that name was already taken** by the LFO rate/depth editor
+600 lines below, and a class body lets the later definition silently win. The
+symptom was perfect: no throw, no effect, every cell still DEAD. Renamed.
+
+### The matrix, before and after
+
+    tweak (change the MOD under a sounding note)     before    after
+    filt cutoff  lfo/vel/key/rnd/press               DEAD      yes
+    pitch        lfo/vel/key/rnd/press               DEAD      yes
+    op level     lfo/vel/key/rnd/press               DEAD      yes
+    osc pitch (addr) vel/key/rnd/press               DEAD      yes
+    flt Q (addr) vel/key/rnd/press                   DEAD      yes
+
+**vel→op and press→op now EXIST** — those branches had never been written.
+
+### Two lies the harness was telling, both fixed
+
+- it played **note 60**, and the `key` source is `(midi-60)/24` — exactly ZERO
+  at middle C, so every key row read DEAD for arithmetic reasons. Plays 72 now.
+- it never **pressed** the note, and pressure is 0 until pressed, so every
+  press row was multiplying its new depth by zero. It presses to 0.7 now.
+
+A cell that reads `blind` still is not a pass: `AudioParam.value` cannot see a
+connected input, so `reaches` is unverifiable that way. `tweak` sidesteps it by
+watching the DEPTH HANDLE, which is exactly what `modReaim` re-aims.
+
+### What is still open
+
+- **env tweak is still DEAD everywhere but amp.** An envelope is SCHEDULED, so
+  it leaves no handle; re-aiming one means recomputing its current target and
+  `setTargetAtTime`-ing there. `envLive` does exactly that for amp already —
+  generalising it is the next piece, and the matrix will show it.
+- **an LFO on a LEARNED address gets no handle** (`osc pitch (addr) lfo` reads
+  `no handle`): a learned route has `dst:0`, so `MD2LFO[0]` is undefined and it
+  never enters `lfoList` — it is served by the older learned-target block,
+  which this pass did not fold in.
+- **`flt Q` has no live dial** (`live: DEAD`): only `frq` ever got a `cutLive`.
+  Every addressed param wants the same treatment.
+
+### What it costs
+
+Depths moved. `taper(a)=a²` plus derived ranges means every mod route is
+shallower in the middle of the knob than it was, and pitch/op depths changed
+outright. No save-format change — SAVEV/LIBV untouched — but anything with a
+mod route wants re-dialling. Factory drums A/B'd against the previous build:
+fundamentals identical (+0Hz on all four), centroid within 2%, peak within
+0.04, which is drum noise rather than a regression.
+
 ## 0c. THE MOD MATRIX, AND THE ONE THING STILL MISSING
 
 Gad, 2026-08-16: "have the same conventional mod method for ALL possible params

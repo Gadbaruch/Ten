@@ -497,10 +497,15 @@ async function probeModMatrix() {
     routes: [Object.assign({ amt }, dest.addr ? { dst: 0, addr: dest.addr, tgt: dest.addr }
                                               : { dst: dest.dst, idx: dest.idx })]
   });
+  /* NOTE 72, NOT 60. The `key` source is (midi-60)/24, which is exactly ZERO at
+     middle C — so every key row read DEAD for the arithmetic reason rather than
+     a wiring one. And pressure is 0 until something presses, so the note is
+     pressed before anything is asked of it. Both were the harness lying. */
   const fire = async ms => {
-    const h = engine.trigger(AC.currentTime + 0.03, pi, 60, 0.9);
+    const h = engine.trigger(AC.currentTime + 0.03, pi, 72, 0.9);
     const v = h && h.voices && h.voices[0];
     await nap(ms == null ? 450 : ms);
+    if (v && v.setPressure) { try { v.setPressure(0.7); } catch (_) {} await nap(80); }
     return { h, v };
   };
   const stop = async h => { try { h && h.release && h.release(AC.currentTime + 0.005); } catch (_) {} await nap(140); };
@@ -549,16 +554,28 @@ async function probeModMatrix() {
           dest.dialSet(p, d0);
         } else row.live = '-';
 
+        /* TWEAK — change the MOD ITSELF under a sounding note. For a CONNECTED
+           source the DESTINATION param cannot show it (see 'blind' above), so
+           watch the DEPTH HANDLE the voice kept, which is precisely what
+           modLive re-aims. An envelope keeps no handle — it is scheduled — so
+           for those the destination param is the only place to look, and a
+           pass there is marked 'sched' because it means something different. */
         {
-          const before = dest.read(v);
+          const hs = (v.modN || []).filter(h => h.mi === 0);
+          const rd = () => hs.length ? hs.map(h => h.p.value) : [dest.read(v)];
+          const before = rd();
           p.mod[0].routes[0].amt = 20;
           try { engine.lfoLive(pi); } catch (_) {}
           try { engine.envLive(pi); } catch (_) {}
+          try { engine.modReaim(pi); } catch (_) {}
           try { engine.refresh(pi); } catch (_) {}
           await nap(220);
-          const after = dest.read(v);
-          row.tweak = (before == null || after == null) ? '?'
-            : (Math.abs(after - before) > Math.max(1e-4, Math.abs(before) * 0.02) ? 'yes' : 'DEAD');
+          const after = rd();
+          const moved = before.some((b, i) => b != null && after[i] != null
+            && Math.abs(after[i] - b) > Math.max(1e-6, Math.abs(b) * 0.02));
+          row.tweak = moved ? (hs.length ? 'yes' : 'yes sched')
+                    : (before[0] == null ? '?' : 'DEAD');
+          row.note = hs.length ? (hs.length + ' handles') : 'no handle';
         }
         await stop(h);
       } catch (e) { row.note = String(e && e.message || e).slice(0, 50); }
