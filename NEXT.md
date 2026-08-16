@@ -385,6 +385,40 @@ limit and gives `flt Q` (and every other addressed param) a live dial for free.
 The harness above is the net for doing it: every DEAD in that table should read
 `yes`, and nothing that reads `ok` may become `off dial`.
 
+## 0e. WHAT `amt 100` MEANS — the table the unification has to agree on
+
+Extracted from every depth-setting line in the engine, 2026-08-16. This is the
+real answer to "make every mod affect every dest consistently": the MECHANISM
+is now nearly uniform, but the DEPTHS never were.
+
+    destination     env        lfo        vel/key/rnd   press      learned addr
+    filter cutoff   5 oct      4 oct      4 oct         4 oct      4 oct
+    pitch           2 oct      2 SEMI     1 oct         1 oct      4 oct
+    op level        full       +-half     MISSING       MISSING    +-full
+    voice amp       the env    +-half     env peak      base+A     —
+
+Pitch spans **24x** between an LFO (200 cents, index.html ~5993 `A*tg.sc`) and
+a learned route (4800 cents, `A*4800`) for the identical destination.
+
+**AND THE OBVIOUS FIX IS WRONG.** One number per destination would break the
+two commonest uses at once: an LFO on pitch at amt 100 wants ~2 semitones,
+because that is vibrato; an ENVELOPE on pitch at amt 100 wants ~24 semitones,
+because that is a drum pitch drop. Both are right. A single ±4-octave range
+makes vibrato live in the bottom 4% of the knob.
+
+So the unification is three things, and only the first two are mechanical:
+
+1. **One resolver.** Every (dst,idx) and every learned address resolves through
+   ONE function to `[{param, range}]`, each target carrying its own full scale.
+   `_opA` is the first piece of this; `_modParam`'s `ranges` is the second.
+2. **One live path.** Every route leaves a handle on the voice; one
+   `engine.modLive(pi)` re-aims all of them. See 0c.
+3. **A DECLARED depth table** — per destination AND per source kind, in one
+   place, chosen deliberately rather than inherited from whoever wrote each
+   branch. This is the part that changes how existing patches sound, and it is
+   Gad's call, not a refactor detail. Nothing above should be built until the
+   numbers in it are decided, because they are its central parameter.
+
 ## 0d. TWO REPORTS ON AN FM OPERATOR — one bug, one physics
 
 Gad, 2026-08-16: env on op4's amp with op4 doing FM on op1, long attack — "the
