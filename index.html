@@ -1154,7 +1154,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-16.1836';
+const BUILD='2026-08-16.1900';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -5692,7 +5692,13 @@ class Voice{
          since the day it was written; the code just never did it.
          The sampler still repitches, because that is what a sampler is. */
       if(src&&pitchParam){
-        if(isS)pitchParam.setValueAtTime(target,at);
+        /* A SAMPLER GLIDES TOO. Its pitch is a playbackRate rather than a
+           frequency, but portamento is a RATIO — glR multiplies either one the
+           same way — and this wrote the target straight in, so on mono/legato
+           the oscillators slid and the sampler jumped. NOISE is right to stay
+           out of it: its rate carries no `midi` term, so it never tracked the
+           note in the first place and there is nothing to glide. */
+        if(isS)setF(pitchParam,target);
         else if(isN)pitchParam.setValueAtTime(
           clamp((ops[0].rat||1)*Math.pow(2,(ops[0].fine||0)/1200),0.05,8),at);
         else setF(pitchParam,target);
@@ -5790,7 +5796,8 @@ class Voice{
            if(en9>st9+0.005){s2.loopStart=st9; s2.loopEnd=en9; s2._off=st9;}
            if(Math.round(op.lps||0)===1)s2.loop=false;}
           const ratio=Math.pow(2,(midi-60)/12)*op.rat*Math.pow(2,(op.fine||0)/1200);
-          s2.playbackRate.value=ratio;
+          setF(s2.playbackRate,ratio);        // glides with the rest — see op 0
+
           (this.opPitch[i]=this.opPitch[i]||[]).push({pm:s2.playbackRate,base:ratio,kind:'smp'});
           (this.opDet[i]=this.opDet[i]||[]).push({pm:s2.playbackRate,sc:0.5});
         }
@@ -8305,10 +8312,17 @@ class Engine{
     let did=false;
     for(const v of this.act[pi]){
       if(!v||v.released||v.killed||!v.opPitch)continue;
-      if(v._rf0===undefined){v._rf0=v.rootFreq; v._nr0=v.noteRatio;}
+      if(v._rf0===undefined){v._rf0=v.rootFreq; v._nr0=v.noteRatio; v._tf0=v.toneFreq;}
       const rat=Math.pow(2,(midi-(v.baseMidi==null?v.midi:v.baseMidi))/12);
       v.rootFreq=v._rf0*rat;
       if(v._nr0!==undefined)v.noteRatio=v._nr0*rat;
+      /* toneFreq MUST move too, and it is the whole of "legato only tracks op
+         0". oscRefresh pitches ops 1-9 from
+             tTgt = target x toneFreq/rootFreq = (rootFreq x k) x toneFreq/rootFreq
+         where rootFreq CANCELS — so tTgt is toneFreq x k and nothing else. Move
+         rootFreq alone and tTgt does not budge: op 0 glided (it reads `target`
+         directly) and every other operator stayed on the old note. */
+      if(v._tf0!==undefined)v.toneFreq=v._tf0*rat;
       v.midi=midi;
       /* `this` is the engine — oscRefresh needs it for setWave/syncWave. This
          used to pass a bare `E`, which does not exist in this scope, so every

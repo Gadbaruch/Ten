@@ -484,6 +484,37 @@ limit and gives `flt Q` (and every other addressed param) a live dial for free.
 The harness above is the net for doing it: every DEAD in that table should read
 `yes`, and nothing that reads `ok` may become `off dial`.
 
+## 0g. LEGATO ONLY EVER MOVED OP 0 (2026-08-16)
+
+Gad: "legato/mono doesn't track for all ops." Exactly right, and the arithmetic
+says why. `oscRefresh` pitches operators 1-9 from
+
+    tTgt = target x toneFreq/rootFreq
+         = (rootFreq x k) x toneFreq/rootFreq
+
+**and rootFreq cancels.** So tTgt is `toneFreq x k` and nothing else. `retune`
+moved `rootFreq` and `noteRatio` but never `toneFreq`, so tTgt did not budge:
+op 0 glided (it reads `target` directly, which does scale with rootFreq) and
+every other operator stayed on the old note.
+
+Measured, three oscillators at ratios 1/2/3, legato retune one octave up:
+
+    op    previous build              now
+    op1   130.8 -> 261.6  x2          130.8 -> 261.6  x2
+    op3   261.6 -> 261.6  DID NOT MOVE  261.6 -> 523.2  x2
+    op5   392.4 -> 392.4  DID NOT MOVE  392.4 -> 784.7  x2
+
+`retune` carries `_tf0` alongside `_rf0`/`_nr0` now and scales it by the same
+ratio.
+
+SEPARATELY, and found on the way: **a SAMPLER did not glide.** Both sampler
+sites wrote their pitch straight in — `pitchParam.setValueAtTime(target,at)`
+for a sampler root, `s2.playbackRate.value=ratio` for a sampler operator —
+bypassing `setF`, so on a glide the oscillators slid and the sampler jumped.
+Portamento is a RATIO, so `glR` multiplies a playbackRate exactly as it does a
+frequency; both go through `setF` now. NOISE deliberately stays out: its rate
+carries no `midi` term, so it never tracked the note and has nothing to glide.
+
 ## 0e. WHAT `amt 100` MEANS — the table the unification has to agree on
 
 Extracted from every depth-setting line in the engine, 2026-08-16. This is the
