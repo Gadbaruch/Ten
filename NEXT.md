@@ -952,8 +952,36 @@ chasing it again: turning `wide` under a SOUNDING note moves nothing in either,
 measured 0 -> 0 on both. The panner is made when the note is. If width is
 reported dead, the question to ask is whether a NEW note was played, and what
 `uni` is — at uni 1 there is no unison to spread and both read mono.
-- the waves are a small additive set (sin/tri/saw/sqr/org); the richer ones
-  fall back to sine.
+**THE WAVES ARE THE ENGINE'S OWN NOW** (2026-08-16). Two of Gad's three
+observations were the same mistake — approximating five waves inside the
+worklet, so everything else silently became a sine, and capping the harmonic
+count at 64 regardless of pitch:
+
+  1. "basic waveforms sound low rez in lower octaves, fine in higher octaves" —
+     the 64 cap. At 65Hz a saw wants ~305 harmonics and got 64, so everything
+     above 4.2kHz was missing and it sounded like a low sample rate; at 1kHz,
+     64 is already more than Nyquist allows, so high notes were right. Native
+     had learned this exact lesson and says so in `harmonics()`: "a 24-harmonic
+     saw tops out ~1.3kHz at 55Hz, which is what made low notes sound cheap."
+  2. "vox, mtl etc sound like sin waves — lost their character" — those waves
+     were ACCEPTED by the eligibility test and then rendered from a recipe that
+     had no entry for them, so they came out as a single harmonic.
+
+Both fixed by sending `E.harmonics(wav)` — the engine's own recipe, pulse width
+folded in the way setWave does it — with the note, band-limited to Nyquist and
+QUANTIZED TO A POWER OF TWO so the cache stays ~10 tables per wave rather than
+one per pitch. Measured, plain carrier, native against phase:
+
+    wave   low C2   high C5        wave   low C2   high C5
+    sin     1.0000   0.9998        org     0.9997   0.9998
+    tri     0.9997   0.9998        bel     0.9998   0.9998
+    saw     0.9998   0.9997        vox     0.9998   0.9998
+    sqr     0.9999   0.9998        mtl     0.9997   0.9998
+
+  3. "wt sounds exactly the same between the 2 modes" — CORRECT AND BY DESIGN.
+     Wave 14 is not in the eligibility test, so a patch containing one takes the
+     NATIVE path entirely. It is identical because it IS native. Same for
+     samples, noise, scan and hard sync.
 
 ### THE ORIGINAL SKETCH OF THE FIX, kept for the reasoning
 

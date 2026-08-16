@@ -1188,7 +1188,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-16.2117';
+const BUILD='2026-08-16.2138';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -4852,18 +4852,19 @@ let fxwReady=false;
      Ops are evaluated deepest-modulator-first, so a modulator always reaches
      its target within the same sample. */
   var FMTL=2048, FMTM=FMTL-1, FMCACHE={};
-  function fmTable(wav,H){
-    var key=wav+'_'+H, t=FMCACHE[key];
+  /* THE TABLE IS BUILT FROM THE ENGINE'S OWN HARMONIC RECIPE, sent in with the
+     note. Approximating the waves in here meant sin/tri/saw/sqr/org were close
+     and EVERYTHING ELSE — bel, vox, mtl — silently came out a sine, which is
+     exactly what "advanced waves lost their character" was. Same recipe as
+     setWave uses now, pulse width already folded in by the caller, so the two
+     engines draw the same wave. */
+  function fmTable(key,harm,H){
+    var t=FMCACHE[key];
     if(t)return t;
     t=new Float32Array(FMTL);
-    for(var n=1;n<=H;n++){
-      var a=0;
-      if(wav===0)a=(n===1)?1:0;                                  // sin
-      else if(wav===1)a=(n%2)?(1/(n*n))*((n%4===1)?1:-1):0;      // tri
-      else if(wav===2)a=1/n*((n%2)?1:-1);                        // saw
-      else if(wav===3)a=(n%2)?1/n:0;                             // sqr
-      else if(wav===5)a=(n<=8)?[1,0.5,0.35,0.25,0.2,0.14,0.1,0.07][n-1]:0;  // org
-      else a=(n===1)?1:0;
+    var lim=Math.min(H,harm.length);
+    for(var n=1;n<=lim;n++){
+      var a=harm[n-1];
       if(!a)continue;
       for(var k=0;k<FMTL;k++)t[k]+=a*Math.sin(2*Math.PI*n*k/FMTL);
     }
@@ -4898,9 +4899,9 @@ let fxwReady=false;
             var s=d.ops[i];
             /* the band limit is fixed HERE, from the nominal frequency, and is
                never revisited — that is the whole point of this processor */
-            var H=Math.max(1,Math.min(64,Math.floor(sampleRate*0.45/Math.max(1,s.f))));
             this.o.push({ph:Math.random()*0.0001,inc:s.f/sampleRate,amp:s.amp,
-                         dep:s.dep,tgt:s.tgt,mode:s.mode,tbl:fmTable(s.wav|0,H),
+                         dep:s.dep,tgt:s.tgt,mode:s.mode,
+                         tbl:fmTable(s.key,s.harm||[1],s.harm?s.harm.length:1),
                          pm:0,ramt:s.ramt||0,rgv:1,incT:0});
           }
           this.N=this.o.length;
@@ -5956,9 +5957,34 @@ class Voice{
              operator silently vanished. sync and scan never get here: the
              eligibility test above sends those patches to the native path. */
           const wm=md===0?0:(md===2?2:1);
+          /* THE REAL WAVE, band-limited for THIS note. Native's own comment
+             says why the count matters: "a 24-harmonic saw tops out ~1.3kHz at
+             55Hz, which is what made low notes sound cheap" — and a flat cap of
+             64 in the worklet did exactly that, right up high and lo-fi down
+             low. The limit is Nyquist now, QUANTIZED TO A POWER OF TWO so the
+             table cache stays about ten entries per wave rather than one per
+             pitch. And the recipe is the ENGINE'S OWN, pulse width folded in
+             the same way setWave does it, so bel/vox/mtl stop collapsing to a
+             sine — approximating five waves in the worklet quietly turned
+             every other one into a sine. */
+          const wv2=Math.round(b.o.wav||0);
+          let harm=[];
+          try{harm=(E.harmonics(wv2)||[]).slice();}catch(_){harm=[1];}
+          if(!harm.length)harm=[1];
+          const dw=clamp(b.o.pw===undefined?0.5:b.o.pw,0.05,0.95);
+          if(Math.abs(dw-0.5)>=0.005)harm=harm.map((v2,q)=>{
+            const kk=q+1, ref=Math.sin(kk*Math.PI/2);
+            return v2*(Math.abs(ref)<1e-6?Math.sin(kk*Math.PI*dw)
+                                         :Math.sin(kk*Math.PI*dw)/ref);
+          });
+          const lim2=Math.max(1,Math.floor(AC.sampleRate*0.45/Math.max(1,b.f)));
+          const H2=Math.max(1,Math.min(harm.length,
+                     Math.pow(2,Math.floor(Math.log2(lim2)))));
+          harm=harm.slice(0,H2);
           /* op0's gain is amt in the native builder; only ops 1-9 additive get
              the 0.9. Applying it to op0 too made the phase engine 0.9x quiet. */
-          return {f:b.f, amp:md===0?(b.i===0?a0:a0*0.9):1, wav:Math.round(b.o.wav||0),
+          return {f:b.f, amp:md===0?(b.i===0?a0:a0*0.9):1, wav:wv2,
+                  key:wv2+'_'+H2+'_'+Math.round(dw*40), harm,
                   mode:wm, tgt:md===0?-1:tgtIx(b),
                   dep:ix/(2*Math.PI), ramt:md===2?a0:0};
         });
