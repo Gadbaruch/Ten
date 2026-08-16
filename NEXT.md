@@ -846,11 +846,19 @@ this measures WHETHER it keeps up, not how much headroom is left — it cannot
 read the audio thread's actual load, so a slower machine or a heavier patch is
 untested.
 
-WHAT IT DOES NOT DO YET, and why it is not the default:
-- **no per-operator pitch/level modulation.** opPitch/opDet/opGains stay empty
-  in this mode, so an env or LFO aimed at an operator does nothing. Everything
-  aimed at amp, the filter or pan still works, because the stack lands in
-  `merge` exactly where the native oscillators would.
+**PER-OPERATOR MODULATION NOW WORKS** (2026-08-16). This was the one thing
+keeping it from being the default. The mod rack aims at AudioParams, so the
+worklet EXPOSES them: `d0..d7` are detune in CENTS — the same unit and the same
+summing behaviour an oscillator's detune has — and `g0..g7` are the operator
+levels, both a-rate. They are registered into opDet/opPitch/opGains/opAmt at
+build, so `_destOf` and every env, LFO, vel and pressure route reach an operator
+without the rack knowing it is talking to a worklet. Measured: an env aimed at
+op2's pitch writes 731 cents and decays to 720; both routes leave live handles.
+
+WHAT IT DOES NOT DO YET:
+- **a legato retune does not reach it.** The worklet's base pitch is fixed at
+  the note; `oscRefresh` skips `kind:'fmw'` rather than writing an absolute Hz
+  into a cents param. Poly and mono are fine — this is the glide path only.
 - **oscillator ops only** — samples, noise, scan, wavetable and hard sync all
   still take the native path, and the flag silently declines rather than
   breaking them.

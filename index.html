@@ -1185,7 +1185,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-16.2001';
+const BUILD='2026-08-16.2033';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -4869,6 +4869,21 @@ let fxwReady=false;
     FMCACHE[key]=t; return t;
   }
   class FMO extends AudioWorkletProcessor{
+    /* PER-OPERATOR MODULATION, as real AudioParams. This is what kept the phase
+       engine from being the default: the mod rack aims at AudioParams, so if
+       the operators live inside a worklet they must EXPOSE AudioParams or every
+       env and LFO pointed at an op goes nowhere. d0..d7 are DETUNE IN CENTS,
+       the same unit and the same summing behaviour as an oscillator's detune,
+       so _destOf and the whole mod rack reach them unchanged; g0..g7 are the
+       operator levels. a-rate, so an audio-rate LFO is audio-rate here too. */
+    static get parameterDescriptors(){
+      var ps=[];
+      for(var i=0;i<8;i++){
+        ps.push({name:'d'+i,defaultValue:0,minValue:-9600,maxValue:9600,automationRate:'a-rate'});
+        ps.push({name:'g'+i,defaultValue:1,minValue:0,maxValue:8,automationRate:'a-rate'});
+      }
+      return ps;
+    }
     constructor(){
       super();
       this.o=[]; this.N=0; this.g=0; this.tg=0; this.dead=false;
@@ -4895,16 +4910,28 @@ let fxwReady=false;
       if(this.dead)return false;
       var L=out[0][0], R=out[0][1]||null, n=L.length, i, k;
       if(!this.N){for(k=0;k<n;k++){L[k]=0; if(R)R[k]=0;} return true;}
+      var P=arguments[2];
+      /* the mod rack's params, gathered once a block: a k-rate param arrives as
+         a length-1 array and an a-rate one as a full block, so each is read
+         with its own index rather than assuming either */
+      var dP=this.dP||(this.dP=[]), gP=this.gP||(this.gP=[]);
+      for(i=0;i<this.N;i++){dP[i]=P['d'+i]; gP[i]=P['g'+i];}
       for(k=0;k<n;k++){
         this.g+=(this.tg-this.g)*0.002;          // a short fade so it cannot click
         var sum=0;
         for(i=this.N-1;i>=0;i--){
           var o=this.o[i];
+          /* DETUNE IN CENTS, summed by the mod rack exactly as an oscillator's
+             would be — this is what makes an env or LFO on an operator's pitch
+             work in here at all */
+          var dv=dP[i], cents=dv?(dv.length>1?dv[k]:dv[0]):0;
+          var gv=gP[i], lvl=gv?(gv.length>1?gv[k]:gv[0]):1;
+          var inc=cents?o.inc*Math.pow(2,cents/1200):o.inc;
           var ph=o.ph+o.pm; ph-=Math.floor(ph);
           var fi=ph*FMTL, i0=fi|0, fr=fi-i0, tb=o.tbl;
-          var v=(tb[i0]+(tb[(i0+1)&FMTM]-tb[i0])*fr)*o.amp;
+          var v=(tb[i0]+(tb[(i0+1)&FMTM]-tb[i0])*fr)*o.amp*lvl;
           o.pm=0;
-          o.ph+=o.inc; o.ph-=Math.floor(o.ph);
+          o.ph+=inc; o.ph-=Math.floor(o.ph);
           if(o.mode===0)sum+=v;
           else if(o.tgt>=0&&o.tgt<this.N)this.o[o.tgt].pm+=v*o.dep;
         }
@@ -5393,6 +5420,11 @@ class Voice{
            operator back at the wrong pitch the builder had been cured of. */
         const tTgt=target*(this.rootFreq>0?(this.toneFreq||this.rootFreq)/this.rootFreq:1);
         let f;
+        /* a phase-engine op's handle is a DETUNE in cents, not a frequency —
+           writing an absolute Hz into it would detune it by hundreds of
+           octaves. Its base pitch lives inside the worklet and is fixed at the
+           note, so a legato retune does not reach it yet. */
+        if(e.kind==='fmw')continue;
         if(e.kind==='smp')f=this.noteRatio*op.rat*Math.pow(2,(op.fine||0)/1200);
         else if(e.kind==='sync')f=tTgt*syncMasterRat(ops,i);
         else f=i===0?target:tTgt*op.rat*Math.pow(2,(op.fine||0)/1200);
@@ -5842,6 +5874,22 @@ class Voice{
         nd.connect(merge);
         this.nodes.push(nd);
         this._fmw=this._fmw||[]; this._fmw.push(nd);
+        /* REGISTER THE WORKLET'S PARAMS WHERE THE MOD RACK ALREADY LOOKS.
+           opDet is read as {pm,sc} with sc>=1 meaning "cents", opAmt as {g,sc}
+           where g.gain is the level — so a d-param and a gain-shaped shim make
+           every env, LFO, vel and pressure route reach an operator in here
+           without the rack knowing it is talking to a worklet. opPitch takes
+           the same param so oscRefresh can retune it on a legato move. */
+        list.forEach((b,k2)=>{
+          if(k2>7)return;                       // 8 param pairs exist
+          const dPar=nd.parameters.get('d'+k2), gPar=nd.parameters.get('g'+k2);
+          if(!dPar||!gPar)return;
+          (this.opDet[b.i]=this.opDet[b.i]||[]).push({pm:dPar,sc:200});
+          (this.opPitch[b.i]=this.opPitch[b.i]||[]).push({pm:dPar,base:0,kind:'fmw'});
+          const shim={gain:gPar};
+          (this.opGains[b.i]=this.opGains[b.i]||[]).push(shim);
+          (this.opAmt[b.i]=this.opAmt[b.i]||[]).push({g:shim,sc:1});
+        });
         if(!firstSrc)firstSrc=nd;
       }
     }
