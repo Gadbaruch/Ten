@@ -406,6 +406,48 @@ because that is vibrato; an ENVELOPE on pitch at amt 100 wants ~24 semitones,
 because that is a drum pitch drop. Both are right. A single ±4-octave range
 makes vibrato live in the bottom 4% of the knob.
 
+### THE TABLE MUST NOT EXIST — Gad, 2026-08-16
+
+"you listed 4 destinations, but we may have hundreds as we continue."
+
+That settles it, and it kills point 3 below rather than answering it. A
+hand-maintained depth table rots the moment somebody adds a param, and the
+evidence is already in the tree: `_modParam` declares Q as `range:14` where its
+spec says `min:0.1,max:24` (23.9), and gain as `range:18` where its spec says
+`-18..18` (36). **Two of three hand-written ranges had already drifted, with
+only four destinations in play.**
+
+There are **230 `SP()` declarations**, and every one carries `min`, `max` and a
+`type`, because the UI cannot draw or step a dial without them. That is the
+single source of truth, and it is already maintained by whoever adds a param.
+So the depth is DERIVED, never declared twice:
+
+    range   = spec.max - spec.min        declared once, by the UI
+    domain  = spec.type                  freq/time -> log (cents/octaves)
+                                         lin       -> linear
+                                         enum      -> stepped, or not a mod
+                                                      destination at all (45 of
+                                                      these are type selectors)
+    depth   = range x taper(amt)         ONE global taper, not per destination
+
+And the vibrato-vs-pitch-drop conflict stops being a range problem and becomes
+a KNOB TAPER problem, which has one answer for the whole instrument. With
+`depth = range · sign(a)·a²` over a ±4-octave pitch range:
+
+    amt  20  ->  ~2 semitones      vibrato
+    amt  50  ->  ~1 octave
+    amt 100  ->   4 octaves        the drum drop
+
+Same rule, same destination, both playable — and it applies unchanged to param
+number 231, which is the whole point.
+
+Two global decisions remain, and they are global, not per destination:
+  - the taper exponent (2 is gentle and probably right; 3 gives finer vibrato
+    resolution at the cost of a twitchy top end);
+  - whether `enum` params are modulation destinations at all — a swept filter
+    TYPE or wave SHAPE is a real effect, but it must quantize, and "off" is
+    usually index 0 which means a mod can silence the slot.
+
 So the unification is three things, and only the first two are mechanical:
 
 1. **One resolver.** Every (dst,idx) and every learned address resolves through
