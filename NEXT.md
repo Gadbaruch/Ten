@@ -121,6 +121,30 @@ carrier sampled every 150ms across a x4 length change whose old cycle ended at
 handler, ahead of the audio channel's own three meanings for it, or the
 gesture would mean different things on different channels.
 
+## KIT IS A ROUND TRIP, NOT A ONE-WAY WALK (Gad, 2026-08-16)
+
+Kit sits in the voice-mode list because a kit IS a voice-allocation mode — the
+pitch class picks which chain answers. But it is the only entry there that
+changes the ENGINE, and it used to leave the voice mode wherever the walk
+happened to pass on the way in: enter kit from poly and step back out and you
+were on legato. Gad: "it kinda sucks... i feel stuck we should keep it in the
+same position."
+
+The mode a channel was on when it entered kit is remembered in `KITBACK` and
+restored on the way out, so:
+
+    on legato -> kit -> step off   ->  legato
+    on poly   -> kit -> step off   ->  poly
+
+`KITBACK` is deliberately module state rather than a field on the preset — it
+is UI memory, not patch data, and must not land in a saved set.
+
+STILL TRUE, and the thing to weigh if this comes back: walking the dial ONTO
+kit still applies mono and legato on the way past, because that is what an enum
+walk does. The round trip is fixed; the walk is not. Moving kit out of the mode
+list and back into the engine type — Gad's own first instinct — is the fix for
+that, and it is a UI relocation rather than a behaviour change.
+
 ## THE RULE A KEY CHANGES MEANING BY (Gad, 2026-08-16)
 
     A KEY MAY ONLY CHANGE WHAT IT MEANS WHILE A MODIFIER IS HELD.

@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-16.2209';
+const BUILD='2026-08-16.2213';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1373,6 +1373,9 @@ function basePreset(name){return{
    Octaves just transpose — C2/C3/C4 all play kit slot 0 at different pitches.
    The last note you played is the slot you see and edit. */
 const isKit=p=>(p&&p.cat==='kit');
+/* the voice mode a channel was on when it went into kit, so leaving kit is a
+   round trip. Deliberately NOT on the preset: it is UI memory, not patch data. */
+let KITBACK={};
 const pcOf=m=>((Math.round(m)%12)+12)%12;
 /* A PAD YOU NEVER MADE DOES NOT MAKE A SOUND. This used to conjure one out of
    basePreset the instant anything asked — including PLAYING it — and
@@ -1940,9 +1943,29 @@ const MODULES=[
     /* KIT LIVES HERE NOW, not in the engine list: what a kit really is is a
        VOICE-ALLOCATION mode — the pitch class picks which chain answers. */
     get:o=>isKit(S.presets[S.editSnd])?3:Math.round(o.mode||0),
+    /* LEAVING KIT PUTS THE MODE BACK WHERE IT WAS. Kit sits in this list
+       because a kit IS a voice-allocation mode, but it is the only entry that
+       changes the ENGINE, and walking onto it used to leave the voice mode
+       wherever the walk happened to pass — so coming back out landed on legato
+       when you had been on poly, and it read as being stuck. The mode you were
+       on when you entered is remembered and restored on the way out, so kit is
+       a round trip rather than a one-way walk. Kept off `o` so it never lands
+       in a saved set. */
     set:(o,v)=>{const pi2=S.editSnd, k2=Math.round(v);
-      if(k2===3){if(!isKit(S.presets[pi2])){setEngine(pi2,'kit');flash('kit — 12 pads, each pad its own chain');} return;}
-      if(isKit(S.presets[pi2]))setEngine(pi2,'synth');
+      KITBACK=KITBACK||{};
+      if(k2===3){
+        if(!isKit(S.presets[pi2])){
+          KITBACK[pi2]=Math.round(o.mode||0);
+          setEngine(pi2,'kit');flash('kit — 12 pads, each pad its own chain');
+        }
+        return;
+      }
+      if(isKit(S.presets[pi2])){
+        setEngine(pi2,'synth');
+        const back=KITBACK[pi2];
+        if(back!==undefined){delete KITBACK[pi2]; o.mode=back;
+          flash('voice '+MODE[back]); return;}
+      }
       o.mode=k2;}}),
     SP('glide','glide','time',{min:0,max:0.5}),
     /* THE EXPERIMENT, on a dial so it can be judged by ear. `phase` swaps the
