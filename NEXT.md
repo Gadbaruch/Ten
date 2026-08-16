@@ -375,18 +375,52 @@ A cell that reads `blind` still is not a pass: `AudioParam.value` cannot see a
 connected input, so `reaches` is unverifiable that way. `tweak` sidesteps it by
 watching the DEPTH HANDLE, which is exactly what `modReaim` re-aims.
 
-### What is still open
+### ALL THREE CLOSED (2026-08-16, same day)
 
-- **env tweak is still DEAD everywhere but amp.** An envelope is SCHEDULED, so
-  it leaves no handle; re-aiming one means recomputing its current target and
-  `setTargetAtTime`-ing there. `envLive` does exactly that for amp already —
-  generalising it is the next piece, and the matrix will show it.
-- **an LFO on a LEARNED address gets no handle** (`osc pitch (addr) lfo` reads
-  `no handle`): a learned route has `dst:0`, so `MD2LFO[0]` is undefined and it
-  never enters `lfoList` — it is served by the older learned-target block,
-  which this pass did not fold in.
-- **`flt Q` has no live dial** (`live: DEAD`): only `frq` ever got a `cutLive`.
-  Every addressed param wants the same treatment.
+- **env tweak** — an envelope SCHEDULES, so it now leaves a handle carrying what
+  it takes to recompute the sustain it is HOLDING, and `modReaim` re-aims to
+  that. Never re-runs the attack: that is already in the past and re-striking it
+  under the player's fingers would be worse than doing nothing, so a handle is
+  skipped until `now − startAt` has passed its own attack.
+- **LFO on a LEARNED address** — a learned route carries `dst:0`, so `MD2LFO[0]`
+  is undefined and it never entered `lfoList`. The learned block leaves its own
+  handle now. Note it is LINEAR in amt (it predates MODTAPER), so the handle
+  says `lin:true` rather than letting modReaim guess.
+- **`dialLive(pi,rack,slot,key,val)`** — every addressed param has a live dial,
+  not just the cutoff. `_modParam` already resolved any (rack,slot,key); this
+  writes the dialled value to them. **Cents params are skipped deliberately**: a
+  `detune` is where the MODULATORS sum and has no dialled value of its own, so
+  writing one would fight them — exactly the mistake the filter envelope made.
+
+One bug worth remembering, because it read as "the feature does not work" for a
+whole round: `this.modN=[]` at the LFO rack ran AFTER the envelope blocks had
+already pushed their handles and threw every one away. `||[]` now.
+
+### The matrix, all 42 cells
+
+    dest              tweak
+    filt cutoff       all 6 yes
+    pitch             all 6 yes
+    osc pitch (addr)  all 6 yes
+    op level          all 6 yes
+    osc level (addr)  all 6 yes
+    flt Q (addr)      all 6 yes   · live dial now tracks x2
+    amp               env + lfo yes · vel/key/rnd DEAD · press unverifiable
+
+### The three that are NOT bugs, and why
+
+- **amp × vel/key/rnd** — `ampBias` is folded into the envelope PEAK when the
+  voice is built, so there is nothing to re-aim without rebuilding the envelope.
+  A note's loudness contour is decided when the note starts; that is defensible
+  and it is what every synth does.
+- **amp × press** — the probe reads `v.vca.gain`, but pressure→amp rides
+  `pGain`, a node AFTER the vca. `modReaim`'s bag loop does re-aim it. NOT
+  MEASURED either way — do not read that DEAD as a finding.
+- **flt Q + env, live dial reads `x0.26` not `x2`** — the dial and the envelope
+  fight over one param, which is precisely the collision the cutoff had. It
+  cannot be fixed the same way: `frequency` had `detune` to move the modulators
+  onto, and `Q` has no companion offset param. Any param without one has this
+  ceiling.
 
 ### What it costs
 

@@ -1154,7 +1154,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-16.1700';
+const BUILD='2026-08-16.1836';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -5435,7 +5435,9 @@ class Voice{
         if(rt.tgt)continue;                      // learned addresses handled separately below
         if(m.src===1&&MD2ENV[rt.dst]&&Math.abs(rt.amt)>0.5){
           const T3=clamp(me.tmul??1,0.1,4);   // time × scales every stage at once
-          envs.push({dst:MD2ENV[rt.dst],idx:rt.idx,amt:rt.amt,
+          /* mi/ri ride along so a scheduled envelope can leave a live handle
+             and be re-aimed mid-note, the way a connected source is */
+          envs.push({dst:MD2ENV[rt.dst],idx:rt.idx,amt:rt.amt,mi:mi2,ri:effRoutes(m).indexOf(rt),
                      a:me.a*T3,d:me.d*T3,s:me.s,r:me.r*T3,crv:me.crv,
                      lp:clamp(me.lp||0,0,1),lsyn:me.lsyn,lrate:me.lrate,
                      lrdiv:me.lrdiv,lfit:me.lfit});
@@ -5604,6 +5606,10 @@ class Voice{
             pm.setTargetAtTime(peak*e2.s,at+a,Math.max(0.005,e2.d/3));
           }
           this.fEnvs.push({node:pm,base:0,r:e2.r});
+          /* an envelope SCHEDULES, so its handle carries what it takes to
+             recompute the sustain it is holding — modReaim re-aims to it */
+          (this.modN=this.modN||[]).push({p:pm,mi:e2.mi,ri:e2.ri,kind:'env',
+                                          base:0,k:60,aT:a});
         }
       }
     }
@@ -5969,6 +5975,8 @@ class Voice{
             if(a<=0.003)pm.setValueAtTime(cents,at);
             else{pm.setValueAtTime(0,at);pm.linearRampToValueAtTime(cents,at+a);}
             pm.setTargetAtTime(cents*pe.s,at+Math.max(a,0.001),Math.max(0.005,pe.d/3));
+            (this.modN=this.modN||[]).push({p:pm,mi:pe.mi,ri:pe.ri,kind:'env',
+                                            base:0,k:24,aT:a});
           }else{                                  // a sample: playbackRate is a ratio
             const tg=pl[j], peak=Math.max(tg.base*R,0.01);
             const sus=Math.max(tg.base*Math.pow(2,cents*pe.s/1200),0.01);
@@ -6007,14 +6015,21 @@ class Voice{
            decay actually short. */
         g.gain.setTargetAtTime(sus,at+a,Math.max(0.004,e2.d/5));
         g.gain.setValueAtTime(sus,at+a+Math.max(0.006,e2.d));
+        /* an operator env is MULTIPLICATIVE from the built level, so its handle
+           carries that level and modReaim rebuilds lo/hi from it */
+        (this.modN=this.modN||[]).push({p:g.gain,mi:e2.mi,ri:e2.ri,kind:'env',
+                                        base,mul:true,aT:a});
       }
     }
 
     /* EVERY ROUTE LEAVES A LIVE HANDLE HERE — {p, span, mi, ri} — so one
        engine.modLive(pi) can re-aim all of them from the current preset values
        instead of each source needing somebody to remember to write it a hook.
-       That is what made 41 of 42 cells in the mod matrix read DEAD. */
-    this.modN=[];
+       That is what made 41 of 42 cells in the mod matrix read DEAD.
+       `||[]` and NOT `=[]`: the envelope blocks above have already pushed their
+       own handles by the time this runs, and a bare reset threw every one of
+       them away — which read as "env still DEAD" long after it was wired. */
+    this.modN=this.modN||[];
     /* LFO rack (per voice: pitch/filt/amp/op) */
     for(const lf of lfoList){
       /* Math.abs: a NEGATIVE amount is a real setting — the whole point of
@@ -6106,9 +6121,11 @@ class Voice{
     }
     /* center: a per-route DC bias on the target (independent of the source) */
     /* learned targets (cmd+C/V): route the source onto any resolvable live param */
-    for(const m of md){
-      if(m.off||!m.src||!m.routes)continue;
-      for(const rt of m.routes){
+    for(let mi6=0;mi6<md.length;mi6++){
+      const m=md[mi6];
+      if(!m||m.off||!m.src||!m.routes)continue;
+      for(let ri6=0;ri6<m.routes.length;ri6++){
+        const rt=m.routes[ri6];
         /* the learned form, plus any ADDRESS the (dst,idx) enum cannot express
            — a filter's resonance or gain, an operator's level on "all" */
         const t=rt.tgt||(rt.addr&&!effRoute(rt).dst?rt.addr:null);
@@ -6133,10 +6150,21 @@ class Voice{
               param.linearRampToValueAtTime(peak,at+a);
               param.setTargetAtTime(base+(peak-base)*m.s,at+a,Math.max(0.005,m.d*T4/3));
             }
+            /* `span` is the depth PER UNIT of A, so modReaim just multiplies by
+               the new amt/100. The learned path is LINEAR in amt (it predates
+               MODTAPER), so `lin` says so rather than the handle guessing. */
+            (this.modN=this.modN||[]).push({p:param,mi:mi6,ri:ri6,kind:'env',
+                                            base,span:dep/(A||1e-9),lin:true,aT:a});
           }else if(m.src===2){                       // lfo → param
-            const sl2=lfoSrcNode(ac,m.wav,m.rate,Math.round(m.ltr||0)===1,md.indexOf(m),at,m.skw);
+            const sl2=lfoSrcNode(ac,m.wav,m.rate,Math.round(m.ltr||0)===1,mi6,at,m.skw);
             const lo=sl2.node, lg=ac.createGain(); lg.gain.value=dep*0.5;
             lo.connect(lg); lg.connect(param); lo.start(at); this.nodes.push(lo);
+            /* THE HANDLE THE LEARNED PATH NEVER LEFT. A learned route carries
+               dst:0, so MD2LFO[0] is undefined and it never enters lfoList —
+               which is why `osc pitch (addr) + lfo` read `no handle` and could
+               not be tweaked live. It leaves one here. */
+            (this.modN=this.modN||[]).push({p:lg.gain,mi:mi6,ri:ri6,kind:'lfo',
+                                            span:(dep*0.5)/(A||1e-9),lin:true});
           }else{                                     // vel / key / rnd → param (constant)
             const vv=m.src===3?clamp(vel,0,1):m.src===4?clamp((midi-60)/24,-2,2):(Math.random()*2-1);
             const cs=ac.createConstantSource(); cs.offset.value=vv*dep; cs.connect(param); cs.start(at); this.nodes.push(cs);
@@ -7106,6 +7134,24 @@ class Engine{
      note. Every route now leaves a handle at build time, so this re-aims all
      of them from the current preset values without knowing what they point at.
      0.02s so a dragged knob is a slide, not a staircase of clicks. */
+  /* EVERY DIAL LIVE, not only the cutoff. `cutLive` was written for `frq` and
+     nothing else ever got one, so turning RESONANCE under a sounding note did
+     nothing at all — the matrix read `flt Q ... live: DEAD`. _modParam already
+     resolves any (rack,slot,key) to its live params, so this writes the dialled
+     value straight to them and every addressed param gets a live dial at once.
+     Cents params are skipped on purpose: a `detune` is where the MODULATORS sum
+     and it has no dialled value of its own — writing one would fight them, which
+     is the whole mistake the filter envelope was making. */
+  dialLive(pi,rack,slot,key,val){
+    if(!Number.isFinite(val))return;
+    const n=AC.currentTime;
+    for(const v of this.act[pi]||[]){
+      if(v.killed||!v._modParam)continue;
+      let rp=null; try{rp=v._modParam({rack,slot,key});}catch(_){}
+      if(!rp||!rp.params||!rp.params.length||rp.cents)continue;
+      for(const p of rp.params)try{p.setTargetAtTime(val,n,0.03);}catch(_){}
+    }
+  }
   /* NOT `modLive` — that name was already taken by the LFO rate/depth editor
      600 lines below, and a class body silently lets the later definition win.
      This one re-aims every route's DEPTH; that one edits one slot's dials. */
@@ -7115,15 +7161,35 @@ class Engine{
     for(const v of this.act[pi]||[]){
       if(!v.modN||v.killed)continue;
       for(const h of v.modN){
-        const m=md[h.mi]; if(!m||m.src<2)continue;
+        const m=md[h.mi]; if(!m)continue;
+        if(h.kind!=='env'&&m.src<2)continue;
         const rt=(effRoutes(m)||[])[h.ri]; if(!rt)continue;
         const off=m.off?0:1;
-        /* a fixed source (vel/key/rnd) carries its per-note constant in `v`;
-           an lfo's handle is the depth gain itself; press/flw are re-aimed by
-           setPressure, which reads `sc`, so their handles only need the span */
-        const dep=MODTAPER(rt.amt||0)*h.span*off;
+        /* `lin` marks the learned path, which is linear in amt and predates
+           MODTAPER; everything else is taper(amt) x the target's own span */
+        const A=(rt.amt||0)/100;
+        const dep=(h.lin?A*h.span:MODTAPER(rt.amt||0)*(h.span??0))*off;
         try{
-          if(h.kind==='fixed')h.p.setTargetAtTime(dep*(h.v||0),n,0.02);
+          if(h.kind==='env'){
+            /* AN ENVELOPE IS SCHEDULED, so re-aiming means moving the target it
+               is HOLDING — never re-running the attack, which is already in the
+               past and would re-strike the note under the player's fingers.
+               Only once the attack has actually elapsed. */
+            const t0=v.startAt||0, T=clamp(m.tmul??1,0.1,4);
+            if(n-t0 <= (h.aT??0)*T+0.005)continue;
+            const s=clamp(m.s??0,0,1);
+            let sus;
+            if(h.mul){                          // an operator env: multiplicative
+              const w=clamp((rt.amt||0)/100,-1,1)*off, b=h.base;
+              const lo=w>0?b*(1-w):b, hi=w>0?b:b*(1+w);
+              sus=lo+(hi-lo)*s;
+            }else{
+              const peak=h.base+(h.k!==undefined?(rt.amt||0)*h.k*off:dep);
+              sus=h.base+(peak-h.base)*s;
+            }
+            h.p.setTargetAtTime(sus,n,0.03);
+          }
+          else if(h.kind==='fixed')h.p.setTargetAtTime(dep*(h.v||0),n,0.02);
           else if(h.kind==='lfo')h.p.setTargetAtTime(dep,n,0.02);
           else h.sc=dep;                       // live sources: next setPressure uses it
         }catch(_){}
@@ -9321,6 +9387,8 @@ function applyParam(pi,mi,si,px,v){
     if(M.id==='mod'){engine.lfoLive(pi); engine.envLive(pi); engine.modReaim(pi);}}
   if(isCodeCh(pi)&&(M.id==='flt'||M.id==='mod'||M.id==='vox'))engine.codeCfg(pi);
   else if(M.id==='flt'&&spec.key==='frq')engine.cutLive(pi,si);
+  /* every OTHER filter dial is live too now, not just the cutoff */
+  else if(M.id==='flt'&&(spec.key==='q'||spec.key==='gn'))engine.dialLive(pi,'flt',si,spec.key,v);
   /* these three change what the filter IS, not where it sits, so the graph has
      to be built again — rebuildRack crossfades, so it does not click */
   else if(M.id==='flt'&&(spec.key==='typ'||spec.key==='pol'||spec.key==='spr'))engine.rebuildRack(pi);

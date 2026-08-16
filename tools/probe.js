@@ -463,7 +463,8 @@ function modDests() {
 
     { name: 'flt Q (addr)', addr: { rack: 'flt', slot: 0, key: 'q' }, amp: false,
       read: v => { const n = v.fNodes && v.fNodes[0]; return n ? n.Q.value : null; },
-      dialSet: (p, x) => { p.flt[0].q = x; }, dialGet: p => p.flt[0].q },
+      dialSet: (p, x) => { p.flt[0].q = x; }, dialGet: p => p.flt[0].q,
+      live: pi => engine.dialLive(pi, 'flt', 0, 'q', S.presets[pi].flt[0].q) },
 
     { name: 'osc pitch (addr)', addr: { rack: 'osc', slot: '*', key: 'pitch' }, amp: false,
       read: v => { const d = first(v.opDet); return d && d.sc >= 1 ? d.pm.value : null; } },
