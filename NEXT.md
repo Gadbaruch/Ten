@@ -718,6 +718,70 @@ So the unification is three things, and only the first two are mechanical:
    Gad's call, not a refactor detail. Nothing above should be built until the
    numbers in it are decided, because they are its central parameter.
 
+## 0i. CH4: FM INTO FM PUSHES THE CARRIER NEGATIVE — diagnosed, NOT fixed
+
+Gad: "its when i fm and fm, op3 is fming op2 which fms op1, thats what seems to
+cause this." He is right, it predates the Nyquist budget, and the budget does
+not fix it.
+
+ch4 (MOG0): op1 `org` rat 1 · op2 `sin` rat 3 +40c · op3 `tri` rat 3 +40c, the
+two FM ops CHAINED (3→2→1), uni 3, poly.
+
+TWO THINGS ARE NOT THE BUG, both measured:
+- **the pitch complaint is SCALE SNAP.** `CFG.scaleOn` is 1 with pitch classes
+  [0,2,4,5,7,9,11] — C major — so every black key plays the white key below it
+  (61→60, 63→62, 66→65, 68→67, 70→69). That is the feature working. It reads as
+  "weird pitch modulations" because it is silently on.
+- **it is not unison, not the org wave, and not the Nyquist budget.** With
+  uni 1 the within-note wobble drops to ~0% and the per-note centroid is still
+  erratic; with a sine carrier it is still erratic; and the pre-budget build
+  gives the same pattern (C 1414 · D 1612 · E 2320 · G 1735 — non-monotonic).
+
+WHAT ISOLATES IT, all ops sine, uni 1, scale off:
+
+    op3 amt 0.38 (his)   centroid 694 730 892 1057 1087 1149 1175 862 …  jumpy
+    op3 amt 0.10         centroid 513 547 589 635 683 724 753 783 827 …  SMOOTH
+
+Turn the CHAINED modulator down and the timbre becomes a clean monotonic curve.
+Leave it up and adjacent semitones differ by up to 1.4x.
+
+THE MECHANISM. At C4 his chain gives:
+
+    op2 instantaneous freq   803 +- 2488  ->  -1685 .. 3291 Hz
+    op1 instantaneous freq   262 +-  490  ->   -228 ..  752 Hz
+
+**Both swing through zero and negative.** In ideal FM that is harmless — phase
+simply runs backwards, and a DX7 does it constantly. But an `OscillatorNode` is
+a BAND-LIMITED WAVETABLE oscillator: it selects a table by |frequency|, in
+octave bands, and those thresholds are ABSOLUTE Hz. So where inside each
+modulation cycle the table switches depends on the note's absolute pitch —
+which is exactly "every note has a different timbre", and exactly why it does
+not transpose. A richer modulator (his triangle) crosses more thresholds, which
+is why sine modulators are so much tamer.
+
+TWO BUDGET EXTENSIONS WERE TRIED AND REVERTED, because neither moved it and
+both dulled patches for nothing: weighting the budget by the modulator's
+harmonic reach, and walking the chain deepest-first to accumulate each link's
+real reach. Both are more correct in principle; measured on ch4 the octave
+ratio went 1.35 → 1.19 and the jumps stayed 0.73..1.38. The budget is not the
+lever, because there IS room under Nyquist here — the fault is the oscillator,
+not the bandwidth.
+
+### THE REAL FIX, and it is the one with a CPU bill
+
+Operators in an **AudioWorklet doing true phase accumulation** — real phase
+modulation rather than frequency modulation of a wavetable oscillator. A phase
+accumulator handles negative instantaneous frequency exactly right and never
+switches tables mid-cycle, so a chain transposes properly. It also makes mode 4
+honest: the current PM is FM scaled by the modulator's frequency (see the
+builder comment) precisely because an OscillatorNode has no phase input.
+
+COST, since Gad asked to be told: this is the one that eats CPU. Every operator
+becomes per-sample JS instead of a native node — call it 5-10x the oscillator
+cost, per voice per operator, and unison multiplies it. A 3-op patch at uni 3
+is 9 accumulators per note. It is the correct answer and it is a real bill, so
+it wants deciding rather than sneaking in.
+
 ## 0d. TWO REPORTS ON AN FM OPERATOR — one bug, one physics
 
 Gad, 2026-08-16: env on op4's amp with op4 doing FM on op1, long attack — "the
