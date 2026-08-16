@@ -184,7 +184,15 @@ multiples of the cutoff instead of collapsing all five onto the first.
 `fBase[i]=fFrq` in the builder is written twice and read nowhere — the right
 value was sitting there the whole time.
 
-### ALSO FIXED: the dial is where the note SETTLES (2026-08-16)
+### SUPERSEDED — read the section after this one first
+
+The "dial is the settling point" fix below was shipped and then REPLACED the
+same day. It worked, but it invented a third convention (the filter anchored
+at its sustain, where amp anchors at its peak and pitch at its rest value) and
+it darkened every patch. Kept here because the measurements are still the
+record of what the bug was. The real fault was never the anchor.
+
+### ALSO FIXED, THEN SUPERSEDED: the dial as the settling point (2026-08-16)
 
 Gad: "when I change the freq during play I expect it to sound as I set it,
 even if there are modulations connected to it." The stored cutoff was the
@@ -222,6 +230,67 @@ a save-format change. So SAVEV/LIBV are untouched and stored sets load as-is —
 but a patch with a filter env now SUSTAINS LOWER than it did (by K, up to 10×)
 until it is re-dialled. That is the cost of the number meaning one thing.
 
+## 0a. THE ACTUAL FIX: THE ENVELOPE IS AN OFFSET (2026-08-16, and this is the one)
+
+Gad, after arguing both wrong answers out of me: **envs, lfos and every other
+modulator are the same kind of thing, and the filter must not be a special
+case.** He is right, and the mechanism was hiding in plain sight.
+
+The env was **the only source in the instrument that WROTE `frequency`
+absolutely.** lfo, vel, key, rnd, press and flw all sum into `detune`. And
+`cutLive` writes `frequency` too — so the envelope and the live cutoff edit
+were two pieces of code fighting over one AudioParam. Every symptom came from
+that one fact:
+
+- turning the cutoff mid-note yanked the filter to the dial and killed the
+  rest of the sweep. Measured, setting the cutoff to the value it ALREADY had:
+      untouched   1098 → 1249 → 1491 → 1992 → 2979
+      knob poked  1098 → 1249 →  520 → 787  → 2979      ← a 22% dent
+- the dial and the ear disagreed about what the number meant, so tuning by ear
+  wrote one thing and the next note re-derived another.
+
+On `detune` they cannot collide. `frequency` belongs to the dial alone. After:
+
+    t(ms)      60    100    160    260    400    600   1100
+    untouched 1098  1249   1491   1992   2979   3150   2333
+    knob poked 1098  1249   1491   2025   2979   3099   2332      ← 0.0% dent
+
+And the whole gesture, dial 1000 → 2000 mid-note, amt 40 / s 0.6:
+
+    note settles      2297.4          (= dial · G^s)
+    dial → 2000       4594.8          exactly 2×, continuous, no jump
+    next note         4594.8          matches what his ear left
+
+### THE RULE, and it is two categories, not four conventions
+
+    AMPS (amp, op level)      the dial is the PEAK, the envelope scales down
+                              from it. NOT a special case: an amp envelope is
+                              not modulating a parameter, it IS the note's
+                              existence. Every synth hardwires it for exactly
+                              this reason. Already correct — do not touch.
+
+    MODULATED PARAMS          the dial is the value with NOTHING modulating.
+    (filter, pitch, pan)      Depth is in the perceptual unit — octaves,
+                              semitones, dB — and every source SUMS there.
+
+Multiplying Hz IS adding octaves (a filter CV is 1V/octave), so "additive vs
+multiplicative" was always a false question: filter, pitch and amp all already
+add, each in the unit the ear uses. The only thing that was ever wrong was
+WHICH PARAM the env wrote and that it wrote it absolutely.
+
+A consequence worth knowing: the envelope is linear in CENTS now, so the
+sustain lands at dial·G^s rather than dial·(1+(G−1)·s) — amt 40 / s 0.6 gives
+2297 where the Hz form gave 2800. The peak is unchanged, the sweep sounds even
+across its range, and that is the analog behaviour rather than a new taste.
+Verified across amt 40/80, NEGATIVE amt (4000 → peak 1000, settles 1741), s=1
+(sustain = peak), s=0 (settles at exactly the dial), and with press and vel
+routed to the same cutoff.
+
+STILL DIFFERENT, and small: env→pitch anchors the same way but interpolates
+its decay LINEARLY IN Hz (`base+(peak−base)·s`), where the filter is now
+linear in cents. Same anchor, different curve. Moving pitch to cents would
+finish the job; it was left alone because it was not what was asked.
+
 ## 0b. WHICH SOURCE MEANS WHAT — Gad's wider suspicion, measured
 
 Gad, 2026-08-16: "this may not be only env or only filter, it's how mods are
@@ -236,29 +305,28 @@ opinion about where the dial sits.
 
 Measured on real notes, one route at a time, amt 80 / s 0.6:
 
-    env → filt       dial is the SETTLING point   ← fixed 2026-08-16, see 0
-    env → pitch      dial is the FLOOR      261.6 → 792.9 → 580.5, predicted 580.4
-    env → op level   dial is the PEAK       1.0 → 0.68, the env presses DOWN from it
+    env → filt       dial is the ZERO-MOD value, offset in cents  ← 0a, correct
+    env → pitch      dial is the ZERO-MOD value (the played note) ← correct
+    env → op level   dial is the PEAK — correct, it is an AMP
     lfo → anything   dial is the CENTRE     bipolar swing in cents
     vel/key/rnd      dial is the value at zero source
     press / flw      dial is the RESTING point (this is what killing `center` bought)
 
-**env → pitch AND env → op level ARE STILL INCONSISTENT WITH THE FILTER, and
-that is now the open question.** The filter was fixed alone because that is
-what was asked about, and the same gesture on the other two has the same two
-faults: play a note, tune the pitch or the operator level by ear, and the next
-note re-derives from a different meaning of the number you just set.
+Read against 0a's two categories, this table is now consistent: everything in
+the MODULATED PARAMS category anchors at the zero-modulation value, and the
+two AMPS anchor at their peak because that is what an amp envelope is. The
+earlier reading of this table — that op level was "the opposite convention" —
+was wrong; it is not a modulated parameter at all.
 
-- `env → pitch` has exactly the old filter bug — the dial is the floor and the
-  sustain is base·2^(amt/100·24/12)·… above it. Same fix shape: divide the
-  stored pitch back out by its own K.
-- `env → op level` is the mirror image: the dial is the PEAK and the envelope
-  presses DOWN from it, so tuning by ear at sustain writes the ceiling. Its
-  live-edit path needs checking too.
+What is left, both small and neither asked for yet:
 
-Doing all three makes one rule for the whole instrument: **the number on
-screen is where the note settles, and every mod moves you away from it and
-back.** That is already true for press/flw and now for the filter.
+- **env → pitch decays linearly in Hz**, not in semitones (`base+(peak−base)·s`
+  at index.html ~5890). Same anchor as the filter, different curve. Moving it
+  to cents the way the filter now is would make the two identical.
+- **`env → filt` still resolves its slot with `clamp(idx,1,10)-1`** rather than
+  `_fltP`, so idx 0 means slot 1 for envelopes where it means ALL for every
+  other source. Left alone deliberately — fixing it changes what existing
+  patches with idx 0 do.
 
 Caveat on the numbers above: `AudioParam.value` never reflects a CONNECTED
 input, only the intrinsic value — so the connected sources (lfo/vel/press)

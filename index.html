@@ -1108,7 +1108,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-16.1515';
+const BUILD='2026-08-16.1546';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -5511,58 +5511,49 @@ class Voice{
     this._oneShotEnd=at+aA+Math.max(aD,0.03)*5+0.05;   // scheduled after the nodes exist (see end of ctor)
     this.fEnvs=[];
     for(const e2 of envs){
-      if(e2.dst===3){ // filter slot freq
+      if(e2.dst===3){ // filter cutoff — an OFFSET in cents, like every other source
         const si2=clamp(Math.round(e2.idx),1,10)-1;
-        const ps=this.fParams(si2,'frequency');
+        const ps=this.fParams(si2,'detune');
         if(!ps.length)continue;
-        /* THE STORED CUTOFF IS WHERE THE NOTE SETTLES, NOT WHERE IT STARTS.
-           Gad, 2026-08-16: "when I change the freq during play I expect it to
-           sound as I set it, even if there are modulations connected to it."
+        /* THE ENVELOPE IS AN OFFSET, NOT A REWRITE OF THE CUTOFF.
+           Gad, 2026-08-16, after two wrong turns. The env was the only source
+           that WROTE `frequency` absolutely; lfo, vel, key, rnd, press and flw
+           all sum into `detune`. So the env and cutLive — which writes
+           `frequency` too — were two pieces of code fighting over one param,
+           and every symptom came from that:
+             - turning the cutoff mid-note yanked the filter to the dial and
+               killed the rest of the sweep (measured: setting the cutoff to
+               the value it ALREADY had still dented the contour 666 → 520);
+             - the dial and the ear disagreed about what the number meant, so
+               tuning by ear wrote one thing and the next note re-derived
+               another.
+           On `detune` they cannot collide. `frequency` belongs to the dial
+           alone, cutLive is uncontested and instant, turning the knob
+           transposes the whole contour rigidly, and the next note agrees.
 
-           It used to be the FLOOR, and cutLive treats it as the frequency you
-           HEAR — two meanings for one number, and the sound jumped between
-           them every time he touched the dial. Measured, dial 1000, amt 40,
-           s 0.6 (so G=4, K=1+(G−1)·s=2.8):
+           A FILTER CV IS 1V/OCTAVE, so the envelope is linear in CENTS, not in
+           Hz — which is also why the sweep sounds even across its range. amt
+           100 = 5 octaves = 6000 cents, the same depth the old Hz form had.
+           The sustain therefore lands at dial·G^s rather than dial·(1+(G−1)s):
+           for amt 40 / s 0.6 that is 2297 where the Hz form gave 2800. The
+           peak is unchanged. That is the analog behaviour, not a new taste.
 
-               note settles          dial 1000 → heard 2800
-               turn the dial to 2000 dial 2000 → heard 2000   (jumps DOWN)
-               next note             dial 2000 → heard 5600   (jumps back UP)
-
-           So he tuned 2800 by ear, the moment he grabbed the knob it fell to
-           2000, and the next note came back at 5600. Now the sweep is derived
-           BACKWARDS from where it has to settle — base = dial/K — so the
-           sustain lands exactly on the dial, cutLive is aiming at the same
-           place the envelope already sustains at (no jump), and the next note
-           settles where his ear left it. Same principle that killed `center`:
-           the stored value is the RESTING value.
-
-           The attack still overshoots to base·G and the release still falls
-           back to base, which is the floor — an envelope keeps its shape, it
-           just hangs off the dial from the settling point instead of the
-           start. NOT migrated deliberately: multiplying stored values by K
-           would preserve today's sound but clamps away anything whose sustain
-           was over 20kHz, and it is a save-format change. Patches with a
-           filter env sustain lower now until re-dialled.
-
-           env→pitch has the OLD convention still and env→op level has the
-           opposite one again (the dial is its PEAK) — see NEXT.md 0b. Left
-           alone on purpose: this was asked about the filter. */
+           This anchors the filter exactly where env→pitch already anchors —
+           the dial is the value with nothing modulating — so the two agree
+           again. amp and op level stay multiplicative-from-peak on purpose:
+           an amp envelope is not modulating a parameter, it is the note's
+           existence, which is why every synth hardwires it. */
         const a=Math.max(0.001,e2.a);
-        const G=Math.pow(2,e2.amt/100*5);
-        const K=Math.max(0.03,1+(G-1)*e2.s);     // guard: amt is ±100, so K ≥ 1/32
+        const peak=clamp(e2.amt*60,-9600,9600);   // amt/100 · 5 octaves · 1200
         for(const pm of ps){
-          /* per-param, not ps[0]: a BANK's peaks sit at their own multiples of
-             the cutoff, and each has to settle at its own place in the shape */
-          const base=clamp(pm.value/K,20,20000);
-          const peak=clamp(base*G,20,20000);
           pm.cancelScheduledValues(at);
-          if(e2.lp>0.001)this._loopEnv(pm,base,peak,e2.s,e2,at);
+          if(e2.lp>0.001)this._loopEnv(pm,0,peak,e2.s,e2,at);
           else{
-            pm.setValueAtTime(base,at);
+            pm.setValueAtTime(0,at);
             pm.linearRampToValueAtTime(peak,at+a);
-            pm.setTargetAtTime(base+(peak-base)*e2.s,at+a,Math.max(0.005,e2.d/3));
+            pm.setTargetAtTime(peak*e2.s,at+a,Math.max(0.005,e2.d/3));
           }
-          this.fEnvs.push({node:pm,base,r:e2.r});
+          this.fEnvs.push({node:pm,base:0,r:e2.r});
         }
       }
     }
