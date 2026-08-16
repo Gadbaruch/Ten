@@ -978,6 +978,16 @@ one per pitch. Measured, plain carrier, native against phase:
     saw     0.9998   0.9997        vox     0.9998   0.9998
     sqr     0.9999   0.9998        mtl     0.9997   0.9998
 
+  PULSE WIDTH was the same omission wearing a third hat. It is an operator's
+  `pw`, nothing to do with unison width — which is what a whole round of
+  measurement went looking for. The worklet ignored it entirely, so the dial did
+  nothing in phase mode; folding it into the shared recipe fixed the new-note
+  case, and `pwLive` needed a branch of its own because it looks for
+  `setPeriodicWave` on `opNodes`, and a phase operator has neither.
+
+    pw 0.5 vs 0.15, square    new note   native 0.9513   phase 0.9516
+                              sounding   native 0.9467   phase 0.9446
+
   3. "wt sounds exactly the same between the 2 modes" — CORRECT AND BY DESIGN.
      Wave 14 is not in the eligibility test, so a patch containing one takes the
      NATIVE path entirely. It is identical because it IS native. Same for

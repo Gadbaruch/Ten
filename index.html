@@ -446,6 +446,27 @@ const fmDepth=(amt,carHz,modHz,isPM)=>{
   const room=Math.max(0,AC.sampleRate/2*0.95-Math.abs(carHz)-Math.abs(modHz));
   return room>0?room*Math.tanh(want/room):0;      // the a0=1 full-scale depth
 };
+/* ONE PLACE THAT DECIDES AN OPERATOR'S WAVE for the phase engine: the engine's
+   own harmonic recipe, PULSE WIDTH folded in exactly as setWave does it, then
+   band-limited to Nyquist and quantised to a power of two so the worklet's
+   table cache stays about ten entries per wave rather than one per pitch.
+   Shared by the builder and by pwLive, so a live width edit cannot drift from
+   what the next note would build. */
+const fmHarm=(E,op,f)=>{
+  const wv=Math.round((op&&op.wav)||0);
+  let harm=[];
+  try{harm=(E.harmonics(wv)||[]).slice();}catch(_){harm=[1];}
+  if(!harm.length)harm=[1];
+  const dw=clamp((op&&op.pw)===undefined?0.5:op.pw,0.05,0.95);
+  if(Math.abs(dw-0.5)>=0.005)harm=harm.map((v2,q)=>{
+    const kk=q+1, ref=Math.sin(kk*Math.PI/2);
+    return v2*(Math.abs(ref)<1e-6?Math.sin(kk*Math.PI*dw)
+                                 :Math.sin(kk*Math.PI*dw)/ref);
+  });
+  const lim=Math.max(1,Math.floor(AC.sampleRate*0.45/Math.max(1,f)));
+  const H=Math.max(1,Math.min(harm.length,Math.pow(2,Math.floor(Math.log2(lim)))));
+  return {key:wv+'_'+H+'_'+Math.round(dw*40), harm:harm.slice(0,H)};
+};
 const MODLOG=new Set(['freq','time']);                 // these modulate in cents
 const MODTAPER=a=>{const x=clamp(a/100,-1,1); return Math.sign(x)*x*x;};
 const MODCENTS=4800;                                   // a log param's full swing
@@ -1188,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-16.2138';
+const BUILD='2026-08-16.2155';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -4924,6 +4945,15 @@ let fxwReady=false;
           if(d.dep)for(var q2=0;q2<this.o.length&&q2<d.dep.length;q2++)
             this.o[q2].dep=d.dep[q2];
         }
+        else if(d.t==='tbl'){
+          /* a live pulse-width or wave edit: swap this operator's table and
+             keep its PHASE, so the shape changes under the note instead of
+             restarting it — the same thing setPeriodicWave does natively */
+          for(var w2=0;w2<d.ops.length;w2++){
+            var e2=d.ops[w2];
+            if(this.o[e2.i])this.o[e2.i].tbl=fmTable(e2.key,e2.harm,e2.harm.length);
+          }
+        }
         else if(d.t==='on'){this.tg=1;}
         else if(d.t==='off'){this.tg=0;}
         else if(d.t==='kill'){this.dead=true;}
@@ -5967,24 +5997,11 @@ class Voice{
              the same way setWave does it, so bel/vox/mtl stop collapsing to a
              sine — approximating five waves in the worklet quietly turned
              every other one into a sine. */
-          const wv2=Math.round(b.o.wav||0);
-          let harm=[];
-          try{harm=(E.harmonics(wv2)||[]).slice();}catch(_){harm=[1];}
-          if(!harm.length)harm=[1];
-          const dw=clamp(b.o.pw===undefined?0.5:b.o.pw,0.05,0.95);
-          if(Math.abs(dw-0.5)>=0.005)harm=harm.map((v2,q)=>{
-            const kk=q+1, ref=Math.sin(kk*Math.PI/2);
-            return v2*(Math.abs(ref)<1e-6?Math.sin(kk*Math.PI*dw)
-                                         :Math.sin(kk*Math.PI*dw)/ref);
-          });
-          const lim2=Math.max(1,Math.floor(AC.sampleRate*0.45/Math.max(1,b.f)));
-          const H2=Math.max(1,Math.min(harm.length,
-                     Math.pow(2,Math.floor(Math.log2(lim2)))));
-          harm=harm.slice(0,H2);
+          const hw=fmHarm(E,b.o,b.f);
           /* op0's gain is amt in the native builder; only ops 1-9 additive get
              the 0.9. Applying it to op0 too made the phase engine 0.9x quiet. */
-          return {f:b.f, amp:md===0?(b.i===0?a0:a0*0.9):1, wav:wv2,
-                  key:wv2+'_'+H2+'_'+Math.round(dw*40), harm,
+          return {f:b.f, amp:md===0?(b.i===0?a0:a0*0.9):1, wav:Math.round(b.o.wav||0),
+                  key:hw.key, harm:hw.harm,
                   mode:wm, tgt:md===0?-1:tgtIx(b),
                   dep:ix/(2*Math.PI), ramt:md===2?a0:0};
         });
@@ -7647,6 +7664,17 @@ class Engine{
     for(const v of this.act[pi]){
       for(const n of (v.opNodes&&v.opNodes[slot])||[])
         if(n.setPeriodicWave)this.setWave(n,op.wav,op.phm===1?0:op.ph,w);
+      /* A PHASE-ENGINE OPERATOR HAS NO setPeriodicWave — its wave is a table
+         inside the worklet, and opNodes is empty for it, so pulse width simply
+         never reached it. Rebuild that operator's table from the same helper
+         the builder uses and swap it in; the phase keeps running, so the shape
+         changes under the note exactly as the native path's does. */
+      for(const nd of (v._fmw||[])){
+        if(!nd||!nd._ix)continue;
+        const k=nd._ix.indexOf(slot); if(k<0)continue;
+        const hw=fmHarm(this,{...op,pw:w},(nd._f&&nd._f[k])||440);
+        try{nd.port.postMessage({t:'tbl',ops:[{i:k,key:hw.key,harm:hw.harm}]});}catch(_){}
+      }
     }
     return true;
   }
