@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-16.2155';
+const BUILD='2026-08-16.2209';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -5478,10 +5478,11 @@ class Voice{
            scaled — scaling carries a legato move but ignores a live ratio or
            fine edit entirely, which is why tweaking `rat` under a held note did
            not match the retrigger. Same expression the builder uses. */
-        const bt2=nd._tgt*pr;
+        const o0=ops[0]||{};
+        const bt2=nd._ub*pr*(o0.rat||1)*Math.pow(2,(o0.fine||0)/1200);
         const f2=nd._ix.map(ix=>{
           const o2=ops[ix]||{};
-          return bt2*(ix===0?1:(o2.rat||1))*Math.pow(2,(o2.fine||0)/1200);
+          return ix===0?bt2:bt2*(o2.rat||1)*Math.pow(2,(o2.fine||0)/1200);
         });
         /* depths re-derived from the BUILT amounts, never the current ones —
            the `g` param already carries a live amount change, and recomputing
@@ -5966,7 +5967,11 @@ class Voice{
           const o=ops[i]; if(!o||o.off||(i>0&&o.amt<=0.001))continue;
           if(i===0&&skipOp0)continue;
           idxOf[i]=list.length;
-          list.push({i,o,f:tgt*(i===0?1:o.rat)*Math.pow(2,(o.fine||0)/1200)});
+          /* baseTarget ALREADY carries op0's rat and fine (see its definition),
+             so op0 is `tgt` exactly — multiplying by its fine again applied it
+             TWICE, which is why op1's fine moved the sound to the wrong place
+             and its ratio could not move it at all. */
+          list.push({i,o,f:i===0?tgt:tgt*(o.rat||1)*Math.pow(2,(o.fine||0)/1200)});
         }
         if(!list.length)continue;
         const tgtIx=b=>{
@@ -6005,9 +6010,16 @@ class Voice{
                   mode:wm, tgt:md===0?-1:tgtIx(b),
                   dep:ix/(2*Math.PI), ramt:md===2?a0:0};
         });
-        const nd=new AudioWorkletNode(ac,'ten-fmop',{numberOfInputs:0,outputChannelCount:[2]});
+        /* ONE CHANNEL, because the native voice chain is mono until the bus panner.
+           A StereoPanner attenuates a MONO input by 0.707 at centre and passes a
+           STEREO one straight through, so a 2-channel worklet output made the
+           phase engine sqrt(2) louder than native for no musical reason. */
+        const nd=new AudioWorkletNode(ac,'ten-fmop',{numberOfInputs:0,outputChannelCount:[1]});
         nd._f=cfg.map(c=>c.f);
-        nd._tgt=tgt; nd._ix=list.map(b=>b.i);   // to RE-DERIVE on a live edit
+        nd._ix=list.map(b=>b.i);
+        /* the unison base WITHOUT op0's rat/fine, so a LIVE edit of either can
+           be re-derived rather than frozen at whatever they were at note-on */
+        nd._ub=this.rootFreq*Math.pow(2,(VX.sprd||0)*off/1200);
         nd._tg=cfg.map(c=>c.tgt); nd._dep=cfg.map(c=>c.dep);
         nd._b0=list.map(b=>clamp(b.o.amt,0,1));   // built amounts: `g` owns amt
         nd.port.postMessage({t:'cfg',ops:cfg});

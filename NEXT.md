@@ -934,6 +934,28 @@ amount block wrote the raw `op.amt` into them, which scaled every modulator to
   still take the native path, and the flag silently declines rather than
   breaking them.
 
+**THE WORKLET OUTPUTS ONE CHANNEL, and that was the level difference.** The
+native voice chain is MONO until the bus panner, and a StereoPanner attenuates
+a mono input by 0.707 at centre while passing a stereo one straight through —
+so a 2-channel worklet output made the phase engine sqrt(2) louder for no
+musical reason. It showed up worst on a sine, which was 1.407x native while
+every other wave sat at 0.97; the isolation test is what separated it, since
+the worklet's raw sine matched a raw OscillatorNode at 0.9993. Now:
+
+    sin 0.971 · tri 1.037 · saw 1.033 · sqr 0.996
+    org 0.948 · bel 0.983 · vox 0.989 · mtl 0.989
+
+all within 5%, and unison spread lines up too (native 0.668, phase 0.699).
+
+**OP1'S RATIO AND FINE WERE FROZEN.** `baseTarget` already carries op0's `rat`
+and `fine`, so the builder multiplying op0 by its fine AGAIN applied it twice,
+and the live path stored a `_tgt` computed from the old ratio — which is
+exactly "on op1 all params except level". The base is stored WITHOUT op0's
+rat/fine now and both are re-derived from the current ops:
+
+    op1 rat    moved 0.0005 -> 0.991   matches 0.003 -> 0.955
+    op1 fine   moved 0.959  -> 0.959   matches 0.062 -> 0.9999
+
 **UNISON IS NOT ONLY DETUNE** (2026-08-16). The phase path had the detune right
 from the start — three nodes at 259.518 / 261.626 / 263.75 for sprd 14, exactly
 ±14 cents — but every one of them went straight into `merge`, dead centre and
