@@ -767,6 +767,56 @@ ratio went 1.35 → 1.19 and the jumps stayed 0.73..1.38. The budget is not the
 lever, because there IS room under Nyquist here — the fault is the oscillator,
 not the bandwidth.
 
+### THE CONTROLLED EXPERIMENT — chained FM is BROKEN natively, not "expected"
+
+Gad: "i cant understand why fm'ing the fm would make atonal notes that dont
+corrolate anymore to the keyboard, if they are all tracking the same. i dont
+get it." He was right not to accept it. On an EMPTY set, a channel blanked to
+nothing (no filter, no mods, no fx, no play rack, no transpose, drum category
+cleared), three IDENTICAL sine ops, main ← fm-prev ← fm-prev:
+
+    case                              harmonic energy        transposes
+    2 ops (one pair)  rat 1  native   62 · 68 · 62 · 68 %    0.62 .. 0.85
+    3 ops CHAINED     rat 1  native    2.4 · 1.4 · 1.6 · 1 %  0.08 .. 0.29
+    3 ops CHAINED     rat 1  PHASE    68 · 70 · 74 · 78 %    0.97 .. 0.996
+    2 ops (one pair)  rat 3  native   61 · 68 · 69 · 69 %    0.95 .. 0.98
+    3 ops CHAINED     rat 3  native    1.8 · 10.7 · 1.4 %     0.04 .. 0.49
+    3 ops CHAINED     rat 3  PHASE    64 · 71 · 71 · 75 %    0.96 .. 0.99
+
+    his ch5 (ROK3) as saved  native    1.1 · 0.6 · 0.5 · 0.4 %
+    his ch5 (ROK3) as saved  PHASE    31 · 75 · 16 · 40 %
+
+`transposes` is the correlation of the LOG-frequency spectrum taken relative to
+f0 between one note and another: 1.0 means the timbre is the same shape simply
+moved, which is what an ear calls consistent between notes. Centroid was the
+wrong metric and this is the right one.
+
+**A single FM pair is fine. Chaining it natively collapses harmonic energy from
+~65% to ~1% and transposition from ~0.97 to ~0.05.** That is NOT FM physics:
+ideal chained FM at INTEGER ratios is exactly harmonic at any index, so ~1%
+harmonic with every op identical at rat 1 is the engine failing, not the maths.
+The phase accumulator restores both to 68-78% and 0.99. It is a bug, and this
+is the proof.
+
+### AND HIS PATCH ALSO ASKS FOR MORE INDEX THAN 44.1k CAN HOLD
+
+ch5 has amt 1 on BOTH links, which is kIdx 24 — an index of 24 twice over.
+Chained, that is beyond Nyquist at any real note, so even a perfect oscillator
+cannot render it:
+
+    3 CHAINED rat 1, PHASE, amt 1.0    harmonic 31 · 73 · 16 · 39 · 12 %   transposes 0.64 .. 0.84
+    3 CHAINED rat 1, PHASE, amt 0.5    harmonic 65 · 72 · 72 · 73 · 78 %   transposes 0.97 .. 0.996
+    3 CHAINED rat 1, PHASE, amt 0.3    harmonic 67 · 72 · 72 · 76 · 79 %   transposes 0.85 .. 0.96
+
+So there are two separate causes and his patch has both. The engine bug is
+ours; the index is his dial. Turn the two op levels to about half and switch to
+phase and a chained stack is 70%+ harmonic and transposes at 0.99.
+
+WORTH SAYING PLAINLY: he reports native SOUNDS better. At ~1% harmonic energy
+the native chain is inharmonic clangour, which is a real and usable noise — it
+simply cannot also track the keyboard, which was the complaint. That is a taste
+choice now rather than a bug, and it is his to make.
+
 ### BUILT, BEHIND A DIAL — `voice → fm eng → phase` (2026-08-16)
 
 Gad: "im interested to at least try the real but heavy fix." So it exists, as
