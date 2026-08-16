@@ -385,6 +385,63 @@ limit and gives `flt Q` (and every other addressed param) a live dial for free.
 The harness above is the net for doing it: every DEAD in that table should read
 `yes`, and nothing that reads `ok` may become `off dial`.
 
+## 0d. TWO REPORTS ON AN FM OPERATOR — one bug, one physics
+
+Gad, 2026-08-16: env on op4's amp with op4 doing FM on op1, long attack — "the
+fm rises in wavey steps like there is an lfo somewhere but there isn't". And:
+"LFO on the same dest does nothing."
+
+### THE LFO WAS A UNITS BUG, and it is fixed
+
+**An operator's level is not 0..1.** An additive operator's gain is amt·0.9; an
+FM operator's is amt·carrierHz·kIdx — **measured 6279** for one operator at
+full level on middle C. Every modulator aimed at an operator used a flat
+`A*0.5`, written for a 0..1 voice gain:
+
+    depth applied      0.5
+    gain's own base    6279
+    depth as % of base 0.008%          <- which is nothing, exactly as reported
+
+The envelope escaped this only because it is MULTIPLICATIVE (base·(1−w) → base)
+and so scales itself. `opAmt` has carried every gain's own full-scale `sc` all
+along, parallel to `opGains` and covering all five operator modes — it was
+simply never used. Depth is `A·sc·0.5` now, via `_opA(idx)`, with a gain node
+PER TARGET because sc differs per target. Same fix in `_modParam`, which
+returned `range:1` for operator levels and now returns per-target `ranges`.
+
+Measured on the carrier partial, 4Hz LFO on op4's amp:
+
+    previous build   flat −50.7 dB, twelve identical samples, 0 peaks in 2s
+    now              swings, 12 peaks in 2s
+
+### THE "WAVEY STEPS" ARE BESSEL, NOT A MODULATOR
+
+The control ramp is smooth — first differences across a 1.2s attack were 561,
+546, 516, 577, 577, 546, 516, 577, 577, 546, 546, which is ±5% setTimeout
+jitter on a straight line. Total RMS is flat too (~0.11), because FM
+redistributes energy rather than changing power.
+
+What moves is the CARRIER PARTIAL, whose amplitude is J₀(index) — and J₀
+oscillates as the index grows. Sweeping the index 0 → 23 over the attack:
+
+    carrier dips at index   6.83  8.69  9.96  12.98  16.12  19.25  22.39
+    J₀ zeros below 24       2.40  5.52  8.65  11.79  14.93  18.07  21.21
+    seven dips, seven zeros
+
+So it is textbook FM, not a hidden modulator — every DX-shaped instrument does
+it. If a SMOOTH swell is what is wanted, the index has to rise so that the ear
+hears one sweep rather than seven nulls: a shorter attack, a lower top index,
+or an exponential rather than linear rise. That is a feature request, not a
+fix, and it is not done.
+
+### STILL MISSING, confirmed by reading the branches
+
+`vel`/`key`/`rnd` handle only dst 3 (filt) and dst 2 (pitch). `press`/`flw`
+handle 3, 2 and 1. **Neither handles dst 5 (op) at all** — those routes are not
+mis-scaled, they are absent. That is why the matrix reads op level DEAD for
+every source but the envelope. Adding them is part of the unification in 0c,
+not a separate job: they want the same `_opA` scaling this commit introduced.
+
 Caveat on the numbers above: `AudioParam.value` never reflects a CONNECTED
 input, only the intrinsic value — so the connected sources (lfo/vel/press)
 read back as the bare dial and their motion has to be measured from rendered

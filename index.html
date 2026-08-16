@@ -1108,7 +1108,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-16.1616';
+const BUILD='2026-08-16.1629';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -5998,11 +5998,13 @@ class Voice{
         if(!ps.length){continue;} lg.gain.value=A*4800; for(const pm of ps)lg.connect(pm);}
       else if(lf.dst===3){                       // amp: the voice, or one operator
         const si3=Math.round(lf.idx||0);
-        if(si3>=1){const gl=this.opGains[clamp(si3,1,10)-1]; if(!gl)continue;
-          lg.gain.value=A*0.5; for(const g of gl)lg.connect(g.gain);}
+        if(si3>=1){const al=this._opA(si3); if(!al.length)continue;
+          for(const t of al){const g3=ac.createGain(); g3.gain.value=A*t.sc*0.5;
+            lo.connect(g3); g3.connect(t.g.gain);}}
         else{lg.gain.value=A*this.amp*0.5; lg.connect(vca.gain);}}
-      else if(lf.dst===5){const gls=this._opG(lf.idx); if(!gls.length)continue;
-        lg.gain.value=A*0.5; for(const g of gls.flat())lg.connect(g.gain);}
+      else if(lf.dst===5){const al=this._opA(lf.idx); if(!al.length)continue;
+        for(const t of al){const g3=ac.createGain(); g3.gain.value=A*t.sc*0.5;
+          lo.connect(g3); g3.connect(t.g.gain);}}
       lo.connect(lg); lo.start(at); this.nodes.push(lo);
     }
     /* vel / key / rnd sources: a per-note constant into each route's target */
@@ -6078,8 +6080,13 @@ class Voice{
         const t=rt.tgt||(rt.addr&&!effRoute(rt).dst?rt.addr:null);
         if(!t)continue;
         const rp=this._modParam(t); if(!rp||!rp.params.length)continue;
-        const A=(rt.amt||0)/100, dep=rp.cents?A*4800:A*(rp.range||1);
-        for(const param of rp.params){
+        const A=(rt.amt||0)/100;
+        /* `ranges` when each target has its own full scale (operator gains),
+           `range` when one number covers them all, 4800 cents when it is a
+           detune. The depth is always A x THE TARGET'S OWN RANGE. */
+        for(let pj=0;pj<rp.params.length;pj++){
+          const param=rp.params[pj];
+          const dep=rp.cents?A*4800:A*((rp.ranges?rp.ranges[pj]:rp.range)||1);
           if(m.src===1){                             // env → param
             const T4=clamp(m.tmul??1,0.1,4);
             const base=rp.cents?0:param.value, peak=base+dep, a=Math.max(0.001,m.a*T4);
@@ -6230,6 +6237,26 @@ class Voice{
     return Object.keys(this.opGains||{}).map(Number).sort((a,b)=>a-b)
       .map(i=>this.opGains[i]).filter(Boolean);
   }
+  /* AN OPERATOR'S LEVEL IS NOT 0..1, AND A MODULATOR DEPTH OF 0.5 IS NOT HALF
+     OF IT. An additive operator's gain is amt·0.9; an FM operator's is
+     amt·carrierHz·kIdx, which is THOUSANDS — measured 6279 for one op at full
+     level on middle C. Every modulator aimed at an operator used a flat
+     `A*0.5`, written for a 0..1 voice gain, so on an FM operator it was 0.008%
+     of the value and did exactly nothing. That is Gad's "LFO on op4 amp isn't
+     doing anything", and the envelope escaped it only because the env is
+     MULTIPLICATIVE (base·(1−w) → base) and so scales itself.
+
+     opAmt already carries every gain's own full-scale `sc`, parallel to
+     opGains and covering all five operator modes. Depth is A·sc·0.5 now —
+     "amt 100 swings this operator across half its own range" — which means the
+     same thing on every kind of operator. Each target needs its OWN gain node
+     because sc differs per target, the way the pitch branch already does it. */
+  _opA(idx){                       // → flat [{g,sc}] — a gain AND its own range
+    const n=Math.round(idx||0);
+    if(n>=1){const a=this.opAmt&&this.opAmt[clamp(n,1,10)-1]; return a?a.slice():[];}
+    return Object.keys(this.opAmt||{}).map(Number).sort((a,b)=>a-b)
+      .flatMap(i=>(this.opAmt||{})[i]||[]);
+  }
   /* A 24dB filter is two nodes, and anything that moves the cutoff has to move
      both or the second stage stays where it was and the slope comes apart. */
   fParams(i,which){
@@ -6258,8 +6285,10 @@ class Voice{
         if(ps.length)return {params:ps,cents:true};
       }
       if(key==='amt'||key==='level'){
-        const gl=this._opG(sel).flat().map(g=>g.gain);
-        if(gl.length)return {params:gl,range:1};
+        /* per-target ranges, not a flat 1 — see _opA: an FM operator's gain is
+           in the thousands and a depth of 1 is nothing on it */
+        const al=this._opA(sel);
+        if(al.length)return {params:al.map(t=>t.g.gain),ranges:al.map(t=>t.sc)};
       }
     }
     if(rack==='voice'&&key==='pitch'){
