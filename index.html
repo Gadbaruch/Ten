@@ -1108,7 +1108,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-16.1546';
+const BUILD='2026-08-16.1616';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -5889,18 +5889,46 @@ class Voice{
     }
     E.lastPitch[pi]=baseTarget;
 
-    /* pitch envelopes: slot# picks WHICH op bends (0 = all) */
+    /* PITCH ENVELOPES, IN CENTS — the same shape as the filter's, for the same
+       reason (2026-08-16). This wrote `frequency`/`playbackRate` ABSOLUTELY,
+       which is what made it the second source that could fight a live edit,
+       and it interpolated its decay linearly in Hz — so the sustain of a
+       2-octave sweep landed a long way from where the semitone number said.
+       An oscillator has a `detune` param, so the envelope is a true cents
+       OFFSET there and sums with lfo/vel/press exactly like the filter's does.
+       amt 100 = 24 semitones = 2400 cents, the depth it always had.
+
+       A SAMPLE HAS NO detune — its pitch IS `playbackRate`, a ratio — so
+       those targets keep the absolute form. They are interpolated in cents now
+       too, so both kinds agree about where the sustain sits; they just cannot
+       be summed. opPitch and opDet are pushed in pairs, so index j of one is
+       the same source as index j of the other. */
     for(const pe of envs.filter(e2=>e2.dst===2)){
       const ix=clamp(Math.round(pe.idx??0),0,10);
-      const tgs=ix===0?Object.values(this.opPitch).flat():(this.opPitch[ix-1]||[]);
-      for(const tg of tgs){
-        const semis=pe.amt/100*24, peak=Math.max(tg.base*Math.pow(2,semis/12),0.01);
-        const a=Math.max(0.001,pe.a);
-        tg.pm.cancelScheduledValues(at);
-        if(pe.lp>0.001){this._loopEnv(tg.pm,tg.base,peak,pe.s,pe,at);continue;}
-        if(a<=0.003)tg.pm.setValueAtTime(peak,at);
-        else{tg.pm.setValueAtTime(tg.base,at);tg.pm.linearRampToValueAtTime(peak,at+a);}
-        tg.pm.setTargetAtTime(Math.max(tg.base+(peak-tg.base)*pe.s,0.01),at+Math.max(a,0.001),Math.max(0.005,pe.d/3));
+      const keys=ix===0?Object.keys(this.opPitch):[String(ix-1)];
+      const cents=clamp(pe.amt/100*24*100,-9600,9600);
+      const a=Math.max(0.001,pe.a), R=Math.pow(2,cents/1200);
+      for(const k of keys){
+        const pl=this.opPitch[k]||[], dl=this.opDet[k]||[];
+        for(let j=0;j<pl.length;j++){
+          const dt=dl[j];
+          if(dt&&dt.sc>=1){                       // an oscillator: cents on detune
+            const pm=dt.pm;
+            pm.cancelScheduledValues(at);
+            if(pe.lp>0.001){this._loopEnv(pm,0,cents,pe.s,pe,at);continue;}
+            if(a<=0.003)pm.setValueAtTime(cents,at);
+            else{pm.setValueAtTime(0,at);pm.linearRampToValueAtTime(cents,at+a);}
+            pm.setTargetAtTime(cents*pe.s,at+Math.max(a,0.001),Math.max(0.005,pe.d/3));
+          }else{                                  // a sample: playbackRate is a ratio
+            const tg=pl[j], peak=Math.max(tg.base*R,0.01);
+            const sus=Math.max(tg.base*Math.pow(2,cents*pe.s/1200),0.01);
+            tg.pm.cancelScheduledValues(at);
+            if(pe.lp>0.001){this._loopEnv(tg.pm,tg.base,peak,pe.s,pe,at);continue;}
+            if(a<=0.003)tg.pm.setValueAtTime(peak,at);
+            else{tg.pm.setValueAtTime(tg.base,at);tg.pm.linearRampToValueAtTime(peak,at+a);}
+            tg.pm.setTargetAtTime(sus,at+Math.max(a,0.001),Math.max(0.005,pe.d/3));
+          }
+        }
       }
     }
     /* op-level envelopes */

@@ -421,6 +421,155 @@ async function probeMatrix() {
   return { cols: ['rms', 'peak', 'pkL', 'pkR', 'hz', 'tv', 'g'], rows };
 }
 
+/* ---------------- the mod matrix ---------------------------------------
+ * Gad, 2026-08-16: "have the same conventional mod method for ALL possible
+ * params in ALL possible engines, i dont want to QA every single param
+ * modulation by every mod type manually." So this does it instead.
+ *
+ * Fires REAL notes and asks four questions of every source x destination:
+ *   reaches  does the modulator move the destination at all
+ *   anchor   at rest, does the param sit on the DIAL (amps exempt by design —
+ *            an amp envelope is the note's existence, not a modulation of a
+ *            resting value)
+ *   live     turning the DIAL x2 under a sounding note: does the sound follow
+ *   tweak    changing the MOD ITSELF under a sounding note: anything?
+ *
+ * WHAT IT CANNOT SEE: AudioParam.value never reflects a CONNECTED input. Every
+ * source except the envelope connects a node, so those cells read back the
+ * bare dial however hard the modulator is working. They are marked 'blind'.
+ * A BLIND CELL IS NOT A PASS. */
+const MSRCS = { env: 1, lfo: 2, vel: 3, key: 4, rnd: 5, press: 6 };
+
+function modDests() {
+  const first = o => (Object.values(o || {})[0] || [])[0];
+  return [
+    { name: 'filt cutoff', dst: 3, idx: 1, amp: false,
+      read: v => { const n = v.fNodes && v.fNodes[0];
+                   return n ? n.frequency.value * Math.pow(2, n.detune.value / 1200) : null; },
+      dialSet: (p, x) => { p.flt[0].frq = x; }, dialGet: p => p.flt[0].frq,
+      live: pi => engine.cutLive(pi, 0) },
+
+    { name: 'pitch', dst: 2, idx: 0, amp: false,
+      read: v => { const t = first(v.opPitch), d = first(v.opDet);
+                   if (!t) return null;
+                   const c = (d && d.sc >= 1) ? d.pm.value : 0;
+                   return t.pm.value * Math.pow(2, c / 1200); } },
+
+    { name: 'amp', dst: 1, idx: 0, amp: true,
+      read: v => v.vca ? v.vca.gain.value : null },
+
+    { name: 'op level', dst: 5, idx: 1, amp: true,
+      read: v => { const g = (v.opGains && v.opGains[0] || [])[0]; return g ? g.gain.value : null; } },
+
+    { name: 'flt Q (addr)', addr: { rack: 'flt', slot: 0, key: 'q' }, amp: false,
+      read: v => { const n = v.fNodes && v.fNodes[0]; return n ? n.Q.value : null; },
+      dialSet: (p, x) => { p.flt[0].q = x; }, dialGet: p => p.flt[0].q },
+
+    { name: 'osc pitch (addr)', addr: { rack: 'osc', slot: '*', key: 'pitch' }, amp: false,
+      read: v => { const d = first(v.opDet); return d && d.sc >= 1 ? d.pm.value : null; } },
+
+    { name: 'osc level (addr)', addr: { rack: 'osc', slot: '*', key: 'amt' }, amp: true,
+      read: v => { const g = (v.opGains && v.opGains[0] || [])[0]; return g ? g.gain.value : null; } },
+  ];
+}
+
+async function probeModMatrix() {
+  const pi = S.curPreset | 0, p = S.presets[pi];
+  const only = str(P.only, '');
+  const cols = ['dest', 'source', 'reaches', 'anchor', 'live', 'tweak', 'note'];
+  const rows = [];
+  const nap = ms => new Promise(r => setTimeout(r, ms));
+
+  await AC.resume();
+  const t0 = AC.currentTime; await nap(120);
+  if (AC.currentTime - t0 < 0.05)
+    return { cols, rows, err: 'AUDIO CLOCK IS DEAD (currentTime frozen) — every cell would be a flat lie. Reload the tab and re-run.' };
+
+  const DESTS = modDests().filter(d => !only || d.name.indexOf(only) >= 0);
+  const clean = () => {
+    p.flt.forEach((f, i) => { f.typ = i === 0 ? 1 : 0; f.off = 0; });
+    Object.assign(p.flt[0], { typ: 1, frq: 1000, q: 1, gn: 0, par: 0, pol: 0, spr: 0.4, lvl: 1 });
+    p.mod.length = 0;
+  };
+  const mkMod = (s, dest, amt) => ({
+    src: MSRCS[s], off: 0, a: 0.01, d: 0.15, s: 0.6, r: 0.2, crv: 0, tmul: 1,
+    wav: 0, rate: 5, ltr: 0, ph: 0, skw: 0, pg: 0.03, pc: 1,
+    routes: [Object.assign({ amt }, dest.addr ? { dst: 0, addr: dest.addr, tgt: dest.addr }
+                                              : { dst: dest.dst, idx: dest.idx })]
+  });
+  const fire = async ms => {
+    const h = engine.trigger(AC.currentTime + 0.03, pi, 60, 0.9);
+    const v = h && h.voices && h.voices[0];
+    await nap(ms == null ? 450 : ms);
+    return { h, v };
+  };
+  const stop = async h => { try { h && h.release && h.release(AC.currentTime + 0.005); } catch (_) {} await nap(140); };
+
+  for (const dest of DESTS) {
+    /* THE ANCHOR IS A PROPERTY OF THE DESTINATION, NOT OF THE SOURCE: "is the
+       dial the value with NOTHING modulating". Measured once, with no mod in
+       the rack at all. Reading a sounding modulated note instead would just be
+       reading the sustain, which is legitimately not the dial — that was this
+       probe's own first bug. amps are exempt: an amp envelope IS the note. */
+    clean();
+    let ref = null, anchor = 'n/a amp';
+    { const { h, v } = await fire(); if (v) ref = dest.read(v);
+      if (!dest.amp) {
+        const dl = dest.dialGet ? dest.dialGet(p) : null;
+        anchor = (ref == null || dl == null) ? '?'
+          : (Math.abs(ref - dl) <= Math.max(1, Math.abs(dl) * 0.02) ? 'ok'
+             : 'off dial (' + Math.round(ref) + ' vs ' + Math.round(dl) + ')');
+      }
+      await stop(h); }
+
+    for (const s of Object.keys(MSRCS)) {
+      const row = { dest: dest.name, source: s, reaches: '', anchor: '', live: '', tweak: '', note: '' };
+      try {
+        clean(); p.mod.push(mkMod(s, dest, 80));
+        const { h, v } = await fire();
+        if (!v) { row.reaches = 'NO VOICE'; rows.push(row); continue; }
+        const withMod = dest.read(v);
+        const connected = s !== 'env';
+
+        if (withMod == null || ref == null) row.reaches = '?';
+        else if (Math.abs(withMod - ref) > Math.max(1e-4, Math.abs(ref) * 0.02)) row.reaches = 'yes';
+        else row.reaches = connected ? 'blind' : 'NO';
+
+        row.anchor = anchor;
+
+        if (dest.dialSet) {
+          const before = dest.read(v), d0 = dest.dialGet(p);
+          dest.dialSet(p, d0 * 2);
+          if (dest.live) dest.live(pi); else engine.refresh(pi);
+          await nap(220);
+          const after = dest.read(v), ratio = before ? after / before : null;
+          row.live = ratio == null ? '?'
+            : Math.abs(ratio - 2) < 0.15 ? 'tracks x2'
+            : Math.abs(ratio - 1) < 0.02 ? 'DEAD' : 'x' + ratio.toFixed(2);
+          dest.dialSet(p, d0);
+        } else row.live = '-';
+
+        {
+          const before = dest.read(v);
+          p.mod[0].routes[0].amt = 20;
+          try { engine.lfoLive(pi); } catch (_) {}
+          try { engine.envLive(pi); } catch (_) {}
+          try { engine.refresh(pi); } catch (_) {}
+          await nap(220);
+          const after = dest.read(v);
+          row.tweak = (before == null || after == null) ? '?'
+            : (Math.abs(after - before) > Math.max(1e-4, Math.abs(before) * 0.02) ? 'yes' : 'DEAD');
+        }
+        await stop(h);
+      } catch (e) { row.note = String(e && e.message || e).slice(0, 50); }
+      rows.push(row);
+    }
+  }
+  notes.push('blind = AudioParam.value cannot see a connected source; not a pass');
+  notes.push('anchor is n/a for amp and op level by design — an amp envelope is the note, not a modulation');
+  return { cols, rows };
+}
+
 const HELP = {
   cols: ['args'],
   rows: [
@@ -430,6 +579,7 @@ const HELP = {
     { k: 'preset',   args: 'names=SNR,S909 note=48 ch=8 — library name, played and measured' },
     { k: 'key',      args: 'code=KeyA hold=120 shift=0 alt=0 ctrl=0 meta=0' },
     { k: 'matrix',   args: 'ch=8 take=nylonlick cues=4 — the seven cases + the cue jumps' },
+    { k: 'modmatrix',args: 'only=filt — every mod SOURCE x every DESTINATION: reaches/anchor/live/tweak' },
     { k: '(any)',    args: '--ab <url> runs the same probe on a second build and diffs it' },
   ]
 };
@@ -440,7 +590,8 @@ try {
   if (AC.state !== 'running') { try { await AC.resume(); } catch (_) {} }
   if (AC.state !== 'running') notes.push('AudioContext is ' + AC.state + ' — every level will read 0');
   const PROBES = { level: probeLevel, spectrum: probeSpectrum, cursor: probeCursor,
-                   preset: probePreset, key: probeKey, matrix: probeMatrix };
+                   preset: probePreset, key: probeKey, matrix: probeMatrix,
+                   modmatrix: probeModMatrix };
   const fn = PROBES[NAME];
   out = fn ? await fn() : (NAME === 'help' ? HELP : { cols: [], rows: [], err: 'no probe named ' + NAME });
 } catch (e) {

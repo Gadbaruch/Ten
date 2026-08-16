@@ -318,15 +318,72 @@ two AMPS anchor at their peak because that is what an amp envelope is. The
 earlier reading of this table — that op level was "the opposite convention" —
 was wrong; it is not a modulated parameter at all.
 
-What is left, both small and neither asked for yet:
+**env → pitch IS IN CENTS TOO NOW (2026-08-16).** Same shape as the filter and
+for the same reasons: an oscillator's env is a true offset on `detune`, so it
+sums with lfo/vel/press instead of writing `frequency` absolutely. Measured,
+C4 with amt 80 / s 0.6 — starts at 261.6 (the played note), peaks 793, settles
+**508.9** against a cents-linear prediction of 508.9, where the old Hz-linear
+form gave 580.5. A SAMPLE has no `detune` — its pitch IS `playbackRate`, a
+ratio — so those targets keep the absolute form, interpolated in cents so both
+kinds agree about where the sustain sits.
 
-- **env → pitch decays linearly in Hz**, not in semitones (`base+(peak−base)·s`
-  at index.html ~5890). Same anchor as the filter, different curve. Moving it
-  to cents the way the filter now is would make the two identical.
-- **`env → filt` still resolves its slot with `clamp(idx,1,10)-1`** rather than
-  `_fltP`, so idx 0 means slot 1 for envelopes where it means ALL for every
-  other source. Left alone deliberately — fixing it changes what existing
-  patches with idx 0 do.
+Still open: **`env → filt` resolves its slot with `clamp(idx,1,10)-1`** rather
+than `_fltP`, so idx 0 means slot 1 for envelopes where it means ALL for every
+other source. Left alone deliberately — fixing it changes what existing patches
+with idx 0 do.
+
+## 0c. THE MOD MATRIX, AND THE ONE THING STILL MISSING
+
+Gad, 2026-08-16: "have the same conventional mod method for ALL possible params
+that can be tweaked in ALL possible engines, i dont want to QA every single
+param modulation by every mod type manually."
+
+So it is a probe now, not a chore: **`tools/probe.sh modmatrix`**. It fires real
+notes and asks four questions of every source × destination —
+
+    reaches  does the modulator move the destination at all
+    anchor   with NOTHING modulating, does the param sit on the dial
+             (measured with no mod in the rack — reading a sounding modulated
+             note just reads the sustain, which is legitimately not the dial;
+             that was this probe's own first bug)
+    live     turning the DIAL ×2 under a sounding note — does the sound follow
+    tweak    changing the MOD ITSELF under a sounding note — anything?
+
+Run it per destination (`only="filt cutoff"`); all 42 cells at once exceeds the
+browse eval timeout. `blind` means AudioParam.value cannot see a CONNECTED
+source, which is every source except the envelope. **A blind cell is not a
+pass.** The first full sweep:
+
+    dest              anchor   live        tweak
+    filt cutoff       ok       tracks x2   DEAD (all 6 sources)
+    pitch             —        —           DEAD (all 6)
+    amp               n/a      —           env only; lfo/vel/key/rnd/press DEAD
+    op level          n/a      —           DEAD (all 6)
+    flt Q (addr)      ok       DEAD        DEAD (all 6)
+    osc pitch (addr)  —        —           DEAD (all 6)
+    osc level (addr)  n/a      —           DEAD (all 6)
+
+**TWEAK IS DEAD IN 41 OF 42 CELLS.** The single working cell is amp × env,
+which is `envLive` — the only live path anyone ever wrote. `lfoLive` looks like
+a second one but only ever re-aims `m.routes[0]`, so a slot's second route is
+dead too. And `flt Q` shows `live: DEAD`: turning the resonance dial does
+nothing to a sounding note, because only `frq` has a `cutLive`.
+
+### WHAT THE UNIFICATION NEEDS, and it is one idea
+
+Every route should leave a LIVE HANDLE on the voice when it is built:
+
+    {mi, ri, param, kind, aim(depth)}     kind = env | connected
+
+Collected into one `this.modN`, so a single `engine.modLive(pi)` can walk every
+voice and re-aim every route from the current preset values — connected sources
+by writing their depth gain, envelopes by re-aiming the current setTarget. One
+list, one method, and a param added anywhere is live by construction rather
+than by somebody remembering to add a hook. That also kills the `routes[0]`
+limit and gives `flt Q` (and every other addressed param) a live dial for free.
+
+The harness above is the net for doing it: every DEAD in that table should read
+`yes`, and nothing that reads `ok` may become `off dial`.
 
 Caveat on the numbers above: `AudioParam.value` never reflects a CONNECTED
 input, only the intrinsic value — so the connected sources (lfo/vel/press)
