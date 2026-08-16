@@ -718,6 +718,31 @@ So the unification is three things, and only the first two are mechanical:
    Gad's call, not a refactor detail. Nothing above should be built until the
    numbers in it are decided, because they are its central parameter.
 
+## 0j. LIVE TWEAK vs RETRIGGER — native mismatches, phase does not
+
+Gad: hold a note, raise op2's level, release, play it again — the retrigger
+does not match what you were just hearing. Real, and measured with a CONTROL so
+it is not a measurement artefact: two identical fresh notes correlate at 1.000,
+so anything below that is the instrument, not the probe.
+
+    engine   tweak-then-retrigger      control (fresh vs fresh)
+    native            0.806                     1.000
+    phase             0.999                     1.000
+
+THE DEPTH IS NOT THE PROBLEM ON NATIVE — the FM depth gain matches to the digit
+(596.13 -> 2681.14 live, 2681.14 on the retrigger, ratio 1.000). `oscRefresh`
+recomputes `sc` from the current amt, so the amount arithmetic is right. What
+differs is the SOUND at identical depth, which points at the oscillator's
+response to a RAMPED depth versus a static one rather than at the routing —
+the same band-limited-wavetable behaviour that 0i is about. Not yet fixed.
+
+PHASE HAD ITS OWN VERSION OF THIS AND IT IS FIXED. Its `g` param is a
+multiplier over the level baked into the cfg, and it was being written as the
+plain ratio `amt/b0`. But a modulator's depth goes as a·6(1+3a²), so a linear
+ratio drifts from what a rebuild gives: 0.3 -> 0.7 was landing at 0.43 of the
+retriggered depth. It is the ratio of the DEPTH CURVES now, and an additive
+op — whose level really is linear — keeps the plain ratio.
+
 ## 0i. CH4: FM INTO FM PUSHES THE CARRIER NEGATIVE — diagnosed, NOT fixed
 
 Gad: "its when i fm and fm, op3 is fming op2 which fms op1, thats what seems to
@@ -891,6 +916,10 @@ lost its unison spread" was; the pitches were never wrong.
 
     uni 3  native  side/mid 0.411      uni 1  native  0.006
     uni 3  phase   side/mid 0.476      uni 1  phase   0.000
+
+And it tracks the DIAL, which is the thing to check if it is ever reported
+missing again — `wide` 0 / 0.5 / 1 gives native 0 / 0.330 / 0.695 and phase
+0.010 / 0.377 / 0.749.
 - the waves are a small additive set (sin/tri/saw/sqr/org); the richer ones
   fall back to sine.
 

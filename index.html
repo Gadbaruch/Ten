@@ -681,7 +681,10 @@ const mkLfo =()=>({dst:0,idx:0,wav:0,rate:5,amt:30});
 /* slot# 0 is 'all' and that is the sensible default: a route you have just
    made should affect the whole thing, and you narrow it if you want to. */
 const mkRoute=()=>({dst:0,idx:0,amt:100,tgt:null});
-const mkMod =i=>({src:0,rsel:0,routes:[mkRoute()],a:0.005,d:0.15,s:0.7,r:0.2,crv:0,
+/* SUSTAIN 0 BY DEFAULT (Gad, 2026-08-16): a fresh envelope is a HIT, and a
+   hold is the thing you ask for. Only the DEFAULT moves — every saved slot
+   keeps whatever it was given. */
+const mkMod =i=>({src:0,rsel:0,routes:[mkRoute()],a:0.005,d:0.15,s:0,r:0.2,crv:0,
                   wav:0,rate:5,ph:0,syn:0,rdiv:4,ltr:0,
                   fch:1,fa:0.01,fr:0.15,fg:4});
 /* tempo divisions for a synced LFO, in beats */
@@ -1185,7 +1188,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-16.2049';
+const BUILD='2026-08-16.2101';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -5453,8 +5456,16 @@ class Voice{
       const pr=(fmDep&&this._tf0>0&&this.toneFreq>0)?this.toneFreq/this._tf0:1;
       if(key==='amt'||key==='off'||(fmDep&&(key==='rat'||key==='fine'||key==='dst')))
         for(const a of (this.opAmt[i]||[])){
-          if(a.fmw){                      // a phase-engine level: a RATIO, not a level
-            a.g.gain.setTargetAtTime(op.off?0:(a.b0>0?clamp(op.amt,0,1)/a.b0:1),t,GL);
+          if(a.fmw){
+            /* A PHASE-ENGINE LEVEL IS A RATIO, and for a MODULATOR it is the
+               ratio of the DEPTH CURVES, not of the raw amounts: the depth goes
+               as a·6(1+3a²), so a linear ratio drifts away from what a rebuild
+               would give and the held note stopped matching the retrigger.
+               An additive op's level IS linear, so it keeps the plain ratio. */
+            const cur=clamp(op.amt,0,1);
+            const fq=x=>a.mod?x*6*(1+3*x*x):x;
+            const den=fq(a.b0);
+            a.g.gain.setTargetAtTime(op.off?0:(den>0?fq(cur)/den:1),t,GL);
             continue;
           }
           /* an FM depth is RE-DERIVED at the new pitch, not scaled from the old
@@ -5965,7 +5976,7 @@ class Voice{
              block below used to) scaled every modulator down and collapsed the
              index. b0 is the built amount, so a live amt edit becomes a ratio. */
           (this.opAmt[b.i]=this.opAmt[b.i]||[]).push(
-            {g:shim,sc:1,fmw:true,b0:clamp(b.o.amt,0,1)});
+            {g:shim,sc:1,fmw:true,b0:clamp(b.o.amt,0,1),mod:md!==0});
         });
         if(!firstSrc)firstSrc=nd;
       }
