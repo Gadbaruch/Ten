@@ -537,7 +537,66 @@ Portamento is a RATIO, so `glR` multiplies a playbackRate exactly as it does a
 frequency; both go through `setF` now. NOISE deliberately stays out: its rate
 carries no `midi` term, so it never tracked the note and has nothing to glide.
 
-## 0e. WHAT `amt 100` MEANS — the table the unification has to agree on
+## 0h. CH 6 "OPS DON'T TRACK" IS ALIASING — diagnosed, NOT fixed
+
+Gad's channel 6 (STRUC), imported from his own export and measured on 3032:
+op0 sin rat 0.5 · **op1 FM rat 6** · **op2 PM rat 16**, poly, glide 0.036.
+
+**Every parameter tracks perfectly.** Pitch doubles per octave on all three
+operators, and both modulator indices hold exactly (FM 4, PM 24) — so it is not
+the pitch bug from 0g, and it never was: the patch is POLY, so `retune` never
+runs and today's legato fixes could not have touched it.
+
+What does not track is the SOUND:
+
+    note  f0     centroid   energy above 16xf0
+     36   65.4     1136       35.3%
+     48  130.8     1098       19.8%
+     60  261.6     1232        4.8%
+     72  523.3     1393        0.3%
+    centroid ratios octave to octave: 0.97, 1.12, 1.13   (2.0 would be tracking)
+
+The spectral centre of gravity is PINNED near 1.1-1.4kHz across four octaves
+while the fundamental moves by a factor of eight. At note 72 the LOUDEST peak
+sits at 40Hz — nothing to do with a 523Hz note.
+
+It is aliasing, and the arithmetic is not close. Carson bandwidth for op2 at
+index 24, ratio 16, is 2·(24+1)·16·f0 = 800·f0:
+
+    note 36   52 kHz  =  2.4x Nyquist
+    note 48  105 kHz  =  4.7x
+    note 60  209 kHz  =  9.5x
+    note 72  419 kHz  = 19.0x
+
+Everything past Nyquist folds back DOWNWARD, so as the note rises the folded
+content moves the wrong way and swamps the real partials — which is exactly
+what "the upper operators don't follow" sounds like. The falling
+`energy above 16xf0` column is the same fact from the other side: at the top
+octave there is nothing left up there because it has all folded down.
+
+CONFIRMED BY CONTROL: same patch with the two depths turned down (op1 0.25,
+op2 0.15) gives centroid ratios 1.6 / 2.06 / 1.35 and a centroid that actually
+climbs 235 → 377 → 777 → 1051. Lower the index and it tracks.
+
+### The fix is a decision, so it is NOT shipped
+
+TEN band-limits its oscillators per note (`setPeriodicWave`), but FM/PM is done
+by connecting a modulator into `frequency`, and those sidebands are not
+band-limited by anything. `kIdx = 6·(1+3a²)` takes the top of the amt knob to
+an index of 24, which guarantees this at any ratio above about 2.
+
+Three ways out, in increasing cost:
+  1. **Clamp the index against Nyquist** — hold Δf + f_mod under Nyquist per
+     note, which is key scaling and what every hardware FM synth does. Cheap,
+     one expression in the builder plus the same in oscRefresh. It makes high
+     notes duller, and it changes every FM patch's top octave.
+  2. **Scale the index by pitch** (a gentler version of 1, a fixed dB/octave
+     rolloff) — more musical, less exact.
+  3. **Oversample the FM operators** in a worklet — correct, and much the most
+     work.
+
+(1) is what the evidence argues for and it is one line, but it audibly changes
+the top of every FM patch in the library, so it is Gad's call, not a cleanup.
 
 Extracted from every depth-setting line in the engine, 2026-08-16. This is the
 real answer to "make every mod affect every dest consistently": the MECHANISM
