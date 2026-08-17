@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.1655';
+const BUILD='2026-08-17.2329-mono';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -4628,10 +4628,24 @@ let fxwReady=false;
         else if(m.t==='tape'){if(this.tv.size<12){
           const c9={id:m.id,bus:1,fr:m.frame,ph:m.pos,
             step:m.rate,sTgt:m.rate,base:m.base||m.rate,free:m.free?1:0,
-            shift:Number.isFinite(m.sh)&&m.sh>0?m.sh:1,ch:m.ch|0,
+            shift:Number.isFinite(m.sh)&&m.sh>0?m.sh:1,
+            /* THE FIT COMPENSATION, KEPT. Under sync the shifter is
+               (1/fitRate) x 2^(semis/12): the first half undoes the stretch
+               the fit applied, the second is the pitch you dialled. tpb was
+               writing the SECOND HALF ALONE, so the moment you bent the pitch
+               in stretch mode the fit compensation was thrown away and never
+               came back — the return landed at the wrong pitch by exactly the
+               fit ratio. Remembered here so a bend can rebuild the whole
+               product instead of replacing it. */
+            shc:Number.isFinite(m.shc)&&m.shc>0?m.shc:1,
+            ch:m.ch|0,
             gl:Number.isFinite(m.gl)?m.gl:1,gr:Number.isFinite(m.gr)?m.gr:1,
             end:m.end,gain:m.gain??1,life:m.durF||1e12,
             dur:Infinity,wrap:m.wrap?1:0,lo:m.lo||0,vel:1,shp:0.5,car:m.car?1:0,
+            /* bp: the phase this cursor would have had if nothing ever bent
+               it. Born where the head is born, advanced at base rather than
+               step, and cret is how the head gets back onto it. */
+            bp:m.pos,
             n:0,env:0,rel:0,relAt:0,tp:0};
           this.tv.set(m.id,c9); this.cx.push(c9);}}
         else if(m.t==='toff'){const v=this.tv.get(m.id); if(v)v.rel=1;}
@@ -4661,6 +4675,30 @@ let fxwReady=false;
               if(xn>0&&Math.abs(to-c9.ph)>1){c9.xPh=c9.ph; c9.xf=xn; c9.xLen=xn;}
               c9.ph=to; c9.gTo=null;
             }
+            /* THE SHADOW GOES WITH IT. A cmov is a DELIBERATE move — a cue, a
+               relock — and the head is now meant to be there; only a BEND is
+               the thing the shadow exists to undo. Left behind, a cue jump
+               would be cancelled by the next bend release. */
+            c9.bp=to;
+          }}
+        /* COME BACK TO WHERE YOU NEVER LEFT (Gad, 2026-08-17: "maybe you should
+           have a silent playhead or counter running parallel so you know where
+           to land properly"). In tape a bend IS a speed change and the head is
+           supposed to run away; the loop underneath it never moved, so letting
+           go has to put it back. audRelock's answer was the loop phase mapped
+           LINEARLY across the crop, which is only right when the take covers
+           the crop exactly once a cycle — sync on AND speed x1. At his x0.25 it
+           covers a quarter of it, so the map is four times too far and throws
+           the head forward, which is exactly what he reported. bp is the phase
+           the cursor would have had if nothing had ever bent it, so there is no
+           map and no arithmetic: land on it. Same 3ms equal-power splice a cue
+           flip uses. */
+        else if(m.t==='cret'){
+          const xn=Math.max(0,Math.round(sampleRate*0.003));
+          for(const c9 of this.cx){
+            if(c9.bus!==1||!c9.car||c9.bp==null)continue;
+            if(xn>0&&Math.abs(c9.bp-c9.ph)>1){c9.xPh=c9.ph; c9.xf=xn; c9.xLen=xn;}
+            c9.ph=c9.bp; c9.gTo=null;
           }}
         /* LIVE RE-AIM. Pitch, speed, tempo and the crop used to reach a
            cursor only at its birth, so every one of them meant "next time":
@@ -4691,18 +4729,47 @@ let fxwReady=false;
                audio". Measured from the caller to the next boundary on the new
                length, and only for the carrier: a key's grab lives until the
                finger leaves and must not be given a deadline. */
-            if(Number.isFinite(m.left)&&v.car)
-              v.life=v.n+Math.max(1,Math.round(m.left*sampleRate));
+            /* …AND ONLY THE CARRIER THAT IS RUNNING NOW. The car flag is worn
+               by every carrier that ever ran, so this handed a fresh life to
+               the ones on their way out as well. The old answer was a DURATION
+               from the caller — the time to the next boundary, which AT the
+               boundary is a WHOLE cycle — so a relock on the bar line
+               resurrected the outgoing carrier for another bar while audCycle
+               spawned its successor anyway. One extra playhead per loop, for
+               ever: Gad's "it gets louder and louder every loop like its
+               doubling the sound".
+               A DURATION SPENT AGAINST n IS ONLY RIGHT FOR A CURSOR ALREADY
+               RUNNING. audCycle posts the next carrier a HORIZON before the
+               line, so inside that window this was aimed at a cursor whose n
+               is still 0 — it took the fifty milliseconds left in the OLD
+               cycle as its whole life and died fifty milliseconds after it
+               was born, with nothing behind it until the bar after. That is
+               "it plays once and stops". dieF is an absolute frame and fr is
+               where this cursor starts counting, so the subtraction says the
+               same thing to both. */
+            if(Number.isFinite(m.dieF)&&v.car&&id===m.car)
+              v.life=Math.max(1,m.dieF-(v.fr||0));
           }}
         /* a stop can be SCHEDULED: the sequenced cue lane stops at a beat that
            has not happened yet, so carry the frame and let the voice die there */
+        /* A STOP ONLY EVER BRINGS A DEATH FORWARD. It used to OVERWRITE relAt,
+           and a scheduled stop is posted the moment the scheduler reaches it —
+           up to a HORIZON before it happens — so the next stop landed on every
+           cursor already holding an earlier one and PUSHED IT BACK. Measured
+           directly: a cursor told to stop at +0.30s, then handed a stop at
+           +2.00s, died at 2.13s instead of 0.37s. The AUDMONO replay no longer
+           walks this path, but the ratchet branch and every live grab still do,
+           and a cue cursor's life is 1e6 seconds — nothing else ends it. */
         else if(m.t==='tclr'){const fa=m.frame||0;
-          for(const [id,v] of this.tv){if(fa>currentFrame+1)v.relAt=fa; else v.rel=1;}}
+          for(const [id,v] of this.tv){
+            if(fa>currentFrame+1)v.relAt=v.relAt?Math.min(v.relAt,fa):fa;
+            else v.rel=1;}}
         /* the pitch bend destination: free voices move their rate (tape), sync
            voices move only the shifter (the clock is not for sale) */
         else if(m.t==='tpb'){const s9=Number.isFinite(m.semis)?m.semis:0, f9=Math.pow(2,s9/12);
           for(const [id,v] of this.tv){
-            if(v.free)v.sTgt=Math.max(0.01,v.base*f9); else v.shift=f9;}}
+            if(v.free)v.sTgt=Math.max(0.01,v.base*f9);
+            else v.shift=(v.shc||1)*f9;}}
         /* THE TAPE'S WINDOW AND SPEED, so a key can obey them. a and far are
            unsorted sample positions — far<a is the reversed crop — and rate
            is the tape's own step before the key's note ratio. on is 0 in
@@ -4832,6 +4899,9 @@ let fxwReady=false;
             if(!c.wrap&&c.ph>=c.end-1){c.rel=1;continue;}
             if(c.step!==c.sTgt)c.step+=(c.sTgt-c.step)*sT;
             c.ph+=c.step; c.n++;
+            if(c.bp!=null){c.bp+=c.base;
+              const lo8=c.lo||0, hi8=c.end||len, w8=Math.max(1,hi8-lo8);
+              if(c.bp<lo8||c.bp>=hi8)c.bp=((c.bp-lo8)%w8+w8)%w8+lo8;}
             continue;
           }else{
             if(c.relAt&&f0+k>=c.relAt)c.rel=1;
@@ -4865,6 +4935,14 @@ let fxwReady=false;
           dL[k]+=l9*amp*c.gl;
           if(st||cloud)dR[k]+=r9*amp*c.gr;
           c.ph+=c.step; c.n++;
+          /* THE UNBENT PHASE, walked beside the real one at base rather than
+             step — the parallel counter, wrapped in the same crop so it is
+             comparable to ph at any instant. One add and a compare; the second
+             cursor this could have been would have cost a buffer read and an
+             interpolation per sample to arrive at the same number. */
+          if(c.bp!=null){c.bp+=c.base;
+            const lo8=c.lo||0, hi8=c.end||len, w8=Math.max(1,hi8-lo8);
+            if(c.bp<lo8||c.bp>=hi8)c.bp=((c.bp-lo8)%w8+w8)%w8+lo8;}
         }
         if(dead){
           this.cx.splice(ci,1);
@@ -5673,7 +5751,20 @@ function scheduleRange(from,to){
               const ms1=Math.max(0,(timeAt(t+a.anchor)-AC.currentTime)*1000);
               const ms2=Math.max(0,(timeAt(t+Math.min(ev.dur||0.25,L3)+a.anchor)-AC.currentTime)*1000);
               setTimeout(()=>{try{engine.audPitch(li,ev.pk);}catch(_){}},ms1);
-              setTimeout(()=>{try{if(!(AUD.hold&&AUD.hold.pi===li))engine.audPitch(li,0);}catch(_){}},ms2);
+              /* AND THE RECORDED BEND COMES BACK IN TIME TOO. The live one got
+                 its relock on the key-up; this one had none, so every replay
+                 of a stored bend left the take a little further out of phase
+                 with the bar — and unlike the live case it happens on EVERY
+                 loop, so the error is not a one-off, it accumulates until the
+                 take has nothing to do with the clock. Same call as the live
+                 key-up, and now the same one: the unbent phase the worklet
+                 walked beside it, rather than the bar mapped across the crop.
+                 Stretch never left the clock, so audBendMovedClock still says
+                 no there and nothing is spliced. */
+              setTimeout(()=>{try{if(!(AUD.hold&&AUD.hold.pi===li)){
+                engine.audPitch(li,0);
+                if(engine.audBendMovedClock(li)){engine.audReturn(li);
+                  setTimeout(()=>{try{engine.audReturn(li);}catch(_){}},80);}}}catch(_){}},ms2);
             }else if(ev.fz!==undefined){
               const ms1=Math.max(0,(timeAt(t+a.anchor)-AC.currentTime)*1000);
               const dSec=Math.min(ev.dur||0.25,L3)*spb();
@@ -5707,6 +5798,32 @@ function scheduleRange(from,to){
             const dj2=clamp(ev.dur||0.25,0.05,L2);
             const skp=0;
             const divs=rtcA?(Math.round(rtcA.p1??0)>=2?clamp(Math.round(rtcA.p1),2,16):0):0;
+            /* ONE PLAYHEAD ON THE REPLAY TOO (AUDMONO). This path was
+               stop → play(cue) → stop → play(resume) for EVERY event, and each
+               resume is a full carrier that lives to the end of the cycle. One
+               or two jumps a bar and you never notice; Gad's exported ch9 has
+               TWELVE in a single bar, so twelve overlapping carriers — "sounds
+               like polyphonic after i added a few notes in the loop", exactly.
+               With one cursor there is nothing to stack: the event MOVES the
+               head to the cue and the end of the gesture moves it back to
+               where the bar says it should be. Both go through the same 3ms
+               equal-power splice a live cue flip uses. */
+            if(AUDMONO){
+              const W7=audWin(au2);
+              const gl7=clamp(Math.round((S.presets[li].vox||{}).mode||0),0,2)===2
+                ?Math.max(0.001,(S.presets[li].vox||{}).glide||0.08):0;
+              const ms7=Math.max(0,(timeAt(tt+a.anchor)-AC.currentTime)*1000);
+              const to7=cutAt(li,ev.cue);
+              setTimeout(()=>{try{engine.audMove(li,to7,gl7,1,1);
+                engine.busEnvFire(li,AC.currentTime);}catch(_){}},ms7);
+              const te7=tt+dj2, ms8=Math.max(0,(timeAt(te7+a.anchor)-AC.currentTime)*1000);
+              setTimeout(()=>{try{
+                if(AUD.hold&&AUD.hold.pi===li)return;   // a finger owns it now
+                engine.busEnvFire(li,AC.currentTime,true);
+                engine.audRelock(li);                   // …back where the bar asks
+              }catch(_){}},ms8);
+              return;
+            }
             engine.audStop(li,timeAt(tt+a.anchor));
             /* THE LENGTH ARGUMENT IS THE LOOP, NOT THE GESTURE. audPlay reads
                it two ways: how long this voice may live, and — when fit is on
@@ -8566,6 +8683,7 @@ class Engine{
     }
     const og=keep(ac.createGain()); og.gain.value=oldOut?0.0001:1;
     cur.connect(og); og.connect(b.busG); b.rackOut=og;
+    this.busMod(pi);                 // …and the modulators that aim at it
     if(oldOut){                      // crossfade old chain out — param changes stop clicking
       const n2=ac.currentTime;
       og.gain.setTargetAtTime(1,n2,0.01); oldOut.gain.setTargetAtTime(0.0001,n2,0.01);
@@ -10090,7 +10208,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
        sound again until the page is reloaded */
     e.node.port.postMessage({t:'tape',id,frame:FIN(Math.round(at*AC.sampleRate),0),
       pos:FIN(P9.pos,0),end:FIN(P9.end,0),rate:FIN(P9.rate,1),base:FIN(P9.base,1),
-      free:P9.free?1:0,sh:FIN(P9.sh,1),
+      free:P9.free?1:0,sh:FIN(P9.sh,1),shc:FIN(P9.shc,1),
       ch:FIN(P9.ch,0),gl:FIN(P9.gl,1),gr:FIN(P9.gr,1),gain:FIN(P9.gain,0.9),
       wrap:P9.wrap?1:0,lo:FIN(P9.lo,0),car:P9.car?1:0,
       durF:FIN(Math.round(P9.durSec*AC.sampleRate),1e9)});
@@ -10098,7 +10216,12 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
        and under free it must not be re-fired at all — so the one place that
        spawns one is the one place that records it. Cleared wherever the tape
        is stopped, which is the only way a carrier can leave. */
-    if(P9.car)(this.audCar=this.audCar||[])[pi]=id;
+    /* AND WHEN IT STARTS, because audCycle posts it a HORIZON early: for the
+       ~150ms before every bar line the recorded carrier is one that has not
+       begun. Its deadline is a cycle from ITS OWN start, not from whenever a
+       relock happens to ask. */
+    if(P9.car){(this.audCar=this.audCar||[])[pi]=id;
+               (this.audCarAt=this.audCarAt||[])[pi]=at;}
     return true;
   }
   audPlay(pi,at,lenBeats,skipBeats=0,cue){
@@ -10163,6 +10286,8 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
       base:baseRate*k9,
       free:!sync,
       sh:shSync,
+      /* the fit half on its own, so a later bend can rebuild sh from it */
+      shc:sync?(1/Math.max(0.05,Math.abs(baseRate))):1,
       ch:buf.numberOfChannels>1?Math.round(au.chan||0):0,
       gl:Math.SQRT2*Math.cos(th9), gr:Math.SQRT2*Math.sin(th9),
       /* a cue plays until you let go, so it loops the crop rather than
@@ -10183,7 +10308,17 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
       car:cue?0:1,
       /* a key-spawned cursor carries the key level and its velocity; the auto
          cursor carries the loop level. cue.vol is the cue's own trim. */
-      gain:(au.gain??0.9)*(cue?(cue.vol??1)*(au.kvol??1)*(cue.vel??1):(au.lvol??1)),
+      /* ONE FADER, AND VELOCITY SURVIVES IT (AUDMONO). `key vol` and `loop vol`
+         were two because a key's cursor and the loop's were two different
+         things; with one cursor they are one fader, and `gain` is it. What
+         does NOT collapse is VELOCITY — how hard you played is not a second
+         fader, and it is the whole reason a cue key feels like an instrument.
+         The cue's own trim (cue.vol) stays too: that is per-cue balance, set
+         once, not a channel level. Neither field is removed from the SAVE, so
+         a set written here still opens on main with both faders intact. */
+      gain:AUDMONO
+        ?(au.gain??0.9)*(cue?(cue.vol??1)*(cue.vel??1):1)
+        :(au.gain??0.9)*(cue?(cue.vol??1)*(au.kvol??1)*(cue.vel??1):(au.lvol??1)),
       /* A LOOPING CURSOR IS NOT BOUNDED BY WHAT IS LEFT. Its life was the
          material remaining ahead of it, which for a cue near the end is a
          fraction of a second — so it died exactly where it should have
@@ -10193,8 +10328,14 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
          which is every take once sync is off — played once and left the rest
          of the bar silent instead of coming round again. It wraps the crop,
          so the cycle is the only thing that should end it. */
+      /* …AND NOTHING RE-FIRES IT WHEN THE LOOP IS OFF. The cycle life is a
+         handshake with audCycle: die at the boundary because the next one is
+         born there. With auto OFF audCycle never runs, so that life is a death
+         with no successor — Gad: "if i hold a note, it playes to the end of
+         the loop and then stops". A key-made head lives until something stops
+         it, exactly as it does under free. */
       durSec:(cue&&Number.isFinite(cue.life))?cue.life
-        :(cue||rate<0||!Math.round(au.fit||0))?1e6
+        :(cue||rate<0||!Math.round(au.fit||0)||!autoCur(S.presets[pi]))?1e6
         :Math.max(0.05,loopSec-skipSec)});
     return this._lastTid;
   }
@@ -10258,6 +10399,18 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     this._cuts[pi]={key,a};
     return a;
   }
+  /* THE HEAD COMES BACK TO WHERE IT NEVER WENT. A bend in tape is a speed
+     change, so the head runs away while it is held and the bar underneath it
+     does not — letting go has to put it back. It used to be put back by
+     audRelock, which maps the loop phase LINEARLY across the crop, and that is
+     only the right answer when the take covers the crop exactly once a cycle:
+     sync on AND speed x1. Every other speed is wrong by that factor. The
+     worklet walks the unbent phase beside the real one, so the answer is a
+     number it already has. */
+  audReturn(pi){
+    const e9=this.gn&&this.gn[pi]; if(!e9||!e9.node)return;
+    try{e9.node.port.postMessage({t:'cret'});}catch(_){}
+  }
   /* mono/legato: send the cursors that are already reading somewhere else */
   audMove(pi,frac,glideSec,bus,onlyCar){
     const e9=this.gn&&this.gn[pi]; if(!e9||!e9.node)return;
@@ -10291,21 +10444,46 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
        loop's phase has to walk BACKWARDS through the take */
     this.audMove(pi,W.a+(ph/L)*(W.far-W.a),0,1,1);
   }
-  /* HOW LONG THE CARRIER HAS LEFT, and it is the switch that decides. SYNC
-     cuts it to the cycle — a fitted take is re-fired every loop, so it has to
-     die exactly where the next one is born. FREE has no deadline at all, and
-     null means "nothing to say", so a channel with no answer never overwrites
-     one the cursor was born with. Sent from audLive, which every audio edit
-     goes through, so flipping the switch under a sounding take re-aims the
-     take that is already running instead of the next one. */
-  audCarLeft(pi){
+  /* WHERE THE CARRIER DIES, and it is the switch that decides. SYNC cuts it to
+     the cycle — a fitted take is re-fired every loop, so it has to die exactly
+     where the next one is born. FREE has no deadline at all, and null means
+     "nothing to say", so a channel with no answer never overwrites one the
+     cursor was born with. Sent from audLive, which every audio edit goes
+     through, so flipping the switch under a sounding take re-aims the take
+     that is already running instead of the next one.
+     A DEADLINE, NOT A DURATION, and that is the whole of the second bug. The
+     answer used to be "how long from NOW", spent against the cursor's own
+     clock — and those are the same instant only for a cursor that is already
+     running. audCycle posts the next carrier a HORIZON before the bar line and
+     audCar names it immediately, so a relock inside that window handed a
+     not-yet-born cursor a life of the fifty milliseconds left in the OLD
+     cycle: born, and dead fifty milliseconds later, with nothing spawning
+     behind it until the bar after. That is "it plays once and stops". Measured
+     from the carrier's OWN start, an absolute frame means the same thing to a
+     cursor born an hour ago and to one that has not begun. */
+  audCarDieF(pi){
     const au=Object.assign({},S.presets[pi].au||{},(this.audOv&&this.audOv[pi])||{});
-    if(!Math.round(au.fit||0))return 1e9;
+    /* AUTO OFF MEANS NO CYCLE TO SERVE. The deadline exists so a carrier dies
+       exactly where audCycle spawns its successor; with the loop off there is
+       no successor, and re-cutting the life to the bar line kills the head a
+       held key is still playing. */
+    if(!autoCur(S.presets[pi]))return Math.round((AC.currentTime+1e9)*AC.sampleRate);
+    /* free: no deadline. A frame this far out is the same "never" the free
+       carrier is already born with (durSec 1e6), through one code path
+       instead of a sentinel the worklet would have to know about. */
+    const never=Math.round((AC.currentTime+1e9)*AC.sampleRate);
+    if(!Math.round(au.fit||0))return never;
     if(!T.playing)return null;
     const lane=S.patterns[S.editPat]&&S.patterns[S.editPat].lanes[pi];
     const L=lane&&lane.len; if(!(L>0))return null;
-    const a=actAt(posNow());
-    return Math.max(0.02,(L-fmod(posNow()-a.anchor,L))*spb());
+    const at9=(this.audCarAt||[])[pi]; if(!Number.isFinite(at9))return null;
+    const b9=beatsAt(at9), a=actAt(b9);
+    /* the FIRST boundary strictly after it started. A carrier spawned ON the
+       line gets the whole cycle (floor lands on its own boundary, +1 is the
+       next); one joining mid-cycle — audCycle's `fresh` branch — gets what is
+       left, which is exactly what its birth durSec already said. */
+    const die=a.anchor+(Math.floor((b9-a.anchor)/L+1e-9)+1)*L;
+    return Math.round(timeAt(die)*AC.sampleRate);
   }
   audRelockAll(){for(const i of CHANS())if(isAudioCh(i))this.audRelock(i);}
   audOff(pi,id){
@@ -10315,6 +10493,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
   audStop(pi,at){
     at=at??AC.currentTime+0.002;
     (this.audCar=this.audCar||[])[pi]=null;   // the carrier goes with everything else
+    (this.audCarAt=this.audCarAt||[])[pi]=null;   // …and so does when it started
     const e9=this.gn&&this.gn[pi];
     if(e9&&e9.node){try{e9.node.port.postMessage(
       {t:'tclr',frame:Math.round(at*AC.sampleRate)});}catch(_){}}
@@ -10340,9 +10519,22 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     const rate=sync?baseRate:baseRate*Math.pow(2,semis/12);
     const k9=buf.sampleRate/AC.sampleRate;
     const r9=(rate<0?Math.min(-0.05,rate):Math.max(0.05,rate))*k9;
-    const left9=this.audCarLeft(pi);
+    /* WHICH carrier the deadline belongs to, and it is half the fix. The
+       worklet applied the re-cut to every cursor wearing the car flag — which
+       is every carrier that ever ran, not the one running now — and the answer
+       was the time to the NEXT boundary, which AT the boundary is a WHOLE
+       cycle. So a relock landing on the bar line handed the OUTGOING carrier a
+       fresh lease exactly as it was about to expire, while audCycle spawned
+       its successor anyway. The replay calls audRelock at the end of every cue
+       gesture and Gad's lane has three events at t=0, so one landed on the line
+       every single loop — one extra playhead per bar, for ever. Named, and an
+       old carrier keeps the life it was born with. Nothing is sent at all when
+       there is no carrier to aim at: an unnamed deadline is a broadcast, which
+       is the bug wearing a different hat. */
+    const car9=(this.audCar||[])[pi]||null;
+    const die9=car9?this.audCarDieF(pi):null;
     try{e9.node.port.postMessage({t:'tset',
-      ...(left9==null?{}:{left:left9}),
+      ...(die9==null?{}:{dieF:die9,car:car9}),
       /* a negative rate is a real rate: a floor of +0.05 turned reverse into
          a very slow forward, and dividing the take's remaining length by it
          gave the voice a negative life, so it died on arrival */
@@ -10354,7 +10546,9 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
          that waited for the next trigger. Both go now, every time. */
       end:FIN(W.hi*buf.length,buf.length),
       lo:FIN(W.lo*buf.length,0),
-      gain:FIN((au.gain??0.9)*(ask.cue?(ask.cue.vol??1)*(au.kvol??1)*(ask.cue.vel??1)
+      gain:FIN(AUDMONO
+        ?(au.gain??0.9)*(ask.cue?(ask.cue.vol??1)*(ask.cue.vel??1):1)
+        :(au.gain??0.9)*(ask.cue?(ask.cue.vol??1)*(au.kvol??1)*(ask.cue.vel??1)
                                    :(au.lvol??1)),0.9)});}catch(_){}
   }
   /* THE TAPE'S WINDOW AND SPEED, HANDED TO THE CLOUD SIDE OF THE WORKLET. A
@@ -10404,6 +10598,131 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
   /* live pitch for the mod/automation destination — one message to the
      channel's cursors: free ones glide their rate, sync ones move the shifter
      they carry inside themselves */
+  /* is there a tape cursor on this channel right now — the one thing a mono
+     key needs to know before it decides between moving one and making one */
+  /* ───────── THE MOD RACK, ON THE BUS ─────────────────────────────────────
+     Gad: "all mods should work. none do, tested lfo and env on filter."
+     He is right and the reason is structural: every source in this instrument
+     is built INSIDE a Voice, and an audio channel has no voices. The filter
+     moved to the bus last build so the dials would be heard — the modulators
+     never followed it, so the rack drew a route from an LFO to a cutoff and
+     nothing on the other end was listening.
+     This is the voice's own wiring, on the channel: same `_fltP` shape, same
+     MODCENTS span, same MODTAPER depth and the same x0.5 for a bipolar source,
+     so a depth of 40 means on an audio channel what it means on a synth.
+     ENVELOPES ARE TRIGGERED BY KEYSTROKES, which is what he asked for — an
+     audio channel's "note" is a key, so busEnv fires from the same two places
+     a cursor is spawned or moved. */
+  busFltP(pi,idx,which){
+    const FC=(this.buses[pi]||{}).fltBus; if(!FC)return [];
+    const one=i=>{
+      const bank=FC.bank&&FC.bank[i];
+      if(bank)return bank.map(n=>n[which]);
+      const a=FC.nodes[i]; if(!a)return [];
+      const b=FC.node2&&FC.node2[i];
+      return b?[a[which],b[which]]:[a[which]];
+    };
+    const n=Math.round(idx||0);
+    if(n>=1)return one(clamp(n,1,10)-1);
+    return Object.keys(FC.nodes).map(Number).sort((a,b)=>a-b).flatMap(one);
+  }
+  /* which live params a route names on this channel's bus. FILTER ONLY, and
+     said plainly: pitch on an audio channel is the tape's speed (not an
+     AudioParam), amp is the cursor's gain inside the worklet, and neither is
+     reachable this way. dst 3 is the cutoff; a learned address into flt works
+     through the same resolver. */
+  busDest(pi,rt,p){
+    const d=Math.round(rt.dst||0), ix=Math.round(rt.idx||0);
+    const A=(!rt.dst&&(rt.tgt||rt.addr))||null;
+    if(A&&(A.rack||A.mod)==='flt'){
+      if(A.key==='frq')return this.busFltP(pi,A.slot==='*'?0:(A.slot|0)+1,'detune')
+        .map(pm=>({p:pm,span:MODCENTS}));
+      if(A.key==='q')return this.busFltP(pi,A.slot==='*'?0:(A.slot|0)+1,'Q')
+        .map(pm=>({p:pm,span:14}));
+      return [];
+    }
+    if(d===3)return this.busFltP(pi,ix,'detune').map(pm=>({p:pm,span:MODCENTS}));
+    return [];
+  }
+  /* the FREE-RUNNING sources — one oscillator per route, started with the bus
+     and torn down with it. Rebuilt by rebuildRack, so an edit to the rack is
+     heard the way every other rack edit is. */
+  busMod(pi){
+    const b=this.buses[pi], p=S.presets[pi];
+    if(!b)return;
+    for(const n of (b.modNodes||[])){try{n.stop&&n.stop();}catch(_){} try{n.disconnect();}catch(_){}}
+    b.modNodes=[]; b.busEnvs=[];
+    if(!b.fltBus||!isAudioCh(pi))return;
+    const ac=AC, now=ac.currentTime, md=p.mod||[];
+    for(let mi=0;mi<md.length;mi++){
+      const m=md[mi]; if(!m||m.off||!m.routes)continue;
+      for(const rt of effRoutes(m)){
+        if(Math.abs(rt.amt||0)<=0.5)continue;
+        const tg=this.busDest(pi,rt,p); if(!tg.length)continue;
+        if(m.src===2){                              // LFO
+          const lo=ac.createOscillator();
+          lo.frequency.value=Math.max(0.01,lfoHz(m));
+          try{this.setWave(lo,LFOW_PW[m.wav]??0,m.ph||0);}catch(_){}
+          for(const t of tg){
+            const g=ac.createGain();
+            g.gain.value=MODTAPER(rt.amt)*t.span*0.5;   // bipolar: half the span each way
+            lo.connect(g); g.connect(t.p);
+            b.modNodes.push(g);
+          }
+          lo.start(now); b.modNodes.push(lo);
+        }else if(m.src===1){                        // ENV — held until a key fires it
+          const T3=clamp(m.tmul??1,0.1,4);
+          b.busEnvs.push({tg,amt:rt.amt,
+            a:(m.a??0.01)*T3,d:(m.d??0.2)*T3,s:m.s??0.5,r:(m.r??0.2)*T3});
+        }
+      }
+    }
+  }
+  /* …AND THE ENVELOPES, ON A KEYSTROKE. A channel whose sound is a playhead
+     has no note-on to hang these off, so the key paths call this: the same
+     attack/decay/sustain the voice schedules, written to the bus filter's
+     detune where every other source sums. */
+  busEnvFire(pi,at,rel){
+    const b=this.buses[pi]; if(!b||!(b.busEnvs||[]).length)return;
+    const t0=at??AC.currentTime;
+    for(const e of b.busEnvs){
+      for(const t of e.tg){
+        const peak=MODTAPER(e.amt)*t.span, sus=peak*clamp(e.s,0,1);
+        try{
+          t.p.cancelScheduledValues(t0);
+          if(rel){t.p.setTargetAtTime(0,t0,Math.max(0.005,e.r)/5);}
+          else{
+            t.p.setValueAtTime(t.p.value||0,t0);
+            t.p.linearRampToValueAtTime(peak,t0+Math.max(0.002,e.a));
+            t.p.setTargetAtTime(sus,t0+Math.max(0.002,e.a),Math.max(0.005,e.d)/5);
+          }
+        }catch(_){}
+      }
+    }
+  }
+  /* DID THE BEND MOVE THE CLOCK, or only the pitch? (Gad, 2026-08-17: "when
+     pitched, in stretch mode+sync on, no need to jump around! the time stretch
+     makes sure the timing doesnt fuck up!" — he is right.)
+     TAPE resamples: a bend IS a speed change, the head runs away, and letting
+     go leaves it out of phase — that is what the catch-up is for.
+     STRETCH holds the timing and sends the pitch through the SHIFTER
+     (tpb writes v.shift, not v.sTgt), so the head never left the clock. There
+     is nothing to catch up, and relocking anyway is a splice for no reason —
+     an audible seam where the whole point of stretch is that there is none. */
+  audBendMovedClock(pi){
+    const au=Object.assign({},S.presets[pi].au||{},(this.audOv&&this.audOv[pi])||{});
+    return Math.round(au.pmode||0)!==1;
+  }
+  audRolling(pi){
+    /* audCar is SYNCHRONOUS — set the instant a carrier is spawned, cleared
+       the instant the tape is stopped. The stat ping is up to a frame stale,
+       and two keys inside one frame would both read "no cursor" and both make
+       one, which is the very thing one-playhead exists to prevent. The stat is
+       the fallback for a cursor this engine did not spawn itself. */
+    if((this.audCar||[])[pi])return true;
+    const st=(this.gn&&this.gn[pi]&&this.gn[pi].stat)||null;
+    return !!(st&&(st.tv|0)>0);
+  }
   audPitch(pi,semis){
     this.audPB=this.audPB||{}; this.audPB[pi]=semis||0;
     const au=S.presets[pi].au||{};
@@ -10595,7 +10914,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
        all-notes-off with nothing in the app able to end them */
     for(const k9 in (this.gn||{})){const e9=this.gn[k9];
       if(e9&&e9.node){try{e9.node.port.postMessage({t:'panic'});}catch(_){}}}
-    this.audCar=[];                 // a panic takes the carriers with it
+    this.audCar=[]; this.audCarAt=[];   // a panic takes the carriers with it
     this.arpPool.forEach(p=>p.length=0);}
   click(at,accent){
     const o=AC.createOscillator(),g=AC.createGain();
@@ -10693,7 +11012,10 @@ function applyParam(pi,mi,si,px,v){
     Object.assign(S.presets[pi].fx[si],FXDEF[Math.round(v)]);
   if(M.id==='fx'){ if(!engine.fxLive(pi,si,spec.key))engine.rebuildRack(pi); }
   else if(M.id==='mix'||M.id==='mod'){engine.refresh(pi);
-    if(M.id==='mod'){engine.lfoLive(pi); engine.envLive(pi); engine.modReaim(pi);}}
+    if(M.id==='mod'){engine.lfoLive(pi); engine.envLive(pi); engine.modReaim(pi);
+      /* an audio channel's modulators live on the BUS and are built once —
+         nothing re-aims them, so a rack edit has to build them again */
+      if(isAudioCh(pi))engine.busMod(pi);}}
   if(isCodeCh(pi)&&(M.id==='flt'||M.id==='mod'||M.id==='vox'))engine.codeCfg(pi);
   else if(M.id==='flt'&&spec.key==='frq')engine.cutLive(pi,si);
   /* every OTHER filter dial is live too now, not just the cutoff */
@@ -12588,8 +12910,13 @@ function prsFieldDefs(){
     {k:'auto',v:()=>autoCur(p)?'loop':'off'},
     /* the loop's own fader, beside the loop's own switch — the keys have
        velocity and their own level over on the sound page */
-    {k:'loop vol',v:()=>Math.round(clamp((p.au||{}).lvol??1,0,1)*100)+'%'},
-    {k:'voice',v:()=>['poly','mono','legato'][clamp(Math.round((p.vox||{}).mode||0),0,2)]},
+    ...(AUDMONO?[]:[{k:'loop vol',v:()=>Math.round(clamp((p.au||{}).lvol??1,0,1)*100)+'%'}]),
+    /* with ONE cursor, poly/mono are the same thing — what survives is whether
+       a jump SNAPS or GLIDES, which is the legato half and worth a field */
+    ...(AUDMONO
+      ?[{k:'glide',v:()=>clamp(Math.round((p.vox||{}).mode||0),0,2)===2
+          ?Math.round(((p.vox||{}).glide||0.08)*1000)+'ms':'snap'}]
+      :[{k:'voice',v:()=>['poly','mono','legato'][clamp(Math.round((p.vox||{}).mode||0),0,2)]}]),
     /* IT NAMES THE DIAL IT ACTUALLY POINTS AT. 'pos' is the CLOUD's position
        dial, which only exists on the grain half of the page — and since the
        keys began obeying the tape's setup, a key in tape or stretch leaves
@@ -12619,8 +12946,17 @@ const GRANF=[
     how it feels (shape/rev/width), and the space around it (fade/dif/fb).
     Setup — keys mode, input, freeze, engine mode, sample, gain — lives on
     the INSTRUMENT row where channel identity belongs. */
- SP('pos','pos','lin',{min:0,max:1,step:0.01,fmt:v=>Math.round(v*100)+'%'}),
- SP('scan','scan','lin',{min:-4,max:4,step:0.05,fmt:v=>Math.abs(v)<0.001?'freeze':'\u00d7'+v}),
+ /* POS AND SCAN ARE GONE FROM THE PAGE (Gad, 2026-08-18: "if they dont do
+    anything lets remove them"). They were the cloud's own address, and since
+    the spray began following the carrier they are consulted ONLY when
+    `this.car == null` — no loop running. With auto on they moved nothing at
+    all, and a dial that does nothing on the setting most channels are in is
+    worse than no dial. The PARAMS stay: the freeze gesture still writes them
+    (`_ctrlPut('grn',pi,0,'pos'|'scan')`), and a keys-only cloud still reads
+    them — it is the two knobs that have left. If they ever come back it should
+    be as an OFFSET from the carrier, which would mean something in both cases.
+    Note what goes with them: they are no longer mod/automation destinations,
+    so a stored route aimed at cloud pos or scan now points at nothing. */
  SP('spray','spray','lin',{min:0,max:1,step:0.02,fmt:v=>Math.round(v*100)+'%'}),
  /* the character dial: a sliver, a cloud, or — at the top — one unbroken
     playhead, which is the clean tape read */
@@ -12709,6 +13045,22 @@ const audWin=au=>{
    honest rather than a fudge: +-24 semitones IS x0.25..x4 (2^(24/12) = 4). The
    SIGN stays on speed, because reverse is not a pitch. */
 const spdToSemis=s=>clamp(Math.round(12*Math.log2(Math.max(0.25,Math.abs(s)))),-24,24);
+/* WHAT SYNC IS DOING TO THE PITCH RIGHT NOW. The rate is fit × speed and the
+   fit is not stored anywhere — it is the take's length over the loop's — so
+   the one dial that has to report the whole rate has to be able to ask. The au
+   object does not know its own channel, so it is found by identity; ten
+   presets is a cheaper scan than caching a derived number that would then have
+   to be invalidated by the take, the crop, the loop length and the tempo. */
+const audFitR=au=>{
+  if(!au||!Math.round(au.fit||0))return 1;
+  let pi=-1; for(const i of CHANS())if(S.presets[i]&&S.presets[i].au===au){pi=i;break;}
+  if(pi<0)return 1;
+  const buf=engine&&engine.audBuf&&engine.audBuf[pi]; if(!buf)return 1;
+  const lane=S.patterns[S.editPat]&&S.patterns[S.editPat].lanes[pi];
+  const L=lane&&lane.len; if(!(L>0))return 1;
+  const W=audWin(au), dur=(W.hi-W.lo)*buf.duration, loopSec=L*spb();
+  return (dur>1e-6&&loopSec>1e-6)?dur/loopSec:1;
+};
 const semisToSpd=(semis,sgn)=>(sgn<0?-1:1)*clamp(+Math.pow(2,clamp(semis,-24,24)/12).toFixed(2),0.25,4);
 const audRate=(au,dur,loopSec,ov)=>{
   const spd=Number.isFinite(ov)?ov:audSpd(au);
@@ -12802,9 +13154,26 @@ const AUDTAKE=[
       (the first attempt) tied the two dials and killed every route on pitch
       in tape mode — caught by the matrix probe, whose `free +7` row writes
       au.semis raw and went silent. */
-   get:o=>Math.round(o.cmode??0)===0?spdToSemis(audSpd(o)):clamp(Math.round(o.semis??0),-24,24),
+   /* …AND SYNC IS PART OF THAT SPEED (Gad, 2026-08-18: "stretch base pitch and
+      tape base pitch are not the same, stretch is slightly higher, not sure
+      whats up"). The rate is fit × speed and the dial derived from the SPEED
+      alone, so a synced take that does not fill the bar was transposed by the
+      fit — a 0.85 take reads 374Hz against stretch's 440, a minor third down —
+      while the dial said 0 and nothing on the page explained it. Speed and
+      pitch are one control in tape, so the dial has to report the whole rate,
+      not its half. Stretch takes the same factor back out through the shifter,
+      which is what stretch is FOR, and that is the difference he heard.
+      The reach is what it is: speed is ±0.25..4, so a fit further out than two
+      octaves cannot be cancelled and the dial clamps. That is honest — sync in
+      tape IS varispeed, and a take eight times the bar has to come out high. */
+   get:o=>Math.round(o.cmode??0)===0?spdToSemis(audFitR(o)*audSpd(o))
+                                    :clamp(Math.round(o.semis??0),-24,24),
    set:(o,v)=>{
-     if(Math.round(o.cmode??0)===0){const s=semisToSpd(v,audSpd(o)); o.spd=s; o.rate=s; o.semis=0;}
+     if(Math.round(o.cmode??0)===0){
+       /* the speed that LANDS that pitch once the fit has had its say */
+       const f=audFitR(o)||1, sgn=audSpd(o)<0?-1:1;
+       const s=sgn*clamp(+(Math.pow(2,clamp(v,-24,24)/12)/Math.abs(f)).toFixed(2),0.25,4);
+       o.spd=s; o.rate=s; o.semis=0;}
      else o.semis=clamp(Math.round(v),-24,24);}}),
 ];
 /* ONE LEVEL HERE, NOT TWO. There were two faders side by side — one for the
@@ -12942,9 +13311,9 @@ function audDefaults(p,gran){
 const AUDPAGE=()=>{
   const p=S.presets[S.editSnd], m=cmodeOf(p);
   const keep=new Set(m===2
-    ?['cmode','fit','rate','st','en','semis','kvol']
-    :m===1?['cmode','fit','rate','wnd','st','en','semis','kvol']
-          :['cmode','fit','rate','st','en','semis','kvol']);
+    ?['cmode','fit','rate','st','en','semis'].concat(AUDMONO?[]:['kvol'])
+    :m===1?['cmode','fit','rate','wnd','st','en','semis'].concat(AUDMONO?[]:['kvol'])
+          :['cmode','fit','rate','st','en','semis'].concat(AUDMONO?[]:['kvol']));
   return AUDALL().filter(sp=>sp.st==='gr'?m===2:keep.has(sp.key));
 };
 function codeAction(d,m){
@@ -13138,7 +13507,7 @@ function _prsAction(d){
     dirty=true; dirtySave=true; return;
   }
   if(p.cat==='audio'
-     &&['keys mode','auto','loop vol','from','voice','input','chan','gain'].includes(f)){
+     &&['keys mode','auto','loop vol','from','voice','glide','input','chan','gain'].includes(f)){
     pushUndo('audio setup');
     p.au=p.au||{};
     if(f==='keys mode'){
@@ -13163,6 +13532,20 @@ function _prsAction(d){
         engine.audPlay(pi,AC.currentTime+0.008,l9.len,fmod(posNow()-a9.anchor,l9.len));
       }
       flash('auto cursor '+(p.au.auto?'loops':'off — the keys are the only playheads'));
+    }
+    else if(f==='glide'){
+      /* ONE CURSOR, so the only question left is whether a jump SNAPS to the
+         new place or slides to it. Walks the glide TIME, with snap at the
+         bottom — and it writes vox.mode underneath (1 = snap, 2 = glide) so
+         the value means the same thing to a build with polyphony still in it. */
+      p.vox=p.vox||{};
+      const isG=clamp(Math.round(p.vox.mode||0),0,2)===2;
+      const ms=Math.round((p.vox.glide||0.08)*1000);
+      const nv=clamp(ms+d*10,0,400);
+      if(nv<=0){p.vox.mode=1; flash('jump → snap');}
+      else{p.vox.mode=2; p.vox.glide=nv/1000;
+        flash('jump → glide '+nv+'ms');}
+      if(!isG&&nv<=0)flash('jump → snap');
     }
     else if(f==='voice'){
       /* the same three the synth voices have, because a cursor is a voice:
@@ -15341,6 +15724,31 @@ const rawAt=new Set();                // ...and which others are markup too
 const kbHeld=new Set();               // note keys physically down, for chord-vs-sequence
 const liveMute=Array.from({length:10},()=>0);   // >0 = a live key overrides recorded notes on this lane
 const isAudioCh=pi=>S.presets[pi].cat==='audio';
+/* ────────────────────────────────────────────────────────────────────────────
+   THE EXPERIMENT (branch `audio-mono`, Gad 2026-08-17): ONE PLAYHEAD PER AUDIO
+   CHANNEL. "maybe we dont need polyphony to audio ch at all beyond just the
+   grain cloud. I guess any poly stuff the synth engine can do with the sample
+   there."
+
+   A key MOVES the channel's single tape cursor instead of stacking another on
+   top of it. The CLOUD is untouched: a grain is a temporary cursor with a
+   finite window and spawning those is what the cloud IS.
+
+   It is a FLAG rather than a deletion on purpose — Gad: "we may fix a lot of
+   stuff that id like to merge without removing polyphony completely if i
+   change my mind." Every other fix on this branch is written to work either
+   way, so a merge brings the fixes and this one line decides the policy.
+   Set to 0 and the channel is polyphonic again, exactly as main is.
+
+   What it takes with it: `voice` (poly/mono/legato) stops meaning anything on
+   an audio channel — there is one cursor and a key always moves it — and the
+   two faders collapse, because `key vol` and `loop vol` were only ever two
+   because a key's cursor and the loop's were two different things. VELOCITY
+   STAYS: it is how hard you played, not a second fader, and it is worth having
+   on the one cursor and as a mod source. Nothing is removed from the SAVE, so
+   a set written here still loads on main with its levels intact.
+   ──────────────────────────────────────────────────────────────────────── */
+const AUDMONO=1;
 /* GRAN IS A MODE OF THE AUDIO CHANNEL now (au.amode 1); cat 'gran' survives
    as the legacy spelling so old saves keep singing */
 /* PITCH KEYS SPAWN CURSORS THROUGH THE CLOUD — that is what 'gran' was.
@@ -16949,9 +17357,12 @@ function detectCuts(buf,st,en,n){
   chosen.sort((a,b)=>a-b);
   /* LAND JUST BEFORE THE HIT. A cue exactly on the transient clips its own
      attack — the first millisecond is what makes it a hit — so each cut backs
-     off 3ms: inaudible as a delay, and the difference between a snare and a
-     thud. */
-  const pre9=Math.round(sr*0.003)/N;
+     off 1ms (Gad, 2026-08-17 — 3ms was landing too early for him). Note the
+     detector's own grid is coarser than this: the flux peak is found on a 5ms
+     hop with a 10ms window, so the cut is quantised to that and the true
+     transient can sit up to a window later. This number is the deliberate
+     part; the grid is the floor under it. */
+  const pre9=Math.round(sr*0.001)/N;
   const fr=chosen.map(b=>Math.max(st,(i0+b*hop)/N-pre9))
                  .filter(f=>f>st+1e-6&&f<en-1e-6);
   /* the take's own start is a cut — unless the first hit IS the start, which
@@ -19496,8 +19907,18 @@ const onKeyDown=e=>{
            bargain position keys make. The key retunes the autonomous cursor
            (sync moves its shifter, free glides its rate) and letting go puts
            it back; poly is what spawns. */
-        const vmP=clamp(Math.round((p9.vox||{}).mode||0),0,2);
-        if(vmP>0&&autoCur(p9)){
+        /* ONE PLAYHEAD (AUDMONO): the key always takes the cursor rather than
+           adding one — and it takes it whether or not the LOOP is running,
+           which is the part `vmP>0 && autoCur` could not express. With auto
+           off there is no cursor to bend yet, so the key makes the one and
+           every key after it moves that. */
+        const vmP=AUDMONO?1:clamp(Math.round((p9.vox||{}).mode||0),0,2);
+        if(AUDMONO&&!autoCur(p9)&&!engine.audRolling(pi)){
+          /* no cursor on this channel yet: give it its one, from the crop, and
+             let the key bend it like any other */
+          engine.audPlay(pi,AC.currentTime+0.005,lane.len,0);
+        }
+        if(vmP>0&&(autoCur(p9)||AUDMONO)){
           /* THE SCALE APPLIES HERE TOO (Gad, 2026-08-17). `chrom` was passed
              true, which is the KIT exemption — a kit is twelve pads and a
              scale keyboard cannot reach them all. An audio channel's pitch
@@ -19508,9 +19929,17 @@ const onKeyDown=e=>{
              true) was giving. */
           const semP=(noteOf(c,pi)??0)+S.oct*12+trSemis(p9);
           AUD.gk=AUD.gk||{};
-          AUD.gk[c]=AUD.hold={c,pi,kind:'pmono',sl:null,vel:hitVel,
-            press:AC.currentTime,tr:gridNow()};
+          /* CARRY THE SEMITONE. The hold recorded nothing at all — no `pk`,
+             so `endAudHold`'s recorder had nothing to write and a pitch
+             performance vanished the moment you let go. It is the same event
+             the lane already replays (`ev.pk` → audPitch), and the 'pitch'
+             branch below already knows how to write one; it just never got a
+             hold with a pk on it. Under AUDMONO this is the ONLY path a pitch
+             key takes, so "recording pitch keys doesn't work" was all of it. */
+          AUD.gk[c]=AUD.hold={c,pi,kind:'pmono',sl:null,vel:hitVel,pk:semP,
+            press:AC.currentTime,tr:Math.max(gridNow(),0)};
           engine.audPitch(pi,semP);
+          engine.busEnvFire(pi,AC.currentTime);      // the keystroke IS the note-on
           flash('loop '+(semP>0?'+':'')+semP+'st'+(vmP===2?' · glide':''));
           dirty=true; return;
         }
@@ -19606,11 +20035,19 @@ const onKeyDown=e=>{
          the loop keeps rolling and the key changes where it reads from. That
          is the difference he asked for: poly adds a head on top, mono moves
          the one head you have, legato slides it there. */
-      const vm9=clamp(Math.round((S.presets[pi].vox||{}).mode||0),0,2);
-      if(vm9>0&&(autoCur(S.presets[pi])||!first9)){
+      /* ONE PLAYHEAD (AUDMONO): a cue key JUMPS the cursor, it does not add
+         one. The glide still comes from `voice` — legato is a glide time, and
+         that is a shape worth keeping even with one head. */
+      const vm9=AUDMONO?Math.max(1,clamp(Math.round((S.presets[pi].vox||{}).mode||0),0,2))
+                       :clamp(Math.round((S.presets[pi].vox||{}).mode||0),0,2);
+      if(AUDMONO&&!autoCur(S.presets[pi])&&!engine.audRolling(pi)){
+        engine.audPlay(pi,AC.currentTime+0.005,L,0);   // no cursor yet: make the one
+      }
+      if(vm9>0&&(autoCur(S.presets[pi])||!first9||AUDMONO)){
         const gl9=vm9===2?Math.max(0.01,(S.presets[pi].vox||{}).glide||0.08):0;
         const ms0=Math.max(0,(atP-AC.currentTime)*1000);
-        const go=()=>engine.audMove(pi,cutAt(pi,sl),gl9,1);
+        const go=()=>{engine.audMove(pi,cutAt(pi,sl),gl9,1);
+          engine.busEnvFire(pi,AC.currentTime);};
         if(ms0<2)go(); else setTimeout(go,ms0);
         flash('cue '+(sl+1)+'/'+nS+' · '+(vm9===2?'glide':'moved'));
         dirty=true; return;
@@ -19877,8 +20314,72 @@ function endAudHold(c){
   if(AUD.gk&&AUD.gk[c]&&AUD.gk[c].kind==='pmono'){
     const h8=AUD.gk[c]; delete AUD.gk[c];
     if(AUD.hold===h8)AUD.hold=null;
-    if(!Object.keys(AUD.gk).some(k8=>(AUD.gk[k8]||{}).kind==='pmono'))
+    /* …AND IT IS WRITTEN DOWN, exactly the way the 'pitch' branch writes one:
+       into retro so tab+N can reveal it afterwards, and into the lane when rec
+       is on. Same {t, pk, dur} shape the replay above already reads. */
+    if(h8.pk!==undefined&&h8.tr!=null){
+      const lane8=S.patterns[S.editPat].lanes[h8.pi], L8=lane8.len;
+      const dur8=Math.max(0.05,h8.press!=null?(AC.currentTime-h8.press)/spb():0.25);
+      retroBuf[h8.pi].push({t:h8.tr,pk:h8.pk,dur:dur8});
+      if(retroBuf[h8.pi].length>512)retroBuf[h8.pi].shift();
+      if(S.patterns[S.editPat].state==='rec'){
+        const qt8=fmod(h8.tr-editAnchor(),L8);
+        lane8.clear(ev=>ev.pk===h8.pk&&Math.abs(ev.t-qt8)<1e-6);
+        lane8.events.push({t:qt8,pk:h8.pk,dur:dur8,born:performance.now()});
+        dirtySave=true;
+      }
+    }
+    if(!Object.keys(AUD.gk).some(k8=>(AUD.gk[k8]||{}).kind==='pmono')){
       engine.audPitch(h8.pi,0);
+      engine.busEnvFire(h8.pi,AC.currentTime,true);   // …and the key-up releases it
+      /* AUTO OFF: the last finger takes the head with it. With the loop off a
+         pitch key MAKES the one cursor, so it also has to end it — otherwise
+         the take runs on by itself at base pitch, which is what Gad heard, and
+         audCar then names a head nobody can reach. */
+      if(!autoCur(S.presets[h8.pi])){engine.audStop(h8.pi); dirty=true; return 'stop';}
+      /* WHY UP WAS WORSE THAN DOWN (Gad: "on pitching down and return it land
+         perfect but on pitching up and return it gets out of sync"). The rate
+         does not snap back, it SLEWS — c.step glides toward c.sTgt on a 20ms
+         time constant — so for ~60ms after the key-up the head is still moving
+         at the wrong speed, and correcting the position before that has
+         finished corrects it to a place the head immediately leaves.
+         The error is asymmetric because the rate delta is: +12st is x2, a
+         surplus of +1.0, while -12st is x0.5, a deficit of only -0.5. Up
+         overshoots twice as far as down undershoots, which is exactly the
+         asymmetry he heard.
+         So: correct once NOW (most of it, and it keeps the seam close to the
+         gesture) and once more after four time constants, when the rate has
+         actually landed and the remaining error is real rather than in
+         flight. */
+      /* AND IT COMES BACK IN TIME (Gad, 2026-08-17). In tape mode a pitch bend
+         IS a speed change — that is what tape means, and while you hold it the
+         head is supposed to run away. But the loop underneath it never moved:
+         the bar is where it always was, and letting go used to leave the head
+         wherever the bend had carried it, so the take was out of phase with
+         the clock for the rest of the session.
+         Under SYNC the loop has an opinion about where in the take you should
+         be, and audRelock is exactly that opinion — it puts the head at the
+         point the current bar position asks for, through the same 3ms
+         equal-power splice a cue flip uses, so it is a seam and not a click.
+         FREE has no such opinion and audRelock returns early there, which is
+         right: a free take is not on the clock and has nowhere to come back
+         to. So this is one call and it does the correct nothing when free. */
+      /* …ONTO THE SHADOW, NOT ONTO A MAP OF THE BAR. audRelock's linear map is
+         right only at speed x1; at x0.25 it is four times too far forward,
+         which is the throw Gad reported. audReturn lands on the phase the
+         cursor would have had unbent, which is the same answer at every speed.
+         Still two-stage: the rate SLEWS back over ~20ms, so for a moment after
+         the first splice the head is still moving wrong, and the second one at
+         four time constants takes out what that cost. */
+      const pi7=h8.pi;
+      if(engine.audBendMovedClock(pi7)){
+        engine.audReturn(pi7);
+        setTimeout(()=>{try{
+          if(AUD.gk&&Object.keys(AUD.gk).some(k7=>(AUD.gk[k7]||{}).pi===pi7))return;
+          engine.audReturn(pi7);
+        }catch(_){}},80);
+      }
+    }
     dirty=true; return 'stop';
   }
   const hg9=(AUD.gk&&AUD.gk[c]&&AUD.gk[c].kind==='pitch')?AUD.gk[c]:null;
@@ -19918,10 +20419,58 @@ function endAudHold(c){
        when the last finger leaves, which is what a grab has always meant. */
     if(tid)engine.audOff(pi,tid);
     const others9=Object.keys(AUD.gk||{}).some(k9=>(AUD.gk[k9]||{}).pi===pi);
-    if(!others9)engine.audStop(pi);
     const lane=S.patterns[S.editPat].lanes[pi], L=lane.len;
-    /* the jump's length is the held gesture, like a note's */
-    const durB=Math.max(0.05,press!=null?(AC.currentTime-press)/spb():0.25);
+    /* QUANTIZE THE OFF TOO (Gad, 2026-08-17: "in cue mode you should quantize
+       note offs to the q-grid size, will sound cleaner"). Quantizing only the
+       START and letting the release land wherever the finger left is what makes
+       a chopped break sound ragged: the hits are in time and the gaps between
+       them are not, so every jump has a different length and the ones that end
+       just before a grid point leave a hole. Ending on the grid makes each grab
+       a whole number of steps, which is what a chop IS.
+       The RECORDED length is quantized with it — the ear and the lane have to
+       agree, or a jam that sounded clean comes back ragged. */
+    const gq9=gridOf(lane), nowB9=gridNow();
+    const offB9=CFG.qOn?qnext(nowB9,gq9):nowB9;
+    const wait9=Math.max(0,(gridTime(offB9)-AC.currentTime)*1000);
+    const endIt=()=>{
+      /* …unless a finger arrived in the meantime: the grab it started owns the
+         channel now and this stale release must not take it away */
+      if(Object.keys(AUD.gk||{}).some(k=>(AUD.gk[k]||{}).pi===pi))return;
+      /* A RELEASE IS NOT A STOP (Gad, 2026-08-18: "when i mess with cue points
+         or pitch and let go around the end of the loop the sample will stop and
+         will only play again next round like it got an off message").
+         audStop is a BROADCAST — a tclr that ends every cursor the worklet is
+         holding — and audCycle posts the next bar's carrier a HORIZON before
+         the line. So a release inside those last 150ms killed a carrier that
+         had not started yet, and audCycle had already scanned past that
+         boundary: nothing spawned until the bar AFTER. One cycle of silence,
+         from letting go at the wrong moment.
+         With one playhead there is nothing to stop anyway — the cue MOVED the
+         head, it did not add one, and a pitch key's own cursor is already ended
+         by the audOff above. So the release only has to hand the head back to
+         the bar. With auto OFF there is no bar to hand it to and the head
+         simply carries on, which is what a keys-only channel is. */
+      if(!AUDMONO){
+        engine.audStop(pi);
+        if(T.playing&&autoCur(S.presets[pi])){
+          const a3=actAt(posNow());
+          engine.audPlay(pi,AC.currentTime+0.006,lane.len,fmod(posNow()-a3.anchor,lane.len));
+        }
+        return;
+      }
+      /* AUTO OFF: THE KEY WAS THE ONLY THING MAKING SOUND, so letting go ends
+         it. Gad: "when key is let go the sample keeps playing on its own".
+         There is no future carrier to protect here — audCycle does not run
+         with the loop off — so the broadcast is safe and is the right shape. */
+      if(!autoCur(S.presets[pi])){engine.audStop(pi); return;}
+      if(T.playing)engine.audRelock(pi);
+    };
+    if(!others9){ if(wait9<2)endIt(); else setTimeout(endIt,wait9); }
+    /* the jump's length is the held gesture, like a note's — ON THE GRID when
+       quantize is on, measured from the same clock the off lands on */
+    const durB=CFG.qOn&&tr!=null
+      ?Math.max(gq9,Math.round((offB9-tr)/gq9)*gq9)
+      :Math.max(0.05,press!=null?(AC.currentTime-press)/spb():0.25);
     if(sl!=null&&tr!=null){
       retroBuf[pi].push({t:tr,cue:sl,dur:durB});
       if(retroBuf[pi].length>512)retroBuf[pi].shift();
@@ -19936,11 +20485,10 @@ function endAudHold(c){
        in phase whether or not the auto cursor was on — so with auto OFF, a
        grab you released handed you the take playing from the loop position,
        all the way to its end, sounding for all the world like the cue had
-       never stopped. */
-    if(T.playing&&autoCur(S.presets[pi])&&!others9){
-      const a2=actAt(posNow());
-      engine.audPlay(pi,AC.currentTime+0.006,L,fmod(posNow()-a2.anchor,L));
-    }
+       never stopped.
+       IT LIVES IN `endIt` NOW, with the stop it belongs to: the two are one
+       gesture and quantizing the stop without the resume would leave a hole
+       exactly as long as the wait. */
     dirty=true; return 'went';
   }
   return '';

@@ -1,3 +1,161 @@
+# BRANCH `audio-mono` — OPEN, five things, with what is already known
+
+Written 2026-08-17 at the end of a session, so the next one starts with the
+analysis rather than repeating it. Served at http://localhost:3033/audio-mono/
+(the worktree lives inside the served root; the trailing slash is required).
+
+## 0. ONE EXTRA PLAYHEAD PER BAR — FIXED (Gad, 2026-08-17)
+
+Gad: "it also gets louder and louder every loop like its doubling the sound, i
+think you didnt kill multiplayheads and they stack or something." He is right,
+and it is NOT the replay — that path spawns nothing now. Instrumented
+`audPlay2` on his own set: **one spawn per loop, always audCycle's carrier,
+life exactly one cycle, and zero audStops.** So nothing was being added; the
+old carrier simply was not dying.
+
+`tset` carries `left` — the carrier's remaining life, re-cut so a loop that
+grows under it does not die at the old cycle end. The worklet applied it to
+**every cursor wearing the car flag**, which is every carrier that ever ran.
+And `left` is the time to the NEXT boundary, so AT the boundary `fmod` wraps
+to 0 and it is a WHOLE cycle: a relock landing on the bar line handed the
+OUTGOING carrier a fresh lease while audCycle spawned its successor anyway.
+The replay calls `audRelock` at the end of every cue gesture and his lane has
+three events at t=0, so one landed on the line every single loop.
+
+The message names the carrier now (`car: audCar[pi]`), and an old one keeps
+the life it was born with. His set, ch9, 20 loops, cursors alive per loop:
+
+    before   1 2 3 4 5 6 7 8 …then a collapse, and away again 1 2 3 4 5 6 7 8
+    after    1.1 every loop, peak 2 across the cycle seam — flat for 20
+
+The empty-lane control reads 1.1/2 as well, which is what says the number is
+right rather than merely small. Removing the re-cut entirely (a runtime patch,
+not shipped) also goes flat — that is what proved the mechanism.
+
+**AND A SECOND ONE IN THE WORKLET, LATENT HERE:** `tclr` OVERWROTE `relAt`, so
+a stop scheduled later pushed back a death already scheduled earlier — and a
+scheduled stop is posted up to a HORIZON before it happens. Measured directly:
+a cursor told to stop at +0.30s, then handed a stop at +2.00s, died at 2.13s
+instead of 0.37s. On `main`, where the replay still does stop → play(cue) →
+stop → play(resume), that is a ratchet: no cue cursor ever reaches its own
+stop and they pin at the 12-cursor cap from the first loop (measured: 12 every
+loop, rms 0.078). AUDMONO does not walk that path, but the ratchet branch and
+every live grab do. Earliest stop wins now.
+
+**THE DROPOUT IS A DIFFERENT BUG AND IT IS STILL THERE** — see item 3, which
+now has numbers.
+
+## 1. QUANTIZE DOES NOT REACH PITCH-MODE KEYS — diagnosed, not fixed
+
+The `pmono` branch fires `engine.audPitch(pi,semP)` the instant the key lands.
+Every other key path in the instrument computes a quantized time first —
+`const trf = CFG.qOn ? qnext(t0f,gf)*(lane.qlive??1) + t0f*(1-(lane.qlive??1)) : t0f;`
+— and defers through a setTimeout. The pmono branch computes nothing, so
+`CFG.qOn` is simply not consulted there. It also records `tr: gridNow()` rather
+than the quantized time, so REC would write the unquantized position even once
+the sound is quantized. Both want the same three lines the 'pitch' branch above
+it already has.
+
+## 2. THE TAPE RETURN OVERSHOOTS — FIXED, and his suggestion was the fix
+
+He was right that it "throws the play head way forward". `audRelock` computed
+where to land as `W.a + (ph/L)*(W.far-W.a)` — the loop phase mapped LINEARLY
+across the crop. That is only correct when the take covers the crop exactly
+once per cycle: sync on AND speed x1. At his x0.25 the take covers a quarter of
+it, so the map is four times too far.
+
+His own suggestion — "maybe you should have a silent playhead or counter
+running parallel so you know where to land properly" — is what shipped, as the
+counter rather than the second cursor: every tape cursor carries `bp`, the
+phase it would have had if nothing ever bent it, advanced at `base` instead of
+`step` and wrapped in the same crop. One add and a compare per sample; a second
+cursor would have cost a buffer read and an interpolation to reach the same
+number. `cret` splices the head onto it through the 3ms equal-power fade a cue
+flip already uses, and `audReturn(pi)` is the call. A deliberate `cmov` — a
+cue, a relock — re-seats `bp` too, or a cue jump would be undone by the next
+bend release.
+
+Measured in ONE run so run-to-run jitter cannot enter it: bend held through
+cycle 3 only, every other cycle its own control, the head read at the same
+phase of each cycle, error in seconds of a 9.6s take.
+
+    cycle        0      1      2      3(bent)  4      5      6
+    before   -0.022 -0.004  0.026    4.136   0.063  0.082  0.100
+    after    -0.018  0.000  0.018   -0.052  -0.044 -0.037 -0.030
+
+The unbent cycles are the noise floor, about +/-0.1s, and after the fix the
+bent one sits inside it. Symmetric: -12st reads -0.048 where +12st reads
+-0.052, so the up/down asymmetry the catch-up used to have is gone with it.
+Stretch is untouched — `audBendMovedClock` still says the clock never moved
+there, so nothing is spliced.
+
+**STILL ON THE LINEAR MAP, deliberately: the CUE gesture's return.** The
+AUDMONO replay ends each cue with `audRelock(li)` — "back where the bar asks" —
+and that is the same map with the same x0.25 error. It was not what he asked
+about and a cue is a deliberate move rather than a bend, so the right answer
+there is a design question, not a bug fix: after a grab, should the head resume
+where the cue left it, or where the bar says? His call.
+
+## 3. RECORDED CUES PLAY BACK ONCE AND STOP — FIXED, and the suspicion written
+##    in this entry was right
+
+The suspicion here — that `audRelock` → `audLive` → the carrier's life re-cut
+is what does it — is what the measurement says.
+
+**THE MECHANISM.** `audCycle` posts the next carrier a HORIZON ahead of the
+boundary and `audPlay2` records it in `audCar[pi]` the moment it is posted, so
+for ~150ms before every bar line the named carrier is one that HAS NOT STARTED.
+The re-cut was a DURATION from the caller — the time from now to the
+boundary — spent against `v.n`, the cursor's own sample count, which for a
+pending cursor is still 0. So it was born with the eighty milliseconds left in
+the OLD cycle as its whole life, died eighty milliseconds in, and nothing
+spawned behind it until the bar after.
+
+**THE FIX: A DEADLINE, NOT A DURATION.** `audCarDieF(pi)` is an absolute frame,
+the first cycle boundary strictly after the carrier's OWN start — which
+`audPlay2` now records alongside its id — and the worklet spends it as
+`life = dieF - fr`. That says the same thing to a cursor born an hour ago and
+to one that has not begun.
+
+Isolated, because with a real lane it only fires when a gesture happens to end
+inside the lookahead window. Cue lane emptied, a relock fired 75ms before the
+bar line, four times, measuring how much of the NEXT cycle had a cursor alive:
+
+    named carrier only (b28529e)   0.15  0.19  0.19  0.12
+    deadline frame                 1.00  1.00  1.00  1.00
+
+And his own lane, 20 loops, cursors alive and blocks of silence per loop, all
+three states with a healthy scheduler (see the trap below — this is the part
+that took the longest to get right):
+
+    7c5591e  his build   1 2 3 4 5 →1.4→ 2, one loop of 21 silent blocks,
+                         then 1 2 3 4 5 6 7 8 9 →1.7→ 2 3
+    b28529e  named       1.1 every loop, 0 silent
+    now      deadline    1.1 every loop, 0 silent
+
+The dropout on his build is the SAME bug as the ramp: when a relock landed
+where the shared re-cut was at its 20ms floor it killed the whole stack at
+once, and nothing spawned until the next boundary.
+
+## 4. GRAIN GETS QUIETER THE SMOOTHER IT IS — partly by design, partly not
+
+`norm = 1/sqrt(ng)` normalises by grain COUNT, and a smoother cloud is a denser
+one, so the level falls as you smooth it. There IS a compensator — `cComp`,
+which measures the cloud's own rms against the take at the point the carrier is
+reading and corrects the ratio — but it only runs `if(this.carMute)`, i.e. only
+when a carrier exists and is muted. A cloud played from the KEYS with the loop
+off never gets it. That asymmetry is the first thing to look at.
+
+## 5. DO `pos` AND `scan` STILL EARN THEIR PLACE — a real question, and the
+answer is "only with no carrier"
+
+Since the cloud follows the playhead, `pos` and `scan` are consulted ONLY when
+`this.car == null` — no loop running. So on a channel with auto on they do
+nothing at all, and on a keys-only channel they are the whole address. That is
+defensible but invisible: the page shows them either way. Either hide them when
+a carrier exists, or fold them into an OFFSET from the carrier (which would
+make them meaningful in both cases and is probably the better instrument).
+
 # TEN — where the audio channel stands, and what is next
 
 Written 2026-08-15. Live at gadbaruch.github.io/Ten/ · dev server: `preview_start
@@ -2125,6 +2283,22 @@ audio, not from the param. That is a probe limitation, not a finding.
 
 ## Things that will bite you
 
+- **CUTTING THE SPEAKERS CLAMPS THE SCHEDULER TO ONE SECOND, and it will make a
+  working build look broken.** The transport is a 25ms `setInterval` with a
+  150ms HORIZON, and a page that is not producing audible output loses the
+  "playing audio" exemption: the browser throttles its timers to 1/s. The audio
+  GRAPH is fine — analysers are pull nodes, exactly as the TEST SILENTLY rule
+  says — but nothing gets SCHEDULED into it in time. Measured in the same tab,
+  same build, same set, over 25 seconds:
+
+        speakers cut       tick median 96ms, max 998ms · 10 of 19 carriers
+                           posted LATE, up to 819ms · three gaps of silence
+        speakers at 5%     tick median 15ms, max 29ms · 0 of 21 late · none
+
+  Two rounds of this session went into "dropouts" that were entirely this.
+  Anything that runs the transport for more than a few seconds has to be
+  measured with `engine.comp` connected — put a gain of 0.05 in front of
+  `AC.destination` and say so. Short probes that fire one note are unaffected.
 - **No backticks inside the worklet code strings.** They live in a template
   literal. A backtick in a comment breaks the whole page.
 - **A long-lived browser tab lies.** After dozens of probes, panics and

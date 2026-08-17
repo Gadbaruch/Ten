@@ -96,6 +96,14 @@ after, not a list of files touched.
   Verified: a kick measured 0.1869 audible, 0.1894 with the destination cut,
   0.1875 restored. He should not have to listen to a session's worth of test
   tones. Reconnect only if something genuinely needs to be heard, and say so.
+  **BUT NOT WITH THE TRANSPORT RUNNING.** True of the graph, false of the
+  SCHEDULER: it is a 25ms `setInterval` with a 150ms horizon, and a page making
+  no audible sound has its timers clamped to 1/s. Measured in one tab: cut,
+  tick median 96ms and max 998ms, ten of nineteen carriers posted LATE by up to
+  819ms, three gaps of silence; at 5%, median 15ms, max 29ms, none late, none.
+  So anything that plays for more than a few seconds goes through a gain of
+  0.05 into `AC.destination` — quiet, but audible enough to keep the exemption —
+  and you say so. One-shot probes are still silent.
 - **Measure against the previous build, not against remembered numbers.** Open
   the live site in a second tab and run the identical script on both.
 - **A preset change needs LIBV bumped and the factory half re-laid**, or the
