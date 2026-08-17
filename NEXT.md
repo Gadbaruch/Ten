@@ -1,3 +1,67 @@
+# BRANCH `audio-mono` — OPEN, five things, with what is already known
+
+Written 2026-08-17 at the end of a session, so the next one starts with the
+analysis rather than repeating it. Served at http://localhost:3033/audio-mono/
+(the worktree lives inside the served root; the trailing slash is required).
+
+## 1. QUANTIZE DOES NOT REACH PITCH-MODE KEYS — diagnosed, not fixed
+
+The `pmono` branch fires `engine.audPitch(pi,semP)` the instant the key lands.
+Every other key path in the instrument computes a quantized time first —
+`const trf = CFG.qOn ? qnext(t0f,gf)*(lane.qlive??1) + t0f*(1-(lane.qlive??1)) : t0f;`
+— and defers through a setTimeout. The pmono branch computes nothing, so
+`CFG.qOn` is simply not consulted there. It also records `tr: gridNow()` rather
+than the quantized time, so REC would write the unquantized position even once
+the sound is quantized. Both want the same three lines the 'pitch' branch above
+it already has.
+
+## 2. THE TAPE RETURN OVERSHOOTS, AND GAD'S SUGGESTION IS THE RIGHT ONE
+
+He is right that it "throws the play head way forward". `audRelock` computes
+where to land as `W.a + (ph/L)*(W.far-W.a)` — the loop phase mapped LINEARLY
+across the crop. That is only correct when the take covers the crop exactly
+once per cycle, i.e. fit on AND speed x1. With `spd` at anything else the take
+covers it `spd` times and the linear map is wrong by that factor, which throws
+it forward exactly as he describes.
+
+His own suggestion — "maybe you should have a silent playhead or counter
+running parallel so you know where to land properly" — is the correct fix and
+is cheaper than it sounds: the worklet already renders a carrier that can be
+silent (`c.car && this.carMute` walks the phase and outputs nothing). A second
+cursor with `gain:0` that is NEVER bent gives the exact answer with no
+arithmetic at all, and `tpos` already reports positions. Land the bent head on
+the silent one's phase.
+
+## 3. RECORDED CUES PLAY BACK ONCE AND STOP — not diagnosed
+
+New with the AUDMONO replay path (move-the-head instead of stop/spawn). The
+stacking is gone and the first pass is right; it does not come round again.
+First thing to check: the replay ends each gesture with `audRelock(li)`, which
+goes through `audLive` → `audCarLeft` → re-cuts the carrier's life to the next
+boundary. If the last gesture in a bar re-cuts a life that `audCycle` has
+already scheduled the successor for, the channel can end up with a carrier that
+dies and no spawn behind it. Measure `tv` across the boundary before theorising
+further.
+
+## 4. GRAIN GETS QUIETER THE SMOOTHER IT IS — partly by design, partly not
+
+`norm = 1/sqrt(ng)` normalises by grain COUNT, and a smoother cloud is a denser
+one, so the level falls as you smooth it. There IS a compensator — `cComp`,
+which measures the cloud's own rms against the take at the point the carrier is
+reading and corrects the ratio — but it only runs `if(this.carMute)`, i.e. only
+when a carrier exists and is muted. A cloud played from the KEYS with the loop
+off never gets it. That asymmetry is the first thing to look at.
+
+## 5. DO `pos` AND `scan` STILL EARN THEIR PLACE — a real question, and the
+answer is "only with no carrier"
+
+Since the cloud follows the playhead, `pos` and `scan` are consulted ONLY when
+`this.car == null` — no loop running. So on a channel with auto on they do
+nothing at all, and on a keys-only channel they are the whole address. That is
+defensible but invisible: the page shows them either way. Either hide them when
+a carrier exists, or fold them into an OFFSET from the carrier (which would
+make them meaningful in both cases and is probably the better instrument).
+
 # TEN — where the audio channel stands, and what is next
 
 Written 2026-08-15. Live at gadbaruch.github.io/Ten/ · dev server: `preview_start
