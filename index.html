@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.1335';
+const BUILD='2026-08-17.1343';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1380,21 +1380,21 @@ const SETTINGS=[
        flash('digits show which channels have content · green = has events',6000);}
      else{HE.ryLightMode(1,{bright:4}); flash('lights back to always-on',4000);}
      dirty=true;}},
- /* CAN THE LIGHT BE MODULATED AT ALL — 24 timed brightness writes, and it
-    flashes the board while it measures so the answer is visible as well as
-    numeric. ~1ms median means 0x07 is RAM and brightness is a live dial;
-    tens of ms means it is a flash commit and this is where the lights stop. */
+ /* HOW MANY BRIGHTNESS LEVELS ARE THERE, REALLY. The timing question is
+    answered — min 0.8ms, median 1ms, so 0x07 is RAM and the vendorSleep was
+    only caution. The open one is whether 0..4 is five visible STEPS or an
+    on/off the firmware rounds. Flickering at 40ms cannot show that; walking it
+    at 1.2s a step can, so this ramps 0-1-2-3-4-3-2-1-0 and names each level as
+    it lands. Nine writes. Watch the board, read the flash, they should agree. */
  {n:'led probe',g:'Input',h:()=>!HE.on||HE.kind!==2,
-   v:()=>HE._probe||'press to time it',
+   v:()=>HE._probe||'ramp 0-4-0',
    a:async()=>{
-     flash('timing 24 brightness writes — the board will flash',6000);
-     const r=await HE.ryBrightProbe(24);
+     flash('walking brightness 0→4→0, about a second a step — watch the board',5000);
+     const r=await HE.ryBrightProbe(1200);
      if(typeof r==='string'){HE._probe='failed'; flash('probe: '+r,8000); dirty=true; return;}
      HE._probe=r.med+'ms';
-     copyFlash('0x07 x'+r.n+'  min '+r.min+'ms  median '+r.med+'ms  max '+r.max+'ms  → '+
-       (r.med<5?'RAM — brightness can be modulated live'
-               :'slow, looks like a flash commit — do not modulate'),
-       'probe copied');
+     copyFlash('0x07 x'+r.n+' ramp 0-4-0  min '+r.min+'ms  median '+r.med+
+       'ms  max '+r.max+'ms  → RAM, live-modulatable','probe copied');
      dirty=true;}},
  {n:'h vel',g:'Input', h:()=>!HE.on,v:()=>Math.round(HE.cfg().est||0)===1?'window':'peak',
               a:()=>{const e2=Math.round(HE.cfg().est||0)===1?0:1; HE.set('est',e2);
@@ -4448,11 +4448,33 @@ let fxwReady=false;
             this.p[k9]=v9;
           }
         }
-        else if(m.t==='on')this.vs.set(m.id,{
-          ratio:Number.isFinite(m.ratio)?Math.min(64,Math.max(1/64,m.ratio)):1,
-          vel:Number.isFinite(m.vel)?Math.min(1.5,Math.max(0,m.vel)):0.9,
-          next:this.tick,env:0,rel:0});    // next=now: the first grain is THE attack
-        else if(m.t==='off'){const v=this.vs.get(m.id); if(v)v.rel=1;}
+        /* AN OFF CAN ARRIVE BEFORE ITS OWN ON, and dropping it is a hung note.
+           Both edges are posted from setTimeouts — the on at the note's time,
+           the off at the release — so a key let go before its own QUANTIZED
+           start sends an off for an id this processor has never seen. It used
+           to be dropped, and then the on landed on a voice that nothing left
+           in the world could ever end: key-mashing, once in a while, a note
+           that never stops. Same family as the synth's canEnd() bug — a voice
+           waiting for an event that cannot fire, except here the event had
+           already fired and was thrown away.
+           So an unmatched off is REMEMBERED and spent by the on that follows,
+           and the voice simply never starts. That is what the key layer
+           already does when you let go before a quantized note lands. */
+        else if(m.t==='on'){
+          if(this.pOff&&this.pOff.delete(m.id)){}      // released before it began
+          else this.vs.set(m.id,{
+            ratio:Number.isFinite(m.ratio)?Math.min(64,Math.max(1/64,m.ratio)):1,
+            vel:Number.isFinite(m.vel)?Math.min(1.5,Math.max(0,m.vel)):0.9,
+            next:this.tick,env:0,rel:0});} // next=now: the first grain is THE attack
+        else if(m.t==='off'){const v=this.vs.get(m.id);
+          if(v)v.rel=1;
+          else{
+            const P=this.pOff||(this.pOff=new Set());
+            P.add(m.id);
+            /* bounded: an id whose on never comes must not be remembered for
+               the life of the page */
+            if(P.size>128)P.delete(P.values().next().value);
+          }}
         else if(m.t==='rat'){const v=this.vs.get(m.id);
           if(v&&Number.isFinite(m.ratio))v.ratio=Math.min(64,Math.max(1/64,m.ratio));}
         else if(m.t==='tape'){if(this.tv.size<12){
@@ -10317,14 +10339,23 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     /* UNISON: one worklet voice per copy, detuned across the vox spread */
     const ids=[],offs=[],vAdj=vel/Math.sqrt(uniN);
     const ms=Math.max(0,(at-AC.currentTime)*1000);
+    /* …AND THE CHEAP HALF OF THE SAME FIX: if the key is already gone by the
+       time this note was due to start, do not post the on at all. The worklet
+       would catch it either way, but a round trip that ends in nothing is a
+       round trip worth not making. */
+    const gone={v:0};
     for(let u=0;u<uniN;u++){
       const off=uniN===1?0:((u/(uniN-1))*2-1)*(sprd||0);
       const id=e.id++;
       offs.push(off); ids.push(id);
-      setTimeout(()=>{try{e.node.port.postMessage({t:'on',id,
+      setTimeout(()=>{if(gone.v)return;
+        try{e.node.port.postMessage({t:'on',id,
         ratio:ratio*Math.pow(2,off/1200),vel:vAdj});}catch(_){}},ms);
     }
     const offAll=t=>{const ms2=Math.max(0,(t-AC.currentTime)*1000);
+      /* the note is over the moment this is CALLED, not when the message goes
+         — so an on still queued behind a quantize delay is cancelled here */
+      if(ms2<=ms)gone.v=1;
       setTimeout(()=>{for(const id of ids){
         try{e.node.port.postMessage({t:'off',id});}catch(_){}}},ms2);};
     if(durSec!=null){offAll(at+durSec);return null;}
@@ -13901,22 +13932,31 @@ const HE={
      is RAM then brightness is a dial we can actually turn — the only live
      modulation this board would have. BOUNDED at 24 writes, hard, because the
      whole point is to find out without paying for the answer. */
-  async ryBrightProbe(n){
+  /* MEASURED: min 0.8ms, median 1ms over 24 writes. 0x07 IS RAM, and the
+     vendorSleep really was only the vendor being careful. So brightness is a
+     live dial and this board can be modulated after all — just not per key.
+     Now: HOW MANY LEVELS. The field is 0..4 and lightLayout says maxValue 4,
+     but five VALUES is not five visible STEPS — the firmware may round it to
+     on/off. Walking it slowly, one level per second, is the only way to see
+     which, so this ramps 0-4-0 instead of flickering. Nine writes, not 24. */
+  BRIGHTRAMP:[0,1,2,3,4,3,2,1,0],
+  async ryBrightProbe(stepMs){
     const d=this.cfgDev||this.dev; if(!d)return 'no device';
-    n=Math.min(n||24,24);
-    const t=[];
-    for(let i=0;i<n;i++){
-      const b=i%2?0:4;                                  // full/off so it is visible too
+    const ms=stepMs||1200, seq=this.BRIGHTRAMP, t=[];
+    for(let i=0;i<seq.length;i++){
+      const b=seq[i];
       const t0=performance.now();
       try{await d.sendFeatureReport(0,this.ryCmd8(0x07,13,4,b,0,0,200,200));}
       catch(err){return 'FAILED at '+i+': '+(err&&err.message||err);}
       t.push(performance.now()-t0);
-      await new Promise(r=>setTimeout(r,40));
+      flash('brightness '+b+'  '+'█'.repeat(b||0)+'·'.repeat(4-(b||0)),ms+200);
+      dirty=true;
+      await new Promise(r=>setTimeout(r,ms));
     }
     t.sort((a,b)=>a-b);
-    this._ledWrites=(this._ledWrites||0)+n;
+    this._ledWrites=(this._ledWrites||0)+seq.length;
     await this.ryLightMode(13,{bright:4,speed:0,option:0});   // leave it lit
-    return {n,min:+t[0].toFixed(2),med:+t[t.length>>1].toFixed(2),
+    return {n:seq.length,min:+t[0].toFixed(2),med:+t[t.length>>1].toFixed(2),
             max:+t[t.length-1].toFixed(2)};
   },
   /* THE DIGITS SHOW WHICH CHANNELS HAVE ANYTHING IN THEM. First real use of the
