@@ -5,6 +5,53 @@ name "ten-gad"` → localhost:3033 is Gad's, `ten-main` → 3032 is Claude's, bo
 serving this directory · one file, `index.html`, no build step. See CLAUDE.md
 for who may be destructive where.
 
+## AN OFF THAT ARRIVED BEFORE ITS OWN ON (Gad, 2026-08-17)
+
+Gad: "key mashing i managed to get some hanging note once in a while. we
+already fixed it in synth engine maybe have a look what we are missing here."
+He is right that it is the same family, and the missing piece is one line.
+
+`granNote` posts BOTH edges from setTimeouts — the `on` at the note's time, the
+`off` at the release. With quantize on, the note's time can be
+
+    at = gridTime(next step)      up to a whole step in the future
+
+and the release is `AC.currentTime`. So a fast tap posts its `off` FIRST. The
+worklet's handler was `const v=this.vs.get(m.id); if(v)v.rel=1;` — no voice
+with that id yet, so **the off was silently dropped**, and then the `on` landed
+on a voice that nothing left in the world could ever end. Not a race that
+needed two threads: the two messages were simply queued in the wrong order.
+
+Same shape as the synth's `canEnd()` bug, mirrored: there a voice waited for an
+event that could never fire; here it waited for one that had already fired and
+been thrown away.
+
+An unmatched off is REMEMBERED now (`pOff`, bounded at 128) and spent by the
+`on` that follows — the voice never starts, which is exactly what the key layer
+already does when you let go before a quantized note lands. Plus the cheap
+half: `granNote` cancels its own queued `on` when the release beats it, so the
+round trip is not made at all.
+
+Both tests, against the previous build:
+
+    8 notes scheduled 300ms out, released after 60ms
+        live   grains 8 · voices 8      hung, and audible
+        now    grains 0 · voices 0
+
+    220 overlapping presses, quantize ON, transport rolling
+        live   voices 8 left, with nothing in AUD.gk / act / kbHeld
+               referencing them — unreachable by any key-up
+        now    0 everywhere
+
+Normal notes are untouched (10/10 sound, none silent) and the SEQUENCED path
+still ends itself: six notes with a 0.25s duration read 6 grains / 6 voices
+while sounding and 0 / 0 after.
+
+**The rule, and it is the third time this family has cost a session:** two
+edges of one note posted from two independent timers can arrive in either
+order. Whichever arrives first must be able to survive the other not being
+there yet.
+
 ## THE KEYS JOIN THE INSTRUMENT (Gad, 2026-08-17)
 
 Three follow-ups on the batch below, and all three are the same shape: a pitch
