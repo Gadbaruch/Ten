@@ -4,6 +4,47 @@ Written 2026-08-17 at the end of a session, so the next one starts with the
 analysis rather than repeating it. Served at http://localhost:3033/audio-mono/
 (the worktree lives inside the served root; the trailing slash is required).
 
+## 0. ONE EXTRA PLAYHEAD PER BAR — FIXED (Gad, 2026-08-17)
+
+Gad: "it also gets louder and louder every loop like its doubling the sound, i
+think you didnt kill multiplayheads and they stack or something." He is right,
+and it is NOT the replay — that path spawns nothing now. Instrumented
+`audPlay2` on his own set: **one spawn per loop, always audCycle's carrier,
+life exactly one cycle, and zero audStops.** So nothing was being added; the
+old carrier simply was not dying.
+
+`tset` carries `left` — the carrier's remaining life, re-cut so a loop that
+grows under it does not die at the old cycle end. The worklet applied it to
+**every cursor wearing the car flag**, which is every carrier that ever ran.
+And `left` is the time to the NEXT boundary, so AT the boundary `fmod` wraps
+to 0 and it is a WHOLE cycle: a relock landing on the bar line handed the
+OUTGOING carrier a fresh lease while audCycle spawned its successor anyway.
+The replay calls `audRelock` at the end of every cue gesture and his lane has
+three events at t=0, so one landed on the line every single loop.
+
+The message names the carrier now (`car: audCar[pi]`), and an old one keeps
+the life it was born with. His set, ch9, 20 loops, cursors alive per loop:
+
+    before   1 2 3 4 5 6 7 8 …then a collapse, and away again 1 2 3 4 5 6 7 8
+    after    1.1 every loop, peak 2 across the cycle seam — flat for 20
+
+The empty-lane control reads 1.1/2 as well, which is what says the number is
+right rather than merely small. Removing the re-cut entirely (a runtime patch,
+not shipped) also goes flat — that is what proved the mechanism.
+
+**AND A SECOND ONE IN THE WORKLET, LATENT HERE:** `tclr` OVERWROTE `relAt`, so
+a stop scheduled later pushed back a death already scheduled earlier — and a
+scheduled stop is posted up to a HORIZON before it happens. Measured directly:
+a cursor told to stop at +0.30s, then handed a stop at +2.00s, died at 2.13s
+instead of 0.37s. On `main`, where the replay still does stop → play(cue) →
+stop → play(resume), that is a ratchet: no cue cursor ever reaches its own
+stop and they pin at the 12-cursor cap from the first loop (measured: 12 every
+loop, rms 0.078). AUDMONO does not walk that path, but the ratchet branch and
+every live grab do. Earliest stop wins now.
+
+**THE DROPOUT IS A DIFFERENT BUG AND IT IS STILL THERE** — see item 3, which
+now has numbers.
+
 ## 1. QUANTIZE DOES NOT REACH PITCH-MODE KEYS — diagnosed, not fixed
 
 The `pmono` branch fires `engine.audPitch(pi,semP)` the instant the key lands.
@@ -32,16 +73,37 @@ cursor with `gain:0` that is NEVER bent gives the exact answer with no
 arithmetic at all, and `tpos` already reports positions. Land the bent head on
 the silent one's phase.
 
-## 3. RECORDED CUES PLAY BACK ONCE AND STOP — not diagnosed
+## 3. RECORDED CUES PLAY BACK ONCE AND STOP — REPRODUCED, and the suspicion
+##    in this entry was RIGHT. Still not fixed.
 
 New with the AUDMONO replay path (move-the-head instead of stop/spawn). The
 stacking is gone and the first pass is right; it does not come round again.
-First thing to check: the replay ends each gesture with `audRelock(li)`, which
-goes through `audLive` → `audCarLeft` → re-cuts the carrier's life to the next
-boundary. If the last gesture in a bar re-cuts a life that `audCycle` has
-already scheduled the successor for, the channel can end up with a carrier that
-dies and no spawn behind it. Measure `tv` across the boundary before theorising
-further.
+The suspicion written here first — that `audRelock` → `audLive` → `audCarLeft`
+re-cuts a life `audCycle` has already scheduled the successor for — is what
+the measurement now says. His set, ch9, 20 loops, blocks of silence per loop
+out of ~29, on BOTH builds (so it is NOT the item-0 fix):
+
+    loop      0 … 11   12  13  14  15  16  17  18  19
+    before     0        2  22  18   7   3  23  18   9
+    after      0        3  22  17   8   3  22  17   7
+
+Identical either side, which is what says these are two bugs and not one.
+Twelve clean loops and then three quarters of a bar missing, on a cycle.
+
+**THE MECHANISM, and it is the same `left` as item 0 wearing its other face.**
+`audCycle` spawns the next carrier a HORIZON AHEAD of the boundary, and
+`audPlay2` records it in `audCar[pi]` the moment it is posted — so for ~150ms
+before every bar line the named carrier is one that has NOT STARTED YET. A
+relock in that window computes `left` = the time from NOW to the boundary,
+which is a few tens of milliseconds, and hands it to a cursor whose `n` is
+still 0. It is born with a life of 50ms and dies 50ms in. Nothing spawns
+behind it until the next cycle.
+
+**THE FIX IS TO STOP SENDING A DURATION.** `left` is measured from the caller
+and spent from the cursor's own clock, and those are only the same instant for
+a cursor that is already running. A DEADLINE — an absolute frame, the way
+`relAt` already works — is right for both, and the carrier's death then means
+the same thing whether it was born an hour ago or has not been born yet.
 
 ## 4. GRAIN GETS QUIETER THE SMOOTHER IT IS — partly by design, partly not
 

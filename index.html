@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.2039-mono';
+const BUILD='2026-08-17.2115-mono';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -4701,13 +4701,32 @@ let fxwReady=false;
                audio". Measured from the caller to the next boundary on the new
                length, and only for the carrier: a key's grab lives until the
                finger leaves and must not be given a deadline. */
-            if(Number.isFinite(m.left)&&v.car)
+            /* …AND ONLY THE CARRIER THAT IS RUNNING NOW. The car flag is worn
+               by every carrier that ever ran, so this handed a fresh life to
+               the ones on their way out as well. left is the time to the NEXT
+               boundary, which AT the boundary is a WHOLE cycle — a relock on
+               the bar line resurrected the outgoing carrier for another bar,
+               and audCycle spawned its successor anyway. One extra playhead per
+               loop, for ever: Gad's "it gets louder and louder every loop like
+               its doubling the sound". Named now, and an unnamed message (no
+               carrier on the channel) still reaches nothing. */
+            if(Number.isFinite(m.left)&&v.car&&(!m.car||id===m.car))
               v.life=v.n+Math.max(1,Math.round(m.left*sampleRate));
           }}
         /* a stop can be SCHEDULED: the sequenced cue lane stops at a beat that
            has not happened yet, so carry the frame and let the voice die there */
+        /* A STOP ONLY EVER BRINGS A DEATH FORWARD. It used to OVERWRITE relAt,
+           and a scheduled stop is posted the moment the scheduler reaches it —
+           up to a HORIZON before it happens — so the next stop landed on every
+           cursor already holding an earlier one and PUSHED IT BACK. Measured
+           directly: a cursor told to stop at +0.30s, then handed a stop at
+           +2.00s, died at 2.13s instead of 0.37s. The AUDMONO replay no longer
+           walks this path, but the ratchet branch and every live grab still do,
+           and a cue cursor's life is 1e6 seconds — nothing else ends it. */
         else if(m.t==='tclr'){const fa=m.frame||0;
-          for(const [id,v] of this.tv){if(fa>currentFrame+1)v.relAt=fa; else v.rel=1;}}
+          for(const [id,v] of this.tv){
+            if(fa>currentFrame+1)v.relAt=v.relAt?Math.min(v.relAt,fa):fa;
+            else v.rel=1;}}
         /* the pitch bend destination: free voices move their rate (tape), sync
            voices move only the shifter (the clock is not for sale) */
         else if(m.t==='tpb'){const s9=Number.isFinite(m.semis)?m.semis:0, f9=Math.pow(2,s9/12);
@@ -10401,8 +10420,18 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     const k9=buf.sampleRate/AC.sampleRate;
     const r9=(rate<0?Math.min(-0.05,rate):Math.max(0.05,rate))*k9;
     const left9=this.audCarLeft(pi);
+    /* WHICH carrier the new life belongs to. `left` is the time to the NEXT
+       boundary, and the worklet applied it to every cursor wearing the car
+       flag — which is every carrier that ever ran, not the one running now.
+       At the bar line fmod wraps to 0, so left is a WHOLE cycle: a relock
+       landing there handed the OUTGOING carrier a fresh lease exactly as it
+       was about to expire. The replay calls audRelock at the end of every cue
+       gesture and this lane has three events at t=0, so one landed on the line
+       every single loop — one extra playhead per bar, for ever. Naming the
+       carrier is the whole fix; an old one keeps the life it was born with and
+       dies where it always should have. */
     try{e9.node.port.postMessage({t:'tset',
-      ...(left9==null?{}:{left:left9}),
+      ...(left9==null?{}:{left:left9,car:(this.audCar||[])[pi]||null}),
       /* a negative rate is a real rate: a floor of +0.05 turned reverse into
          a very slow forward, and dividing the take's remaining length by it
          gave the voice a negative life, so it died on arrival */
