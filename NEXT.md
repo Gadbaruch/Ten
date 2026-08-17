@@ -56,22 +56,45 @@ than the quantized time, so REC would write the unquantized position even once
 the sound is quantized. Both want the same three lines the 'pitch' branch above
 it already has.
 
-## 2. THE TAPE RETURN OVERSHOOTS, AND GAD'S SUGGESTION IS THE RIGHT ONE
+## 2. THE TAPE RETURN OVERSHOOTS — FIXED, and his suggestion was the fix
 
-He is right that it "throws the play head way forward". `audRelock` computes
+He was right that it "throws the play head way forward". `audRelock` computed
 where to land as `W.a + (ph/L)*(W.far-W.a)` — the loop phase mapped LINEARLY
 across the crop. That is only correct when the take covers the crop exactly
-once per cycle, i.e. fit on AND speed x1. With `spd` at anything else the take
-covers it `spd` times and the linear map is wrong by that factor, which throws
-it forward exactly as he describes.
+once per cycle: sync on AND speed x1. At his x0.25 the take covers a quarter of
+it, so the map is four times too far.
 
 His own suggestion — "maybe you should have a silent playhead or counter
-running parallel so you know where to land properly" — is the correct fix and
-is cheaper than it sounds: the worklet already renders a carrier that can be
-silent (`c.car && this.carMute` walks the phase and outputs nothing). A second
-cursor with `gain:0` that is NEVER bent gives the exact answer with no
-arithmetic at all, and `tpos` already reports positions. Land the bent head on
-the silent one's phase.
+running parallel so you know where to land properly" — is what shipped, as the
+counter rather than the second cursor: every tape cursor carries `bp`, the
+phase it would have had if nothing ever bent it, advanced at `base` instead of
+`step` and wrapped in the same crop. One add and a compare per sample; a second
+cursor would have cost a buffer read and an interpolation to reach the same
+number. `cret` splices the head onto it through the 3ms equal-power fade a cue
+flip already uses, and `audReturn(pi)` is the call. A deliberate `cmov` — a
+cue, a relock — re-seats `bp` too, or a cue jump would be undone by the next
+bend release.
+
+Measured in ONE run so run-to-run jitter cannot enter it: bend held through
+cycle 3 only, every other cycle its own control, the head read at the same
+phase of each cycle, error in seconds of a 9.6s take.
+
+    cycle        0      1      2      3(bent)  4      5      6
+    before   -0.022 -0.004  0.026    4.136   0.063  0.082  0.100
+    after    -0.018  0.000  0.018   -0.052  -0.044 -0.037 -0.030
+
+The unbent cycles are the noise floor, about +/-0.1s, and after the fix the
+bent one sits inside it. Symmetric: -12st reads -0.048 where +12st reads
+-0.052, so the up/down asymmetry the catch-up used to have is gone with it.
+Stretch is untouched — `audBendMovedClock` still says the clock never moved
+there, so nothing is spliced.
+
+**STILL ON THE LINEAR MAP, deliberately: the CUE gesture's return.** The
+AUDMONO replay ends each cue with `audRelock(li)` — "back where the bar asks" —
+and that is the same map with the same x0.25 error. It was not what he asked
+about and a cue is a deliberate move rather than a bend, so the right answer
+there is a design question, not a bug fix: after a grab, should the head resume
+where the cue left it, or where the bar says? His call.
 
 ## 3. RECORDED CUES PLAY BACK ONCE AND STOP — FIXED, and the suspicion written
 ##    in this entry was right

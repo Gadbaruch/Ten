@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.2137-mono';
+const BUILD='2026-08-17.2207-mono';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -4642,6 +4642,10 @@ let fxwReady=false;
             gl:Number.isFinite(m.gl)?m.gl:1,gr:Number.isFinite(m.gr)?m.gr:1,
             end:m.end,gain:m.gain??1,life:m.durF||1e12,
             dur:Infinity,wrap:m.wrap?1:0,lo:m.lo||0,vel:1,shp:0.5,car:m.car?1:0,
+            /* bp: the phase this cursor would have had if nothing ever bent
+               it. Born where the head is born, advanced at base rather than
+               step, and cret is how the head gets back onto it. */
+            bp:m.pos,
             n:0,env:0,rel:0,relAt:0,tp:0};
           this.tv.set(m.id,c9); this.cx.push(c9);}}
         else if(m.t==='toff'){const v=this.tv.get(m.id); if(v)v.rel=1;}
@@ -4671,6 +4675,30 @@ let fxwReady=false;
               if(xn>0&&Math.abs(to-c9.ph)>1){c9.xPh=c9.ph; c9.xf=xn; c9.xLen=xn;}
               c9.ph=to; c9.gTo=null;
             }
+            /* THE SHADOW GOES WITH IT. A cmov is a DELIBERATE move — a cue, a
+               relock — and the head is now meant to be there; only a BEND is
+               the thing the shadow exists to undo. Left behind, a cue jump
+               would be cancelled by the next bend release. */
+            c9.bp=to;
+          }}
+        /* COME BACK TO WHERE YOU NEVER LEFT (Gad, 2026-08-17: "maybe you should
+           have a silent playhead or counter running parallel so you know where
+           to land properly"). In tape a bend IS a speed change and the head is
+           supposed to run away; the loop underneath it never moved, so letting
+           go has to put it back. audRelock's answer was the loop phase mapped
+           LINEARLY across the crop, which is only right when the take covers
+           the crop exactly once a cycle — sync on AND speed x1. At his x0.25 it
+           covers a quarter of it, so the map is four times too far and throws
+           the head forward, which is exactly what he reported. bp is the phase
+           the cursor would have had if nothing had ever bent it, so there is no
+           map and no arithmetic: land on it. Same 3ms equal-power splice a cue
+           flip uses. */
+        else if(m.t==='cret'){
+          const xn=Math.max(0,Math.round(sampleRate*0.003));
+          for(const c9 of this.cx){
+            if(c9.bus!==1||!c9.car||c9.bp==null)continue;
+            if(xn>0&&Math.abs(c9.bp-c9.ph)>1){c9.xPh=c9.ph; c9.xf=xn; c9.xLen=xn;}
+            c9.ph=c9.bp; c9.gTo=null;
           }}
         /* LIVE RE-AIM. Pitch, speed, tempo and the crop used to reach a
            cursor only at its birth, so every one of them meant "next time":
@@ -4871,6 +4899,9 @@ let fxwReady=false;
             if(!c.wrap&&c.ph>=c.end-1){c.rel=1;continue;}
             if(c.step!==c.sTgt)c.step+=(c.sTgt-c.step)*sT;
             c.ph+=c.step; c.n++;
+            if(c.bp!=null){c.bp+=c.base;
+              const lo8=c.lo||0, hi8=c.end||len, w8=Math.max(1,hi8-lo8);
+              if(c.bp<lo8||c.bp>=hi8)c.bp=((c.bp-lo8)%w8+w8)%w8+lo8;}
             continue;
           }else{
             if(c.relAt&&f0+k>=c.relAt)c.rel=1;
@@ -4904,6 +4935,14 @@ let fxwReady=false;
           dL[k]+=l9*amp*c.gl;
           if(st||cloud)dR[k]+=r9*amp*c.gr;
           c.ph+=c.step; c.n++;
+          /* THE UNBENT PHASE, walked beside the real one at base rather than
+             step — the parallel counter, wrapped in the same crop so it is
+             comparable to ph at any instant. One add and a compare; the second
+             cursor this could have been would have cost a buffer read and an
+             interpolation per sample to arrive at the same number. */
+          if(c.bp!=null){c.bp+=c.base;
+            const lo8=c.lo||0, hi8=c.end||len, w8=Math.max(1,hi8-lo8);
+            if(c.bp<lo8||c.bp>=hi8)c.bp=((c.bp-lo8)%w8+w8)%w8+lo8;}
         }
         if(dead){
           this.cx.splice(ci,1);
@@ -5717,12 +5756,15 @@ function scheduleRange(from,to){
                  of a stored bend left the take a little further out of phase
                  with the bar — and unlike the live case it happens on EVERY
                  loop, so the error is not a one-off, it accumulates until the
-                 take has nothing to do with the clock. Same call, same reason:
-                 under sync the loop has an opinion about where in the take you
-                 should be, and free has none (audRelock returns early there). */
+                 take has nothing to do with the clock. Same call as the live
+                 key-up, and now the same one: the unbent phase the worklet
+                 walked beside it, rather than the bar mapped across the crop.
+                 Stretch never left the clock, so audBendMovedClock still says
+                 no there and nothing is spliced. */
               setTimeout(()=>{try{if(!(AUD.hold&&AUD.hold.pi===li)){
                 engine.audPitch(li,0);
-                if(engine.audBendMovedClock(li))engine.audRelock(li);}}catch(_){}},ms2);
+                if(engine.audBendMovedClock(li)){engine.audReturn(li);
+                  setTimeout(()=>{try{engine.audReturn(li);}catch(_){}},80);}}}catch(_){}},ms2);
             }else if(ev.fz!==undefined){
               const ms1=Math.max(0,(timeAt(t+a.anchor)-AC.currentTime)*1000);
               const dSec=Math.min(ev.dur||0.25,L3)*spb();
@@ -10350,6 +10392,18 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     const a=detectCuts(buf,st,en,KBSEQ.length);
     this._cuts[pi]={key,a};
     return a;
+  }
+  /* THE HEAD COMES BACK TO WHERE IT NEVER WENT. A bend in tape is a speed
+     change, so the head runs away while it is held and the bar underneath it
+     does not — letting go has to put it back. It used to be put back by
+     audRelock, which maps the loop phase LINEARLY across the crop, and that is
+     only the right answer when the take covers the crop exactly once a cycle:
+     sync on AND speed x1. Every other speed is wrong by that factor. The
+     worklet walks the unbent phase beside the real one, so the answer is a
+     number it already has. */
+  audReturn(pi){
+    const e9=this.gn&&this.gn[pi]; if(!e9||!e9.node)return;
+    try{e9.node.port.postMessage({t:'cret'});}catch(_){}
   }
   /* mono/legato: send the cursors that are already reading somewhere else */
   audMove(pi,frac,glideSec,bus,onlyCar){
@@ -20252,12 +20306,19 @@ function endAudHold(c){
          FREE has no such opinion and audRelock returns early there, which is
          right: a free take is not on the clock and has nowhere to come back
          to. So this is one call and it does the correct nothing when free. */
+      /* …ONTO THE SHADOW, NOT ONTO A MAP OF THE BAR. audRelock's linear map is
+         right only at speed x1; at x0.25 it is four times too far forward,
+         which is the throw Gad reported. audReturn lands on the phase the
+         cursor would have had unbent, which is the same answer at every speed.
+         Still two-stage: the rate SLEWS back over ~20ms, so for a moment after
+         the first splice the head is still moving wrong, and the second one at
+         four time constants takes out what that cost. */
       const pi7=h8.pi;
       if(engine.audBendMovedClock(pi7)){
-        engine.audRelock(pi7);
+        engine.audReturn(pi7);
         setTimeout(()=>{try{
           if(AUD.gk&&Object.keys(AUD.gk).some(k7=>(AUD.gk[k7]||{}).pi===pi7))return;
-          engine.audRelock(pi7);
+          engine.audReturn(pi7);
         }catch(_){}},80);
       }
     }
