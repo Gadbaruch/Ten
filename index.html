@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.0911';
+const BUILD='2026-08-17.0914';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -10409,6 +10409,19 @@ function libAll(){
     libMigrated=true;
     const v=(x&&!Array.isArray(x)&&x.v)||0;
     if(v<3)items.forEach(en=>en&&fx17p(en.data));   // v3: drv/crush → dist · verb size curve
+    /* v29: a sampler op's `end` became a signed SPAN from `start` instead of an
+       absolute position — SAVEV 27 did this for sets, and the library needs the
+       identical conversion or a saved sound comes back cropped somewhere else.
+       Two racks store presets and only one of them was migrated; a set and a
+       library entry hold the same shape and must be walked together whenever a
+       preset field changes meaning. No factory preset owns a sampler op, so
+       this only ever touches sounds somebody saved. */
+    if(v<29)items.forEach(en=>{
+      for(const so of ((en&&en.data&&en.data.osc)||[])){
+        if(!so||so.sen===undefined)continue;
+        const a=clamp(so.sst??0,0,0.98);
+        so.sen=a>=0.999?1:clamp((clamp(so.sen,0,1)-a)/(1-a),0,1);
+      }});
     /* v4: the drums were rebuilt — 909/808/606 kicks and snares, a rim shot,
        snares with a tuned shell under the noise instead of noise alone, and
        basses that keep their bottom. v5: basses generate an octave or two down
@@ -10442,7 +10455,7 @@ function libNos(){
   }
   return libNoCache=m;
 }
-const LIBV=28;   // bump BOTH: libStore writes it, libAll checks it
+const LIBV=29;   // bump BOTH: libStore writes it, libAll checks it
 function libStore(a){libMigrated=true; libCache=null; libNoCache=null;
   const out=(a||[]).map(en=>en&&en.data?{...en,data:portPreset(en.data,true)}:en);
   try{localStorage.setItem(LIBKEY,JSON.stringify({v:LIBV,items:out}));}catch(_){} if(typeof prepCache!=='undefined')prepCache.clear();}

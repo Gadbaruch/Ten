@@ -224,6 +224,15 @@ runs reads straight off whether the peak rises or falls:
       0.5  -1      0-0.5     True   800→200       764→237      FALLING
       1    -0.5    0.49-0.98 True   3027→778      2945→899     FALLING
 
+**TWO RACKS STORE PRESETS AND ONLY ONE WAS MIGRATED.** SAVEV 27 converted the
+SET; the LIBRARY holds the same shape and was left reading old crops with the
+new meaning. Caught by writing the save-to-pads snippet, not by testing the
+change — which is the lesson: a preset field that changes MEANING has to be
+walked in `load()` **and** in `libAll()`, together, every time. LIBV 28 → 29
+with the identical conversion, verified idempotent and exact (a stored
+`start .5 / end .75` still resolves to [.5, .75]). No factory preset owns a
+sampler op, so this only touches sounds somebody saved.
+
 **SAVEV 26 → 27, WITH A MIGRATION.** The old absolute `end` and the new span
 agree whenever start is 0 and diverge everywhere else, so every stored crop is
 CONVERTED rather than reinterpreted: `sen = (sen - sst) / (1 - sst)`. Verified
