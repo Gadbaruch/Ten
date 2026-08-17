@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.1307';
+const BUILD='2026-08-17.1325';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1367,6 +1367,18 @@ const SETTINGS=[
        ? 'slot 65 = '+got+' — SAVED. right alt survives a power cycle now.'
        : 'slot 65 still '+got+' — not committed. right alt may still work until you unplug.',
        12000);
+     dirty=true;}},
+ /* THE BOARD AS THE DISPLAY, first working piece. Digits light for the lanes
+    that have events in them, brighter for the focused one. Off by default and
+    it says how many writes it has done, because every write is a picture write
+    and those are not free — the counter is there so a runaway is visible
+    rather than inferred from a dead keyboard six months later. */
+ {n:'led digits',g:'Input',h:()=>!HE.on||HE.kind!==2,
+   v:()=>CFG.ledOn?('on · '+(HE._ledWrites||0)+' writes'):'off',
+   a:()=>{CFG.ledOn=CFG.ledOn?0:1; saveCfg();
+     if(CFG.ledOn){HE._ledSig=null; HE.ledDigits(true);
+       flash('digits show which channels have content · green = has events',6000);}
+     else{HE.ryLightMode(1,{bright:4}); flash('lights back to always-on',4000);}
      dirty=true;}},
  {n:'h vel',g:'Input', h:()=>!HE.on,v:()=>Math.round(HE.cfg().est||0)===1?'window':'peak',
               a:()=>{const e2=Math.round(HE.cfg().est||0)===1?0:1; HE.set('est',e2);
@@ -13818,6 +13830,87 @@ const HE={
   kmSlot(s){const k=this.km; if(!k||k.err||!k.raw)return null;
     const b=k.raw.split(' ').map(x=>parseInt(x,16));
     return b.slice(s*4,s*4+4);},
+  /* ── LIGHTS ──────────────────────────────────────────────────────────────
+     Live per-key streaming does NOT exist for a web page: LightMusicFollow2
+     and LightScreenColor are handled by MonsGeek's NATIVE agent over gRPC
+     (`vt.controlFeature`), and the page only asks it to start. So no meters.
+     What IS reachable is writing a whole 126-key picture and switching the
+     board to it — slow, but the thing Gad actually asked for after that
+     (does this channel have anything in it) changes a few times a MINUTE, not
+     thirty times a second. Rate is the whole safety story here: never write
+     unless the picture CHANGED, and never faster than LEDMIN.
+
+     Two commands, and they do not agree on the checksum, which is the trap:
+        0x0C SET_USERPIC  Bit7  hdr[1]=picSlot [2]=255 [3]=chunk [4]=len
+                                [5]=last  · 7 chunks, 378 bytes = 126 × RGB
+        0x07 SET_LEDPARAM Bit8  [1]=type(13=LightUserPicture) [2]=4-speed
+                                [3]=bright [4]=option<<4 [5..7]=0,200,200
+     SET_LEDPARAM has to be Bit8 because it puts data in byte 7, where Bit7
+     would write its checksum. */
+  ryCmd8(...bytes){
+    const b=new Uint8Array(64); b.set(bytes);
+    let sum=0; for(let i=0;i<8;i++)sum+=b[i];
+    b[8]=(255-sum)&0xff; return b;
+  },
+  LEDN:126, LEDMIN:1500,
+  async ryLightPic(rgb,picSlot){                    // rgb: 378 bytes, index = slot*3
+    const d=this.cfgDev||this.dev; if(!d)return 'no device';
+    const TOT=this.LEDN*3;
+    try{
+      for(let c=0;c<7;c++){
+        const h=new Uint8Array(64);
+        h[0]=0x0C; h[1]=picSlot|0; h[2]=255; h[3]=c;
+        h[4]=(c===6)?TOT-56*6:56; h[5]=(c===6)?1:0;
+        let s=0; for(let i=0;i<7;i++)s+=h[i];
+        h[7]=(255-s)&0xff;
+        for(let i=0;i<56;i++)h[8+i]=rgb[c*56+i]||0;
+        await d.sendFeatureReport(0,h);
+      }
+    }catch(err){return 'FAILED '+(err&&err.message||err);}
+    return 'sent';
+  },
+  async ryLightMode(type,o){                        // 13 = LightUserPicture
+    const d=this.cfgDev||this.dev; if(!d)return 'no device';
+    o=o||{};
+    const b=this.ryCmd8(0x07,type,4-(o.speed|0),o.bright===undefined?4:o.bright,
+                        (o.option|0)<<4, 0,200,200);
+    try{await d.sendFeatureReport(0,b);}catch(err){return 'FAILED '+(err&&err.message||err);}
+    return 'sent';
+  },
+  /* THE DIGITS SHOW WHICH CHANNELS HAVE ANYTHING IN THEM. First real use of the
+     board as TEN's display: lane with events = green, empty = dark, and the
+     focused one brighter so your hand knows where it is without the screen.
+     Slot numbers come straight from RY_SLOTS — the keymap read proved the LED
+     index and the sensor index are the same index. */
+  DIGSLOT:[7,13,19,25,31,37,43,49,55,61],
+  ledDigits(force){
+    if(!this.on||!CFG.ledOn||this.kind!==2)return;
+    const now=performance.now();
+    const rgb=new Array(this.LEDN*3).fill(0);
+    let sig='';
+    try{
+      const p=S.patterns[S.curPat];
+      for(let i=0;i<10;i++){
+        const has=!!(p&&p.lanes[i]&&p.lanes[i].events.length);
+        const here=(S.curCh===i);
+        const c=has?(here?[0,255,90]:[0,90,30]):(here?[40,40,40]:[0,0,0]);
+        sig+=has?(here?'H':'h'):(here?'F':'.');
+        const sl=this.DIGSLOT[i];
+        rgb[sl*3]=c[0]; rgb[sl*3+1]=c[1]; rgb[sl*3+2]=c[2];
+      }
+    }catch(_){return;}
+    if(!force&&sig===this._ledSig)return;            // nothing changed: no write, ever
+    if(!force&&now-(this._ledAt||0)<this.LEDMIN){     // too soon: coalesce, do not drop
+      clearTimeout(this._ledT);
+      this._ledT=setTimeout(()=>{this._ledT=null; this.ledDigits();},this.LEDMIN);
+      return;
+    }
+    this._ledSig=sig; this._ledAt=now; this._ledWrites=(this._ledWrites||0)+1;
+    this.ryLightPic(rgb,0).then(r=>{
+      if(r!=='sent'){flash('led write: '+r,6000); return;}
+      return this.ryLightMode(13,{bright:4,speed:0,option:0});
+    });
+  },
   kcProbe(){                                         // Keychron: what can this firmware do?
     const b=new Uint8Array(32); b[0]=0xA9; b[1]=0x01;
     this._reqAt=performance.now();
@@ -13839,6 +13932,10 @@ const HE={
   tick(){                                            // watchdog: the board went quiet
     if(!this.on)return;
     const now9=()=>performance.now();
+    /* the lights ride the watchdog rather than a timer of their own: this runs
+       at 60ms, and ledDigits is a no-op unless the picture actually changed,
+       so the cost of asking is a string compare */
+    if(CFG.ledOn)this.ledDigits();
     if(this.kind===1&&this.ready&&performance.now()-(this._reqAt||0)>60)this.kcRequest();
     /* nothing pressed: the next arrow key-down is a new push, not a re-fire */
     if(this.pressure()==null&&now9()-(this.lastDownAt||0)>60){
