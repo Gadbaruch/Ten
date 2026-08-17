@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.1057';
+const BUILD='2026-08-17.1115';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1289,39 +1289,21 @@ const SETTINGS=[
  {n:'key',g:'Behavior',    v:()=>KEYN[CFG.key],             a:d=>CFG.key=fmod(CFG.key+d,12)},
  {n:'mode',g:'Behavior',   v:()=>SCALES[CFG.scale][0],      a:d=>CFG.scale=fmod(CFG.scale+d,SCALES.length)},
  {n:'vel',g:'Input', v:()=>String(Math.round(clamp(CFG.kvel??0.9,0.02,1)*127)), a:d=>EXP.bump(d*0.05)},
- /* press the row, then press the key you want. ⌫ on the row puts it back to
-    the defaults; esc cancels a learn that is waiting. */
- {n:'tools key',g:'Input', v:()=>TOOLLEARN?'press it now…':(CFG.toolKey||'ctrl / prtsc'),
-   a:d=>{ if(d<0&&CFG.toolKey){CFG.toolKey=null; saveCfg(); flash('tools key back to ctrl / prtsc'); return;}
-          TOOLLEARN=true; flash('press the key you want for TOOLS — esc cancels'); }},
- {n:'scope key',g:'Input', v:()=>SCOPELEARN?'press it now…':(CFG.scopeKey||'ctrl / numlock'),
-   a:d=>{ if(d<0&&CFG.scopeKey){CFG.scopeKey=null; saveCfg(); flash('scope key back to ctrl / numlock'); return;}
-          SCOPELEARN=true; flash('press the key you want for the CHANNEL SCOPES — esc cancels'); }},
- {n:'last key',g:'Input', v:()=>LASTKEY||'— nothing yet',
-   a:()=>flash(LASTKEY?('last key the page saw: '+LASTKEY):'no key has reached TEN yet')},
+ /* THE KEYBOARD IS NOT A SETTING ANY MORE (Gad, 2026-08-17). tools key, scope
+    key, win key, menu key, last key and the arrows mode selector all lived
+    here, and between them they were six ways to be wrong about which build
+    was mapped how. Every one of them is hardcoded now: tools is left ⌥,
+    the scopes are left ctrl, and the arrow cluster is one table that is
+    always on. A key that needs moving gets moved in the BOARD's own
+    software, where it is a property of the hardware and travels with it. */
  {n:'h trig',g:'Input',h:()=>!HE.on,v:()=>Math.round(HE.cfg().trig*100)+'%', a:d=>HE.set('trig',clamp(HE.cfg().trig+d*0.01,0.02,1))},
  /* WHICH QUESTION THE BOARD IS ASKED. peak: how fast was the fastest frame —
     right on a board that samples on a clock. window: how far did the key get
     in `wait` ms — right on a board that reports per unit of travel, where a
     single frame's slope is mostly arrival jitter. */
- /* a 60% board has no arrow cluster, and the arrows are how this instrument
-    moves and edits — so lend them four keys */
- {n:'arrows',g:'Input', v:()=>ARROWMODE[CFG.hidArrows|0],
-              a:d=>{CFG.hidArrows=fmod((CFG.hidArrows|0)+d,ARROWMODE.length); saveCfg();
-                    flash(['arrows are the arrow keys · , . octave · - = volume',
-                           ', . = ←→ · - = = ↓↑ · ⇧ as always · octave moves to ⌃, ⌃.',
-                           'right alt ← · fn/F13 → · menu ↑ · right ctrl ↓ · , . - = back to normal'
-                          ][CFG.hidArrows|0]);}},
  {n:'midi in',g:'Input',v:()=>EXP.midiOn?['off','solo','+kbd'][CFG.midiIn|0]:'off', a:d=>EXP.cycleMidi(d)},
  {n:'hid',g:'Input',    v:()=>HE.on?(HE.srcName||'on').slice(0,8):'off',
               a:()=>{if(HE.on)HE.disconnect(); else HE.connect();}},
- /* the bottom-row keys a 60% board has and this instrument never used */
- {n:'win key',g:'Input', v:()=>SPARE[kWinIdx()],
-              a:d=>{CFG.kWin=fmod(kWinIdx()+d,SPARE.length); saveCfg();
-                    flash('win tap → '+SPARE[kWinIdx()]+' · held it is still ⌘');}},
- {n:'menu key',g:'Input',v:()=>SPARE[CFG.kMenu|0],
-              a:d=>{CFG.kMenu=fmod((CFG.kMenu|0)+d,SPARE.length); saveCfg();
-                    flash('menu → '+SPARE[CFG.kMenu|0]);}},
  {n:'h vel',g:'Input', h:()=>!HE.on,v:()=>Math.round(HE.cfg().est||0)===1?'window':'peak',
               a:()=>{const e2=Math.round(HE.cfg().est||0)===1?0:1; HE.set('est',e2);
                      flash(e2?'window — velocity is how deep it got in '+HE.cfg().wait+'ms'
@@ -2502,8 +2484,20 @@ function arrowRefire(code){
      you decide to press again. The two ends are the release and the next
      press, and both are the sensor's own timestamps — so the gap is a fact
      about the key rather than about when anything happened to ask. */
+  /* AND THE SENSOR CANNOT BE THE ONLY WAY BACK. `press>home` can only be true
+     if the analog report for THIS press has already landed when the keystroke
+     arrives — and it is a SECOND HID stream with no ordering guarantee, so it
+     usually has not. The guard then never re-armed and the arrow was swallowed
+     for the rest of the session. Measured, ten presses a second apart:
+       sensor silent            passes SWALLOWED SWALLOWED SWALLOWED …
+       sensor tracks, loses race  passes SWALLOWED SWALLOWED SWALLOWED …
+     It read as "left arrow doesn't work" because alternating arrows hides it:
+     ASTEP.code holds ONE code, so ←→←→ passes every time and ←←← dies after
+     the first. A wobble is tens of milliseconds; anything slower than a
+     quarter second is a finger that left, whatever the sensor managed to say. */
   const home=HE.homeAt||0, press=HE.pressAt||0;
-  if(home>(ASTEP.lastAt||0)&&press>home&&press-home>60){ASTEP.armed=true; ASTEP.code=null;}
+  if((home>(ASTEP.lastAt||0)&&press>home&&press-home>60)
+     || now-(ASTEP.lastAt||0)>250){ASTEP.armed=true; ASTEP.code=null;}
   if(ASTEP.code===code&&!ASTEP.armed)return true;
   /* and a floor under it all: two accepted steps of the same key inside a
      tenth of a second is a bouncing switch, not a decision. */
@@ -2724,7 +2718,7 @@ const rs=e=>KM.srLatch||(!!e.shiftKey&&(KM.sr||!KM.shl));
    ControlLeft, NumLock (what Gad's board is remapped to now — a proper
    press you can hold, unlike PrintScreen, which is a one-shot and is exactly
    why tools kept doing nothing), or anything learned into `scope key`. */
-const SCOPEKEY=c=>c===CFG.scopeKey||(!CFG.scopeKey&&(c==='ControlLeft'||c==='NumLock'));
+const SCOPEKEY=c=>c==='ControlLeft'||c==='NumLock';
 const altOf=e=>KM.altLatch||KM.scp;
 /* ⌘ IS ⌘ AND ⌃ IS NOT. Control used to stand in for command so the shortcuts
    worked on a PC, which was fine while control meant nothing on its own — it
@@ -2742,7 +2736,7 @@ function armTools(code){
      must not read as two. Anything inside 250ms of the last edge is the same
      press still finishing; a genuine second tap after that puts the layer
      away, so it can always be cancelled. */
-  if(HOLD.t&&code!=='AltLeft'&&code!=='AltRight'&&now-TOOLAT>250){disarmTools(1); flash('tools off'); return;}
+  if(HOLD.t&&code!=='AltLeft'&&now-TOOLAT>250){disarmTools(1); flash('tools off'); return;}
   /* …and the OTHER half of THAT tap must not turn it straight back on: a
      cancel happens on one edge and the key still owes us the other. Only a
      CANCEL sets that window — a layer that was spent by a letter, or cleared
@@ -2754,7 +2748,7 @@ function armTools(code){
   HOLD.t=true; HOLD.tUsed=false;
   if(TOOLT)clearTimeout(TOOLT);
   /* only the one-shot key needs a lapse; a control key clears on its own up */
-  const held=code==='AltLeft'||code==='AltRight';
+  const held=code==='AltLeft';
   TOOLT=held?null:setTimeout(()=>{TOOLT=null; HOLD.t=false; dirty=true;},2500);
   if(!held&&fresh)flash('tools — c/x/v copy cut paste · z undo (⇧z redo) · s save');
   dirty=true;
@@ -14129,16 +14123,13 @@ const MICKEY=c=>c==='ControlRight'||c==='Fn';
    went to the MIC instead, which was still claiming PrintScreen from when it
    was the 60%-board stand-in. Both codes are tools now and the mic keeps the
    right control, Fn, and escape's hold, so nothing it could do was lost. */
-/* WHATEVER KEY YOU ACTUALLY HAVE. Guessing at a remapped board from the other
-   side of a chat is how three rounds got spent on one modifier: the code was
-   ControlLeft, then PrintScreen, then something neither of us can name. So the
-   instrument learns it — `tools key` in settings, press the row, press your
-   key, done — and the two defaults stay for a board that needs no help.
-   `last key` sits next to it and shows the code of the last key the PAGE saw,
-   on either edge, so "does this key reach TEN at all" is a question you can
-   answer by looking rather than by asking me. */
-const TOOLKEY=c=>c===CFG.toolKey||(!CFG.toolKey&&(c==='AltLeft'||c==='AltRight'));
-let TOOLLEARN=false, SCOPELEARN=false, LASTKEY='';
+/* LEFT ALT ONLY, and that is now the whole rule (Gad, 2026-08-17). AltRight
+   was in here as a second tools key, and it is the LEFT ARROW — which is
+   exactly the bug that started this: in the default arrows mode right alt
+   armed the tools layer and no arrow ever came out. A key cannot be a
+   modifier and a cursor. Left ⌥ is tools, per the four-modifiers block in
+   CLAUDE.md; the learn row and its `last key` diagnostic are gone with it. */
+const TOOLKEY=c=>c==='AltLeft';
 /* ⌥M just made a mod (env by default). While ⌥ is STILL down, one letter
    re-sources it: l lfo, v velocity, k key, / random, e env again. Closed the
    moment ⌥ comes up, so the letters go back to their scopes. */
@@ -16395,75 +16386,33 @@ let capsWas=false;
    trusted events and dress the synthetic ones in them. */
 const MODS={shift:false,alt:false,ctrl:false,meta:false};
 const modsOf=()=>({shiftKey:MODS.shift,altKey:MODS.alt,ctrlKey:MODS.ctrl,metaKey:MODS.meta});
-const ARROWALIAS={Comma:'ArrowLeft',Period:'ArrowRight',Minus:'ArrowDown',Equal:'ArrowUp'};
-/* THE RIGHT CLUSTER, which is the better answer: the four keys under your right
-   hand that this instrument never used become the arrow cluster, and , . - =
-   go back to being the octave and the volume. LEFT alt and LEFT control keep
-   every meaning they had — separating the two sides is the whole trick.
-   fn is here in hope only: macOS eats it in hardware and no browser ever sees
-   it, so remap that key to F13 (or right-win) in the board's own software and
-   this picks it up. */
-/* F13-F16 are the ESCAPE HATCH, and the better route: macOS assigns them
-   nothing and no app claims them globally, so remapping the four bottom-right
-   keys to F13-F16 in the board's own software beats every conflict at once —
-   including right alt, which another app's global hotkey can swallow before
-   any web page is allowed to see it. */
-const RIGHTARROW={AltRight:'ArrowLeft',ContextMenu:'ArrowUp',ControlRight:'ArrowDown',
-  Fn:'ArrowRight',MetaRight:'ArrowRight',
+/* THE ARROW CLUSTER, one table, always on (Gad, 2026-08-17). This was three
+   modes behind a settings row, and the default mode was the one where none of
+   it worked — right alt fell through to TOOLKEY and armed the tools layer
+   instead. Measured on 3032 before the change: mode 0 gave arrowLeftSeen 0
+   with toolsArmed TRUE, mode 2 gave arrowLeftSeen 1. A mapping you can be in
+   the wrong mode of is a mapping that is wrong.
+   WHAT IS NOT IN HERE, AND WHY. ControlRight and MetaRight were, and both cost
+   a key that already had a job: right ctrl is the mic fallback and right ⌘ is
+   ⌘. Two arrows are not worth those, so ↓ and → come from the BOARD — map
+   those two keys to the real ArrowDown/ArrowRight keycodes in its own
+   software, which every configurator has and which no OS or app can swallow
+   the way it can swallow right alt.
+   Fn is gone too: macOS handles it below the event layer and no browser on any
+   OS has ever seen it, so it was an entry that could not fire.
+   F13-F16 stay because they cost nothing and nothing else in TEN reads them —
+   but they are not the recommended route any more: MonsGeek stops at F12, and
+   F1-F12 are media keys on macOS unless a System Settings toggle is flipped. */
+const RIGHTARROW={AltRight:'ArrowLeft',ContextMenu:'ArrowUp',
   F13:'ArrowLeft',F14:'ArrowRight',F15:'ArrowUp',F16:'ArrowDown'};
-const ARROWMODE=['real',', . - =','right cluster'];
-/* what the learned fn slot does — right arrow first, because that is the one
-   the right cluster cannot fill from a keycode */
 /* fn IS THE RIGHT ARROW, out of the box. It sends no keycode at all, so the
    sensor is the only way to it — but its matrix slot is a property of the
    board, not of a session, and 71 is where the FUN60 keeps it (everything
    around it is in RY_SLOTS; that hole is fn). Shipping it means the fourth
-   arrow works on a fresh profile, and cannot be lost by touching the learn
-   rows. Learning still overrides it, per board and per taste. */
+   arrow works on a fresh profile. */
 const RY_DEFAULT_SLOTS={71:'ArrowRight'};
-const FNACT=['ArrowRight','ArrowLeft','ArrowUp','ArrowDown','Tab','Escape','Backslash','Space',
-             'Enter','Backquote','Slash','off'];
-
-/* THE SPARE KEYS. A 60% board's bottom row carries win and menu, which do
-   nothing for this instrument and something unwanted for the OS. A page can
-   only take a key while it is focused — which is the right scope — and both of
-   these arrive untouched, unlike ⌘Tab and ⌘Space, which macOS eats first.
-   win is claimed on the TAP only: held, it is still the ⌘ that saves a set. */
-const SPARE=['off','scope','oct −','oct +','play','rec','settings','dice'];
-/* win defaults to OFF again. The scope is still available there for anyone who
-   wants it, but that key is ⌘ — the browser and the OS both answer to it — and
-   a scope is STATE, so a tap that goes astray leaves the arrows walking the
-   instrument with no sign of why. State belongs on a key nothing else owns. */
-const kWinIdx=()=>CFG.kWin|0;
-const kMenuIdx=()=>CFG.kMenu|0;
-const spareKey=(name)=>{
-  const synth=code=>{for(const kind of ['keydown','keyup'])
-    document.dispatchEvent(new KeyboardEvent(kind,
-      Object.assign({code,key:code,bubbles:true},modsOf())));};
-  if(name==='oct −'||name==='oct +'){
-    S.oct=clamp(S.oct+(name==='oct +'?1:-1),-3,3); flash('oct '+S.oct); dirty=true; return;}
-  /* THE INSTRUMENT SCOPE, LATCHED. Holding this key is not an option — it is
-     ⌘, and ⌘ with an arrow belongs to the browser and to the per-note tweak.
-     So a tap opens the scope and a tap closes it, and the arrows in between
-     are plain arrows walking the instrument, exactly as they do while ` is
-     held. Esc closes it too, like everything else that stays open. */
-  if(name==='scope'){
-    HOLD.i=!HOLD.i; HOLD.iUsed=false;
-    flash(HOLD.i?'instrument scope OPEN — arrows walk it · tap again to close'
-                :'instrument scope closed');
-    dirty=true; return;
-  }
-  if(name==='play'){T.playing?stop():play(); return;}
-  if(name==='rec')return synth('Tab');
-  if(name==='settings')return synth('Escape');
-  if(name==='dice')return synth('Backslash');
-};
-const MK={win:false,winUsed:false};
 const arrowAlias=(e,kind)=>{
-  const m=CFG.hidArrows|0;
-  let a=null;
-  if(m===1)a=(e.metaKey||altOf(e)||e.ctrlKey||HOLD.tab)?null:ARROWALIAS[e.code];
-  else if(m===2)a=RIGHTARROW[e.code];
+  const a=RIGHTARROW[e.code];
   if(!a)return false;
   e.preventDefault();
   /* the modifier a right-cluster key IS must not ride along — right alt is the
@@ -16496,18 +16445,6 @@ function escapeAction(e){
   dirty=true;
 }
 const onKeyDown=e=>{
-  if(e.isTrusted&&e.code){LASTKEY=e.code; if(S.layer===-1)dirty=true;}
-  /* the learn is asked FIRST, before any handler can claim the key — the whole
-     point is to catch a key nothing else knows what to do with */
-  if((TOOLLEARN||SCOPELEARN)&&e.code&&!e.repeat){
-    e.preventDefault();
-    const what=TOOLLEARN?'tools':'scope';
-    if(e.code==='Escape'){TOOLLEARN=SCOPELEARN=false; flash(what+' key unchanged'); dirty=true; return;}
-    if(TOOLLEARN){CFG.toolKey=e.code; disarmTools();} else {CFG.scopeKey=e.code; KM.scp=false;}
-    TOOLLEARN=SCOPELEARN=false; saveCfg();
-    flash('◎ '+what+' key = '+e.code);
-    dirty=true; return;
-  }
   if(e.isTrusted){MODS.shift=e.shiftKey; MODS.alt=e.altKey; MODS.ctrl=e.ctrlKey; MODS.meta=e.metaKey;
     /* A LOST SHIFT KEY-UP LATCHES EVERYTHING YOU PLAY. Left shift is the latch,
        and its state was believed until a matching key-up arrived — but mashing
@@ -16544,15 +16481,7 @@ const onKeyDown=e=>{
     if(arrowRefire(e.code)){e.preventDefault(); return;}
     arepStart(e.code);
   }
-  if(arrowAlias(e,'keydown'))return;   // , . - = ARE the arrows on a board without any
-  /* the menu key is unambiguous — nothing else uses it, so it acts on the press */
-  if(e.code==='ContextMenu'&&!e.repeat&&SPARE[kMenuIdx()]!=='off'){
-    e.preventDefault(); spareKey(SPARE[kMenuIdx()]); return;}
-  /* win/⌘ is a TAP, decided at release: held it is still the modifier that
-     saves a set, and a chord with anything marks it used */
-  if(e.code==='MetaLeft'||e.code==='MetaRight'){
-    if(!e.repeat){MK.win=true; MK.winUsed=false;}
-  }else if(MK.win)MK.winUsed=true;
+  if(arrowAlias(e,'keydown'))return;   // right alt is ←, menu is ↑, F13-F16 are all four
   /* BARE CONTROL (or a board's fn) IS THE MIC. Down opens it; a ctrl+letter
      chord marks the hold as modifier use so the mic closes on release instead
      of latching; left-shift at the press latches (decided at release). */
@@ -16627,7 +16556,7 @@ const onKeyDown=e=>{
       else if(KM.sl){KM.srLatch=true; LATCH.used=true; flash('⇧ shift latched'); dirty=true;}
     }
     return;}
-  if(e.code==='AltLeft'||e.code==='AltRight'){
+  if(e.code==='AltLeft'){   // right alt is the LEFT ARROW and never reaches here
     if(!e.repeat){
       if(KM.altLatch){KM.altLatch=false; flash('option released'); dirty=true;}
       else if(KM.sl){KM.altLatch=true; LATCH.used=true; flash('⌥ option latched'); dirty=true;}
@@ -18848,15 +18777,6 @@ function endAudHold(c){
   return '';
 }
 const onKeyUp=e=>{
-  if(e.isTrusted&&e.code){LASTKEY=e.code; if(S.layer===-1)dirty=true;}
-  /* a key that sends ONLY a key-up can still be learned — that is exactly the
-     kind of key this exists for */
-  if((TOOLLEARN||SCOPELEARN)&&e.code&&e.code!=='Escape'){
-    const what=TOOLLEARN?'tools':'scope';
-    if(TOOLLEARN){CFG.toolKey=e.code; disarmTools();} else {CFG.scopeKey=e.code; KM.scp=false;}
-    TOOLLEARN=SCOPELEARN=false; saveCfg();
-    flash('◎ '+what+' key = '+e.code); dirty=true; return;
-  }
   if(e.isTrusted){MODS.shift=e.shiftKey; MODS.alt=e.altKey; MODS.ctrl=e.ctrlKey; MODS.meta=e.metaKey;
     if(!e.shiftKey){KM.sl=false; KM.sr=false;}}
   const c=e.code;
@@ -18883,10 +18803,6 @@ const onKeyUp=e=>{
     AREP.stopT=setTimeout(()=>{AREP.stopT=null; arepStop();},90);
   }
   if(arrowAlias(e,'keyup'))return;      // the release half — arrow key-ups end automation writes
-  if(c==='MetaLeft'||c==='MetaRight'){
-    const used=MK.winUsed; MK.win=false; MK.winUsed=false;
-    if(!used&&SPARE[kWinIdx()]!=='off'){e.preventDefault(); spareKey(SPARE[kWinIdx()]); return;}
-  }
   /* the release half of the same rule: the panel owns only the keys it
      navigates with, and every other key-up is the desk's */
   if(S.layer===-1&&!(c==='Escape'||c==='Enter'||c==='Slash'||c.startsWith('Arrow'))){
@@ -19007,7 +18923,7 @@ const onKeyUp=e=>{
     /* a scope riding on the modifier ends with it, exactly as it did on ⌥ */
     for(const k of [...ALTSUS]){ALTSUS.delete(k);
       document.dispatchEvent(new KeyboardEvent('keyup',{code:k,bubbles:true}));}}
-  if(TOOLKEY(c)){ if(c==='AltLeft'||c==='AltRight')disarmTools(); else armTools(c); }
+  if(TOOLKEY(c))disarmTools();   // TOOLKEY is left ⌥ alone now: a real hold, cleared on its own up
   if(c==='BracketLeft')BRK.l=false;
   if(c==='BracketRight')BRK.r=false;
   if(c==='Comma')OCT.l=false;
