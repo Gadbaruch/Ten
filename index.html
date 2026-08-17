@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.0855';
+const BUILD='2026-08-17.0911';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1474,6 +1474,16 @@ const smpWin=o=>{
   const rev=far<a;
   return {a,far,rev,lo:rev?far:a,hi:rev?a:far};
 };
+/* THE SCAN WIDTH IS EXPONENTIAL, and level 1 still means the whole crop
+   exactly as specified. What changed is the travel to get there. The range
+   that SOUNDS like a scan is the bottom couple of percent of a crop — a
+   second of audio swept at middle C is 285 source samples per output sample
+   at full width, which is decimation, not a note — and on a linear dial with
+   a 0.05 step exactly ONE notch of that zone was reachable. Over three and a
+   bit decades the musical part lands under the middle of the travel:
+     0.25 → 0.3%    0.5 → 2.2%    0.75 → 15%    1 → all of it
+   Zero still means nothing at all, which no exponential gives you for free. */
+const SCANW=a=>{const x=clamp(a,0,1); return x<=0?0:0.0005*Math.pow(2000,x);};
 const OSC_P=sl=>[
   SP('wave','wav','enum',{opts:['none'].concat(WAVES),
      get:o=>(o.amt<=0.001?0:(o.wav|0)+1),
@@ -5605,7 +5615,7 @@ class Voice{
         const W8=smpWin(so);
         try{sn.node.port.postMessage({t:'win',
           st:W8.a, en:W8.far,
-          w:dO.off?0:clamp(dO.amt===undefined?1:dO.amt,0,1)});}catch(_){}
+          w:dO.off?0:SCANW(dO.amt===undefined?1:dO.amt)});}catch(_){}
       }
     }
     const ops=this.p.osc, t=Math.max(AC.currentTime,at||0), GL=gl>0?gl:0.02;
@@ -6561,7 +6571,7 @@ class Voice{
            reverse needs no mirrored buffer on this path at all. */
         const W8=smpWin(sOp);
         const win={t:'win', st:W8.a, en:W8.far,
-                   w:clamp(dOp.amt===undefined?1:dOp.amt,0,1)};
+                   w:SCANW(dOp.amt===undefined?1:dOp.amt)};
         try{b.s.port.postMessage(win);}catch(_){}
         if(isFM){
           /* FM OF THE PLAYHEAD. The sample's own playback rate is the carrier,

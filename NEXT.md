@@ -158,14 +158,30 @@ second of audio swept at 261 Hz has no reconstructible content, so the
 correct anti-aliased result is near-silence. Hiss was the aliased version of
 nothing.
 
-**STILL OPEN — THE WIDTH DIAL CANNOT REACH ITS OWN MUSICAL RANGE.** Level is
-linear with a **0.05 step**, and on a one-second take everything at or above
-0.05 is past the point of usefulness (14 source samples per output cycle at
-middle C). The zone that sounds like a scan is 0.004–0.02 — the bottom 2% of
-the dial, one notch of which is reachable. Gad's spec (1 = the full crop) is
-the right *definition*; the taper is what needs to change, and that is his
-call, not a bug fix. An exponential width, or one expressed in samples-per-
-cycle, would put the whole range under the hand.
+**THE WIDTH DIAL IS EXPONENTIAL NOW** (Gad: "yes make it exponential very
+good call"). It was linear with a 0.05 step, and on a one-second take
+everything at or above 0.05 was past the point of usefulness — the zone that
+sounds like a scan was the bottom 2% of the dial, one notch of which was
+reachable. `SCANW(a) = 0.0005 * 2000^a`, so level 1 is still the whole crop
+exactly as specified and the travel to get there changed instead. Walked in
+its real 0.05 steps:
+
+    level   window   harmonic%      level   window   harmonic%
+      1      100%       22.8         0.4     1.05%      79.4
+     0.85   31.98%      37.5         0.3     0.49%      70.5
+     0.7    10.23%      74.4         0.15    0.16%      77.3
+     0.55    3.27%      91.4         0.05    0.07%      91.4
+
+Every notch does something now, and the two useful characters — a 1-3% window
+that reads as a pitched scan, and a sub-1% window that reads as a wavetable —
+are a third of the dial apart instead of sharing one step.
+
+**One discontinuity, left alone deliberately:** level 0 is not silence, it is
+the plain sample. The pairing loop skips a driver at `amt<=0.001`, so no scan
+is built at all and the BufferSource path plays the take normally. That is
+what a level-0 modulator does everywhere else in the rack, and it is more
+useful than silence, but it is not what "0 = nothing" reads like on the dial.
+Gad's call if it ever bites.
 
 ## END IS A SPAN FROM START, AND NEGATIVE MEANS REVERSE (Gad, 2026-08-17)
 
