@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.0938';
+const BUILD='2026-08-17.0958';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -6878,7 +6878,18 @@ class Voice{
     /* the voice frees itself when its FIRST source ends — and op 0 may no
        longer be that source, or exist. Any started node will do; they all stop
        together. */
-    this.src=firstSrc||this.nodes.find(n=>n&&n.onended!==undefined)||null;
+    /* NOT EVERY NODE CAN ANNOUNCE ITS OWN END, and picking one that cannot is
+       a voice that never leaves act[]. A scanned or fm-driven sample builds
+       its root as an AudioWorkletNode with a HAND-WRITTEN start/stop — the
+       worklet has no onended, and assigning one to it does nothing at all, so
+       the voice sat in the rack forever and the cap was reached without a key
+       being held. Gad: "99v constantly without even playing a note."
+       The tell is that the fake stop is an OWN property; a real
+       AudioScheduledSourceNode inherits its stop from the prototype. Same test
+       catches the wt pair's gain wrapper, which is faked the same way. */
+    const canEnd=n=>!!n&&typeof n.stop==='function'
+      &&!Object.prototype.hasOwnProperty.call(n,'stop')&&n.onended!==undefined;
+    this.src=(canEnd(firstSrc)?firstSrc:null)||this.nodes.find(canEnd)||null;
     if(this.src)this.src.onended=()=>{const a=E.act[pi],i=a.indexOf(this); if(i>=0)a.splice(i,1);
       try{vca.disconnect();}catch(_){}};
     if(this.oneShot)this._end(this._oneShotEnd);   // percussive: self-free once the nodes exist
@@ -7111,11 +7122,14 @@ class Voice{
        sit in act[] forever — the native path is freed by its source's onended.
        Tell the processor to return false (which frees it) and splice out here,
        after the tail the vca is still playing. */
-    if(this._fmw&&!this._fmwEnded){
+    /* …and the same is true of ANY voice that ended up with no node able to
+       fire onended, not just an fmw one — `this.src` is null there and nothing
+       else would ever splice it out. One timer covers both. */
+    if((this._fmw||!this.src)&&!this._fmwEnded){
       this._fmwEnded=true;
       const ms=Math.max(0,(t-AC.currentTime)*1000)+150;
       setTimeout(()=>{
-        for(const n of this._fmw){try{n.port.postMessage({t:'kill'});}catch(_){}
+        for(const n of (this._fmw||[])){try{n.port.postMessage({t:'kill'});}catch(_){}
                                   try{n.disconnect();}catch(_){}}
         const a=this.eng&&this.eng.act[this.pi];
         if(a){const i=a.indexOf(this); if(i>=0)a.splice(i,1);}

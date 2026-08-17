@@ -183,6 +183,46 @@ what a level-0 modulator does everywhere else in the rack, and it is more
 useful than silence, but it is not what "0 = nothing" reads like on the dial.
 Gad's call if it ever bites.
 
+## A VOICE FREED BY AN EVENT THAT CANNOT FIRE (2026-08-17)
+
+Gad: "the voice cap gets triggered all the time, when I have a second op doing
+a modulation on a sample the audio gets cut, I'm on 99v constantly without
+even playing a note."
+
+A voice leaves `act[]` from `this.src.onended`, and `this.src` was
+`firstSrc || nodes.find(n => n.onended !== undefined)`. A scanned or fm-driven
+sample builds its root as an **AudioWorkletNode with a hand-written
+start/stop** — it has no `onended`, assigning one to it does nothing, and
+`firstSrc` took it because it is the root. So the voice waited forever for an
+event that can never arrive. Present since scan shipped (0831), not from the
+taper; he hit it now because he is leaning on fm-of-a-sample.
+
+Eight notes fired and released, count afterwards:
+
+    plain sample            0        (fine)
+    sample + op2 FM         8        LEAK
+    sample + op2 SCAN       8 more   LEAK, and the first eight never went
+    two oscillators         0        (fine)
+
+**The tell is that a faked `stop` is an OWN property** — a real
+AudioScheduledSourceNode inherits `stop` from the prototype. `canEnd()` asks
+exactly that, which also catches the wt pair's gain wrapper, faked the same
+way. `firstSrc` now has to pass it, and if NOTHING in the voice can announce
+its end, `_end` schedules the splice on a timer the way an fmw voice already
+did. Twenty fast notes, all released, settled count and whether it still
+sounds:
+
+    native sample + FM        peak 6  settled 0  rms 0.1331
+    native sample + SCAN      peak 6  settled 0  rms 0.0749
+    native sample + FM uni3   peak 6  settled 0  rms 0.1238
+    PHASE two ops             peak 8  settled 0  rms 0.0832
+    PHASE uni 3               peak 8  settled 0  rms 0.0719
+    native wt root + FM       peak 6  settled 0  rms 0.0831
+    native plain two ops      peak 6  settled 0  rms 0.0608
+
+**The rule:** any node given a hand-written `start`/`stop` is invisible to the
+lifecycle that frees voices. Build one and you owe it an explicit way out.
+
 ## LEVEL IS A WINDOW ON SCAN AND A DEPTH ON FM — NOT BOTH (Gad, 2026-08-17)
 
 Gad, after the taper shipped: "it just sounds less good now, the whole
