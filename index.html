@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.1155';
+const BUILD='2026-08-17.1159';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -4797,7 +4797,14 @@ let fxwReady=false;
                 *Math.pow(2,(C.semis+(Math.random()*2-1)*C.jit)/12);
               lo9=0; hi9=len;
             }
-            const rev9=Math.random()<C.rev;
+            /* AND THE DIRECTION IS THE CROP'S, NOT A DICE ROLL. rev is the
+               CLOUD's "how many grains play backwards" and it belongs to a
+               spray of them — on a tape channel the key IS the tape, and a
+               one-in-ten chance that the note you just played runs backwards
+               is not a character, it is a fault. Caught on the live build:
+               two of five identical key presses came out falling. The crop
+               says which way this reads; grain mode still rolls. */
+            const rev9=W9?false:(Math.random()<C.rev);
             /* A WHOLE NOTE IS NOT A GRAIN: throwing it to a random point in
                the field the way the spray does gave every key a different
                place in the stereo picture, which reads as the sound jumping
