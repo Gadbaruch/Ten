@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.1018';
+const BUILD='2026-08-17.1024';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -13946,9 +13946,21 @@ function opSmpSave(noAudio){
     let k=seen.get(buf);
     if(k===undefined){
       k='s'+(id++);
-      const enc=noAudio?null:smpEnc(buf);
-      if(enc&&spent+enc.d.length<=SMPCAP){spent+=enc.d.length; blobs[k]={n:nm,src,...enc};}
-      else{blobs[k]={n:nm,src}; holes.push(nm);}      // named hole: settings keep, sound does not
+      /* A FACTORY PHRASE IS A PATH, NOT A PAYLOAD. Embedding one is seconds of
+         audio — over a megabyte of base64 for a take that `samples/<name>` will
+         hand back for free — and it was big enough to push the whole set past
+         what localStorage will hold, so the autosave dropped to its no-audio
+         fallback and the op reloaded as a named hole. Which is NOISE, which is
+         exactly what Gad heard after picking nylonlick and refreshing.
+         So a factory take is written as its reference and re-fetched, the way
+         the audio channel's already is. Only a dropped or recorded take — the
+         two that exist nowhere else — carries its audio. */
+      if(src.k==='f'&&src.f)blobs[k]={n:nm,src};
+      else{
+        const enc=noAudio?null:smpEnc(buf);
+        if(enc&&spent+enc.d.length<=SMPCAP){spent+=enc.d.length; blobs[k]={n:nm,src,...enc};}
+        else{blobs[k]={n:nm,src}; holes.push(nm);}    // named hole: settings keep, sound does not
+      }
       seen.set(buf,k);
     }
     at[pi+':'+i]=k;
@@ -13957,14 +13969,39 @@ function opSmpSave(noAudio){
 }
 function opSmpLoad(blobs,at){
   if(!blobs||!at)return;
-  const made={}, miss=[];
+  const miss=[];
+  /* which ops are waiting on this blob — used by both the immediate path and
+     the re-fetch, so a take that arrives late lands the same way one that was
+     embedded does */
+  const put=(k,buf)=>{
+    if(!buf)return;
+    const chans=new Set();
+    for(const key in at)if(at[key]===k){
+      engine.opSamples.set(key,buf); chans.add(+key.split(':')[0]);
+    }
+    for(const pi of chans)try{engine.rebuildRack(pi);}catch(_){}
+    dirty=true;
+  };
   for(const k in blobs){
     const b=blobs[k]; if(!b)continue;
-    const buf=smpDec(b);
-    if(buf){made[k]=buf; poolAdd(buf,b.n||'take',b.src||{k:'r'});}
-    else miss.push(b.n||'take');
+    if(b.d){                                    // carried its audio
+      const buf=smpDec(b);
+      if(buf){poolAdd(buf,b.n||'take',b.src||{k:'r'}); put(k,buf);}
+      else miss.push(b.n||'take');
+      continue;
+    }
+    const src=b.src||{};
+    if(src.k==='f'&&src.f){                     // a factory phrase: fetch it back
+      const have=POOL.find(p2=>p2.src&&p2.src.k==='f'&&p2.src.f===src.f);
+      if(have){put(k,have.buf); continue;}
+      fetch('samples/'+src.f).then(r=>r.ok?r.arrayBuffer():null)
+        .then(ab=>ab&&AC.decodeAudioData(ab))
+        .then(buf=>{ if(buf){poolAdd(buf,src.f.replace(/\.\w+$/,''),{k:'f',f:src.f}); put(k,buf);} })
+        .catch(()=>{});
+      continue;
+    }
+    miss.push(b.n||'take');                     // dropped/recorded and too big to carry
   }
-  for(const key in at){const buf=made[at[key]]; if(buf)engine.opSamples.set(key,buf);}
   if(miss.length)setTimeout(()=>flash('op samples this set could not carry — '+
     [...new Set(miss)].slice(0,3).join(' · ')+' — drop the file on the op again'),700);
 }

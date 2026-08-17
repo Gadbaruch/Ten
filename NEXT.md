@@ -183,6 +183,43 @@ what a level-0 modulator does everywhere else in the rack, and it is more
 useful than silence, but it is not what "0 = nothing" reads like on the dial.
 Gad's call if it ever bites.
 
+## …AND A FACTORY PHRASE IS A PATH, NOT A PAYLOAD (Gad, 2026-08-17)
+
+Embedding fixed the dropped-file case and MISSED the one he was actually
+testing: "I'm not dropping a new sample in, I'm just using one of the stock
+samples, like the nylon lick... I refresh the page and it sounds like noise."
+
+nylonlick is **9.6 seconds STEREO**. As 16-bit that is ~1.84 MB, ~2.46 MB of
+base64, and a localStorage string is UTF-16 — call it 4.9 MB against a 5 MB
+quota, before the rest of the set, the library and the backup ring. So setItem
+threw, the autosave took its no-audio fallback, and the op reloaded as a named
+hole: NOISE. The embedding did not fail; it succeeded into a set too big to
+store.
+
+A factory take is written as its REFERENCE now and re-fetched on load, exactly
+as the audio channel's already was — only a dropped or recorded take, the two
+that exist nowhere else, carries its audio. His exact flow, measured:
+
+    centroid before        629
+    map wiped (his bug)   8036      noise
+    after reload           625
+
+    set size    101 KB  (would have been ~2.5 MB)
+    blob carries audio    false     — a path and a name
+    fits in localStorage  true
+    same take object      true      — reuses the pool entry, no duplicate fetch
+
+**The rule this earns, and it is the same one twice today:** the fix has to be
+measured on the path the USER takes, not the path the change was written for.
+Embedding was tested against a half-second synthetic take and shipped; the
+first real sample in the instrument is twenty times that.
+
+**The drop path was already right.** He asked for it to save the filename and
+it does — `poolAdd(buf, f.name…, {k:'d', f:f.name})` runs immediately before
+`opSamples.set` at the drop handler. The 'take' label in the earlier
+measurement came from a probe that set `opSamples` directly without ever
+registering the buffer in POOL; that was the test lying, not the drop.
+
 ## A SYNTH OP'S SAMPLE NOW TRAVELS WITH THE SET (Gad, 2026-08-17)
 
 Gad: "fix the saving loading of samples in synths, when I reload the set
