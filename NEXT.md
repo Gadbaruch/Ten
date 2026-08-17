@@ -73,37 +73,46 @@ cursor with `gain:0` that is NEVER bent gives the exact answer with no
 arithmetic at all, and `tpos` already reports positions. Land the bent head on
 the silent one's phase.
 
-## 3. RECORDED CUES PLAY BACK ONCE AND STOP — REPRODUCED, and the suspicion
-##    in this entry was RIGHT. Still not fixed.
+## 3. RECORDED CUES PLAY BACK ONCE AND STOP — FIXED, and the suspicion written
+##    in this entry was right
 
-New with the AUDMONO replay path (move-the-head instead of stop/spawn). The
-stacking is gone and the first pass is right; it does not come round again.
-The suspicion written here first — that `audRelock` → `audLive` → `audCarLeft`
-re-cuts a life `audCycle` has already scheduled the successor for — is what
-the measurement now says. His set, ch9, 20 loops, blocks of silence per loop
-out of ~29, on BOTH builds (so it is NOT the item-0 fix):
+The suspicion here — that `audRelock` → `audLive` → the carrier's life re-cut
+is what does it — is what the measurement says.
 
-    loop      0 … 11   12  13  14  15  16  17  18  19
-    before     0        2  22  18   7   3  23  18   9
-    after      0        3  22  17   8   3  22  17   7
+**THE MECHANISM.** `audCycle` posts the next carrier a HORIZON ahead of the
+boundary and `audPlay2` records it in `audCar[pi]` the moment it is posted, so
+for ~150ms before every bar line the named carrier is one that HAS NOT STARTED.
+The re-cut was a DURATION from the caller — the time from now to the
+boundary — spent against `v.n`, the cursor's own sample count, which for a
+pending cursor is still 0. So it was born with the eighty milliseconds left in
+the OLD cycle as its whole life, died eighty milliseconds in, and nothing
+spawned behind it until the bar after.
 
-Identical either side, which is what says these are two bugs and not one.
-Twelve clean loops and then three quarters of a bar missing, on a cycle.
+**THE FIX: A DEADLINE, NOT A DURATION.** `audCarDieF(pi)` is an absolute frame,
+the first cycle boundary strictly after the carrier's OWN start — which
+`audPlay2` now records alongside its id — and the worklet spends it as
+`life = dieF - fr`. That says the same thing to a cursor born an hour ago and
+to one that has not begun.
 
-**THE MECHANISM, and it is the same `left` as item 0 wearing its other face.**
-`audCycle` spawns the next carrier a HORIZON AHEAD of the boundary, and
-`audPlay2` records it in `audCar[pi]` the moment it is posted — so for ~150ms
-before every bar line the named carrier is one that has NOT STARTED YET. A
-relock in that window computes `left` = the time from NOW to the boundary,
-which is a few tens of milliseconds, and hands it to a cursor whose `n` is
-still 0. It is born with a life of 50ms and dies 50ms in. Nothing spawns
-behind it until the next cycle.
+Isolated, because with a real lane it only fires when a gesture happens to end
+inside the lookahead window. Cue lane emptied, a relock fired 75ms before the
+bar line, four times, measuring how much of the NEXT cycle had a cursor alive:
 
-**THE FIX IS TO STOP SENDING A DURATION.** `left` is measured from the caller
-and spent from the cursor's own clock, and those are only the same instant for
-a cursor that is already running. A DEADLINE — an absolute frame, the way
-`relAt` already works — is right for both, and the carrier's death then means
-the same thing whether it was born an hour ago or has not been born yet.
+    named carrier only (b28529e)   0.15  0.19  0.19  0.12
+    deadline frame                 1.00  1.00  1.00  1.00
+
+And his own lane, 20 loops, cursors alive and blocks of silence per loop, all
+three states with a healthy scheduler (see the trap below — this is the part
+that took the longest to get right):
+
+    7c5591e  his build   1 2 3 4 5 →1.4→ 2, one loop of 21 silent blocks,
+                         then 1 2 3 4 5 6 7 8 9 →1.7→ 2 3
+    b28529e  named       1.1 every loop, 0 silent
+    now      deadline    1.1 every loop, 0 silent
+
+The dropout on his build is the SAME bug as the ramp: when a relock landed
+where the shared re-cut was at its 20ms floor it killed the whole stack at
+once, and nothing spawned until the next boundary.
 
 ## 4. GRAIN GETS QUIETER THE SMOOTHER IT IS — partly by design, partly not
 
@@ -2251,6 +2260,22 @@ audio, not from the param. That is a probe limitation, not a finding.
 
 ## Things that will bite you
 
+- **CUTTING THE SPEAKERS CLAMPS THE SCHEDULER TO ONE SECOND, and it will make a
+  working build look broken.** The transport is a 25ms `setInterval` with a
+  150ms HORIZON, and a page that is not producing audible output loses the
+  "playing audio" exemption: the browser throttles its timers to 1/s. The audio
+  GRAPH is fine — analysers are pull nodes, exactly as the TEST SILENTLY rule
+  says — but nothing gets SCHEDULED into it in time. Measured in the same tab,
+  same build, same set, over 25 seconds:
+
+        speakers cut       tick median 96ms, max 998ms · 10 of 19 carriers
+                           posted LATE, up to 819ms · three gaps of silence
+        speakers at 5%     tick median 15ms, max 29ms · 0 of 21 late · none
+
+  Two rounds of this session went into "dropouts" that were entirely this.
+  Anything that runs the transport for more than a few seconds has to be
+  measured with `engine.comp` connected — put a gain of 0.05 in front of
+  `AC.destination` and say so. Short probes that fire one note are unaffected.
 - **No backticks inside the worklet code strings.** They live in a template
   literal. A backtick in a comment breaks the whole page.
 - **A long-lived browser tab lies.** After dozens of probes, panics and

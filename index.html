@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.2115-mono';
+const BUILD='2026-08-17.2137-mono';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -4703,15 +4703,24 @@ let fxwReady=false;
                finger leaves and must not be given a deadline. */
             /* …AND ONLY THE CARRIER THAT IS RUNNING NOW. The car flag is worn
                by every carrier that ever ran, so this handed a fresh life to
-               the ones on their way out as well. left is the time to the NEXT
-               boundary, which AT the boundary is a WHOLE cycle — a relock on
-               the bar line resurrected the outgoing carrier for another bar,
-               and audCycle spawned its successor anyway. One extra playhead per
-               loop, for ever: Gad's "it gets louder and louder every loop like
-               its doubling the sound". Named now, and an unnamed message (no
-               carrier on the channel) still reaches nothing. */
-            if(Number.isFinite(m.left)&&v.car&&(!m.car||id===m.car))
-              v.life=v.n+Math.max(1,Math.round(m.left*sampleRate));
+               the ones on their way out as well. The old answer was a DURATION
+               from the caller — the time to the next boundary, which AT the
+               boundary is a WHOLE cycle — so a relock on the bar line
+               resurrected the outgoing carrier for another bar while audCycle
+               spawned its successor anyway. One extra playhead per loop, for
+               ever: Gad's "it gets louder and louder every loop like its
+               doubling the sound".
+               A DURATION SPENT AGAINST n IS ONLY RIGHT FOR A CURSOR ALREADY
+               RUNNING. audCycle posts the next carrier a HORIZON before the
+               line, so inside that window this was aimed at a cursor whose n
+               is still 0 — it took the fifty milliseconds left in the OLD
+               cycle as its whole life and died fifty milliseconds after it
+               was born, with nothing behind it until the bar after. That is
+               "it plays once and stops". dieF is an absolute frame and fr is
+               where this cursor starts counting, so the subtraction says the
+               same thing to both. */
+            if(Number.isFinite(m.dieF)&&v.car&&id===m.car)
+              v.life=Math.max(1,m.dieF-(v.fr||0));
           }}
         /* a stop can be SCHEDULED: the sequenced cue lane stops at a beat that
            has not happened yet, so carry the frame and let the voice die there */
@@ -10165,7 +10174,12 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
        and under free it must not be re-fired at all — so the one place that
        spawns one is the one place that records it. Cleared wherever the tape
        is stopped, which is the only way a carrier can leave. */
-    if(P9.car)(this.audCar=this.audCar||[])[pi]=id;
+    /* AND WHEN IT STARTS, because audCycle posts it a HORIZON early: for the
+       ~150ms before every bar line the recorded carrier is one that has not
+       begun. Its deadline is a cycle from ITS OWN start, not from whenever a
+       relock happens to ask. */
+    if(P9.car){(this.audCar=this.audCar||[])[pi]=id;
+               (this.audCarAt=this.audCarAt||[])[pi]=at;}
     return true;
   }
   audPlay(pi,at,lenBeats,skipBeats=0,cue){
@@ -10370,21 +10384,41 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
        loop's phase has to walk BACKWARDS through the take */
     this.audMove(pi,W.a+(ph/L)*(W.far-W.a),0,1,1);
   }
-  /* HOW LONG THE CARRIER HAS LEFT, and it is the switch that decides. SYNC
-     cuts it to the cycle — a fitted take is re-fired every loop, so it has to
-     die exactly where the next one is born. FREE has no deadline at all, and
-     null means "nothing to say", so a channel with no answer never overwrites
-     one the cursor was born with. Sent from audLive, which every audio edit
-     goes through, so flipping the switch under a sounding take re-aims the
-     take that is already running instead of the next one. */
-  audCarLeft(pi){
+  /* WHERE THE CARRIER DIES, and it is the switch that decides. SYNC cuts it to
+     the cycle — a fitted take is re-fired every loop, so it has to die exactly
+     where the next one is born. FREE has no deadline at all, and null means
+     "nothing to say", so a channel with no answer never overwrites one the
+     cursor was born with. Sent from audLive, which every audio edit goes
+     through, so flipping the switch under a sounding take re-aims the take
+     that is already running instead of the next one.
+     A DEADLINE, NOT A DURATION, and that is the whole of the second bug. The
+     answer used to be "how long from NOW", spent against the cursor's own
+     clock — and those are the same instant only for a cursor that is already
+     running. audCycle posts the next carrier a HORIZON before the bar line and
+     audCar names it immediately, so a relock inside that window handed a
+     not-yet-born cursor a life of the fifty milliseconds left in the OLD
+     cycle: born, and dead fifty milliseconds later, with nothing spawning
+     behind it until the bar after. That is "it plays once and stops". Measured
+     from the carrier's OWN start, an absolute frame means the same thing to a
+     cursor born an hour ago and to one that has not begun. */
+  audCarDieF(pi){
     const au=Object.assign({},S.presets[pi].au||{},(this.audOv&&this.audOv[pi])||{});
-    if(!Math.round(au.fit||0))return 1e9;
+    /* free: no deadline. A frame this far out is the same "never" the free
+       carrier is already born with (durSec 1e6), through one code path
+       instead of a sentinel the worklet would have to know about. */
+    const never=Math.round((AC.currentTime+1e9)*AC.sampleRate);
+    if(!Math.round(au.fit||0))return never;
     if(!T.playing)return null;
     const lane=S.patterns[S.editPat]&&S.patterns[S.editPat].lanes[pi];
     const L=lane&&lane.len; if(!(L>0))return null;
-    const a=actAt(posNow());
-    return Math.max(0.02,(L-fmod(posNow()-a.anchor,L))*spb());
+    const at9=(this.audCarAt||[])[pi]; if(!Number.isFinite(at9))return null;
+    const b9=beatsAt(at9), a=actAt(b9);
+    /* the FIRST boundary strictly after it started. A carrier spawned ON the
+       line gets the whole cycle (floor lands on its own boundary, +1 is the
+       next); one joining mid-cycle — audCycle's `fresh` branch — gets what is
+       left, which is exactly what its birth durSec already said. */
+    const die=a.anchor+(Math.floor((b9-a.anchor)/L+1e-9)+1)*L;
+    return Math.round(timeAt(die)*AC.sampleRate);
   }
   audRelockAll(){for(const i of CHANS())if(isAudioCh(i))this.audRelock(i);}
   audOff(pi,id){
@@ -10394,6 +10428,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
   audStop(pi,at){
     at=at??AC.currentTime+0.002;
     (this.audCar=this.audCar||[])[pi]=null;   // the carrier goes with everything else
+    (this.audCarAt=this.audCarAt||[])[pi]=null;   // …and so does when it started
     const e9=this.gn&&this.gn[pi];
     if(e9&&e9.node){try{e9.node.port.postMessage(
       {t:'tclr',frame:Math.round(at*AC.sampleRate)});}catch(_){}}
@@ -10419,19 +10454,22 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     const rate=sync?baseRate:baseRate*Math.pow(2,semis/12);
     const k9=buf.sampleRate/AC.sampleRate;
     const r9=(rate<0?Math.min(-0.05,rate):Math.max(0.05,rate))*k9;
-    const left9=this.audCarLeft(pi);
-    /* WHICH carrier the new life belongs to. `left` is the time to the NEXT
-       boundary, and the worklet applied it to every cursor wearing the car
-       flag — which is every carrier that ever ran, not the one running now.
-       At the bar line fmod wraps to 0, so left is a WHOLE cycle: a relock
-       landing there handed the OUTGOING carrier a fresh lease exactly as it
-       was about to expire. The replay calls audRelock at the end of every cue
-       gesture and this lane has three events at t=0, so one landed on the line
-       every single loop — one extra playhead per bar, for ever. Naming the
-       carrier is the whole fix; an old one keeps the life it was born with and
-       dies where it always should have. */
+    /* WHICH carrier the deadline belongs to, and it is half the fix. The
+       worklet applied the re-cut to every cursor wearing the car flag — which
+       is every carrier that ever ran, not the one running now — and the answer
+       was the time to the NEXT boundary, which AT the boundary is a WHOLE
+       cycle. So a relock landing on the bar line handed the OUTGOING carrier a
+       fresh lease exactly as it was about to expire, while audCycle spawned
+       its successor anyway. The replay calls audRelock at the end of every cue
+       gesture and Gad's lane has three events at t=0, so one landed on the line
+       every single loop — one extra playhead per bar, for ever. Named, and an
+       old carrier keeps the life it was born with. Nothing is sent at all when
+       there is no carrier to aim at: an unnamed deadline is a broadcast, which
+       is the bug wearing a different hat. */
+    const car9=(this.audCar||[])[pi]||null;
+    const die9=car9?this.audCarDieF(pi):null;
     try{e9.node.port.postMessage({t:'tset',
-      ...(left9==null?{}:{left:left9,car:(this.audCar||[])[pi]||null}),
+      ...(die9==null?{}:{dieF:die9,car:car9}),
       /* a negative rate is a real rate: a floor of +0.05 turned reverse into
          a very slow forward, and dividing the take's remaining length by it
          gave the voice a negative life, so it died on arrival */
@@ -10811,7 +10849,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
        all-notes-off with nothing in the app able to end them */
     for(const k9 in (this.gn||{})){const e9=this.gn[k9];
       if(e9&&e9.node){try{e9.node.port.postMessage({t:'panic'});}catch(_){}}}
-    this.audCar=[];                 // a panic takes the carriers with it
+    this.audCar=[]; this.audCarAt=[];   // a panic takes the carriers with it
     this.arpPool.forEach(p=>p.length=0);}
   click(at,accent){
     const o=AC.createOscillator(),g=AC.createGain();
