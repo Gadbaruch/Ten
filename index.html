@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.2341';
+const BUILD='2026-08-17.2346';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -19949,11 +19949,33 @@ const onKeyDown=e=>{
              branch below already knows how to write one; it just never got a
              hold with a pk on it. Under AUDMONO this is the ONLY path a pitch
              key takes, so "recording pitch keys doesn't work" was all of it. */
-          AUD.gk[c]=AUD.hold={c,pi,kind:'pmono',sl:null,vel:hitVel,pk:semP,
-            press:AC.currentTime,tr:Math.max(gridNow(),0)};
-          engine.audPitch(pi,semP);
-          engine.busEnvFire(pi,AC.currentTime);      // the keystroke IS the note-on
-          flash('loop '+(semP>0?'+':'')+semP+'st'+(vmP===2?' · glide':''));
+          /* QUANTIZE REACHES THE PITCH KEYS NOW (Gad, 2026-08-18: "id like to
+             be able to record arp in pitch and cue properly and having the
+             performence match the recording"). This branch fired audPitch the
+             instant the key landed and never asked CFG.qOn — every other key
+             path in the instrument computes a quantized time first and defers
+             to it, and the cue branch below is the same three lines. It also
+             recorded tr: gridNow(), the RAW position, so the lane got the
+             finger's time while the ear got the grid's: the take you played
+             and the take that came back could not agree. Same clock for both
+             now — the sound waits for the grid and the recorder writes the
+             beat it waited for, which is the whole of "performance matches
+             the recording". qlive is honoured, so a lane set to half-strength
+             quantize pulls the pitch key exactly as far as it pulls a note. */
+          const t0p=gridNow(), gp=gridOf(lane);
+          const trp=CFG.qOn?qnext(t0p,gp)*(lane.qlive??1)+t0p*(1-(lane.qlive??1)):t0p;
+          const hp={c,pi,kind:'pmono',sl:null,vel:hitVel,pk:semP,
+            press:AC.currentTime,tr:Math.max(t0p,trp)};
+          AUD.gk[c]=AUD.hold=hp;
+          const msp=CFG.qOn?Math.max(0,(gridTime(hp.tr)-AC.currentTime)*1000):0;
+          const firep=()=>{
+            if(AUD.gk[c]!==hp)return;                // let go before it landed
+            engine.audPitch(pi,semP);
+            engine.busEnvFire(pi,AC.currentTime);    // the keystroke IS the note-on
+          };
+          if(msp<2)firep(); else setTimeout(firep,msp);
+          flash('loop '+(semP>0?'+':'')+semP+'st'+(vmP===2?' · glide':'')+
+                (msp>=2?' · on the grid':''));
           dirty=true; return;
         }
         engine.granNode(pi);
@@ -20332,7 +20354,17 @@ function endAudHold(c){
        is on. Same {t, pk, dur} shape the replay above already reads. */
     if(h8.pk!==undefined&&h8.tr!=null){
       const lane8=S.patterns[S.editPat].lanes[h8.pi], L8=lane8.len;
-      const dur8=Math.max(0.05,h8.press!=null?(AC.currentTime-h8.press)/spb():0.25);
+      /* AND THE LENGTH IS QUANTIZED WITH IT, exactly as the cue release does.
+         Quantizing the START and letting the release land wherever the finger
+         left is what makes a jam come back ragged: the hits are in time and
+         the gaps are not, so every gesture is a different length and the ones
+         ending just before a grid point leave a hole. A pitch bend is a
+         gesture with a length like any other. The ear and the lane read the
+         same number — the off sounds where it is written. */
+      const gq8=gridOf(lane8), off8=CFG.qOn?qnext(gridNow(),gq8):gridNow();
+      const dur8=CFG.qOn
+        ?Math.max(gq8,Math.round((off8-h8.tr)/gq8)*gq8)
+        :Math.max(0.05,h8.press!=null?(AC.currentTime-h8.press)/spb():0.25);
       retroBuf[h8.pi].push({t:h8.tr,pk:h8.pk,dur:dur8});
       if(retroBuf[h8.pi].length>512)retroBuf[h8.pi].shift();
       if(S.patterns[S.editPat].state==='rec'){
