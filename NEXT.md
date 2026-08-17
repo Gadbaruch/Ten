@@ -121,6 +121,99 @@ carrier sampled every 150ms across a x4 length change whose old cycle ended at
 handler, ahead of the audio channel's own three meanings for it, or the
 gesture would mean different things on different channels.
 
+## THE SAMPLE DID NOT TURN INTO NOISE — THE READ DID (2026-08-17)
+
+Gad: "could it be that when choosing a mode on op2 it reverts the sample in
+op1 to noise?" No. Measured on 3032 with a tone in `opSamples`: the map entry
+survives every mode change, `wav` stays 9, and the built voice reads the
+sample. What he heard was three separate things, two of them real bugs.
+
+**THE FM DRIVER WAS BEING SUMMED AS A VOICE.** `built.push` recorded
+`drv:scanDrives[i]` only. An fm op aimed at a sample fails the `tb.osc` test
+in the fm branch — a sample is not an oscillator — so it fell through to the
+add branch, and `if(b.drv!==undefined)continue` never caught it. You heard the
+modulator's bare wave sitting on top of the sample it was steering. One line:
+`drv` records `fmDrives` too. Measured with the driver at ratio 8 so its own
+tone would sit at 2093 Hz: **-35.8 dB → -77.9 dB**, and its gain-node count
+1 → 0. Gad reported this independently while the scan half was being measured.
+
+**SCAN WAS DECIMATING, AND DECIMATION IS WHAT NOISE IS.** At level 1 the
+playhead sweeps the whole crop once per cycle — a one-second take at 261 Hz is
+**285 source samples jumped per output sample**, and linear interpolation
+reads one of them and folds the other 284 back as images. Measured centroid
+**8087 against an explicit-noise reference of 7511**: brighter than noise.
+Fixed with a box average over the ground the playhead actually crossed, made
+free by a **prefix sum built once per note** — the span can be hundreds of
+samples and the cost does not move. On a realistic take, harmonic share
+roughly doubles at every width:
+
+    level    harmonic% live → fixed     rms live → fixed
+    0.05          42 → 85.2              0.270 → 0.234
+    0.02        47.3 → 88.9              0.247 → 0.233
+    0.2         13.8 → 51.2              0.228 → 0.102
+    1.0          3.3 → 22.8              0.113 → 0.019
+
+Wide settings go QUIET rather than hissy now, and that is the honest answer: a
+second of audio swept at 261 Hz has no reconstructible content, so the
+correct anti-aliased result is near-silence. Hiss was the aliased version of
+nothing.
+
+**STILL OPEN — THE WIDTH DIAL CANNOT REACH ITS OWN MUSICAL RANGE.** Level is
+linear with a **0.05 step**, and on a one-second take everything at or above
+0.05 is past the point of usefulness (14 source samples per output cycle at
+middle C). The zone that sounds like a scan is 0.004–0.02 — the bottom 2% of
+the dial, one notch of which is reachable. Gad's spec (1 = the full crop) is
+the right *definition*; the taper is what needs to change, and that is his
+call, not a bug fix. An exponential width, or one expressed in samples-per-
+cycle, would put the whole range under the hand.
+
+## END IS A SPAN FROM START, AND NEGATIVE MEANS REVERSE (Gad, 2026-08-17)
+
+Gad: "start dictates the starting point on the whole wave, but end 0% should
+not be the start of the sample it should be the crop start point, we could
+have -100% which can put the end on the other side of the start point — but
+that should reverse the sample."
+
+`end` was an ABSOLUTE position, which makes 0% the head of the take — the one
+place it can never legally be once start has moved. Half the dial was dead and
+its numbers meant nothing where you were standing. It is a **signed span from
+start** now: +100% reaches the take's end from wherever start is, 50% is half
+of what is left, and the whole range is live at every start. That frees the
+negative half for the obvious reading — end lands on the other side of start,
+so the crop is read BACKWARDS.
+
+Resolved in ONE place, `smpWin(op)`, which returns the **anchor and the far
+edge unsorted** (`far < a` is the reversed case) plus the sorted bounds. Four
+callers used to spell the crop out separately — root op, ops 1-9, and the scan
+window sent at build and again on a live edit — four chances to disagree.
+
+Two paths, because they can do different things:
+
+- **BufferSource** has no negative playbackRate, so reverse plays a mirrored
+  COPY of the take (`engine.revBuf`, a WeakMap so a take that leaves the pool
+  takes its twin with it) with the crop points mirrored to match.
+- **The scan worklet** carries the sign through. `a` and `b` are no longer
+  sorted, the span is signed, and `x = a + (inp+1)*0.5*span` walks the
+  driver's -1..+1 backwards all by itself. Reverse costs nothing there.
+
+Width still shortens from the FAR end only, so turning it down never moves the
+place the read leaves from — same rule as before, now true in both directions.
+
+Verified against a take sweeping 200 Hz → 3200 Hz, so which way the playhead
+runs reads straight off whether the peak rises or falls:
+
+    start  end    window      rev   expect Hz     heard Hz     dir
+      0     1      0-1       False  200→3200      210→668      rising
+      0.5   1      0.5-1     False  800→3200      834→2713     rising
+      0.5  -1      0-0.5     True   800→200       764→237      FALLING
+      1    -0.5    0.49-0.98 True   3027→778      2945→899     FALLING
+
+**SAVEV 26 → 27, WITH A MIGRATION.** The old absolute `end` and the new span
+agree whenever start is 0 and diverge everywhere else, so every stored crop is
+CONVERTED rather than reinterpreted: `sen = (sen - sst) / (1 - sst)`. Verified
+exact — an old `start 0.5, end 0.75` still resolves to the window [0.5, 0.75].
+No export needed; a stored set loads to the same sound.
+
 ## A SAMPLE'S PLAYHEAD IS A WORKLET, AND BOTH MODES DRIVE IT (2026-08-17)
 
 Gad, two specifications on top of the scan fix.

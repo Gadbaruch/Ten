@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.0831';
+const BUILD='2026-08-17.0855';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1454,6 +1454,26 @@ const WTF=[
   SP('fold','fold','lin',{min:0,max:1,step:0.02,get:o=>o.fold??0,set:(o,v)=>o.fold=v,
      fmt:v=>Math.round(v*100)+'%'}),
 ];
+/* THE CROP, RESOLVED IN ONE PLACE. Four callers used to spell it out
+   separately — the root op, ops 1-9, and the scan window sent at build and
+   again on a live edit — which is four chances to disagree about what a
+   backwards crop means. They all ask here now.
+   Returns the ANCHOR (start, where the read begins) and the FAR edge, in that
+   order and deliberately unsorted, plus the sorted pair for anyone who needs
+   bounds. far < a is the reversed case. */
+const smpWin=o=>{
+  const a=clamp((o&&o.sst!==undefined?o.sst:0),0,0.98);
+  const s=clamp((o&&o.sen!==undefined?o.sen:1),-1,1);
+  let far=s>=0?a+s*(1-a):a*(1+s);
+  /* a zero-length crop is silence with no way to hear your way back out of
+     it, so the dial bottoms out on a sliver instead. At start 0 there is
+     nothing BEFORE to reverse into, and that falls forward for the same
+     reason. */
+  if(far>a-0.002&&far<a+0.002)far=(s<0&&a>=0.002)?a-0.002:a+0.002;
+  far=clamp(far,0,1);
+  const rev=far<a;
+  return {a,far,rev,lo:rev?far:a,hi:rev?a:far};
+};
 const OSC_P=sl=>[
   SP('wave','wav','enum',{opts:['none'].concat(WAVES),
      get:o=>(o.amt<=0.001?0:(o.wav|0)+1),
@@ -1479,8 +1499,17 @@ const OSC_P=sl=>[
    /* the CLIP half: crop the take per slot, loop it or fire it once */
    SP('start','sst','lin',{min:0,max:0.98,step:0.01,get:o=>o.sst??0,set:(o,v)=>o.sst=v,
       fmt:v=>Math.round(v*100)+'%'}),
-   SP('end','sen','lin',{min:0.02,max:1,step:0.01,get:o=>o.sen??1,set:(o,v)=>o.sen=v,
-      fmt:v=>Math.round(v*100)+'%'}),
+   /* END IS A SPAN FROM START, and start is the only position dial. As an
+      absolute position it read 0% = the head of the TAKE, which is the one
+      place end can never legally be once start has moved — the dial's bottom
+      half was dead and its numbers meant nothing where you were standing.
+      As a span, 100% reaches the take's end from wherever start is, 50% is
+      half of what is left, and the whole range is live at every start.
+      That frees the negative half to mean the obvious thing: end lands on the
+      OTHER side of start, so the crop is read BACKWARDS. -100% is start back
+      to the head of the take, reversed. */
+   SP('end','sen','lin',{min:-1,max:1,step:0.01,get:o=>o.sen??1,set:(o,v)=>o.sen=v,
+      fmt:v=>Math.round(v*100)+'%'+(v<0?' rev':'')}),
    SP('play','lps','enum',{opts:['loop','once'],get:o=>Math.round(o.lps||0),set:(o,v)=>o.lps=v})]:[]),
   /* ONE FIELD, TWO MEANINGS, decided by the wave — the same idiom the fx rack
      already uses for dist's tone/rate. On a tonal wave it is PULSE WIDTH: the
@@ -4842,24 +4871,64 @@ let fxwReady=false;
          position — which is frequency modulation of a sampler, and the thing a
          BufferSource can never do because its playbackRate is k-rate. */
       this.md=0; this.pos=0; this.rate=1; this.dev=0;
+      this.px=-1; this.oL=0; this.oR=0; this.CL=null; this.CR=null;
       this.port.onmessage=e=>{const m=e.data||{};
         if(m.t==='buf'){this.L=m.l; this.R=m.r||m.l; this.len=m.l.length;
-          this.a=0; this.b=this.len-1;}
+          this.a=0; this.b=this.len-1;
+          /* RUNNING SUMS, so the box average in rd() is two lookups instead of
+             a loop. The playhead can cover three hundred source samples per
+             output sample at full width and a per-sample loop would price the
+             whole feature out; a prefix sum makes the cost the same whatever
+             the span. Built once per note, alongside the copy that already
+             crosses the port. */
+          const n=this.len, cl=new Float64Array(n+1);
+          for(let i=0;i<n;i++)cl[i+1]=cl[i]+this.L[i];
+          this.CL=cl;
+          if(this.R===this.L)this.CR=cl;
+          else{const cr=new Float64Array(n+1);
+            for(let i=0;i<n;i++)cr[i+1]=cr[i]+this.R[i];
+            this.CR=cr;}
+          this.px=-1; this.pos=0;}
         else if(m.t==='rate'){
           this.md=1;
           if(m.rate!==undefined)this.rate=m.rate;
           if(m.dev!==undefined)this.dev=m.dev;
         }
         else if(m.t==='win'){
-          const L=Math.max(1,this.len);
-          let a=Math.round((m.st||0)*(L-1)), b=Math.round((m.en===undefined?1:m.en)*(L-1));
-          if(b<a+1)b=Math.min(L-1,a+1);
-          this.a=Math.max(0,a); this.b=Math.min(L-1,b);
+          /* a is the ANCHOR and b the FAR edge, and they are NOT sorted:
+             b < a is a backwards crop, and every span below carries the sign
+             so the read simply runs the other way. Sorting them here was what
+             made reverse impossible to express. */
+          const L=Math.max(1,this.len), cl=v=>Math.max(0,Math.min(L-1,Math.round(v*(L-1))));
+          this.a=cl(m.st||0); this.b=cl(m.en===undefined?1:m.en);
           this.w=Math.max(0,Math.min(1,m.w===undefined?1:m.w));
+          this.px=-1;
         }
         /* (this handler used to clear this.grains, which SC has never had —
            copied from the cloud, and it threw on every buffer it was sent) */
         else if(m.t==='stop')this.alive=false;};}
+    /* ONE READ, AVERAGED OVER THE GROUND JUST COVERED. A playhead moving more
+       than one source sample per output sample is DECIMATING, and interpolation
+       does nothing about that: it reads one of the samples it lands on and every
+       one it jumped folds back as an image. Scanning a one-second take at 261Hz
+       steps 285 samples at a time, and the result measured a spectral centroid
+       of 8087 against an explicit-noise reference of 7511 — brighter than
+       noise, which is exactly what "my sample turned into hiss" sounds like.
+       The box average over [x-d, x] is the decimation filter that step is
+       asking for. Under a sample per step there is nothing to decimate and the
+       interpolation is the right answer, so it keeps it. */
+    rd(x,d){
+      const L=this.L, R=this.R, ad=d<0?-d:d;
+      if(ad<1.5||!this.CL){
+        const i0=x<0?0:(x|0), fr=x-i0, i1=i0+1<this.len?i0+1:i0;
+        this.oL=L[i0]+(L[i1]-L[i0])*fr; this.oR=R[i0]+(R[i1]-R[i0])*fr; return;}
+      let lo=x-d, hi2=x; if(lo>hi2){const t=lo; lo=hi2; hi2=t;}
+      let i=lo<0?0:Math.round(lo), j=hi2>this.len?this.len:Math.round(hi2);
+      if(i>=this.len)i=this.len-1;
+      if(j<=i)j=i+1;
+      const w=j-i;
+      this.oL=(this.CL[j]-this.CL[i])/w; this.oR=(this.CR[j]-this.CR[i])/w;
+    }
     process(I,O){
       if(!this.alive)return false;
       const out=O[0]; if(!out||!out[0])return true;
@@ -4869,35 +4938,54 @@ let fxwReady=false;
          past b, which is what makes start/end a grain window rather than a
          suggestion. The fade is measured from the WINDOW's edges for the same
          reason — fading at the buffer's ends would click at the crop. */
-      const a=this.b>this.a?this.a:0, b=this.b>this.a?this.b:len-1;
-      const span=(b-a)*this.w, hi=a+span;
-      const ew=Math.min(256,Math.max(1,span>>2))||1;
+      /* THE SIGNED SPAN. a is where the read starts — the crop start, the one
+         position you picked — and the span runs from it toward the far edge,
+         which may be BEHIND it. Width still shortens from the far end only, so
+         turning it down never moves the place the read leaves from. */
+      const a=this.a, span=(this.b-this.a)*this.w;
+      const e0=a+span, lo=span<0?e0:a, hi=span<0?a:e0;
+      const asp=span<0?-span:span;
+      if(asp<1){out[0].fill(0); if(out[1])out[1].fill(0); return true;}
+      const ew=Math.min(256,Math.max(1,asp>>2))||1;
       if(this.md===1){
         /* FM OF A SAMPLER: speed = rate + modulator x deviation, integrated.
            The playhead LOOPS inside the same window scan uses, so start/end and
            the width control mean the same thing in both modes. */
-        if(this.pos<a||this.pos>hi)this.pos=a;
-        const lp=span>1?span:1;
+        /* a reversed crop runs the playhead backwards — same rate, other
+           direction — and wraps to the anchor rather than to the low edge */
+        const dir=span<0?-1:1, lp=asp>1?asp:1;
+        if(this.pos<lo||this.pos>hi)this.pos=a;
         for(let k=0;k<N;k++){
-          let x=this.pos;
-          const i0=x|0, fr=x-i0, i1=i0+1<len?i0+1:i0;
-          const ef=Math.min(1,(x-a)/ew,(hi-x)/ew);
-          out[0][k]=(this.L[i0]+(this.L[i1]-this.L[i0])*fr)*ef;
-          if(out[1])out[1][k]=(this.R[i0]+(this.R[i1]-this.R[i0])*fr)*ef;
-          this.pos+=this.rate+inp[k]*this.dev;
+          const ef=Math.min(1,(this.pos-lo)/ew,(hi-this.pos)/ew);
+          const stp=dir*(this.rate+inp[k]*this.dev);
+          /* the average covers the ground ABOUT to be crossed, clipped to the
+             window so it never runs past the loop point and averages in the
+             far side of the sample */
+          let d=stp;
+          if(this.pos+d>hi)d=hi-this.pos;
+          if(this.pos+d<lo)d=lo-this.pos;
+          this.rd(this.pos+d,d);
+          out[0][k]=this.oL*ef;
+          if(out[1])out[1][k]=this.oR*ef;
+          this.pos+=stp;
           while(this.pos>=hi)this.pos-=lp;
-          while(this.pos<a)this.pos+=lp;
+          while(this.pos<lo)this.pos+=lp;
         }
         return true;
       }
+      let px=this.px;
+      if(!(px>=lo&&px<=hi))px=a;
       for(let k=0;k<N;k++){
+        /* a negative span walks the driver's -1..+1 backwards from the anchor
+           all by itself — reverse costs nothing on this path */
         let x=a+(inp[k]+1)*0.5*span;
-        if(x<a)x=a; if(x>hi)x=hi;
-        const i0=x|0, fr=x-i0, i1=i0+1<len?i0+1:i0;
-        const ef=Math.min(1,(x-a)/ew,(hi-x)/ew);
-        out[0][k]=(this.L[i0]+(this.L[i1]-this.L[i0])*fr)*ef;
-        if(out[1])out[1][k]=(this.R[i0]+(this.R[i1]-this.R[i0])*fr)*ef;
+        if(x<lo)x=lo; if(x>hi)x=hi;
+        const ef=Math.min(1,(x-lo)/ew,(hi-x)/ew);
+        this.rd(x,x-px); px=x;
+        out[0][k]=this.oL*ef;
+        if(out[1])out[1][k]=this.oR*ef;
       }
+      this.px=px;
       return true;
     }
   }
@@ -5514,8 +5602,9 @@ class Voice{
       const ops9=this.p.osc||[];
       for(const sn of this.scanN){
         const so=ops9[sn.si]||{}, dO=ops9[sn.di]||{};
+        const W8=smpWin(so);
         try{sn.node.port.postMessage({t:'win',
-          st:clamp(so.sst??0,0,0.98), en:clamp(so.sen??1,0.02,1),
+          st:W8.a, en:W8.far,
           w:dO.off?0:clamp(dO.amt===undefined?1:dO.amt,0,1)});}catch(_){}
       }
     }
@@ -6188,10 +6277,16 @@ class Voice{
           Math.max(0,((t||AC.currentTime)-AC.currentTime)*1000)+120);};
       }
       else if(isN){src=ac.createBufferSource();
-        src.buffer=isS?(E.opSamples.get(pi+':0')||E.noiseBuf):E.nbuf(rootW,ops[0].pw);
+        /* the crop decides WHICH buffer, so it has to be resolved before the
+           assignment — `.buffer` may only be written once */
+        const W9=isS?smpWin(ops[0]):null;
+        const b9=isS?(E.opSamples.get(pi+':0')||E.noiseBuf):E.nbuf(rootW,ops[0].pw);
+        src.buffer=(W9&&W9.rev)?E.revBuf(b9):b9;
         src.loop=true;pitchParam=src.playbackRate;
         if(isS){const d9=src.buffer.duration;
-          const st9=clamp(ops[0].sst??0,0,0.98)*d9, en9=clamp(ops[0].sen??1,0.02,1)*d9;
+          /* mirrored crop points for a mirrored take, so start still means the
+             place you picked and the read still leaves from it */
+          const st9=(W9.rev?1-W9.hi:W9.lo)*d9, en9=(W9.rev?1-W9.lo:W9.hi)*d9;
           if(en9>st9+0.005){src.loopStart=st9; src.loopEnd=en9; src._off=st9;}
           if(Math.round(ops[0].lps||0)===1)src.loop=false;}}
       let rootWt=null;                  // wt twin for THIS unison copy (crossfade pair)
@@ -6295,9 +6390,11 @@ class Voice{
           s2.playbackRate.value=clamp((op.rat||1)*Math.pow(2,(op.fine||0)/1200),0.05,8);}
         else if(wv===9){                              // sampler op: pitch via playbackRate
           s2=ac.createBufferSource();
-          s2.buffer=E.opSamples.get(pi+':'+i)||E.noiseBuf; s2.loop=true;
+          const W9=smpWin(op);
+          const b9=E.opSamples.get(pi+':'+i)||E.noiseBuf;
+          s2.buffer=W9.rev?E.revBuf(b9):b9; s2.loop=true;
           {const d9=s2.buffer.duration;
-           const st9=clamp(op.sst??0,0,0.98)*d9, en9=clamp(op.sen??1,0.02,1)*d9;
+           const st9=(W9.rev?1-W9.hi:W9.lo)*d9, en9=(W9.rev?1-W9.lo:W9.hi)*d9;
            if(en9>st9+0.005){s2.loopStart=st9; s2.loopEnd=en9; s2._off=st9;}
            if(Math.round(op.lps||0)===1)s2.loop=false;}
           const ratio=Math.pow(2,(midi-60)/12)*op.rat*Math.pow(2,(op.fine||0)/1200);
@@ -6332,7 +6429,14 @@ class Voice{
         else{s2=ac.createOscillator();
           E.setWave(s2,wv,op.phm===1?Math.random()*360:op.ph,op.pw);
           setF(s2.frequency,fi);}
-        built.push({i,s:s2,osc:!isNoiseW(wv)&&wv!==9&&!scanned,f:fi,op,scan:scanned,drv:scanDrives[i]});
+        /* drv = "this op is somebody's MODULATOR, not a voice" — and an fm op
+           driving a sample's playhead is every bit as much one as a scan op.
+           It was not marked, so it failed the `tb.osc` test in the fm branch
+           (a sample is not an oscillator), fell through to the add branch and
+           got SUMMED: you heard the modulator's bare sine sitting on top of
+           the sample it was steering. */
+        built.push({i,s:s2,osc:!isNoiseW(wv)&&wv!==9&&!scanned,f:fi,op,scan:scanned,
+          drv:scanDrives[i]!==undefined?scanDrives[i]:fmDrives[i]});
         (this.opNodes[i]=this.opNodes[i]||[]).push(s2);
         if(!isNoiseW(wv)&&wv!==9&&wv!==14){
           (this.opPitch[i]=this.opPitch[i]||[]).push({pm:s2.frequency,base:fi,kind:sync?'sync':'osc'});
@@ -6452,7 +6556,11 @@ class Voice{
            Sent here rather than at build so both spellings and the op-0 root
            go through the same line. */
         const sOp=ops[b.i]||{}, dOp=ops[j]||{};
-        const win={t:'win', st:clamp(sOp.sst??0,0,0.98), en:clamp(sOp.sen??1,0.02,1),
+        /* st is the ANCHOR and en the FAR edge, unsorted on purpose: en < st
+           is a backwards crop and the worklet carries the sign through, so
+           reverse needs no mirrored buffer on this path at all. */
+        const W8=smpWin(sOp);
+        const win={t:'win', st:W8.a, en:W8.far,
                    w:clamp(dOp.amt===undefined?1:dOp.amt,0,1)};
         try{b.s.port.postMessage(win);}catch(_){}
         if(isFM){
@@ -7080,6 +7188,14 @@ class Engine{
     };
     this.nbuf=(w,pw)=>w===13?this.dustBuf(pw===undefined?0.5:pw)
                             :(this.noiseBufs[w]||this.noiseBufs[4]);
+    this.revBuf=b=>{
+      if(!b)return b;
+      let r=this._rev.get(b); if(r)return r;
+      r=AC.createBuffer(b.numberOfChannels,b.length,b.sampleRate);
+      for(let c=0;c<b.numberOfChannels;c++){
+        const s=b.getChannelData(c), d=r.getChannelData(c), n=b.length;
+        for(let i=0;i<n;i++)d[i]=s[n-1-i];}
+      this._rev.set(b,r); return r;};
     this.waveCache=new Map();
     this.tables={ // harmonic magnitude tables (index 5..8 in WAVES)
       5:[1,0.5,0.33,0.25,0.5,0.15,0.1,0.4],
@@ -7090,6 +7206,11 @@ class Engine{
     this.buses=[]; this.act=[]; this.lastPitch=[]; this.arpPool=[]; this.arpIdx=[];
     this.audBuf=[]; this.audName=[]; this.audRec=null;
     this.opSamples=new Map();
+    /* REVERSED TWINS. An AudioBufferSourceNode has no negative playbackRate,
+       so a backwards crop is a mirrored COPY of the take with the crop points
+       mirrored to match. Built on first use and held in a WeakMap, so a take
+       that leaves the pool takes its twin with it. */
+    this._rev=new WeakMap();
     for(let i=0;i<10;i++){
       const vIn=ac.createGain(), busG=ac.createGain(), pan=ac.createStereoPanner();
       const trim=ac.createGain(), an=ac.createAnalyser();   // auto-mix trim + level/spectrum tap
@@ -18926,7 +19047,7 @@ window.addEventListener('blur',()=>{
 
 /* ---------------- persistence + migration ---------------------------- */
 const LS='ten-v1';
-const SAVEV=26;                       // bump BOTH: serialize writes it, load checks it
+const SAVEV=27;                       // bump BOTH: serialize writes it, load checks it
 /* v22: granular is the audio channel's MODE (au.amode), never a cat — old
    'gran' spellings are normalized on the way in */
 /* WHAT A SAVE SAYS vs WHAT THE RUNTIME USES.
@@ -19105,6 +19226,15 @@ function load(json){
           p.au.auto=gran?0:1;
           p.au.start=km===2?1:0;
           p.au.kmode=(km>=1||gran)?1:0;
+        }
+        /* v<27 stored a sampler op's `end` as an absolute POSITION in the take;
+           it is a signed SPAN from `start` now. The two agree whenever start
+           is 0 and diverge everywhere else, so every stored crop is converted
+           rather than reinterpreted — an old [0.5, 0.75] stays [0.5, 0.75]. */
+        if(o.v<27)for(const so of (p.osc||[])){
+          if(!so||so.sen===undefined)continue;
+          const a=clamp(so.sst??0,0,0.98);
+          so.sen=a>=0.999?1:clamp((clamp(so.sen,0,1)-a)/(1-a),0,1);
         }
         if(sp.gr)p.gr=Object.assign({},sp.gr);   // the cloud's dials were being dropped on load
         /* v<22 spelled granular as an ENGINE; it is the audio channel's mode */
