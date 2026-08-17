@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.1655';
+const BUILD='2026-08-17.1937-mono';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -10183,7 +10183,17 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
       car:cue?0:1,
       /* a key-spawned cursor carries the key level and its velocity; the auto
          cursor carries the loop level. cue.vol is the cue's own trim. */
-      gain:(au.gain??0.9)*(cue?(cue.vol??1)*(au.kvol??1)*(cue.vel??1):(au.lvol??1)),
+      /* ONE FADER, AND VELOCITY SURVIVES IT (AUDMONO). `key vol` and `loop vol`
+         were two because a key's cursor and the loop's were two different
+         things; with one cursor they are one fader, and `gain` is it. What
+         does NOT collapse is VELOCITY — how hard you played is not a second
+         fader, and it is the whole reason a cue key feels like an instrument.
+         The cue's own trim (cue.vol) stays too: that is per-cue balance, set
+         once, not a channel level. Neither field is removed from the SAVE, so
+         a set written here still opens on main with both faders intact. */
+      gain:AUDMONO
+        ?(au.gain??0.9)*(cue?(cue.vol??1)*(cue.vel??1):1)
+        :(au.gain??0.9)*(cue?(cue.vol??1)*(au.kvol??1)*(cue.vel??1):(au.lvol??1)),
       /* A LOOPING CURSOR IS NOT BOUNDED BY WHAT IS LEFT. Its life was the
          material remaining ahead of it, which for a cue near the end is a
          fraction of a second — so it died exactly where it should have
@@ -10354,7 +10364,9 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
          that waited for the next trigger. Both go now, every time. */
       end:FIN(W.hi*buf.length,buf.length),
       lo:FIN(W.lo*buf.length,0),
-      gain:FIN((au.gain??0.9)*(ask.cue?(ask.cue.vol??1)*(au.kvol??1)*(ask.cue.vel??1)
+      gain:FIN(AUDMONO
+        ?(au.gain??0.9)*(ask.cue?(ask.cue.vol??1)*(ask.cue.vel??1):1)
+        :(au.gain??0.9)*(ask.cue?(ask.cue.vol??1)*(au.kvol??1)*(ask.cue.vel??1)
                                    :(au.lvol??1)),0.9)});}catch(_){}
   }
   /* THE TAPE'S WINDOW AND SPEED, HANDED TO THE CLOUD SIDE OF THE WORKLET. A
@@ -10404,6 +10416,12 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
   /* live pitch for the mod/automation destination — one message to the
      channel's cursors: free ones glide their rate, sync ones move the shifter
      they carry inside themselves */
+  /* is there a tape cursor on this channel right now — the one thing a mono
+     key needs to know before it decides between moving one and making one */
+  audRolling(pi){
+    const st=(this.gn&&this.gn[pi]&&this.gn[pi].stat)||null;
+    return !!(st&&(st.tv|0)>0);
+  }
   audPitch(pi,semis){
     this.audPB=this.audPB||{}; this.audPB[pi]=semis||0;
     const au=S.presets[pi].au||{};
@@ -12588,8 +12606,13 @@ function prsFieldDefs(){
     {k:'auto',v:()=>autoCur(p)?'loop':'off'},
     /* the loop's own fader, beside the loop's own switch — the keys have
        velocity and their own level over on the sound page */
-    {k:'loop vol',v:()=>Math.round(clamp((p.au||{}).lvol??1,0,1)*100)+'%'},
-    {k:'voice',v:()=>['poly','mono','legato'][clamp(Math.round((p.vox||{}).mode||0),0,2)]},
+    ...(AUDMONO?[]:[{k:'loop vol',v:()=>Math.round(clamp((p.au||{}).lvol??1,0,1)*100)+'%'}]),
+    /* with ONE cursor, poly/mono are the same thing — what survives is whether
+       a jump SNAPS or GLIDES, which is the legato half and worth a field */
+    ...(AUDMONO
+      ?[{k:'glide',v:()=>clamp(Math.round((p.vox||{}).mode||0),0,2)===2
+          ?Math.round(((p.vox||{}).glide||0.08)*1000)+'ms':'snap'}]
+      :[{k:'voice',v:()=>['poly','mono','legato'][clamp(Math.round((p.vox||{}).mode||0),0,2)]}]),
     /* IT NAMES THE DIAL IT ACTUALLY POINTS AT. 'pos' is the CLOUD's position
        dial, which only exists on the grain half of the page — and since the
        keys began obeying the tape's setup, a key in tape or stretch leaves
@@ -12942,9 +12965,9 @@ function audDefaults(p,gran){
 const AUDPAGE=()=>{
   const p=S.presets[S.editSnd], m=cmodeOf(p);
   const keep=new Set(m===2
-    ?['cmode','fit','rate','st','en','semis','kvol']
-    :m===1?['cmode','fit','rate','wnd','st','en','semis','kvol']
-          :['cmode','fit','rate','st','en','semis','kvol']);
+    ?['cmode','fit','rate','st','en','semis'].concat(AUDMONO?[]:['kvol'])
+    :m===1?['cmode','fit','rate','wnd','st','en','semis'].concat(AUDMONO?[]:['kvol'])
+          :['cmode','fit','rate','st','en','semis'].concat(AUDMONO?[]:['kvol']));
   return AUDALL().filter(sp=>sp.st==='gr'?m===2:keep.has(sp.key));
 };
 function codeAction(d,m){
@@ -13138,7 +13161,7 @@ function _prsAction(d){
     dirty=true; dirtySave=true; return;
   }
   if(p.cat==='audio'
-     &&['keys mode','auto','loop vol','from','voice','input','chan','gain'].includes(f)){
+     &&['keys mode','auto','loop vol','from','voice','glide','input','chan','gain'].includes(f)){
     pushUndo('audio setup');
     p.au=p.au||{};
     if(f==='keys mode'){
@@ -13163,6 +13186,20 @@ function _prsAction(d){
         engine.audPlay(pi,AC.currentTime+0.008,l9.len,fmod(posNow()-a9.anchor,l9.len));
       }
       flash('auto cursor '+(p.au.auto?'loops':'off — the keys are the only playheads'));
+    }
+    else if(f==='glide'){
+      /* ONE CURSOR, so the only question left is whether a jump SNAPS to the
+         new place or slides to it. Walks the glide TIME, with snap at the
+         bottom — and it writes vox.mode underneath (1 = snap, 2 = glide) so
+         the value means the same thing to a build with polyphony still in it. */
+      p.vox=p.vox||{};
+      const isG=clamp(Math.round(p.vox.mode||0),0,2)===2;
+      const ms=Math.round((p.vox.glide||0.08)*1000);
+      const nv=clamp(ms+d*10,0,400);
+      if(nv<=0){p.vox.mode=1; flash('jump → snap');}
+      else{p.vox.mode=2; p.vox.glide=nv/1000;
+        flash('jump → glide '+nv+'ms');}
+      if(!isG&&nv<=0)flash('jump → snap');
     }
     else if(f==='voice'){
       /* the same three the synth voices have, because a cursor is a voice:
@@ -15341,6 +15378,31 @@ const rawAt=new Set();                // ...and which others are markup too
 const kbHeld=new Set();               // note keys physically down, for chord-vs-sequence
 const liveMute=Array.from({length:10},()=>0);   // >0 = a live key overrides recorded notes on this lane
 const isAudioCh=pi=>S.presets[pi].cat==='audio';
+/* ────────────────────────────────────────────────────────────────────────────
+   THE EXPERIMENT (branch `audio-mono`, Gad 2026-08-17): ONE PLAYHEAD PER AUDIO
+   CHANNEL. "maybe we dont need polyphony to audio ch at all beyond just the
+   grain cloud. I guess any poly stuff the synth engine can do with the sample
+   there."
+
+   A key MOVES the channel's single tape cursor instead of stacking another on
+   top of it. The CLOUD is untouched: a grain is a temporary cursor with a
+   finite window and spawning those is what the cloud IS.
+
+   It is a FLAG rather than a deletion on purpose — Gad: "we may fix a lot of
+   stuff that id like to merge without removing polyphony completely if i
+   change my mind." Every other fix on this branch is written to work either
+   way, so a merge brings the fixes and this one line decides the policy.
+   Set to 0 and the channel is polyphonic again, exactly as main is.
+
+   What it takes with it: `voice` (poly/mono/legato) stops meaning anything on
+   an audio channel — there is one cursor and a key always moves it — and the
+   two faders collapse, because `key vol` and `loop vol` were only ever two
+   because a key's cursor and the loop's were two different things. VELOCITY
+   STAYS: it is how hard you played, not a second fader, and it is worth having
+   on the one cursor and as a mod source. Nothing is removed from the SAVE, so
+   a set written here still loads on main with its levels intact.
+   ──────────────────────────────────────────────────────────────────────── */
+const AUDMONO=1;
 /* GRAN IS A MODE OF THE AUDIO CHANNEL now (au.amode 1); cat 'gran' survives
    as the legacy spelling so old saves keep singing */
 /* PITCH KEYS SPAWN CURSORS THROUGH THE CLOUD — that is what 'gran' was.
@@ -19496,8 +19558,18 @@ const onKeyDown=e=>{
            bargain position keys make. The key retunes the autonomous cursor
            (sync moves its shifter, free glides its rate) and letting go puts
            it back; poly is what spawns. */
-        const vmP=clamp(Math.round((p9.vox||{}).mode||0),0,2);
-        if(vmP>0&&autoCur(p9)){
+        /* ONE PLAYHEAD (AUDMONO): the key always takes the cursor rather than
+           adding one — and it takes it whether or not the LOOP is running,
+           which is the part `vmP>0 && autoCur` could not express. With auto
+           off there is no cursor to bend yet, so the key makes the one and
+           every key after it moves that. */
+        const vmP=AUDMONO?1:clamp(Math.round((p9.vox||{}).mode||0),0,2);
+        if(AUDMONO&&!autoCur(p9)&&!engine.audRolling(pi)){
+          /* no cursor on this channel yet: give it its one, from the crop, and
+             let the key bend it like any other */
+          engine.audPlay(pi,AC.currentTime+0.005,lane.len,0);
+        }
+        if(vmP>0&&(autoCur(p9)||AUDMONO)){
           /* THE SCALE APPLIES HERE TOO (Gad, 2026-08-17). `chrom` was passed
              true, which is the KIT exemption — a kit is twelve pads and a
              scale keyboard cannot reach them all. An audio channel's pitch
@@ -19606,8 +19678,15 @@ const onKeyDown=e=>{
          the loop keeps rolling and the key changes where it reads from. That
          is the difference he asked for: poly adds a head on top, mono moves
          the one head you have, legato slides it there. */
-      const vm9=clamp(Math.round((S.presets[pi].vox||{}).mode||0),0,2);
-      if(vm9>0&&(autoCur(S.presets[pi])||!first9)){
+      /* ONE PLAYHEAD (AUDMONO): a cue key JUMPS the cursor, it does not add
+         one. The glide still comes from `voice` — legato is a glide time, and
+         that is a shape worth keeping even with one head. */
+      const vm9=AUDMONO?Math.max(1,clamp(Math.round((S.presets[pi].vox||{}).mode||0),0,2))
+                       :clamp(Math.round((S.presets[pi].vox||{}).mode||0),0,2);
+      if(AUDMONO&&!autoCur(S.presets[pi])&&!engine.audRolling(pi)){
+        engine.audPlay(pi,AC.currentTime+0.005,L,0);   // no cursor yet: make the one
+      }
+      if(vm9>0&&(autoCur(S.presets[pi])||!first9||AUDMONO)){
         const gl9=vm9===2?Math.max(0.01,(S.presets[pi].vox||{}).glide||0.08):0;
         const ms0=Math.max(0,(atP-AC.currentTime)*1000);
         const go=()=>engine.audMove(pi,cutAt(pi,sl),gl9,1);
@@ -19877,8 +19956,23 @@ function endAudHold(c){
   if(AUD.gk&&AUD.gk[c]&&AUD.gk[c].kind==='pmono'){
     const h8=AUD.gk[c]; delete AUD.gk[c];
     if(AUD.hold===h8)AUD.hold=null;
-    if(!Object.keys(AUD.gk).some(k8=>(AUD.gk[k8]||{}).kind==='pmono'))
+    if(!Object.keys(AUD.gk).some(k8=>(AUD.gk[k8]||{}).kind==='pmono')){
       engine.audPitch(h8.pi,0);
+      /* AND IT COMES BACK IN TIME (Gad, 2026-08-17). In tape mode a pitch bend
+         IS a speed change — that is what tape means, and while you hold it the
+         head is supposed to run away. But the loop underneath it never moved:
+         the bar is where it always was, and letting go used to leave the head
+         wherever the bend had carried it, so the take was out of phase with
+         the clock for the rest of the session.
+         Under SYNC the loop has an opinion about where in the take you should
+         be, and audRelock is exactly that opinion — it puts the head at the
+         point the current bar position asks for, through the same 3ms
+         equal-power splice a cue flip uses, so it is a seam and not a click.
+         FREE has no such opinion and audRelock returns early there, which is
+         right: a free take is not on the clock and has nowhere to come back
+         to. So this is one call and it does the correct nothing when free. */
+      engine.audRelock(h8.pi);
+    }
     dirty=true; return 'stop';
   }
   const hg9=(AUD.gk&&AUD.gk[c]&&AUD.gk[c].kind==='pitch')?AUD.gk[c]:null;
