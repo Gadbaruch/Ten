@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.1213';
+const BUILD='2026-08-17.1227';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -4467,7 +4467,28 @@ let fxwReady=false;
             ?{a:m.a,far:m.far,rate:Number.isFinite(m.rate)&&m.rate!==0?m.rate:1,
               sh:Number.isFinite(m.sh)&&m.sh>0?m.sh:1,
               semis:Number.isFinite(m.semis)?m.semis:0,here:m.here?1:0}
-            :null;}
+            :null;
+          /* AND THE KEYS ALREADY SOUNDING ARE RE-AIMED. The tape's own cursor
+             has had a live path since tset; a key-spawned one had none, so
+             speed, pitch, start and length all reached it at birth and never
+             again — you turned a knob under a held note and heard nothing
+             until you played the next one. Same rule as the loop, same rule as
+             everything else in the instrument: a change is never heard as a
+             stop, and never as nothing.
+             The step is rebuilt from the pieces it was BUILT from — the key's
+             own ratio and the jitter it drew — so a re-aim is exactly what a
+             fresh press would have given, not a drift away from it. */
+          const W=this.tw;
+          for(const c of this.cx){
+            if(!c.tw||c.vs==null)continue;
+            if(!W){c.tw=0; continue;}
+            const v=this.vs.get(c.vs); if(!v)continue;
+            const lo=Math.max(0,Math.min(W.a,W.far));
+            const hi=Math.max(lo+2,Math.max(W.a,W.far));
+            c.lo=lo; c.end=hi; c.shift=W.sh;
+            const st=v.ratio*W.rate*Math.pow(2,(W.semis+(c.jit||0))/12);
+            c.sTgt=c.rv?-st:st;               // glides on the voice's own slew
+          }}
         else if(m.t==='wnd'){const ms=Math.max(5,Math.min(300,+m.ms||50));
           this.pW=Math.round(sampleRate*ms/1000);}
         else if(m.t==='panic'){this.vs.clear(); this.cx.length=0; this.ng=0; this.tv.clear();}
@@ -4780,7 +4801,13 @@ let fxwReady=false;
            is — so the dial runs from a 5ms sliver through clouds to one
            clean unbroken cursor, and 'grains or tape' stops being a mode.
            One per voice, held by the voice's own envelope. */
-        if(C.size>=0.999){
+        /* THE TARGET SIZE DECIDES THE BRANCH, NOT THE SLEWED ONE. C is a slew
+           of P, so for ~100ms after a switch INTO tape mode C.size is still
+           climbing out of the grain range — and a key pressed in that window
+           took the grain branch, complete with its one-in-ten random reverse.
+           The slew belongs to the grain LENGTH, not to which instrument this
+           is. P is what the channel is set to; C is how it is getting there. */
+        if(P.size>=0.999){
           if(!v.one){
             v.one=1; this.stat++;
             /* A KEY ON A TAPE CHANNEL IS A TAPE CURSOR. At the top of the size
@@ -4795,15 +4822,15 @@ let fxwReady=false;
                In GRAIN mode there is no tape window and the cloud's own dials
                are the instrument, exactly as before. */
             const W9=this.tw;
-            let st9,step9,lo9,hi9;
+            let st9,step9,lo9,hi9,jit9=0;
             if(W9){
               lo9=Math.max(0,Math.min(len-2,Math.min(W9.a,W9.far)));
               hi9=Math.max(lo9+2,Math.min(len,Math.max(W9.a,W9.far)));
               const anc=Math.max(lo9,Math.min(hi9-1,W9.a));
               st9=(W9.here&&this.car!=null)
                 ?Math.max(lo9,Math.min(hi9-1,this.car*len)):anc;
-              step9=v.ratio*W9.rate*Math.pow(2,(W9.semis+C.semis
-                    +(Math.random()*2-1)*C.jit)/12);
+              jit9=C.semis+(Math.random()*2-1)*C.jit;
+              step9=v.ratio*W9.rate*Math.pow(2,(W9.semis+jit9)/12);
             }else{
               const base9=live?(((this.rw/len)-0.05-C.pos*0.9)%1+1)%1
                               :((C.pos+this.scanPh)%1+1)%1;
@@ -4829,6 +4856,9 @@ let fxwReady=false;
               shift:W9?W9.sh:1,ch:0,fr:0,
               ph:st9,step:rev9?-step9:step9,sTgt:rev9?-step9:step9,
               n:0,vel:v.vel*0.5,gl:1,gr:1,lo:lo9,
+              /* what it was built FROM, so a live re-aim can rebuild the step
+                 exactly rather than guessing at it or re-rolling the jitter */
+              tw:W9?1:0,jit:jit9,rv:rev9?1:0,
               gain:1,env:1,rel:0,relAt:0,life:1e12,end:hi9,tp:0,id:null});
             this.ng++;
           }
@@ -10163,7 +10193,10 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     this.audBuf[pi]=buf; this.audName[pi]=name;
     this.granBuf=this.granBuf||[]; this.granBuf[pi]=buf;
     this.granName=this.granName||[]; this.granName[pi]=name;
-    if(this.gn&&this.gn[pi]&&this.gn[pi].node)this.granSend(pi);
+    if(this.gn&&this.gn[pi]&&this.gn[pi].node){this.granSend(pi); this.audTwin(pi);}
+    /* the window is in SAMPLES, so a new take of a different length invalidates
+       it — and a take arriving on a restore is the one path that reaches no
+       dial afterwards to put it right */
   }
   granLiveWire(pi){
     /* the mic straight into the cloud's input — only wired when asked for,
@@ -18683,7 +18716,15 @@ const onKeyDown=e=>{
            it back; poly is what spawns. */
         const vmP=clamp(Math.round((p9.vox||{}).mode||0),0,2);
         if(vmP>0&&autoCur(p9)){
-          const semP=(kbNote(c,true)??0)+S.oct*12+trSemis(p9);
+          /* THE SCALE APPLIES HERE TOO (Gad, 2026-08-17). `chrom` was passed
+             true, which is the KIT exemption — a kit is twelve pads and a
+             scale keyboard cannot reach them all. An audio channel's pitch
+             keys are NOTES, played alongside the synths, and they were the one
+             row in the instrument that ignored the key you had set. noteOf()
+             is what every other note goes through: it carries the scale, the
+             key offset AND the piano-vs-full layout, none of which kbNote(c,
+             true) was giving. */
+          const semP=(noteOf(c,pi)??0)+S.oct*12+trSemis(p9);
           AUD.gk=AUD.gk||{};
           AUD.gk[c]=AUD.hold={c,pi,kind:'pmono',sl:null,vel:hitVel,
             press:AC.currentTime,tr:gridNow()};
@@ -18700,7 +18741,7 @@ const onKeyDown=e=>{
           engine._ctrlPut('grn',pi,0,'scan',0);
           engine._ctrlPut('grn',pi,0,'pos',posF);
         }
-        const midiF=KBBASE+S.oct*12+(kbNote(c,true)??0)+trSemis(p9);
+        const midiF=KBBASE+S.oct*12+(noteOf(c,pi)??0)+trSemis(p9);
         /* hitVel, not another take(): the note path above has already
            consumed the pending velocity, so asking again returned the
            keyboard's flat default — which is why nothing on this channel

@@ -5,6 +5,57 @@ name "ten-gad"` → localhost:3033 is Gad's, `ten-main` → 3032 is Claude's, bo
 serving this directory · one file, `index.html`, no build step. See CLAUDE.md
 for who may be destructive where.
 
+## THE KEYS JOIN THE INSTRUMENT (Gad, 2026-08-17)
+
+Three follow-ups on the batch below, and all three are the same shape: a pitch
+key on an audio channel was still only half a note.
+
+**THE SCALE APPLIES TO THEM NOW.** Both pitch-key sites called
+`kbNote(c, true)` — `chrom: true`, which is the KIT exemption (a kit is twelve
+pads and a scale keyboard cannot reach them all). An audio channel's letters
+are NOTES, played alongside the synths, and they were the one row in the
+instrument that ignored the key you had set. `noteOf(c, pi)` is what every
+other note goes through and it carries the scale, the key offset AND the
+piano-vs-full layout, none of which the old call was giving. Keys a..k:
+
+    scale off   C3 C#3 D3 D#3 E3 F3 F#3 G3     (unchanged)
+    C major     was C3 C#3 D3 D#3 …  now C3 D3 E3 F3 G3 A3 B3 C4
+    A minor     was C3 C#3 D3 D#3 …  now A3 B3 C4 D4 E4 F4 G4 A4
+
+**THE DIALS ARE LIVE ON A HELD NOTE.** The tape's own cursor has had a live
+path since `tset`; a key-spawned one had none, so speed, pitch, start and
+length reached it at birth and never again. The `twin` message re-aims every
+key cursor built from a tape window, rebuilding the step from the pieces it was
+BUILT from — the key's own ratio and the jitter it drew — so a re-aim is
+exactly what a fresh press would have given rather than a drift away from it.
+ONE key held down, dials moved under it, on a 200→3200 sweep:
+
+    held, ×1, full crop        247 → 280 Hz
+    speed → ×2                 829 → 1012      twice as fast, at once
+    start → 75%               2842 → 3155      the last quarter
+    length → −50%             1486 → 1346      FALLING, reading it backwards
+    grains alive: 1 throughout — re-aimed, never restarted
+
+**AND THE RANDOM REVERSE HAD A SECOND SOURCE.** The dice roll was gated on the
+tape window last build (10/10 forward, still true), but the branch that
+CHOOSES between "one continuous cursor" and "a cloud of grains" tested
+`C.size` — the SLEWED copy — not `P.size`. C is a slew of P, so for ~100ms
+after a switch into tape mode C.size is still climbing out of the grain range,
+and a key pressed in that window took the grain branch complete with its
+one-in-ten reverse. The slew belongs to the grain LENGTH, not to which
+instrument this is. Grain mode still grains: size 0.12, four grains alive on
+one held key.
+
+**A take arriving on a RESTORE reaches no dial afterwards**, and the window is
+in samples, so `setChanBuf` posts the twin now. Measured on the restore path
+with nothing else touched: 12 presses, all forward, all starting at 850 Hz
+inside the crop.
+
+One trap worth the note: a probe that calls `granNote` directly without
+registering an `AUD.gk` hold AND a `kbHeld` finger is testing the orphan
+sweeper, not the thing it meant to test — the voice is reaped at 0.35s and
+every reading after the first comes back silent. Two nets, both need feeding.
+
 ## THE TAPE GETS ITS FILTER, ITS LENGTH AND ITS KEYS (Gad, 2026-08-17)
 
 Six asks in one batch. Two of them turned out to be the same question — what
