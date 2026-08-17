@@ -183,6 +183,52 @@ what a level-0 modulator does everywhere else in the rack, and it is more
 useful than silence, but it is not what "0 = nothing" reads like on the dial.
 Gad's call if it ever bites.
 
+## THE CROP IS A DESTINATION, AND AN FM DRIVER'S LEVEL IS LIVE (Gad, 2026-08-17)
+
+Two asks: make the op sample params modulatable and automatable, and let op2's
+level be tweaked live when it is fm'ing a sample in op1.
+
+**start and end are `ctrl`-lane destinations now.** They reach a running note
+two ways and both answer live — a scan/fm worklet takes the window as a
+message, and a plain BufferSource has `loopStart`/`loopEnd`, which are writable
+while it plays. `play` and `smpl` stay OUT on purpose: one is a choice and the
+other is an index into the pool, and a modulator needs a range, not a menu
+(`destRate` returns null for both, so they never appear in the table).
+
+One resolver does the work for both node kinds — `Voice.smpCrop(E,si)` — off
+the same `smpWin` and the same overlay, so a modulated crop and a dialled one
+cannot disagree. The overlay is written BEFORE the live apply, and all four
+build sites read the op through `ovObj`, so a note starting mid-sweep begins
+where the modulator currently is instead of snapping to the dialled number.
+
+Measured on a take built as eight steady bands (250…2000 Hz), with the window
+narrow enough that exactly one band sounds — so "did the crop move" is a count,
+not a judgement:
+
+    no route            1 band    the window sits still
+    LFO on START        4 bands   the window walks the take
+    envelope on END     8 bands   the window grows
+
+**One asymmetry, deliberate:** a BufferSource keeps the DIRECTION it was built
+with. Reverse is a mirrored buffer and a buffer cannot be swapped under a
+running node, so a modulator that swings the crop past start moves the edge,
+not the sense. The worklet path turns around properly, because there the span
+is just signed.
+
+**AN FM DRIVER'S LEVEL IS ITS DEPTH, and nothing was re-aiming it.** On a
+sample that depth lives inside the worklet as a deviation rather than on a gain
+node, so the one dial you reach for while listening was the one that waited for
+the next note. `oscRefresh` re-posts the rate message with the builder's own
+curve. Note held, op2 dialled mid-note, against what a retrigger gives:
+
+    case              held   after live   fresh   moved    gap
+    fm on sample       638      3569       3565    2931      4
+    fm on oscillator  3629      5724       5720    2095      4
+    scan on sample   10498      5965       5966   -4533     -1
+
+Within four hertz of a retrigger on every path, and the leak fix holds (voices
+left behind: 0).
+
 ## A VOICE FREED BY AN EVENT THAT CANNOT FIRE (2026-08-17)
 
 Gad: "the voice cap gets triggered all the time, when I have a second op doing

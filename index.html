@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.0958';
+const BUILD='2026-08-17.1009';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -2180,7 +2180,13 @@ const destRate=(rack,key)=>
   :(rack==='mod'&&(key==='rate'||key==='amt'||key==='rdiv'))?'ctrl'
   /* the closest thing these oscillators have to a phase sweep: the wave is
      rebuilt as the width moves, on the note that is already sounding */
-  :(rack==='osc'&&(key==='pw'||key==='mrph'||key==='fold'||key==='posa'||key==='posb'))?'ctrl'
+  /* A SAMPLE OP'S CROP. start and end reach a running note two ways and both
+     answer live: a scan/fm worklet takes the window as a message, and a plain
+     BufferSource has loopStart/loopEnd, which are writable while it plays.
+     `play` and `smpl` stay out — one is a choice and the other is an index
+     into the pool, and a modulator needs a range, not a menu. */
+  :(rack==='osc'&&(key==='pw'||key==='mrph'||key==='fold'||key==='posa'||key==='posb'
+                   ||key==='sst'||key==='sen'))?'ctrl'
   /* PAN IS A BUS PARAMETER — one panner for the channel, shared by every note,
      so there is no per-voice AudioParam to hand an LFO. It rides the control
      tick instead, which is how EVERY source gets to drive it: as an audio-rate
@@ -5600,6 +5606,32 @@ class Voice{
     for(const n of this.flwN)
       try{n.p.setTargetAtTime((n.base||0)+v*n.sc,t,0.02);}catch(_){}
   }
+  /* ONE OP'S CROP, RE-APPLIED TO WHATEVER IS PLAYING IT. Two node kinds hold a
+     sample and they take the window differently — the scan/fm worklet as a
+     message carrying the signed span, a plain BufferSource as loopStart and
+     loopEnd, which are writable while it runs. Both read the same smpWin, off
+     the same overlay, so a modulated crop and a dialled one cannot disagree. */
+  smpCrop(E,si){
+    const op=E.ovObj(this.pi,'osc',si,(this.p.osc||[])[si]);
+    if(!op||Math.round(op.wav)!==9)return;
+    const W=smpWin(op);
+    for(const sn of (this.scanN||[])){
+      if(sn.si!==si)continue;
+      const dO=E.ovObj(this.pi,'osc',sn.di,(this.p.osc||[])[sn.di]||{});
+      try{sn.node.port.postMessage({t:'win', st:W.a, en:W.far,
+        w:sn.fm?1:(dO.off?0:SCANW(dO.amt===undefined?1:dO.amt))});}catch(_){}
+    }
+    for(const n of ((this.opNodes||{})[si]||[])){
+      if(!n||!n.buffer||n.loopEnd===undefined)continue;
+      /* a BufferSource KEEPS THE DIRECTION IT WAS BUILT WITH: reverse is a
+         mirrored buffer and a buffer cannot be swapped under a running node.
+         So a modulator that swings the crop past start moves the edge here,
+         not the sense — the worklet path above turns around properly. */
+      const d=n.buffer.duration, rv=!!n._rev;
+      const st=(rv?1-W.hi:W.lo)*d, en=(rv?1-W.lo:W.hi)*d;
+      if(en>st+0.005){try{n.loopStart=st; n.loopEnd=en;}catch(_){}}
+    }
+  }
   /* live OSC edits: retune / relevel / reshape the running oscillators instead of
      waiting for the next note. mode/dest/trig/phase are structural — those still
      land on the next note, since they change the graph itself. */
@@ -5608,14 +5640,21 @@ class Voice{
     /* A SCAN WINDOW IS THREE DIALS ON TWO OPERATORS — the sample's start and
        end, and the driver's level as the width swept between them. All three
        are heard on the note already sounding rather than the next one. */
-    if(this.scanN&&(key==='amt'||key==='sst'||key==='sen'||key==='off')){
-      const ops9=this.p.osc||[];
-      for(const sn of this.scanN){
-        const so=ops9[sn.si]||{}, dO=ops9[sn.di]||{};
-        const W8=smpWin(so);
-        try{sn.node.port.postMessage({t:'win',
-          st:W8.a, en:W8.far,
-          w:sn.fm?1:(dO.off?0:SCANW(dO.amt===undefined?1:dO.amt))});}catch(_){}
+    if(key==='amt'||key==='sst'||key==='sen'||key==='off'){
+      const seen={};
+      for(const sn of (this.scanN||[])){seen[sn.si]=1; this.smpCrop(E,sn.si);}
+      /* a PLAIN sampler op has no scanN entry, and its crop is just as live —
+         loopStart/loopEnd are writable on a running BufferSource */
+      for(const i9 in (this.opNodes||{}))if(!seen[i9])this.smpCrop(E,+i9);
+      /* AN FM DRIVER'S LEVEL IS ITS DEPTH, and nothing was re-aiming it: on a
+         sample the depth lives inside the worklet as a deviation, not on a
+         gain node, so the one dial you reach for while listening was the one
+         that waited for the next note. Same curve as the builder's. */
+      for(const fn of (this.fmScanN||[])){
+        const dO=E.ovObj(this.pi,'osc',fn.di,(this.p.osc||[])[fn.di]||{});
+        const a02=dO.off?0:clamp(dO.amt===undefined?0:dO.amt,0,1);
+        try{fn.node.port.postMessage({t:'rate',rate:fn.r0,
+          dev:fn.r0*a02*(6*(1+3*a02*a02))});}catch(_){}
       }
     }
     const ops=this.p.osc, t=Math.max(AC.currentTime,at||0), GL=gl>0?gl:0.02;
@@ -6289,9 +6328,10 @@ class Voice{
       else if(isN){src=ac.createBufferSource();
         /* the crop decides WHICH buffer, so it has to be resolved before the
            assignment — `.buffer` may only be written once */
-        const W9=isS?smpWin(ops[0]):null;
+        const W9=isS?smpWin(E.ovObj(pi,'osc',0,ops[0])):null;
         const b9=isS?(E.opSamples.get(pi+':0')||E.noiseBuf):E.nbuf(rootW,ops[0].pw);
         src.buffer=(W9&&W9.rev)?E.revBuf(b9):b9;
+        src._rev=!!(W9&&W9.rev);
         src.loop=true;pitchParam=src.playbackRate;
         if(isS){const d9=src.buffer.duration;
           /* mirrored crop points for a mirrored take, so start still means the
@@ -6400,9 +6440,9 @@ class Voice{
           s2.playbackRate.value=clamp((op.rat||1)*Math.pow(2,(op.fine||0)/1200),0.05,8);}
         else if(wv===9){                              // sampler op: pitch via playbackRate
           s2=ac.createBufferSource();
-          const W9=smpWin(op);
+          const W9=smpWin(E.ovObj(pi,'osc',i,op));
           const b9=E.opSamples.get(pi+':'+i)||E.noiseBuf;
-          s2.buffer=W9.rev?E.revBuf(b9):b9; s2.loop=true;
+          s2.buffer=W9.rev?E.revBuf(b9):b9; s2.loop=true; s2._rev=W9.rev;
           {const d9=s2.buffer.duration;
            const st9=(W9.rev?1-W9.hi:W9.lo)*d9, en9=(W9.rev?1-W9.lo:W9.hi)*d9;
            if(en9>st9+0.005){s2.loopStart=st9; s2.loopEnd=en9; s2._off=st9;}
@@ -6569,7 +6609,7 @@ class Voice{
         /* st is the ANCHOR and en the FAR edge, unsorted on purpose: en < st
            is a backwards crop and the worklet carries the sign through, so
            reverse needs no mirrored buffer on this path at all. */
-        const W8=smpWin(sOp);
+        const W8=smpWin(E.ovObj(pi,'osc',b.i,sOp));
         /* LEVEL IS A WINDOW WIDTH ON SCAN AND NOTHING ELSE. On an fm driver
            `amt` is the DEPTH — how hard the playhead is pushed — and feeding
            it in here as a width as well meant the two fought: half level
@@ -7962,6 +8002,19 @@ class Engine{
     }
     return true;
   }
+  /* THE CROP, LIVE. Modulating or automating start/end has to be heard on the
+     note already sounding — a four-bar pad whose crop only moves at the next
+     trigger is a modulator doing nothing for four bars. The overlay is written
+     first so a note starting DURING the sweep begins from where the modulator
+     currently is, rather than snapping back to the dialled number. */
+  smpLive(pi,si,key,v){
+    this.ovPut(pi,'osc',si,key,v);
+    for(const vc of (this.act[pi]||[])){
+      if(!vc||vc.killed)continue;
+      try{vc.smpCrop(this,si);}catch(_){}
+    }
+    return true;
+  }
   oscLive(pi,key){
     const ops=(modHolder(S.presets[pi],'osc')||S.presets[pi]).osc||[];
     for(let i=1;i<10;i++){
@@ -8369,6 +8422,7 @@ class Engine{
     }
     if(rack==='fx')return this.fxLive(pi,si,key,v);
     if(rack==='mod'&&(key==='rate'||key==='amt'||key==='rdiv'))return this.modLive(pi,si,key,v);
+    if(rack==='osc'&&(key==='sst'||key==='sen'))return this.smpLive(pi,si,key,v);
     if(rack==='osc'&&key==='pw')return this.pwLive(pi,si,v);
     if(rack==='osc'&&(key==='mrph'||key==='fold'||key==='posa'||key==='posb'))
       return this.wtLive(pi,si,key,v);
