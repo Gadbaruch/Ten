@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.1355';
+const BUILD='2026-08-17.1410';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -9457,6 +9457,11 @@ class Engine{
   }
   noteOn(at,pi,midi,vel,padMidi){
     const p=S.presets[pi];
+    /* EVERY note this instrument sounds comes through here — a held key, an arp
+       step, a looped event — so this is the one place the lamp has to be armed
+       from, and live and looped light identically without either being special
+       cased. `at` is scheduled ahead, so ledNote waits for it. */
+    if(typeof HE!=='undefined'&&CFG.ledOn)HE.ledNote(pi,at);
     if(engineGranP(p))return this.granNote(at,pi,midi,vel,null);
     /* A CUE IS A NOTE. Position keys used to fire from the key handler and
        return, which meant the whole PLAY rack — chords, the arp, everything
@@ -13905,7 +13910,15 @@ const HE={
     let sum=0; for(let i=0;i<8;i++)sum+=b[i];
     b[8]=(255-sum)&0xff; return b;
   },
-  LEDN:126, LEDMIN:1500,
+  /* LEDMIN WAS 1500ms AND THAT WAS THE LAG. Gad: "the channel select coloring
+     works, BUT its very slow, changes color after about 500ms… i dont think its
+     a constraint, cause when i run the led probe, the color/brightness changes
+     apply with near 0 latency." Correct — the probe bypasses the throttle. The
+     floor was set when a picture write was assumed to be a flash commit, and
+     the measurement says 6.6ms median, so 33ms is a 20% duty cycle and reads
+     as instant. Nothing about this instrument is "rare": you change channel
+     constantly while playing, which is the other thing that framing got wrong. */
+  LEDN:126, LEDMIN:33,
   async ryLightPic(rgb,picSlot){                    // rgb: 378 bytes, index = slot*3
     const d=this.cfgDev||this.dev; if(!d)return 'no device';
     const TOT=this.LEDN*3;
@@ -14007,24 +14020,85 @@ const HE={
      `S.curPat`, which are different the moment you edit one pattern while
      another plays. */
   DIGSLOT:[61,7,13,19,25,31,37,43,49,55],
-  ledDigits(force){
+  /* one hue per channel, and the LETTERS wear the selected channel's hue — so
+     the board tells you which channel your hands are about to play before you
+     play it. Full-brightness values; every level below comes from scaling. */
+  CHCOL:[[255,60,0],[255,190,0],[160,255,0],[0,255,80],[0,240,220],
+         [0,130,255],[110,90,255],[220,0,255],[255,0,120],[190,190,190]],
+  /* THE LEVELS ARE GAD'S: empty 1, has-events 2, selected 3, a note-hit 4
+     decaying back to resting over 100ms. Scaled 0..4 -> 0..1 so "brightness 2"
+     means the same thing on every hue. */
+  LEDLVL:[0,0.16,0.34,0.62,1],
+  letterSlots(){
+    if(this._lsl)return this._lsl;
+    const m=(CFG.he&&CFG.he.map)||RY_SLOTS, out=[];
+    for(const k in m)if(/^Key[A-Z]$/.test(m[k]))out.push(+k);
+    return (this._lsl=out);
+  },
+  /* A NOTE LANDS ON A CHANNEL. noteOn's `pi` IS the channel (S.presets[pi]),
+     and it is called with a SCHEDULED AudioContext time — often a lookahead
+     ahead of now — so the lamp is armed for when the note will actually sound
+     rather than when it was queued. Live keys and looped events come through
+     the same door, which is why both light. */
+  ledNote(ch,at){
+    if(!CFG.ledOn||!this.on||this.kind!==2)return;
+    if(!(ch>=0&&ch<10))return;
+    const d=(typeof at==='number'&&typeof AC!=='undefined')
+      ? Math.max(0,(at-AC.currentTime)*1000) : 0;
+    if(d<6)this.ledHit(ch);
+    else setTimeout(()=>this.ledHit(ch),Math.min(d,4000));
+  },
+  ledHit(ch){
+    (this._hit=this._hit||{})[ch]=performance.now();
+    /* while anything is decaying the frame has to be REBUILT, not merely
+       re-checked — a decay is a change the signature cannot see, because the
+       static state it summarises has not moved. 16ms so 100ms is six steps. */
+    if(!this._pump)this._pump=setInterval(()=>{
+      const n=performance.now(); let live=false;
+      for(const k in this._hit)if(n-this._hit[k]<this.HITMS)live=true; else delete this._hit[k];
+      this.ledDigits(false,true);
+      if(!live){clearInterval(this._pump); this._pump=null; this.ledDigits(true);}
+    },16);
+    this.ledDigits(false,true);
+  },
+  HITMS:100,
+  ledDigits(force,decaying){
     if(!this.on||!CFG.ledOn||this.kind!==2)return;
     const now=performance.now();
     const rgb=new Array(this.LEDN*3).fill(0);
     let sig='';
+    /* LEVELS ARE CONTINUOUS HERE, and indexing the table with a fraction is how
+       the decay came out BLACK: a hit at 70ms is level 2.6, LEDLVL[2.6] is
+       undefined, `||0` made it dark, and every note would have blinked off
+       mid-fade instead of falling to rest. Interpolate between the two nearest
+       stops — the named levels still land exactly on their own values. */
+    const put=(sl,c,lvl)=>{
+      const x=Math.max(0,Math.min(4,lvl)), i0=Math.floor(x), i1=Math.min(4,i0+1), f=x-i0;
+      const g=this.LEDLVL[i0]*(1-f)+this.LEDLVL[i1]*f;
+      rgb[sl*3]=Math.round(c[0]*g); rgb[sl*3+1]=Math.round(c[1]*g); rgb[sl*3+2]=Math.round(c[2]*g);};
     try{
-      const p=S.patterns[S.editPat];
+      const p=S.patterns[S.editPat], sel=S.curPreset|0;
+      const selCol=this.CHCOL[sel%10];
+      for(const sl of this.letterSlots())put(sl,selCol,1);   // every letter = this channel
+      sig+='L'+sel;
       for(let i=0;i<10;i++){
         const has=!!(p&&p.lanes[i]&&p.lanes[i].events.length);
-        const here=(S.curPreset===i);
-        const c=has?(here?[0,255,90]:[0,90,30]):(here?[40,40,40]:[0,0,0]);
-        sig+=has?(here?'H':'h'):(here?'F':'.');
-        const sl=this.DIGSLOT[i];
-        rgb[sl*3]=c[0]; rgb[sl*3+1]=c[1]; rgb[sl*3+2]=c[2];
+        const here=(sel===i);
+        const rest=here?3:(has?2:1);
+        sig+=here?'S':(has?'h':'.');
+        let lvl=rest;
+        const h=this._hit&&this._hit[i];
+        if(h!=null){
+          const k=1-(now-h)/this.HITMS;                       // 4 -> resting over 100ms
+          if(k>0)lvl=rest+(4-rest)*k; else if(this._hit)delete this._hit[i];
+        }
+        put(this.DIGSLOT[i],this.CHCOL[i],lvl);
       }
     }catch(_){return;}
-    if(!force&&sig===this._ledSig)return;            // nothing changed: no write, ever
-    if(!force&&now-(this._ledAt||0)<this.LEDMIN){     // too soon: coalesce, do not drop
+    /* the guard is for STATIC state only. A decay frame says so and skips it,
+       or the flash would be written once and then held. */
+    if(!force&&!decaying&&sig===this._ledSig)return;
+    if(!force&&now-(this._ledAt||0)<this.LEDMIN){       // too soon: coalesce, never drop
       clearTimeout(this._ledT);
       this._ledT=setTimeout(()=>{this._ledT=null; this.ledDigits();},this.LEDMIN);
       return;
@@ -14032,7 +14106,9 @@ const HE={
     this._ledSig=sig; this._ledAt=now; this._ledWrites=(this._ledWrites||0)+1;
     this.ryLightPic(rgb,0).then(r=>{
       if(r!=='sent'){flash('led write: '+r,6000); return;}
-      return this.ryLightMode(13,{bright:4,speed:0,option:0});
+      /* the mode only has to be set once — resending it per frame doubles the
+         traffic and it is the same value every time */
+      if(!this._ledMode){this._ledMode=1; return this.ryLightMode(13,{bright:4,speed:0,option:0});}
     });
   },
   kcProbe(){                                         // Keychron: what can this firmware do?
