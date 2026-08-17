@@ -121,6 +121,44 @@ carrier sampled every 150ms across a x4 length change whose old cycle ended at
 handler, ahead of the audio channel's own three meanings for it, or the
 gesture would mean different things on different channels.
 
+## A SAMPLE'S PLAYHEAD IS A WORKLET, AND BOTH MODES DRIVE IT (2026-08-17)
+
+Gad, two specifications on top of the scan fix.
+
+**1. THE CROP IS THE WINDOW, AND THE DRIVER'S LEVEL IS ITS WIDTH.** Scan read
+the whole buffer and ignored start/end, and the scanning operator's level did
+nothing at all. Now the playhead never leaves the crop, and the driver's level
+shortens the window FROM THE END — 1 sweeps all of start..end, 0.5 the first
+half of it, 0 nothing. Anchored at the start, not centred: centred was the
+first guess and Gad corrected it, and he is right — a start point is a position
+you chose and a width control must not move it.
+
+    buffer: quiet LOW first half, loud HIGH second half
+    width 1.0   rms 0.226  centroid 7129     sweeps into the loud half
+    width 0.5   rms 0.089  centroid 2549     stays in the quiet half
+    width 0.2   rms 0.089  centroid 1474
+
+The edge fade is measured from the WINDOW's edges rather than the buffer's, or
+it would click at the crop. Start, end and the driver's level are all live on a
+sounding note.
+
+**2. FM ONTO A SAMPLE NOW MEANS FM OF THE PLAYHEAD.** The k-rate limit below is
+real and unchanged for a BufferSource — but a worklet playhead has no such
+limit, so an fm or pm operator aimed at a sample builds the sample as a
+RATE-DRIVEN playhead instead: speed = rate + modulator x deviation, integrated
+to a position, looping inside the same window scan uses. The deviation is
+proportional to the sample's own playback rate exactly as an oscillator's is to
+its frequency, so amt reads the same on a sample as anywhere else.
+
+    no driver      worklet 0   centroid  426     a plain BufferSource
+    FM amt 0.2     worklet 1   centroid  187
+    FM amt 0.8     worklet 1   centroid 2801
+
+TWO WAYS TO DRIVE A PLAYHEAD, AND THEY ARE DIFFERENT INSTRUMENTS: POSITION
+(scan) makes the modulator BE the playhead — its value picks where to read.
+RATE (fm) makes the modulator move the playhead's SPEED. Scan wins if both
+point at the same sample; it is the more specific request.
+
 ## SCAN, AND WHY FM CANNOT TOUCH A SAMPLE (2026-08-16)
 
 Gad: "scan mode doesnt work, do you understand how it should work? also

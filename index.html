@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.0814';
+const BUILD='2026-08-17.0831';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -4827,8 +4827,36 @@ let fxwReady=false;
      Edge-faded reads so the extremes never click. */
   class SC extends AudioWorkletProcessor{
     constructor(){super(); this.L=null; this.R=null; this.len=0; this.alive=true;
+      /* THE WINDOW. a..b is the sample's own start/end crop, and w is the
+         SCANNING OPERATOR'S LEVEL used as a width: it always STARTS AT THE
+         CROP START and shortens from the end, so 0.5 plays the first half of
+         what start/end selected and 0 is nothing. (Centred was the first guess
+         and Gad corrected it: the start point is a position you chose, and a
+         width control must not move it.) */
+      this.a=0; this.b=0; this.w=1;
+      /* TWO WAYS TO DRIVE A PLAYHEAD, and they are different instruments.
+         POSITION (scan): the modulator IS the playhead — its value picks where
+         in the window to read, so a sine sweeps back and forth through the
+         sample and you hear the sample's shape at the driver's rate.
+         RATE (fm): the modulator moves the playhead's SPEED, integrated into a
+         position — which is frequency modulation of a sampler, and the thing a
+         BufferSource can never do because its playbackRate is k-rate. */
+      this.md=0; this.pos=0; this.rate=1; this.dev=0;
       this.port.onmessage=e=>{const m=e.data||{};
-        if(m.t==='buf'){this.L=m.l; this.R=m.r||m.l; this.len=m.l.length;}
+        if(m.t==='buf'){this.L=m.l; this.R=m.r||m.l; this.len=m.l.length;
+          this.a=0; this.b=this.len-1;}
+        else if(m.t==='rate'){
+          this.md=1;
+          if(m.rate!==undefined)this.rate=m.rate;
+          if(m.dev!==undefined)this.dev=m.dev;
+        }
+        else if(m.t==='win'){
+          const L=Math.max(1,this.len);
+          let a=Math.round((m.st||0)*(L-1)), b=Math.round((m.en===undefined?1:m.en)*(L-1));
+          if(b<a+1)b=Math.min(L-1,a+1);
+          this.a=Math.max(0,a); this.b=Math.min(L-1,b);
+          this.w=Math.max(0,Math.min(1,m.w===undefined?1:m.w));
+        }
         /* (this handler used to clear this.grains, which SC has never had —
            copied from the cloud, and it threw on every buffer it was sent) */
         else if(m.t==='stop')this.alive=false;};}
@@ -4837,11 +4865,36 @@ let fxwReady=false;
       const out=O[0]; if(!out||!out[0])return true;
       const inp=I[0]&&I[0][0], N=out[0].length, len=this.len;
       if(!len||!inp){out[0].fill(0); if(out[1])out[1].fill(0); return true;}
-      const ew=Math.min(256,len>>2)||1;
+      /* read ONLY inside the crop: the playhead never wanders before a or
+         past b, which is what makes start/end a grain window rather than a
+         suggestion. The fade is measured from the WINDOW's edges for the same
+         reason — fading at the buffer's ends would click at the crop. */
+      const a=this.b>this.a?this.a:0, b=this.b>this.a?this.b:len-1;
+      const span=(b-a)*this.w, hi=a+span;
+      const ew=Math.min(256,Math.max(1,span>>2))||1;
+      if(this.md===1){
+        /* FM OF A SAMPLER: speed = rate + modulator x deviation, integrated.
+           The playhead LOOPS inside the same window scan uses, so start/end and
+           the width control mean the same thing in both modes. */
+        if(this.pos<a||this.pos>hi)this.pos=a;
+        const lp=span>1?span:1;
+        for(let k=0;k<N;k++){
+          let x=this.pos;
+          const i0=x|0, fr=x-i0, i1=i0+1<len?i0+1:i0;
+          const ef=Math.min(1,(x-a)/ew,(hi-x)/ew);
+          out[0][k]=(this.L[i0]+(this.L[i1]-this.L[i0])*fr)*ef;
+          if(out[1])out[1][k]=(this.R[i0]+(this.R[i1]-this.R[i0])*fr)*ef;
+          this.pos+=this.rate+inp[k]*this.dev;
+          while(this.pos>=hi)this.pos-=lp;
+          while(this.pos<a)this.pos+=lp;
+        }
+        return true;
+      }
       for(let k=0;k<N;k++){
-        let p=(inp[k]+1)*0.5; if(p<0)p=0; if(p>1)p=1;
-        const x=p*(len-1), i0=x|0, fr=x-i0, i1=i0+1<len?i0+1:i0;
-        const ef=Math.min(1,x/ew,(len-1-x)/ew);
+        let x=a+(inp[k]+1)*0.5*span;
+        if(x<a)x=a; if(x>hi)x=hi;
+        const i0=x|0, fr=x-i0, i1=i0+1<len?i0+1:i0;
+        const ef=Math.min(1,(x-a)/ew,(hi-x)/ew);
         out[0][k]=(this.L[i0]+(this.L[i1]-this.L[i0])*fr)*ef;
         if(out[1])out[1][k]=(this.R[i0]+(this.R[i1]-this.R[i0])*fr)*ef;
       }
@@ -5454,6 +5507,18 @@ class Voice{
      land on the next note, since they change the graph itself. */
   oscRefresh(E,key,gl,at){
     if(this.killed)return;
+    /* A SCAN WINDOW IS THREE DIALS ON TWO OPERATORS — the sample's start and
+       end, and the driver's level as the width swept between them. All three
+       are heard on the note already sounding rather than the next one. */
+    if(this.scanN&&(key==='amt'||key==='sst'||key==='sen'||key==='off')){
+      const ops9=this.p.osc||[];
+      for(const sn of this.scanN){
+        const so=ops9[sn.si]||{}, dO=ops9[sn.di]||{};
+        try{sn.node.port.postMessage({t:'win',
+          st:clamp(so.sst??0,0,0.98), en:clamp(so.sen??1,0.02,1),
+          w:dO.off?0:clamp(dO.amt===undefined?1:dO.amt,0,1)});}catch(_){}
+      }
+    }
     const ops=this.p.osc, t=Math.max(AC.currentTime,at||0), GL=gl>0?gl:0.02;
     const bt=this.rootFreq*ops[0].rat*Math.pow(2,(ops[0].fine||0)/1200);
     const sprd=(this.vx||this.p.vox).sprd||0;
@@ -6079,6 +6144,25 @@ class Voice{
         scanDriver[t]=j; scanDrives[j]=t;
       }
     }
+    /* AND THE SAME PAIRING FOR FM ONTO A SAMPLE. An fm or pm operator aimed at
+       a sample used to do nothing at all — the builder skipped it because a
+       BufferSource cannot be frequency-modulated (its playbackRate is k-rate).
+       A worklet playhead CAN be, so the pair is recorded here and the sample is
+       built as a rate-driven playhead instead of a BufferSource. Scan wins if
+       both point at the same sample: it is the more specific request. */
+    const fmDriver={}, fmDrives={};
+    for(let j=1;j<10;j++){
+      const o2=ops[j];
+      if(!o2||o2.off||o2.amt<=0.001)continue;
+      const md2=Math.round(o2.mode);
+      if(md2!==1&&md2!==4)continue;
+      let t=(o2.dst|0)>0?(o2.dst|0)-1:-1;
+      if(t<0||t===j)for(let k=j-1;k>=0;k--){
+        const o3=ops[k]; if(o3&&!o3.off&&(k===0||o3.amt>0.001)){t=k;break;}}
+      if(t>=0&&t!==j&&ops[t]&&ops[t].wav===9&&scanDriver[t]===undefined&&fmDriver[t]===undefined){
+        fmDriver[t]=j; fmDrives[j]=t;
+      }
+    }
     /* …and it is computed BEFORE the unison loop, because op 0 is built by the
        ROOT path and has to be able to ask whether something is scanning it. */
     for(let u=0;!FMW&&u<uniN;u++){
@@ -6092,7 +6176,7 @@ class Voice{
          1-9 loop — op 0 comes from this root path, which had no scan branch —
          so `sample in op1, sine in op2 set to scan` computed the pairing and
          then silently did nothing, which is exactly what Gad hit. */
-      else if(isS&&scanDriver[0]!==undefined&&fxwReady){
+      else if(isS&&(scanDriver[0]!==undefined||fmDriver[0]!==undefined)&&fxwReady){
         const bufR=E.opSamples.get(pi+':0')||E.noiseBuf;
         const nscR=new AudioWorkletNode(ac,'ten-scan',{numberOfInputs:1,outputChannelCount:[2]});
         const lR=new Float32Array(bufR.getChannelData(0));
@@ -6192,7 +6276,7 @@ class Voice{
         const mf=sync?tTarget*syncMasterRat(ops,i):0;
         const fi=sync?mf:tTarget*op.rat*Math.pow(2,(op.fine||0)/1200);
         let s2, scanned=false;
-        if(wv===9&&(Math.round(op.mode)===5||scanDriver[i]!==undefined)&&fxwReady){
+        if(wv===9&&(Math.round(op.mode)===5||scanDriver[i]!==undefined||fmDriver[i]!==undefined)&&fxwReady){
           /* SCAN: this sample's playhead is its dst/prev op's WAVEFORM. No
              BufferSource at all — a worklet reads wherever the driver says.
              (the buffer crosses the port per note: audition build; a shared
@@ -6357,9 +6441,34 @@ class Voice{
       for(const b of built){
         if(!b.scan)continue;
         /* driven from the other side when someone is pointing AT this sample */
-        const j=scanDriver[b.i]!==undefined?scanDriver[b.i]:tgtOf(b);
+        const isFM=fmDriver[b.i]!==undefined&&scanDriver[b.i]===undefined;
+        const j=isFM?fmDriver[b.i]
+               :(scanDriver[b.i]!==undefined?scanDriver[b.i]:tgtOf(b));
         const tb=built.find(x=>x.i===j);
         if(tb&&tb.s&&tb.s.connect){try{tb.s.connect(b.s);}catch(_){}}
+        /* THE WINDOW, sent from the one place that knows BOTH ops: the sample
+           supplies its own start/end crop, and the DRIVER'S LEVEL is the width
+           swept inside it — which is the job that level had none of before.
+           Sent here rather than at build so both spellings and the op-0 root
+           go through the same line. */
+        const sOp=ops[b.i]||{}, dOp=ops[j]||{};
+        const win={t:'win', st:clamp(sOp.sst??0,0,0.98), en:clamp(sOp.sen??1,0.02,1),
+                   w:clamp(dOp.amt===undefined?1:dOp.amt,0,1)};
+        try{b.s.port.postMessage(win);}catch(_){}
+        if(isFM){
+          /* FM OF THE PLAYHEAD. The sample's own playback rate is the carrier,
+             and the deviation is proportional to it exactly as an oscillator's
+             is to its frequency — so amt reads the same on a sample as it does
+             anywhere else. This is the thing a BufferSource cannot do. */
+          const dOp2=ops[j]||{}, a02=clamp(dOp2.amt,0,1), kI2=6*(1+3*a02*a02);
+          const r0=b.i===0?target
+                  :this.noteRatio*(sOp.rat||1)*Math.pow(2,(sOp.fine||0)/1200);
+          try{b.s.port.postMessage({t:'rate',rate:r0,dev:r0*a02*kI2});}catch(_){}
+          (this.fmScanN=this.fmScanN||[]).push({node:b.s,si:b.i,di:j,r0});
+        }
+        /* remembered so a live start/end or level edit can be heard on the note
+           that is already sounding, the way every other dial is */
+        (this.scanN=this.scanN||[]).push({node:b.s,si:b.i,di:j});
       }
       let node=sum;
       for(const k2 in outN)outN[k2].connect(sum);
