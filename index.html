@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.1435';
+const BUILD='2026-08-17.1444';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1383,9 +1383,9 @@ const SETTINGS=[
  {n:'led digits',g:'Input',h:()=>!HE.on||HE.kind!==2,
    v:()=>CFG.ledOn?('on · '+(HE._ledWrites||0)+' writes'):'off',
    a:()=>{CFG.ledOn=CFG.ledOn?0:1; saveCfg();
-     if(CFG.ledOn){HE._ledSig=null; HE._ledMode=0; HE.ledStart(); HE.ledDigits(true);
+     if(CFG.ledOn){HE._ledSig=null; HE._ledMode=0; HE.ledDigits(true);
        flash('yellow = selected channel · teal = the rest · bright = has events',6000);}
-     else{HE.ledStop(); HE.ryLightMode(1,{bright:4}); flash('lights back to always-on',4000);}
+     else{HE._ledSig=null; HE.ryLightMode(1,{bright:4}); flash('lights back to always-on',4000);}
      dirty=true;}},
  /* HOW MANY BRIGHTNESS LEVELS ARE THERE, REALLY. The timing question is
     answered — min 0.8ms, median 1ms, so 0x07 is RAM and the vendorSleep was
@@ -9494,11 +9494,13 @@ class Engine{
   }
   noteOn(at,pi,midi,vel,padMidi){
     const p=S.presets[pi];
-    /* EVERY note this instrument sounds comes through here — a held key, an arp
-       step, a looped event — so this is the one place the lamp has to be armed
-       from, and live and looped light identically without either being special
-       cased. `at` is scheduled ahead, so ledNote waits for it. */
-    if(typeof HE!=='undefined'&&CFG.ledOn)HE.ledNote(pi,at);
+    /* NO LED HOOK HERE, AND NOT AGAIN. Lighting a lamp per note meant seven HID
+       writes to the very device whose analog stream this instrument reads to
+       decide a note happened. Gad: "i cant play two notes fast after each
+       other" — that is the hall state machine, which disarms a key on release
+       and re-arms it only when the sensor reports it back at REST. Drop that
+       frame and the key never re-arms, so the second fast note is dropped in
+       silence. The keyboard's job is to be played. */
     if(engineGranP(p))return this.granNote(at,pi,midi,vel,null);
     /* A CUE IS A NOTE. Position keys used to fire from the key handler and
        return, which meant the whole PLAY rack — chords, the arp, everything
@@ -14085,10 +14087,10 @@ const HE={
       seen.sort((a,b)=>a-b);
       return {n:seen.length,lo:seen[0],med:seen[seen.length>>1],hi:seen[seen.length-1]};
     };
-    CFG.ledOn=0; this.ledStop();
+    CFG.ledOn=0; this._ledSig=null;
     const idle=await samp(2000,false);
     const busy=await samp(2000,true);
-    CFG.ledOn=on0; if(on0)this.ledStart();
+    CFG.ledOn=on0; this._ledSig=null;
     if(!idle||!busy)return 'no sensor frames — hold a key down and wiggle it during the test';
     return {idle,busy};
   },
@@ -14156,64 +14158,14 @@ const HE={
      ahead of now — so the lamp is armed for when the note will actually sound
      rather than when it was queued. Live keys and looped events come through
      the same door, which is why both light. */
-  /* NOTHING EXPENSIVE MAY HAPPEN IN HERE. Gad: "major bug introduced: now i
-     have a mega wierd reaction/latency on audio when playing any ch keys."
-     Mine, and the mechanism is plain in hindsight: noteOn is the AUDIO
-     SCHEDULING path, and this used to build a 378-byte frame and issue SEVEN
-     HID writes from inside it, per note, on the main thread the scheduler runs
-     on. A held chord or a 16th-note lane and the scheduler is queueing behind
-     the keyboard's USB traffic.
-     So this is now a two-number push and NOTHING else — no frame, no write, no
-     timer started. The render loop drains it on its own clock. An instrument
-     that stutters is not worth any number of pretty lights. */
-  ledNote(ch,at){
-    if(!CFG.ledOn||!this.on||this.kind!==2)return;
-    if(!(ch>=0&&ch<10))return;
-    /* STORE A WALL-CLOCK DEADLINE, not the AudioContext time. Comparing `at`
-       against AC.currentTime inside the loop meant a suspended or stalled
-       context never let anything drain — the queue filled to its cap and not
-       one lamp lit. performance.now() always advances. The conversion is one
-       property read, which is the only thing this is allowed to cost. */
-    const q=this._hitQ||(this._hitQ=[]);
-    let d=0;
-    if(typeof at==='number'&&typeof AC!=='undefined'&&AC)
-      d=Math.max(0,Math.min(4000,(at-AC.currentTime)*1000));
-    q.push(ch,performance.now()+d);
-    if(q.length>128)q.splice(0,q.length-128);        // a stuck queue must not grow
-  },
-  HITMS:100, LEDFRAME:40,
-  /* ONE loop owns every write, and it only exists while the lights are on. The
-     old design had three things able to trigger a write — the 60ms watchdog, a
-     16ms decay pump, and every note directly — which is how the board ended up
-     being written faster than it can redraw. */
-  ledStart(){
-    if(this._loop)return;
-    this._loop=setInterval(()=>this.ledTick(),this.LEDFRAME);
-  },
-  ledStop(){
-    if(this._loop){clearInterval(this._loop); this._loop=null;}
-    if(this._pump){clearInterval(this._pump); this._pump=null;}
-    this._hit={}; this._hitQ=[]; this._ledSig=null; this._ledWant=null;
-  },
-  ledTick(){
-    if(!this.on||!CFG.ledOn||this.kind!==2)return;
-    const now=performance.now();
-    this._hit=this._hit||{};
-    /* each entry carries the wall-clock moment its note will SOUND, so a lamp
-       lights when you hear it rather than when it was queued. Drained here
-       because this is the only place allowed to cost anything. */
-    const q=this._hitQ;
-    if(q&&q.length){
-      for(let i=0;i<q.length;i+=2){
-        if(q[i+1]<=now+this.LEDFRAME){this._hit[q[i]]=now; q.splice(i,2); i-=2;}
-      }
-    }
-    let live=false;
-    for(const k in this._hit){
-      if(now-this._hit[k]<this.HITMS)live=true; else delete this._hit[k];
-    }
-    this.ledDigits(false,live);
-  },
+  /* THE FLASH IS GONE, AND WITH IT EVERY PER-NOTE WRITE (Gad, 2026-08-17:
+     "try to remove the flashing"). What is left writes ONLY when the static
+     picture changes — you switch channel, or a lane gains or loses events —
+     which is a handful of writes a minute instead of seven reports per note.
+     The whole ledNote / hit-queue / decay-pump apparatus is deleted rather than
+     disabled: a note-flash on this board costs the board's own responsiveness,
+     and that trade is not close. If it ever comes back it needs a channel that
+     is not the one the sensor is reading on. */
   ledDigits(force,decaying){
     if(!this.on||!CFG.ledOn||this.kind!==2)return;
     const now=performance.now();
@@ -14237,15 +14189,7 @@ const HE={
         const here=(sel===i);
         const rest=here?3:(has?2:1);      // selected 3 · full 2 · empty 1
         sig+=here?(has?'H':'S'):(has?'h':'.');
-        let lvl=rest;
-        const h=this._hit&&this._hit[i];
-        if(h!=null){
-          const k=1-(now-h)/this.HITMS;                       // 4 -> resting over 100ms
-          if(k>0)lvl=rest+(4-rest)*k; else if(this._hit)delete this._hit[i];
-        }
-        /* ONLY THIS DIGIT. The hit touches DIGSLOT[i] and nothing else — the
-           letters are built above from static state and never see a decay. */
-        put(this.DIGSLOT[i],here?this.CHSEL:this.CHOFF,lvl);
+        put(this.DIGSLOT[i],this.CHSEL,rest);
       }
     }catch(_){return;}
     /* the guard is for STATIC state only. A decay frame says so and skips it,
@@ -14296,9 +14240,9 @@ const HE={
     const now9=()=>performance.now();
     /* the watchdog no longer writes. It was one of THREE things that could
        trigger a picture — with the decay pump and noteOn itself — which is how
-       the board came to be written faster than it can redraw. ledStart's loop
-       is the only writer now; this just makes sure it is running. */
-    if(CFG.ledOn&&this.kind===2&&!this._loop)this.ledStart();
+       the board came to be written faster than it can redraw. Only a CHANGE in
+       the static picture writes now, and this is the one place that asks. */
+    if(CFG.ledOn&&this.kind===2)this.ledDigits();   // signature-guarded: a no-op unless it changed
     if(this.kind===1&&this.ready&&performance.now()-(this._reqAt||0)>60)this.kcRequest();
     /* nothing pressed: the next arrow key-down is a new push, not a re-fire */
     if(this.pressure()==null&&now9()-(this.lastDownAt||0)>60){
