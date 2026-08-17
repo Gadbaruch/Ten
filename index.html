@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.1430';
+const BUILD='2026-08-17.1435';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1408,6 +1408,25 @@ const SETTINGS=[
      HE._probe=r.med+'ms / '+(typeof q==='string'?'err':q.med+'ms');
      copyFlash('0x07 bright x'+r.n+' ramp 0-4-0  min '+r.min+'ms  median '+r.med+
        'ms  max '+r.max+'ms\n'+pic,'probe copied');
+     dirty=true;}},
+ /* THE ONE THAT MATTERS NOW: do the LED writes starve the sensor stream this
+    board's velocity depends on. Four seconds, two halves, and a key has to be
+    held and wiggled the whole time because HE.fps only advances while a key is
+    moving. If busy is materially below idle, the lights and the instrument
+    cannot share this device and the lights are the half that goes. */
+ {n:'led contend',g:'Input',h:()=>!HE.on||HE.kind!==2,
+   v:()=>HE._contend||'hold a key, press',
+   a:async()=>{
+     flash('HOLD A KEY DOWN AND KEEP WIGGLING IT for 4 seconds — measuring the sensor',4500);
+     const r=await HE.ryContendProbe();
+     if(typeof r==='string'){HE._contend='—'; flash(r,9000); dirty=true; return;}
+     const drop=r.idle.med?Math.round((1-r.busy.med/r.idle.med)*100):0;
+     HE._contend=r.idle.med+'→'+r.busy.med+'Hz';
+     copyFlash('sensor report rate\n  writes OFF  n='+r.idle.n+'  lo '+r.idle.lo+
+       '  median '+r.idle.med+'  hi '+r.idle.hi+' Hz\n  writes ON   n='+r.busy.n+
+       '  lo '+r.busy.lo+'  median '+r.busy.med+'  hi '+r.busy.hi+' Hz\n  → '+drop+
+       '% drop'+(drop>15?' — the writes ARE starving the sensor':' — not the cause'),
+       'contention copied');
      dirty=true;}},
  {n:'h vel',g:'Input', h:()=>!HE.on,v:()=>Math.round(HE.cfg().est||0)===1?'window':'peak',
               a:()=>{const e2=Math.round(HE.cfg().est||0)===1?0:1; HE.set('est',e2);
@@ -14034,6 +14053,45 @@ const HE={
     this._ledWrites=(this._ledWrites||0)+n;
     return {n,min:+t[0].toFixed(2),med:+t[t.length>>1].toFixed(2),max:+t[t.length-1].toFixed(2)};
   },
+  /* DO THE WRITES STARVE THE READS. Gad, with the two clues that cracked it:
+     "the issue is not an issue on my mac keyboard" and "the first note i play on
+     the monsgeek is not delayed but i cannot play rapid notes."
+     That is not main-thread cost — I had already made noteOn free and it did not
+     help. It is ONE DEVICE serving two directions. TEN reads this board's analog
+     stream continuously and that stream IS how velocity and note detection work;
+     writing seven feature reports per frame to the same device competes with it.
+     First note lands before any write is in flight; rapid notes need exactly the
+     frames the writes are eating; the Mac keyboard is a different device and is
+     untouched. Every symptom fits.
+     So measure it instead of arguing about it: the board's own report period
+     with writes off, then with writes flat out. HE.fps only advances while a key
+     is MOVING, so a key has to be held and wiggled throughout — hence the
+     instruction rather than a silent probe. */
+  async ryContendProbe(){
+    const d=this.cfgDev||this.dev; if(!d)return 'no device';
+    const on0=CFG.ledOn;
+    const samp=async(ms,writing)=>{
+      const seen=[]; const t0=performance.now();
+      while(performance.now()-t0<ms){
+        if(writing){
+          const rgb=new Array(this.LEDN*3).fill(0);
+          for(const sl of this.DIGSLOT)rgb[sl*3+1]=(seen.length%2)?200:40;
+          await this.ryLightPic(rgb,0);
+        }
+        await new Promise(r=>setTimeout(r,40));
+        if(this.fps)seen.push(this.fps);
+      }
+      if(!seen.length)return null;
+      seen.sort((a,b)=>a-b);
+      return {n:seen.length,lo:seen[0],med:seen[seen.length>>1],hi:seen[seen.length-1]};
+    };
+    CFG.ledOn=0; this.ledStop();
+    const idle=await samp(2000,false);
+    const busy=await samp(2000,true);
+    CFG.ledOn=on0; if(on0)this.ledStart();
+    if(!idle||!busy)return 'no sensor frames — hold a key down and wiggle it during the test';
+    return {idle,busy};
+  },
   BRIGHTRAMP:[0,1,2,3,4,3,2,1,0],
   async ryBrightProbe(stepMs){
     const d=this.cfgDev||this.dev; if(!d)return 'no device';
@@ -14079,8 +14137,13 @@ const HE={
          BRIGHTNESS 1 = empty · 2 = has events · 4 = a note just hit
      The letters wear the SELECTED hue, so the whole board says which channel
      your hands are about to play. */
-  CHSEL:[255,196,0],                                  // yellow: selected
-  CHOFF:[0,210,150],                                  // teal: everything else
+  /* ONE HUE, FOUR LEVELS (Gad, 2026-08-17). Colour was carrying nothing that
+     brightness was not already saying better, so it stopped carrying anything:
+         1 empty · 2 has events · 3 SELECTED · 4 a note just hit
+     Selection is a brightness step now, which is why it is worth having only
+     one hue — a level means the same thing wherever you look. */
+  CHSEL:[0,210,150],
+  CHOFF:[0,210,150],
   LEDLVL:[0,0.16,0.34,0.62,1],
   letterSlots(){
     if(this._lsl)return this._lsl;
@@ -14172,10 +14235,7 @@ const HE={
       for(let i=0;i<10;i++){
         const has=!!(p&&p.lanes[i]&&p.lanes[i].events.length);
         const here=(sel===i);
-        /* BRIGHTNESS SAYS CONTENT, FULL STOP. The selected channel is yellow —
-           it does not also get a level of its own, or "brighter" would mean
-           two different things on the same lamp. */
-        const rest=has?2:1;
+        const rest=here?3:(has?2:1);      // selected 3 · full 2 · empty 1
         sig+=here?(has?'H':'S'):(has?'h':'.');
         let lvl=rest;
         const h=this._hit&&this._hit[i];
