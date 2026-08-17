@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.1227';
+const BUILD='2026-08-17.1248';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1310,16 +1310,25 @@ const SETTINGS=[
     display. Pressing the row flashes the raw first sixteen bytes, because the
     next thing anyone asks of this is "what ELSE is in that reply". */
  {n:'board',g:'Input',h:()=>!HE.on,
-              v:()=>{const f=HE.fw; if(!f)return '— no reply';
-                     return f.err?'err':(f.lightSync?'sync ✓':'sync ✗ b11='+f.b11);},
+              v:()=>{const f=HE.fw, k=HE.km; if(!f)return '— no reply';
+                     if(f.err)return 'err';
+                     /* the keymap read is the live question now, so it is what
+                        the row reports: how many of the 128 slots came back
+                        with anything in them */
+                     return k?(k.err?'km err':k.used+'/'+k.slots+' keys'):'no km';},
               a:()=>{const f=HE.fw;
                      if(!f)return flash('the board sent no 0x8F reply — reconnect hid',6000);
                      /* the whole reply to the clipboard: this is data to be
                         reported back, and reading it off a 1.8s flash is how
                         you get a screenshot of half of it */
+                     const k=HE.km;
                      copyFlash('0x8F  id=0x'+((f.id>>>0).toString(16))+
                        '  b11='+f.b11+'  len='+f.len+(f.err?'  ERR '+f.err:'')+
-                       '\n'+f.raw, 'board reply copied');}},
+                       '\n'+f.raw+
+                       '\n\n0x8A keymap layer '+(k?k.layer:'-')+'  '+
+                       (!k?'(not read)':k.err?('ERR '+k.err+' after '+k.got+' bytes')
+                          :(k.used+'/'+k.slots+' slots used, '+k.len+' bytes\n'+k.raw)),
+                       'board + keymap copied');}},
  {n:'h vel',g:'Input', h:()=>!HE.on,v:()=>Math.round(HE.cfg().est||0)===1?'window':'peak',
               a:()=>{const e2=Math.round(HE.cfg().est||0)===1?0:1; HE.set('est',e2);
                      flash(e2?'window — velocity is how deep it got in '+HE.cfg().wait+'ms'
@@ -13633,7 +13642,8 @@ const HE={
     /* info BEFORE enable, the order their driver uses: whoAmI first, then turn
        the stream on. Asking after would put a feature read in the middle of a
        running analog push. */
-    if(kind===2){await this.ryInfo(); await this.ryEnable();} else this.kcProbe();
+    if(kind===2){await this.ryInfo(); await this.ryKeymap(0); await this.ryEnable();}
+    else this.kcProbe();
     this.watch=setInterval(()=>this.tick(),60);
     this.set('autoOn',1);      // a reload should find the board already here
     flash('hid: '+this.srcName+(this.map?'':' — run `h keys` to map the keys'));
@@ -13711,6 +13721,38 @@ const HE={
                b11:a[11], len:a.length, raw:hex};
       if(a[0]!==0x8F){this.fw.err='0x8F answered 0x'+a[0].toString(16); return;}
     }catch(err){this.fw={err:String(err&&err.message||err)};}
+  },
+  /* READ THE KEYMAP OFF THE BOARD — 0x8A, and it is a READ, which is the whole
+     point of doing it first. The write (0x0A) needs a 4-byte-per-key encoding
+     we would otherwise be guessing at; 512 bytes of the board's own current
+     matrix, laid against a layout we can see, is that encoding handed to us.
+
+     Framed exactly as the driver for THIS board frames it. That mattered more
+     than it looks: SET_KEYMATRIX is 0x09 in the mechanical drivers and 0x0A in
+     the magnetic one, and the two use different chunk framings entirely. The
+     FUN60 PRO (id 2600, magnetism, no hitbox) is served by the driver that
+     says 0x0A — so this asks the way that driver asks.
+        n[0]=0x8A  n[1]=layer  n[2]=255  n[3]=chunk  n[4]=profile
+     Eight chunks of 64 bytes = 512, which is 128 slots of 4 bytes. */
+  async ryKeymap(layer=0,profile=0){
+    const d=this.cfgDev||this.dev; if(!d)return null;
+    const out=[];
+    try{
+      for(let c=0;c<8;c++){
+        await d.sendFeatureReport(0,this.ryCmd(0x8A,layer,255,c,profile));
+        await new Promise(r=>setTimeout(r,12));
+        const dv=await d.receiveFeatureReport(0);
+        const a=new Uint8Array(dv.buffer,dv.byteOffset,dv.byteLength);
+        for(let i=0;i<64;i++)out.push(a[i]||0);
+      }
+    }catch(err){this.km={err:String(err&&err.message||err),got:out.length}; return null;}
+    const hex=out.map(x=>x.toString(16).padStart(2,'0')).join(' ');
+    /* how many of the 128 slots are non-empty — the quickest sanity check that
+       this is a keymap and not 512 bytes of nothing */
+    let used=0; for(let i=0;i<out.length;i+=4)
+      if(out[i]|out[i+1]|out[i+2]|out[i+3])used++;
+    this.km={layer,len:out.length,slots:out.length>>2,used,raw:hex};
+    return out;
   },
   kcProbe(){                                         // Keychron: what can this firmware do?
     const b=new Uint8Array(32); b[0]=0xA9; b[1]=0x01;
