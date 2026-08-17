@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.0807';
+const BUILD='2026-08-17.0814';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -6057,12 +6057,52 @@ class Voice{
         if(!firstSrc)firstSrc=nd;
       }
     }
+    /* WHO IS SCANNING WHOM. Scan has meant one thing since it shipped — "my
+       playhead is your waveform" — which puts the mode on the SAMPLE and
+       makes it the only op mode that points BACKWARDS. fm, ring and pm all
+       read "I do this TO my dest"; scan alone read "I take this FROM my
+       dest", so setting the op AFTER a sample to scan did nothing at all,
+       which is precisely what you would try first.
+       It reads both ways now. An op in scan mode pointed at a sample DRIVES
+       that sample's playhead, and the sample is the thing you hear; the
+       driver goes silent, the way every other modulator does. Which spelling
+       you meant is never ambiguous, because only one of the two ops is
+       holding a buffer. */
+    const scanDriver={}, scanDrives={};
+    for(let j=1;j<10;j++){
+      const o2=ops[j];
+      if(!o2||o2.off||o2.amt<=0.001||Math.round(o2.mode)!==5||o2.wav===9)continue;
+      let t=(o2.dst|0)>0?(o2.dst|0)-1:-1;
+      if(t<0||t===j)for(let k=j-1;k>=0;k--){
+        const o3=ops[k]; if(o3&&!o3.off&&(k===0||o3.amt>0.001)){t=k;break;}}
+      if(t>=0&&t!==j&&ops[t]&&ops[t].wav===9&&scanDriver[t]===undefined){
+        scanDriver[t]=j; scanDrives[j]=t;
+      }
+    }
+    /* …and it is computed BEFORE the unison loop, because op 0 is built by the
+       ROOT path and has to be able to ask whether something is scanning it. */
     for(let u=0;!FMW&&u<uniN;u++){
       const off=uniN===1?0:(u/(uniN-1))*2-1;
       this.uniOff.push(off);
       const target=baseTarget*Math.pow(2,(VX.sprd||0)*off/1200);
-      let src=null,pitchParam=null;
+      let src=null,pitchParam=null,rootScan=false;
       if(skipOp0){}                     // silent and unreachable: never built at all
+      /* SCAN WHEN THE SAMPLE IS OP 1. The pairing above can name op 0 as the
+         scanned sample, but the scan node was only ever built inside the ops
+         1-9 loop — op 0 comes from this root path, which had no scan branch —
+         so `sample in op1, sine in op2 set to scan` computed the pairing and
+         then silently did nothing, which is exactly what Gad hit. */
+      else if(isS&&scanDriver[0]!==undefined&&fxwReady){
+        const bufR=E.opSamples.get(pi+':0')||E.noiseBuf;
+        const nscR=new AudioWorkletNode(ac,'ten-scan',{numberOfInputs:1,outputChannelCount:[2]});
+        const lR=new Float32Array(bufR.getChannelData(0));
+        const rR=bufR.numberOfChannels>1?new Float32Array(bufR.getChannelData(1)):lR;
+        nscR.port.postMessage({t:'buf',l:lR,r:rR});
+        src=nscR; rootScan=true;
+        src.start=()=>{};
+        src.stop=t=>{setTimeout(()=>{try{nscR.port.postMessage({t:'stop'});}catch(_){}},
+          Math.max(0,((t||AC.currentTime)-AC.currentTime)*1000)+120);};
+      }
       else if(isN){src=ac.createBufferSource();
         src.buffer=isS?(E.opSamples.get(pi+':0')||E.noiseBuf):E.nbuf(rootW,ops[0].pw);
         src.loop=true;pitchParam=src.playbackRate;
@@ -6136,33 +6176,11 @@ class Voice{
         (this.opNodes[0]=this.opNodes[0]||[]).push(src);
         (this.opAmt[0]=this.opAmt[0]||[]).push({g:g0,sc:1});
       }
-      const built=skipOp0?[]:[{i:0,s:src,osc:!isN,f:target,op:ops[0]}];
+      const built=skipOp0?[]:[{i:0,s:src,osc:!isN&&!rootScan,f:target,op:ops[0],scan:rootScan}];
       /* the same target, re-based on the note's own frequency — identical to
          `target` whenever op 0 is tonal (rootFreq IS toneFreq there), and the
          whole fix when it is not */
       const tTarget=target*(this.rootFreq>0?this.toneFreq/this.rootFreq:1);
-      /* WHO IS SCANNING WHOM. Scan has meant one thing since it shipped — "my
-         playhead is your waveform" — which puts the mode on the SAMPLE and
-         makes it the only op mode that points BACKWARDS. fm, ring and pm all
-         read "I do this TO my dest"; scan alone read "I take this FROM my
-         dest", so setting the op AFTER a sample to scan did nothing at all,
-         which is precisely what you would try first.
-         It reads both ways now. An op in scan mode pointed at a sample DRIVES
-         that sample's playhead, and the sample is the thing you hear; the
-         driver goes silent, the way every other modulator does. Which spelling
-         you meant is never ambiguous, because only one of the two ops is
-         holding a buffer. */
-      const scanDriver={}, scanDrives={};
-      for(let j=1;j<10;j++){
-        const o2=ops[j];
-        if(!o2||o2.off||o2.amt<=0.001||Math.round(o2.mode)!==5||o2.wav===9)continue;
-        let t=(o2.dst|0)>0?(o2.dst|0)-1:-1;
-        if(t<0||t===j)for(let k=j-1;k>=0;k--){
-          const o3=ops[k]; if(o3&&!o3.off&&(k===0||o3.amt>0.001)){t=k;break;}}
-        if(t>=0&&t!==j&&ops[t]&&ops[t].wav===9&&scanDriver[t]===undefined){
-          scanDriver[t]=j; scanDrives[j]=t;
-        }
-      }
       for(let i=1;i<10;i++){
         const op=ops[i]; if(!op||op.amt<=0.001||op.off)continue;
         const wv=op.wav;

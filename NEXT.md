@@ -146,7 +146,37 @@ playhead can be moved at audio rate when `playbackRate` cannot. It reads both
 ways — a sample op set to scan is driven by its dst/prev op, or an op set to
 scan pointing AT a sample drives that sample and goes silent itself.
 
-**WHY IT LOOKS BROKEN: SCAN WITH NO SAMPLE IN THE PAIR IS A SILENT OP.** Only
+**THE REAL BUG: SCAN NEVER BUILT WHEN THE SAMPLE WAS OP 1.** Gad: "i had a
+sample loaded in op1 and op2 was a sin set to scan and it didnt do anything."
+The pairing loop happily names op 0 as the scanned sample — but the scan node
+was only ever created inside the `for(let i=1;i<10;i++)` loop, and op 0 comes
+from the ROOT build, which had no scan branch. So the pairing was computed and
+then nothing consumed it:
+
+    op1=smp, op2=sine SCAN          scan nodes 0   <- his setup
+    op2 SCAN dst=op1 explicit       scan nodes 0
+    op1=sine, op2=smp SCAN          scan nodes 1
+    op1=sine op2=sine SCAN op3=smp  scan nodes 1
+
+The pairing is computed BEFORE the unison loop now, so the root can ask whether
+something is scanning it, and the root builds a ten-scan node when it is. Op 0's
+`built` entry carries `scan:true`, so the existing connection loop wires the
+driver in with no second code path.
+
+PROVED with a ramp buffer — value proportional to POSITION, so a playhead
+following a sine outputs that sine, and the scanned pitch must equal the
+DRIVER's:
+
+    driver  261.6Hz -> scanned  261.1Hz
+    driver  523.3Hz -> scanned  522.2Hz
+    driver 1046.5Hz -> scanned 1047.1Hz
+
+A NOISE BUFFER CANNOT SHOW THIS, which is worth remembering: an op set to `smp`
+with nothing loaded falls back to `E.noiseBuf`, and scanning noise gives noise
+at every sweep rate. Two rounds of measurement here read as "inconclusive"
+purely because of that.
+
+**AND SEPARATELY: SCAN WITH NO SAMPLE IN THE PAIR IS A SILENT OP.** Only
 `b.op.mode===0` ops get an output gain and reach `outN`, so a mode-5 op with no
 sample partner is built, never connected, and heard as nothing — while still
 counting toward `addAmt`, so it quietly divides the other operators down.
