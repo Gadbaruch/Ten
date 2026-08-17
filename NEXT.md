@@ -5,6 +5,71 @@ name "ten-gad"` → localhost:3033 is Gad's, `ten-main` → 3032 is Claude's, bo
 serving this directory · one file, `index.html`, no build step. See CLAUDE.md
 for who may be destructive where.
 
+## THE CLOUD CURSOR WAS DRAWN SOMEWHERE THE GRAINS WERE NOT (Gad, 2026-08-17)
+
+Gad: "the cloud cursor, it should move with the main playhead no?? why is it
+seperate". It was separate by OMISSION, and he could hear it.
+
+The SPAWN has followed the carrier since the cloud was unified — with a loop
+running, grains are sprayed around where the playhead IS rather than around a
+dial of their own. The stat readout never got that memo and kept reporting
+`pos + scanPh`. So on a granulated loop the band sat somewhere the grains were
+not, drifting at the scan rate while the sound came from the playhead. Both
+now make the same three-way choice in the same order. Band against playhead,
+sampled 14 times across a granulated loop:
+
+    live (before)   worst gap 0.489   drifting at its own rate
+    now             worst gap 0.002
+
+**`from` NAMES THE DIAL IT POINTS AT.** `pos` is the cloud's position dial,
+which only exists on the grain half of the page — and since the keys began
+obeying the tape's setup, a key in tape or stretch leaves from the crop's
+START. So the field said `pos` while meaning a control that was not on screen.
+It reads `start | here` outside grain mode and `pos | here` inside it.
+
+**THE SIZE DIAL AND THE MODE FIELD ARE ONE FACT.** `applyCmode` wrote the size
+from the mode; nothing wrote the mode from the size, so turning size down on
+the cloud page left the mode saying `tape` while the cloud ran. `syncCmode`
+closes it, from all three paths that write size — the page dial, the ⌫ reset,
+and an automation curve (a curve on size is a curve on what the channel IS).
+The last CLOUD size is recorded on every write rather than on the mode edge:
+parking it when the mode flips is too late, because by then the size is at the
+top and the value is gone. Walk 0.3 → 0.08 → 1 and the mode field hands back
+0.08.
+
+    size 1 → tape · 0.30 → grain · 0.08 → grain · 1 → tape (parks 0.08)
+    mode → grain hands back 0.08
+
+**TAB -/= IS A SPEED, NOT A LENGTH**, and that decides which way round it goes.
+The pair was set as "− shortens, = lengthens" on the reasoning that a minus
+takes away — true of the number, wrong for the hand. What you reach for these
+keys to do is make the loop go faster or slower, and = is more. Double speed IS
+half the loop. Flipped on audio and midi together, because it is one gesture:
+
+    tab=   4 → 2 bars   double speed   (midi events scale 0,2 → 0,1)
+    tab-   4 → 8 bars   half speed
+
+**AND A CORRECTION TO THE ENTRY BELOW.** The "220 overlapping presses, live
+leaves 8 voices" number was WRONG — the probe dispatched its KeyboardEvents at
+`window`, and the listener is on `document`, so it pressed nothing at all. The
+8 voices were residue from the `early.js` probe run on that tab moments before.
+Re-run properly, with the events reaching the app and a clean page each side,
+the mash is CLEAN ON BOTH BUILDS: 220 presses, 0 grains, 0 voices, both.
+
+The off-before-on bug is still real and still fixed — it is measured directly
+and reproduces every time. But it is a LATENT bug, not a reproduction of what
+Gad reported: through the keyboard, `granNote` is called at
+`currentTime+0.004`, so the release would have to land inside 4ms of the press
+to invert the two timers. **His hanging note is not reproduced.** The `stuck`
+row in settings now counts the WORKLET's voices as well as `act`'s (shown as
+`act+cloud`), because a cloud voice whose shim has been dropped from `act` —
+the exact shape of a hang that outlives its key — was invisible to the one net
+you can check while it is happening.
+
+**The rule this earns:** a probe that drives the app through synthetic events
+must assert that they ARRIVED. Two rounds of measurement here were of an app
+that never received a keystroke, and both read as passes.
+
 ## THE SPRAY BAND BELONGED TO THE KEYS MODE, NOT THE CLOUD (Gad, 2026-08-17)
 
 Gad: "there is this dotted line with a range around it… it keeps running
