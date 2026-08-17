@@ -169,14 +169,17 @@ Rearranged 2026-08-15 (Gad). Each one now means exactly one thing:
                                    the coarse step, walking a rack. `rs()`.
     left ⌥       `HOLD.t`          TOOLS — c/x/v, z (⇧z redo), s. A second ⌘.
     left ctrl    `KM.scp`          THE CHANNEL'S SCOPES (what ⌥ used to be).
-                 `SCOPEKEY`        Defaults ControlLeft + NumLock; learnable.
+                 `SCOPEKEY`        ControlLeft + NumLock. FIXED, not learnable.
        ⌥ and ctrl SWAPPED (Gad, 2026-08-15). Everything still calls altOf() —
        only what it asks changed, which is what makes a swap this wide safe.
        Every scope handler had a `!e.ctrlKey` guard meaning "a modified letter
        is not a note"; control IS the scope modifier now, so those guards were
        refusing the scope its own key and had to go. gblOf dropped ctrl for the
        same reason — ctrl+q would have been the quality scope AND quantize.
-                 `TOOLKEY`         Defaults AltLeft/AltRight; learnable.
+                 `TOOLKEY`         AltLeft ALONE. FIXED, not learnable. Right
+                                   alt was a second tools key and is now the
+                                   LEFT ARROW — a key cannot be a modifier and
+                                   a cursor. See THE KEYBOARD IS NOT A SETTING.
        **TOOLS IS ARMED, NOT HELD.** PrintScreen does not deliver a normal
        press: the OS treats it as a ONE-SHOT and sends keydown and keyup
        together, or only the keyup. It worked as the mic because mic on/off is
@@ -199,6 +202,38 @@ permission the first time and every escape you ever pressed would have gone
 through a browser dialog to get there. So escape's own work runs from the
 key-UP, where it can still see whether anything else was pressed.
 Right ctrl is still a mic key as a fallback.
+
+## THE KEYBOARD IS NOT A SETTING (Gad, 2026-08-17)
+
+"I just want to have them working in one way, and that's it… less error prone."
+`tools key`, `scope key`, `win key`, `menu key`, `last key` and the `arrows`
+mode selector are GONE from settings, with the machinery behind them
+(TOOLLEARN/SCOPELEARN/LASTKEY, SPARE, spareKey, ARROWALIAS, ARROWMODE, MK,
+FNACT). A key that needs moving gets moved in the BOARD's own software, where
+it is a property of the hardware and travels with it.
+
+**The arrow cluster is one table, `RIGHTARROW`, always on:**
+
+    right alt → ←     menu → ↑     F13 → ←  F14 → →  F15 → ↑  F16 → ↓
+
+`ControlRight` and `MetaRight` are deliberately NOT in it — they cost the mic
+fallback and right ⌘, and two arrows are not worth those. **↓ and → come from
+the board**: map those two keys to the real ArrowDown/ArrowRight keycodes in
+the MonsGeek web driver. `Fn` is not in it either — macOS handles Fn below the
+event layer and no browser on any OS has ever seen it.
+
+**The bug this replaced, because it is the shape to watch for:** the mapping
+lived behind a three-way mode and the DEFAULT mode was the one where none of it
+worked — right alt fell through to `TOOLKEY` and armed the tools layer instead.
+A mapping you can be in the wrong mode of is a mapping that is wrong.
+
+**And do NOT remap a key to an ARROW in board firmware without checking
+`arrowRefire`.** It absorbs rapid-trigger wobble by disarming on every press,
+and the hall sensor's `homeAt`/`pressAt` are a SECOND HID stream — `press>home`
+is only true if the analog report beat the keystroke, which it usually does
+not. It used to latch shut and kill that arrow for the session; a 250ms clock
+re-arms it now. F13–F16 sidestep this entirely, because TEN's synthesized arrow
+is untrusted and never enters the guard.
 
 ## Scope
 
