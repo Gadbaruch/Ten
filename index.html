@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.2207-mono';
+const BUILD='2026-08-17.2247-mono';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -13025,6 +13025,22 @@ const audWin=au=>{
    honest rather than a fudge: +-24 semitones IS x0.25..x4 (2^(24/12) = 4). The
    SIGN stays on speed, because reverse is not a pitch. */
 const spdToSemis=s=>clamp(Math.round(12*Math.log2(Math.max(0.25,Math.abs(s)))),-24,24);
+/* WHAT SYNC IS DOING TO THE PITCH RIGHT NOW. The rate is fit × speed and the
+   fit is not stored anywhere — it is the take's length over the loop's — so
+   the one dial that has to report the whole rate has to be able to ask. The au
+   object does not know its own channel, so it is found by identity; ten
+   presets is a cheaper scan than caching a derived number that would then have
+   to be invalidated by the take, the crop, the loop length and the tempo. */
+const audFitR=au=>{
+  if(!au||!Math.round(au.fit||0))return 1;
+  let pi=-1; for(const i of CHANS())if(S.presets[i]&&S.presets[i].au===au){pi=i;break;}
+  if(pi<0)return 1;
+  const buf=engine&&engine.audBuf&&engine.audBuf[pi]; if(!buf)return 1;
+  const lane=S.patterns[S.editPat]&&S.patterns[S.editPat].lanes[pi];
+  const L=lane&&lane.len; if(!(L>0))return 1;
+  const W=audWin(au), dur=(W.hi-W.lo)*buf.duration, loopSec=L*spb();
+  return (dur>1e-6&&loopSec>1e-6)?dur/loopSec:1;
+};
 const semisToSpd=(semis,sgn)=>(sgn<0?-1:1)*clamp(+Math.pow(2,clamp(semis,-24,24)/12).toFixed(2),0.25,4);
 const audRate=(au,dur,loopSec,ov)=>{
   const spd=Number.isFinite(ov)?ov:audSpd(au);
@@ -13118,9 +13134,26 @@ const AUDTAKE=[
       (the first attempt) tied the two dials and killed every route on pitch
       in tape mode — caught by the matrix probe, whose `free +7` row writes
       au.semis raw and went silent. */
-   get:o=>Math.round(o.cmode??0)===0?spdToSemis(audSpd(o)):clamp(Math.round(o.semis??0),-24,24),
+   /* …AND SYNC IS PART OF THAT SPEED (Gad, 2026-08-18: "stretch base pitch and
+      tape base pitch are not the same, stretch is slightly higher, not sure
+      whats up"). The rate is fit × speed and the dial derived from the SPEED
+      alone, so a synced take that does not fill the bar was transposed by the
+      fit — a 0.85 take reads 374Hz against stretch's 440, a minor third down —
+      while the dial said 0 and nothing on the page explained it. Speed and
+      pitch are one control in tape, so the dial has to report the whole rate,
+      not its half. Stretch takes the same factor back out through the shifter,
+      which is what stretch is FOR, and that is the difference he heard.
+      The reach is what it is: speed is ±0.25..4, so a fit further out than two
+      octaves cannot be cancelled and the dial clamps. That is honest — sync in
+      tape IS varispeed, and a take eight times the bar has to come out high. */
+   get:o=>Math.round(o.cmode??0)===0?spdToSemis(audFitR(o)*audSpd(o))
+                                    :clamp(Math.round(o.semis??0),-24,24),
    set:(o,v)=>{
-     if(Math.round(o.cmode??0)===0){const s=semisToSpd(v,audSpd(o)); o.spd=s; o.rate=s; o.semis=0;}
+     if(Math.round(o.cmode??0)===0){
+       /* the speed that LANDS that pitch once the fit has had its say */
+       const f=audFitR(o)||1, sgn=audSpd(o)<0?-1:1;
+       const s=sgn*clamp(+(Math.pow(2,clamp(v,-24,24)/12)/Math.abs(f)).toFixed(2),0.25,4);
+       o.spd=s; o.rate=s; o.semis=0;}
      else o.semis=clamp(Math.round(v),-24,24);}}),
 ];
 /* ONE LEVEL HERE, NOT TWO. There were two faders side by side — one for the
