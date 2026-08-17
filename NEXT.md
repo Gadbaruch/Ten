@@ -121,6 +121,42 @@ carrier sampled every 150ms across a x4 length change whose old cycle ended at
 handler, ahead of the audio channel's own three meanings for it, or the
 gesture would mean different things on different channels.
 
+## SCAN, AND WHY FM CANNOT TOUCH A SAMPLE (2026-08-16)
+
+Gad: "scan mode doesnt work, do you understand how it should work? also
+fm/pm/scan/sync doesnt work when the op they are applied to is a sample, my
+guess is that the playhead of sample in synth isnt malleable."
+
+His guess is right, and it is stronger than "not malleable" — it is a hard
+platform limit, and it is the REASON scan exists.
+
+**AN AudioBufferSourceNode'S PITCH IS k-RATE.** Measured: `detune` and
+`playbackRate` both report `automationRate: 'k-rate'`. They are connectable,
+but they update once per 128-sample block — about 344Hz — so an audio-rate
+modulator reaches them as a staircase, not a waveform. FM and PM of a sample
+are therefore IMPOSSIBLE with a BufferSource, and the builder's `tb.osc` guard
+is correct rather than an oversight. SYNC is not a platform limit but a
+meaningless one: hard sync resets an oscillator's PHASE, and a buffer has no
+phase to reset.
+
+**SCAN IS THE SAMPLE-NATIVE ANSWER TO EXACTLY THAT.** It is "my playhead is
+your waveform": the driver's output, −1..1, is mapped to a position 0..1 in the
+buffer and the sample is read there, in a WORKLET, per sample. That is why the
+playhead can be moved at audio rate when `playbackRate` cannot. It reads both
+ways — a sample op set to scan is driven by its dst/prev op, or an op set to
+scan pointing AT a sample drives that sample and goes silent itself.
+
+**WHY IT LOOKS BROKEN: SCAN WITH NO SAMPLE IN THE PAIR IS A SILENT OP.** Only
+`b.op.mode===0` ops get an output gain and reach `outN`, so a mode-5 op with no
+sample partner is built, never connected, and heard as nothing — while still
+counting toward `addAmt`, so it quietly divides the other operators down.
+Measured: with a sample, one scan node is created and the op sounds; with no
+sample, zero scan nodes and the op contributes nothing at any ratio.
+
+NOT FIXED, and worth deciding: a mode that silently does nothing is the trap
+here. It could flash when scan is set with no sample to reach, or fall back to
+behaving as an additive op, or be refused. Not done unasked.
+
 ## KIT IS AN ENGINE AGAIN (Gad, 2026-08-16) — supersedes the entry below
 
 It spent a while in the voice-mode list on the argument that a kit IS a

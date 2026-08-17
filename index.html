@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.0759';
+const BUILD='2026-08-17.0807';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1936,7 +1936,7 @@ const MODULES=[
     const R=s.routes||[];const t=R[0]?(R[0].tgt?'·':MDST[R[0].dst||0]):'?';
     return MSRC[s.src]+'→'+t+(R.length>1?'+'+(R.length-1):'');}},
  {k:'5',id:'fx', name:'FX',  slot:true,params:FX_P, abbr:s=>s.typ?XTYPES[s.typ]:'···'},
- {k:'6',id:'vox',name:'VOICE',flat:[SP('mode','mode','enum',{opts:MODE}),
+ {k:'6',id:'vox',name:'VOICE',flat:[SP('voices','mode','enum',{opts:MODE}),
     SP('glide','glide','time',{min:0,max:0.5}),
     /* THE EXPERIMENT, on a dial so it can be judged by ear. `phase` swaps the
        operator stack for ten-fmop: a real phase accumulator, band-limit table
