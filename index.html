@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.1159';
+const BUILD='2026-08-17.1202';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1304,6 +1304,19 @@ const SETTINGS=[
  {n:'midi in',g:'Input',v:()=>EXP.midiOn?['off','solo','+kbd'][CFG.midiIn|0]:'off', a:d=>EXP.cycleMidi(d)},
  {n:'hid',g:'Input',    v:()=>HE.on?(HE.srcName||'on').slice(0,8):'off',
               a:()=>{if(HE.on)HE.disconnect(); else HE.connect();}},
+ /* WHAT THE BOARD SAID WHEN ASKED — the 0x8F reply, on a row instead of in a
+    console. `sync ✓` is the one that matters: the firmware takes live per-key
+    LED frames, which is the whole prerequisite for using the keyboard as the
+    display. Pressing the row flashes the raw first sixteen bytes, because the
+    next thing anyone asks of this is "what ELSE is in that reply". */
+ {n:'board',g:'Input',h:()=>!HE.on,
+              v:()=>{const f=HE.fw; if(!f)return '— no reply';
+                     return f.err?'err':(f.lightSync?'sync ✓':'sync ✗ b11='+f.b11);},
+              a:()=>{const f=HE.fw;
+                     if(!f)return flash('the board sent no 0x8F reply — reconnect hid');
+                     if(f.err)return flash('0x8F failed: '+f.err);
+                     flash('board 0x'+((f.id>>>0).toString(16))+' · light sync '+
+                           (f.lightSync?'YES':'no')+' · '+f.raw);}},
  {n:'h vel',g:'Input', h:()=>!HE.on,v:()=>Math.round(HE.cfg().est||0)===1?'window':'peak',
               a:()=>{const e2=Math.round(HE.cfg().est||0)===1?0:1; HE.set('est',e2);
                      flash(e2?'window — velocity is how deep it got in '+HE.cfg().wait+'ms'
