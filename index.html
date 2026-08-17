@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.2247-mono';
+const BUILD='2026-08-17.2329-mono';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -10328,8 +10328,14 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
          which is every take once sync is off — played once and left the rest
          of the bar silent instead of coming round again. It wraps the crop,
          so the cycle is the only thing that should end it. */
+      /* …AND NOTHING RE-FIRES IT WHEN THE LOOP IS OFF. The cycle life is a
+         handshake with audCycle: die at the boundary because the next one is
+         born there. With auto OFF audCycle never runs, so that life is a death
+         with no successor — Gad: "if i hold a note, it playes to the end of
+         the loop and then stops". A key-made head lives until something stops
+         it, exactly as it does under free. */
       durSec:(cue&&Number.isFinite(cue.life))?cue.life
-        :(cue||rate<0||!Math.round(au.fit||0))?1e6
+        :(cue||rate<0||!Math.round(au.fit||0)||!autoCur(S.presets[pi]))?1e6
         :Math.max(0.05,loopSec-skipSec)});
     return this._lastTid;
   }
@@ -10457,6 +10463,11 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
      cursor born an hour ago and to one that has not begun. */
   audCarDieF(pi){
     const au=Object.assign({},S.presets[pi].au||{},(this.audOv&&this.audOv[pi])||{});
+    /* AUTO OFF MEANS NO CYCLE TO SERVE. The deadline exists so a carrier dies
+       exactly where audCycle spawns its successor; with the loop off there is
+       no successor, and re-cutting the life to the bar line kills the head a
+       held key is still playing. */
+    if(!autoCur(S.presets[pi]))return Math.round((AC.currentTime+1e9)*AC.sampleRate);
     /* free: no deadline. A frame this far out is the same "never" the free
        carrier is already born with (durSec 1e6), through one code path
        instead of a sentinel the worklet would have to know about. */
@@ -12935,8 +12946,17 @@ const GRANF=[
     how it feels (shape/rev/width), and the space around it (fade/dif/fb).
     Setup — keys mode, input, freeze, engine mode, sample, gain — lives on
     the INSTRUMENT row where channel identity belongs. */
- SP('pos','pos','lin',{min:0,max:1,step:0.01,fmt:v=>Math.round(v*100)+'%'}),
- SP('scan','scan','lin',{min:-4,max:4,step:0.05,fmt:v=>Math.abs(v)<0.001?'freeze':'\u00d7'+v}),
+ /* POS AND SCAN ARE GONE FROM THE PAGE (Gad, 2026-08-18: "if they dont do
+    anything lets remove them"). They were the cloud's own address, and since
+    the spray began following the carrier they are consulted ONLY when
+    `this.car == null` — no loop running. With auto on they moved nothing at
+    all, and a dial that does nothing on the setting most channels are in is
+    worse than no dial. The PARAMS stay: the freeze gesture still writes them
+    (`_ctrlPut('grn',pi,0,'pos'|'scan')`), and a keys-only cloud still reads
+    them — it is the two knobs that have left. If they ever come back it should
+    be as an OFFSET from the carrier, which would mean something in both cases.
+    Note what goes with them: they are no longer mod/automation destinations,
+    so a stored route aimed at cloud pos or scan now points at nothing. */
  SP('spray','spray','lin',{min:0,max:1,step:0.02,fmt:v=>Math.round(v*100)+'%'}),
  /* the character dial: a sliver, a cloud, or — at the top — one unbroken
     playhead, which is the clean tape read */
@@ -20312,6 +20332,11 @@ function endAudHold(c){
     if(!Object.keys(AUD.gk).some(k8=>(AUD.gk[k8]||{}).kind==='pmono')){
       engine.audPitch(h8.pi,0);
       engine.busEnvFire(h8.pi,AC.currentTime,true);   // …and the key-up releases it
+      /* AUTO OFF: the last finger takes the head with it. With the loop off a
+         pitch key MAKES the one cursor, so it also has to end it — otherwise
+         the take runs on by itself at base pitch, which is what Gad heard, and
+         audCar then names a head nobody can reach. */
+      if(!autoCur(S.presets[h8.pi])){engine.audStop(h8.pi); dirty=true; return 'stop';}
       /* WHY UP WAS WORSE THAN DOWN (Gad: "on pitching down and return it land
          perfect but on pitching up and return it gets out of sync"). The rate
          does not snap back, it SLEWS — c.step glides toward c.sTgt on a 20ms
@@ -20411,11 +20436,34 @@ function endAudHold(c){
       /* …unless a finger arrived in the meantime: the grab it started owns the
          channel now and this stale release must not take it away */
       if(Object.keys(AUD.gk||{}).some(k=>(AUD.gk[k]||{}).pi===pi))return;
-      engine.audStop(pi);
-      if(T.playing&&autoCur(S.presets[pi])){
-        const a3=actAt(posNow());
-        engine.audPlay(pi,AC.currentTime+0.006,lane.len,fmod(posNow()-a3.anchor,lane.len));
+      /* A RELEASE IS NOT A STOP (Gad, 2026-08-18: "when i mess with cue points
+         or pitch and let go around the end of the loop the sample will stop and
+         will only play again next round like it got an off message").
+         audStop is a BROADCAST — a tclr that ends every cursor the worklet is
+         holding — and audCycle posts the next bar's carrier a HORIZON before
+         the line. So a release inside those last 150ms killed a carrier that
+         had not started yet, and audCycle had already scanned past that
+         boundary: nothing spawned until the bar AFTER. One cycle of silence,
+         from letting go at the wrong moment.
+         With one playhead there is nothing to stop anyway — the cue MOVED the
+         head, it did not add one, and a pitch key's own cursor is already ended
+         by the audOff above. So the release only has to hand the head back to
+         the bar. With auto OFF there is no bar to hand it to and the head
+         simply carries on, which is what a keys-only channel is. */
+      if(!AUDMONO){
+        engine.audStop(pi);
+        if(T.playing&&autoCur(S.presets[pi])){
+          const a3=actAt(posNow());
+          engine.audPlay(pi,AC.currentTime+0.006,lane.len,fmod(posNow()-a3.anchor,lane.len));
+        }
+        return;
       }
+      /* AUTO OFF: THE KEY WAS THE ONLY THING MAKING SOUND, so letting go ends
+         it. Gad: "when key is let go the sample keeps playing on its own".
+         There is no future carrier to protect here — audCycle does not run
+         with the loop off — so the broadcast is safe and is the right shape. */
+      if(!autoCur(S.presets[pi])){engine.audStop(pi); return;}
+      if(T.playing)engine.audRelock(pi);
     };
     if(!others9){ if(wait9<2)endIt(); else setTimeout(endIt,wait9); }
     /* the jump's length is the held gesture, like a note's — ON THE GRID when
