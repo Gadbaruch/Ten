@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.2022-mono';
+const BUILD='2026-08-17.2038-mono';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -4628,7 +4628,17 @@ let fxwReady=false;
         else if(m.t==='tape'){if(this.tv.size<12){
           const c9={id:m.id,bus:1,fr:m.frame,ph:m.pos,
             step:m.rate,sTgt:m.rate,base:m.base||m.rate,free:m.free?1:0,
-            shift:Number.isFinite(m.sh)&&m.sh>0?m.sh:1,ch:m.ch|0,
+            shift:Number.isFinite(m.sh)&&m.sh>0?m.sh:1,
+            /* THE FIT COMPENSATION, KEPT. Under sync the shifter is
+               (1/fitRate) x 2^(semis/12): the first half undoes the stretch
+               the fit applied, the second is the pitch you dialled. tpb was
+               writing the SECOND HALF ALONE, so the moment you bent the pitch
+               in stretch mode the fit compensation was thrown away and never
+               came back — the return landed at the wrong pitch by exactly the
+               fit ratio. Remembered here so a bend can rebuild the whole
+               product instead of replacing it. */
+            shc:Number.isFinite(m.shc)&&m.shc>0?m.shc:1,
+            ch:m.ch|0,
             gl:Number.isFinite(m.gl)?m.gl:1,gr:Number.isFinite(m.gr)?m.gr:1,
             end:m.end,gain:m.gain??1,life:m.durF||1e12,
             dur:Infinity,wrap:m.wrap?1:0,lo:m.lo||0,vel:1,shp:0.5,car:m.car?1:0,
@@ -4702,7 +4712,8 @@ let fxwReady=false;
            voices move only the shifter (the clock is not for sale) */
         else if(m.t==='tpb'){const s9=Number.isFinite(m.semis)?m.semis:0, f9=Math.pow(2,s9/12);
           for(const [id,v] of this.tv){
-            if(v.free)v.sTgt=Math.max(0.01,v.base*f9); else v.shift=f9;}}
+            if(v.free)v.sTgt=Math.max(0.01,v.base*f9);
+            else v.shift=(v.shc||1)*f9;}}
         /* THE TAPE'S WINDOW AND SPEED, so a key can obey them. a and far are
            unsorted sample positions — far<a is the reversed crop — and rate
            is the tape's own step before the key's note ratio. on is 0 in
@@ -10127,7 +10138,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
        sound again until the page is reloaded */
     e.node.port.postMessage({t:'tape',id,frame:FIN(Math.round(at*AC.sampleRate),0),
       pos:FIN(P9.pos,0),end:FIN(P9.end,0),rate:FIN(P9.rate,1),base:FIN(P9.base,1),
-      free:P9.free?1:0,sh:FIN(P9.sh,1),
+      free:P9.free?1:0,sh:FIN(P9.sh,1),shc:FIN(P9.shc,1),
       ch:FIN(P9.ch,0),gl:FIN(P9.gl,1),gr:FIN(P9.gr,1),gain:FIN(P9.gain,0.9),
       wrap:P9.wrap?1:0,lo:FIN(P9.lo,0),car:P9.car?1:0,
       durF:FIN(Math.round(P9.durSec*AC.sampleRate),1e9)});
@@ -10200,6 +10211,8 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
       base:baseRate*k9,
       free:!sync,
       sh:shSync,
+      /* the fit half on its own, so a later bend can rebuild sh from it */
+      shc:sync?(1/Math.max(0.05,Math.abs(baseRate))):1,
       ch:buf.numberOfChannels>1?Math.round(au.chan||0):0,
       gl:Math.SQRT2*Math.cos(th9), gr:Math.SQRT2*Math.sin(th9),
       /* a cue plays until you let go, so it loops the crop rather than
