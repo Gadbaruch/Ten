@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.1257';
+const BUILD='2026-08-17.1307';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1334,27 +1334,39 @@ const SETTINGS=[
     except slot 65, right alt, which holds `00 50 00 00`. 0x50 IS the HID usage
     for Left Arrow, so Gad's remap did reach the board; it landed in byte 1,
     and byte 2 is the field the firmware emits from. Hence AltRight forever.
-    Writing the shape the other 54 keys use fixes it. Two presses on purpose:
-    the first is save=0, which is RAM and dies on unplug, so a wrong guess
-    costs a cable pull; only the second commits. Row disappears once slot 65
-    reads correct, because a button that writes to your keyboard should not sit
-    around after the job is done. */
+    Writing the shape the other 54 keys use fixes it.
+
+    0x8A READS THE STORED MAP, NOT THE LIVE ONE — and reading it back is how
+    that got discovered the wrong way round. The save=0 write reported "did not
+    take" because slot 65 still read 00 50 00 00; right alt started sending a
+    real Left Arrow at that exact moment. So save=0 DID apply, to the ACTIVE
+    map, and the read simply cannot see it.
+
+        save=0   applies now, not persisted — gone on a power cycle
+        save=1   applies AND commits, which is what 0x8A will then report
+
+    Their call sites agree: a batch stages every key with save=0 and commits on
+    the last one, `g===_.length-1`, while a single key goes straight in with
+    `setKeyConfigSimple(f, i, 0, !0)`. Byte 6 is the batch index, not a profile.
+
+    THE LESSON, since it cost a wrong conclusion: a read-back only verifies the
+    thing the read actually looks at. Verify a live change by its EFFECT — press
+    the key — and use the read for what it answers, which is persistence. */
  {n:'fix ralt',g:'Input',
    h:()=>{const q=HE.on&&HE.kmSlot&&HE.kmSlot(65);
           return !q || (q[2]===0x50&&!q[1]);},        // hidden unless slot 65 is the broken shape
-   v:()=>HE._raltStaged?'press to keep':'→ ← (ram)',
+   v:()=>'→ ← (keeps it)',
    a:async()=>{
-     const save=!!HE._raltStaged;
-     const r=await HE.ryWriteKey(65,[0,0,0x50,0],{layer:0,save});
+     const r=await HE.ryWriteKey(65,[0,0,0x50,0],{layer:0,save:true});
      if(r!=='sent'){flash('write failed: '+r,8000); return;}
-     await HE.ryKeymap(0);                            // read it back rather than assume
+     await new Promise(r2=>setTimeout(r2,250));       // a commit needs a moment to settle
+     await HE.ryKeymap(0);                            // now the read CAN see it: 0x8A reads stored
      const q=HE.kmSlot(65)||[];
      const got=q.map(x=>x.toString(16).padStart(2,'0')).join(' ');
-     const ok=q[2]===0x50;
-     HE._raltStaged=ok&&!save;
-     flash(ok?(save?'slot 65 = '+got+' — SAVED. right alt is a real ← now, everywhere.'
-                   :'slot 65 = '+got+' — in RAM. TEST RIGHT ALT. press again to keep · unplug to undo')
-             :'slot 65 still '+got+' — the write did not take',12000);
+     flash(q[2]===0x50
+       ? 'slot 65 = '+got+' — SAVED. right alt survives a power cycle now.'
+       : 'slot 65 still '+got+' — not committed. right alt may still work until you unplug.',
+       12000);
      dirty=true;}},
  {n:'h vel',g:'Input', h:()=>!HE.on,v:()=>Math.round(HE.cfg().est||0)===1?'window':'peak',
               a:()=>{const e2=Math.round(HE.cfg().est||0)===1?0:1; HE.set('est',e2);
