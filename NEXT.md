@@ -183,6 +183,41 @@ what a level-0 modulator does everywhere else in the rack, and it is more
 useful than silence, but it is not what "0 = nothing" reads like on the dial.
 Gad's call if it ever bites.
 
+## LEVEL IS A WINDOW ON SCAN AND A DEPTH ON FM — NOT BOTH (Gad, 2026-08-17)
+
+Gad, after the taper shipped: "it just sounds less good now, the whole
+scanning and FM of samples. Before, an operator doing FM on the sample sounded
+quite good and you could still hear the sample. Now fm'ing a sample sounds
+closer to the scanning — you can't hear the movement of the sample."
+
+He was right, and he was right about the cause being that turn's change —
+though the fix is not the revert he offered. The `win` message carried
+`w: SCANW(driver.amt)` for BOTH modes. On a SCAN driver `amt` is the window
+width and the taper is what he asked for. On an FM driver `amt` is the
+DEPTH — and feeding it in as a width too meant half level locked the playhead
+inside 2% of the crop, so a sample being fm'd could not traverse itself. The
+linear width had the same coupling; the exponential made it 23x worse at half
+level (0.5 -> 0.022) and that is where it became audible.
+
+An FM driver gets the WHOLE crop now. start/end still bound it, and scan keeps
+the taper he approved. Measured as "how much of the sample is still in there",
+correlating the fm'd output against the same sample played plain:
+
+    level   sounds like the sample    centroid (plain ref = 732)
+             live(bug)     fixed        live(bug)      fixed
+     0.2       0.038       0.586          5895          537
+     0.5       0.017       0.387          4303         1071
+     1.0       0.150       0.446          5342         2866
+
+The centroid column is the real tell. Bugged, it sits at 4000-5900 wherever
+the level is — a wall of hash, and the dial does nothing musical. Fixed, it
+climbs 537 -> 2866 with the level, which is an FM depth control behaving like
+one with the sample still underneath it.
+
+**The rule this earns:** when one dial is read by two features, a taper added
+for one of them is a change to BOTH, and the other one has to be measured
+before it ships. `SCANW` was tested against the scan dial only.
+
 ## END IS A SPAN FROM START, AND NEGATIVE MEANS REVERSE (Gad, 2026-08-17)
 
 Gad: "start dictates the starting point on the whole wave, but end 0% should

@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.0914';
+const BUILD='2026-08-17.0938';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -5615,7 +5615,7 @@ class Voice{
         const W8=smpWin(so);
         try{sn.node.port.postMessage({t:'win',
           st:W8.a, en:W8.far,
-          w:dO.off?0:SCANW(dO.amt===undefined?1:dO.amt)});}catch(_){}
+          w:sn.fm?1:(dO.off?0:SCANW(dO.amt===undefined?1:dO.amt))});}catch(_){}
       }
     }
     const ops=this.p.osc, t=Math.max(AC.currentTime,at||0), GL=gl>0?gl:0.02;
@@ -6570,8 +6570,15 @@ class Voice{
            is a backwards crop and the worklet carries the sign through, so
            reverse needs no mirrored buffer on this path at all. */
         const W8=smpWin(sOp);
+        /* LEVEL IS A WINDOW WIDTH ON SCAN AND NOTHING ELSE. On an fm driver
+           `amt` is the DEPTH — how hard the playhead is pushed — and feeding
+           it in here as a width as well meant the two fought: half level
+           locked the playhead inside 2% of the crop, so a sample being fm'd
+           could not traverse itself and came out static, which is precisely
+           what Gad heard ("you can't hear the movement of the sample").
+           An fm driver gets the WHOLE crop. start/end still bound it. */
         const win={t:'win', st:W8.a, en:W8.far,
-                   w:SCANW(dOp.amt===undefined?1:dOp.amt)};
+                   w:isFM?1:SCANW(dOp.amt===undefined?1:dOp.amt)};
         try{b.s.port.postMessage(win);}catch(_){}
         if(isFM){
           /* FM OF THE PLAYHEAD. The sample's own playback rate is the carrier,
@@ -6586,7 +6593,7 @@ class Voice{
         }
         /* remembered so a live start/end or level edit can be heard on the note
            that is already sounding, the way every other dial is */
-        (this.scanN=this.scanN||[]).push({node:b.s,si:b.i,di:j});
+        (this.scanN=this.scanN||[]).push({node:b.s,si:b.i,di:j,fm:isFM});
       }
       let node=sum;
       for(const k2 in outN)outN[k2].connect(sum);
