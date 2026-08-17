@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.1248';
+const BUILD='2026-08-17.1257';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1329,6 +1329,33 @@ const SETTINGS=[
                        (!k?'(not read)':k.err?('ERR '+k.err+' after '+k.got+' bytes')
                           :(k.used+'/'+k.slots+' slots used, '+k.len+' bytes\n'+k.raw)),
                        'board + keymap copied');}},
+ /* THE RIGHT-ALT REPAIR, and it only exists while it is needed. Read off the
+    board: every one of the 61 keys is `00 00 <hid> 00` — usage in byte 2 —
+    except slot 65, right alt, which holds `00 50 00 00`. 0x50 IS the HID usage
+    for Left Arrow, so Gad's remap did reach the board; it landed in byte 1,
+    and byte 2 is the field the firmware emits from. Hence AltRight forever.
+    Writing the shape the other 54 keys use fixes it. Two presses on purpose:
+    the first is save=0, which is RAM and dies on unplug, so a wrong guess
+    costs a cable pull; only the second commits. Row disappears once slot 65
+    reads correct, because a button that writes to your keyboard should not sit
+    around after the job is done. */
+ {n:'fix ralt',g:'Input',
+   h:()=>{const q=HE.on&&HE.kmSlot&&HE.kmSlot(65);
+          return !q || (q[2]===0x50&&!q[1]);},        // hidden unless slot 65 is the broken shape
+   v:()=>HE._raltStaged?'press to keep':'→ ← (ram)',
+   a:async()=>{
+     const save=!!HE._raltStaged;
+     const r=await HE.ryWriteKey(65,[0,0,0x50,0],{layer:0,save});
+     if(r!=='sent'){flash('write failed: '+r,8000); return;}
+     await HE.ryKeymap(0);                            // read it back rather than assume
+     const q=HE.kmSlot(65)||[];
+     const got=q.map(x=>x.toString(16).padStart(2,'0')).join(' ');
+     const ok=q[2]===0x50;
+     HE._raltStaged=ok&&!save;
+     flash(ok?(save?'slot 65 = '+got+' — SAVED. right alt is a real ← now, everywhere.'
+                   :'slot 65 = '+got+' — in RAM. TEST RIGHT ALT. press again to keep · unplug to undo')
+             :'slot 65 still '+got+' — the write did not take',12000);
+     dirty=true;}},
  {n:'h vel',g:'Input', h:()=>!HE.on,v:()=>Math.round(HE.cfg().est||0)===1?'window':'peak',
               a:()=>{const e2=Math.round(HE.cfg().est||0)===1?0:1; HE.set('est',e2);
                      flash(e2?'window — velocity is how deep it got in '+HE.cfg().wait+'ms'
@@ -13754,6 +13781,31 @@ const HE={
     this.km={layer,len:out.length,slots:out.length>>2,used,raw:hex};
     return out;
   },
+  /* WRITE ONE KEY — 0x0A, framed exactly as this board's driver frames it:
+        a[0]=0x0A  a[1]=layer  a[2]=slot(<=127)  a[5]=save  a[6]=profile
+        a[7]=Bit7 checksum over a[0..6]   a[8..11]=the four config bytes
+     The payload sits AFTER the checksum byte and is not part of it, which is
+     why 8 and not 7. Slot index is the SENSOR's slot index — read off the
+     board and matched against RY_SLOTS 54 for 54, so the table this file has
+     had all along is the keymap's index map too.
+     save=0 lands in RAM and is gone on unplug. That is the whole safety story:
+     the first attempt at anything here is reversible by pulling the cable. */
+  async ryWriteKey(slot,quad,opt){
+    const d=this.cfgDev||this.dev; if(!d)return 'no device';
+    if(!(slot>=0&&slot<=127))return 'slot '+slot+' out of range';
+    const o=opt||{}, b=new Uint8Array(64);
+    b[0]=0x0A; b[1]=o.layer|0; b[2]=slot; b[5]=o.save?1:0; b[6]=o.profile|0;
+    let sum=0; for(let i=0;i<7;i++)sum+=b[i];
+    b[7]=(255-sum)&0xff;
+    b[8]=quad[0]|0; b[9]=quad[1]|0; b[10]=quad[2]|0; b[11]=quad[3]|0;
+    try{await d.sendFeatureReport(0,b);}catch(err){return 'FAILED '+(err&&err.message||err);}
+    return 'sent';
+  },
+  /* what slot 65 currently holds, as four bytes — used both to decide whether
+     the repair row shows at all and to say whether the write took */
+  kmSlot(s){const k=this.km; if(!k||k.err||!k.raw)return null;
+    const b=k.raw.split(' ').map(x=>parseInt(x,16));
+    return b.slice(s*4,s*4+4);},
   kcProbe(){                                         // Keychron: what can this firmware do?
     const b=new Uint8Array(32); b[0]=0xA9; b[1]=0x01;
     this._reqAt=performance.now();
