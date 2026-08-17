@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.1420';
+const BUILD='2026-08-17.1429';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1263,8 +1263,15 @@ const SETTINGS=[
                      if(CFG.latch===0)latchReleaseAll();
                      flash(CFG.latch===0?'latch OFF — a note ends when you lift, whatever shift is doing'
                                         :'latch ON — a note played with left shift down sustains · tap ⇧ to release all');}},
+ /* THE WORKLET'S OWN VOICES COUNT TOO. This read `act` only, and a cloud voice
+    whose shim has been dropped from act — the exact shape of a hang that
+    outlives its key — was invisible to the one net you can check while it is
+    happening. Shown as act+cloud, so "0+2" says where to look. */
  {n:'stuck',g:'Behavior',  v:()=>{let n=0;(engine.act||[]).forEach(a=>{for(const v of (a||[]))if(v&&!v.killed)n++;});
-                                    return String(n);},                a:()=>stuckReport()},
+                                    let w=0;
+                                    for(const k in (engine.gn||{})){const st=(engine.gn[k]||{}).stat;
+                                      if(st)w+=(st.v|0);}
+                                    return w?n+'+'+w:String(n);},      a:()=>stuckReport()},
  {n:'swing',g:'Behavior',  v:()=>S.grv.amt+'%',            a:d=>S.grv.amt=clamp(S.grv.amt+d*5,0,100)},
  {n:'groove',g:'Behavior', v:()=>GROOVES[S.grv.typ].n,     a:d=>S.grv.typ=fmod(S.grv.typ+d,GROOVES.length)},
  {n:'grid',g:'Look',   v:()=>CFG.vgrid?'vertical':'lanes',a:()=>CFG.vgrid=CFG.vgrid?0:1},
@@ -1376,9 +1383,9 @@ const SETTINGS=[
  {n:'led digits',g:'Input',h:()=>!HE.on||HE.kind!==2,
    v:()=>CFG.ledOn?('on · '+(HE._ledWrites||0)+' writes'):'off',
    a:()=>{CFG.ledOn=CFG.ledOn?0:1; saveCfg();
-     if(CFG.ledOn){HE._ledSig=null; HE.ledDigits(true);
-       flash('digits show which channels have content · green = has events',6000);}
-     else{HE.ryLightMode(1,{bright:4}); flash('lights back to always-on',4000);}
+     if(CFG.ledOn){HE._ledSig=null; HE._ledMode=0; HE.ledStart(); HE.ledDigits(true);
+       flash('yellow = selected channel · teal = the rest · bright = has events',6000);}
+     else{HE.ledStop(); HE.ryLightMode(1,{bright:4}); flash('lights back to always-on',4000);}
      dirty=true;}},
  /* HOW MANY BRIGHTNESS LEVELS ARE THERE, REALLY. The timing question is
     answered — min 0.8ms, median 1ms, so 0x07 is RAM and the vendorSleep was
@@ -4603,7 +4610,18 @@ let fxwReady=false;
             /* …and where the cloud is reading from: the centre the grains are
                sprayed around (scan included), how wide the spray is, and how
                loud each grain is right now, so the picture breathes with it */
-            cpos:this.p.live>0.5
+            /* THE PICTURE READS OFF THE SAME LINE THE GRAINS DO. The spawn has
+               followed the carrier since the cloud was unified — with a loop
+               running, grains are sprayed around WHERE THE PLAYHEAD IS rather
+               than around a dial of their own — but this readout never got the
+               memo and kept reporting pos+scanPh. So on a granulated loop the
+               band sat somewhere the grains were not, drifting at the scan
+               rate while the sound came from the playhead. Gad: "it should
+               move with the main playhead no?? why is it separate". It was
+               separate by omission. Same three-way choice as the spawn, in the
+               same order, so they cannot disagree again. */
+            cpos:this.car!=null?this.car
+              :this.p.live>0.5
               ?((((this.rw/L9)-0.05-(this.cur||this.p).pos*0.9)%1)+1)%1
               :((((this.cur||this.p).pos+this.scanPh)%1)+1)%1,
             cspr:(this.cur||this.p).spray,
@@ -10498,6 +10516,8 @@ function applyAudParam(pi,rack,spec,v){
   if(rack==='grn'){
     p.gr=p.gr||{};
     if(spec.set)spec.set(p.gr,v); else p.gr[spec.key]=v;
+    /* a curve on size is a curve on WHAT THIS CHANNEL IS, and the field says so */
+    if(spec.key==='size')syncCmode(p);
     engine.granCfg(pi);
   }else{
     p.au=p.au||{};
@@ -12433,7 +12453,13 @@ function prsFieldDefs(){
        velocity and their own level over on the sound page */
     {k:'loop vol',v:()=>Math.round(clamp((p.au||{}).lvol??1,0,1)*100)+'%'},
     {k:'voice',v:()=>['poly','mono','legato'][clamp(Math.round((p.vox||{}).mode||0),0,2)]},
-    ...(kmodeOf(p)?[{k:'from',v:()=>Math.round((p.au||{}).start||0)?'here':'pos'}]:[]),
+    /* IT NAMES THE DIAL IT ACTUALLY POINTS AT. 'pos' is the CLOUD's position
+       dial, which only exists on the grain half of the page — and since the
+       keys began obeying the tape's setup, a key in tape or stretch leaves
+       from the crop's START instead. So the field said 'pos' while meaning a
+       control that was not on screen. */
+    ...(kmodeOf(p)?[{k:'from',v:()=>Math.round((p.au||{}).start||0)?'here'
+        :(cmodeOf(p)===2?'pos':'start')}]:[]),
     {k:'input', v:()=>['mic','mstr'][Math.round((p.au||{}).src||0)]},
     {k:'chan',  v:()=>['stereo','left','right'][clamp(Math.round((p.au||{}).chan||0),0,2)]},
     {k:'gain',  v:()=>((p.au||{}).gain??0.9).toFixed(2)}];
@@ -12725,6 +12751,27 @@ function applyCmode(pi){
   if(m===0)audFoldPitch(p.au);     // tape keeps its pitch in the speed
   engine.granNode(pi); engine.granCfg(pi); engine.audLive(pi); engine.audTwin(pi);
 }
+/* …AND THE OTHER DIRECTION, which never existed. applyCmode writes the SIZE
+   from the mode; nothing wrote the MODE from the size, so turning size down on
+   the cloud page left the mode field saying `tape` while the cloud ran — two
+   names for one fact, and the field was the one lying. They are the same fact:
+   the cloud is running exactly when the grain size is below its top, which is
+   what carMute asks and what the spray band is drawn on.
+   The size a mode change PARKS is kept, so walking grain → tape by hand and
+   back by the mode field still returns you to the cloud you had. */
+function syncCmode(p){
+  if(!p||!p.au)return false;
+  const sz=(p.gr||{}).size??0.12;
+  /* the last CLOUD size, recorded on every write rather than on the edge —
+     parking it at the moment the mode flips is too late, because by then the
+     size is already at the top and the value is gone. Walk 0.3 → 0.08 → 1 and
+     the mode field hands back 0.08, which is the cloud you were actually
+     listening to. */
+  if(sz<0.999)p.gr._gsz=sz;
+  const m=sz<0.999?2:(Math.round(p.au.pmode||0)?1:0);
+  if(Math.round(p.au.cmode??0)===m)return false;
+  p.au.cmode=m; return true;
+}
 /* WHAT AN AUDIO CHANNEL IS BEFORE YOU TOUCH IT: a tape, on the clock, looping
    by itself. Two of those three were already meant to be the defaults; the
    first was NOT REACHABLE. `cmode` had no stored value on a fresh channel, so
@@ -12798,6 +12845,7 @@ function audAction(d,m){
     const cur0=spec.get?spec.get(pre.gr):pre.gr[spec.key]??GD[spec.key];
     const nv0=adjust(spec,cur0,d,m);
     if(spec.set)spec.set(pre.gr,nv0); else pre.gr[spec.key]=nv0;
+    if(spec.key==='size')syncCmode(pre);      // the mode field follows the dial
     engine.granNode(S.editSnd); engine.granCfg(S.editSnd);
     recAutoAud(S.editSnd,pre,'grn',spec,spec.get?spec.get(pre.gr):pre.gr[spec.key]);
     flash('grain '+spec.lbl+' = '+fmtVal(spec,spec.get?spec.get(pre.gr):pre.gr[spec.key]));
@@ -12990,7 +13038,8 @@ function _prsAction(d){
     }
     else if(f==='from'){
       p.au.start=Math.round(p.au.start||0)?0:1;
-      flash('keys start '+(p.au.start?'where the loop is (freeze)':'at the pos dial'));
+      flash('keys start '+(p.au.start?'where the loop is (freeze)'
+        :cmodeOf(p)===2?'at the pos dial':'at the crop start'));
     }
     else if(f==='input'){p.au.src=Math.round(p.au.src||0)?0:1;
       flash('input → '+['mic','resample the master'][p.au.src]);}
@@ -13187,6 +13236,7 @@ function resetParam(){
           width:0.5,scan:1,gain:0.8,fade:0.06,flow:0.5,dif:0,live:0,frz:0,fb:0,pmode:0};
         pre9.gr=pre9.gr||{};
         if(sp9.set)sp9.set(pre9.gr,GD9[sp9.key]); else pre9.gr[sp9.key]=GD9[sp9.key];
+        if(sp9.key==='size')syncCmode(pre9);
         engine.granNode(S.editSnd); engine.granCfg(S.editSnd);
         recAutoAud(S.editSnd,pre9,'grn',sp9,sp9.get?sp9.get(pre9.gr):pre9.gr[sp9.key]);
       }else{
@@ -14043,28 +14093,64 @@ const HE={
      ahead of now — so the lamp is armed for when the note will actually sound
      rather than when it was queued. Live keys and looped events come through
      the same door, which is why both light. */
+  /* NOTHING EXPENSIVE MAY HAPPEN IN HERE. Gad: "major bug introduced: now i
+     have a mega wierd reaction/latency on audio when playing any ch keys."
+     Mine, and the mechanism is plain in hindsight: noteOn is the AUDIO
+     SCHEDULING path, and this used to build a 378-byte frame and issue SEVEN
+     HID writes from inside it, per note, on the main thread the scheduler runs
+     on. A held chord or a 16th-note lane and the scheduler is queueing behind
+     the keyboard's USB traffic.
+     So this is now a two-number push and NOTHING else — no frame, no write, no
+     timer started. The render loop drains it on its own clock. An instrument
+     that stutters is not worth any number of pretty lights. */
   ledNote(ch,at){
     if(!CFG.ledOn||!this.on||this.kind!==2)return;
     if(!(ch>=0&&ch<10))return;
-    const d=(typeof at==='number'&&typeof AC!=='undefined')
-      ? Math.max(0,(at-AC.currentTime)*1000) : 0;
-    if(d<6)this.ledHit(ch);
-    else setTimeout(()=>this.ledHit(ch),Math.min(d,4000));
+    /* STORE A WALL-CLOCK DEADLINE, not the AudioContext time. Comparing `at`
+       against AC.currentTime inside the loop meant a suspended or stalled
+       context never let anything drain — the queue filled to its cap and not
+       one lamp lit. performance.now() always advances. The conversion is one
+       property read, which is the only thing this is allowed to cost. */
+    const q=this._hitQ||(this._hitQ=[]);
+    let d=0;
+    if(typeof at==='number'&&typeof AC!=='undefined'&&AC)
+      d=Math.max(0,Math.min(4000,(at-AC.currentTime)*1000));
+    q.push(ch,performance.now()+d);
+    if(q.length>128)q.splice(0,q.length-128);        // a stuck queue must not grow
   },
-  ledHit(ch){
-    (this._hit=this._hit||{})[ch]=performance.now();
-    /* while anything is decaying the frame has to be REBUILT, not merely
-       re-checked — a decay is a change the signature cannot see, because the
-       static state it summarises has not moved. 16ms so 100ms is six steps. */
-    if(!this._pump)this._pump=setInterval(()=>{
-      const n=performance.now(); let live=false;
-      for(const k in this._hit)if(n-this._hit[k]<this.HITMS)live=true; else delete this._hit[k];
-      this.ledDigits(false,true);
-      if(!live){clearInterval(this._pump); this._pump=null; this.ledDigits(true);}
-    },16);
-    this.ledDigits(false,true);
+  HITMS:100, LEDFRAME:40,
+  /* ONE loop owns every write, and it only exists while the lights are on. The
+     old design had three things able to trigger a write — the 60ms watchdog, a
+     16ms decay pump, and every note directly — which is how the board ended up
+     being written faster than it can redraw. */
+  ledStart(){
+    if(this._loop)return;
+    this._loop=setInterval(()=>this.ledTick(),this.LEDFRAME);
   },
-  HITMS:100,
+  ledStop(){
+    if(this._loop){clearInterval(this._loop); this._loop=null;}
+    if(this._pump){clearInterval(this._pump); this._pump=null;}
+    this._hit={}; this._hitQ=[]; this._ledSig=null; this._ledWant=null;
+  },
+  ledTick(){
+    if(!this.on||!CFG.ledOn||this.kind!==2)return;
+    const now=performance.now();
+    this._hit=this._hit||{};
+    /* each entry carries the wall-clock moment its note will SOUND, so a lamp
+       lights when you hear it rather than when it was queued. Drained here
+       because this is the only place allowed to cost anything. */
+    const q=this._hitQ;
+    if(q&&q.length){
+      for(let i=0;i<q.length;i+=2){
+        if(q[i+1]<=now+this.LEDFRAME){this._hit[q[i]]=now; q.splice(i,2); i-=2;}
+      }
+    }
+    let live=false;
+    for(const k in this._hit){
+      if(now-this._hit[k]<this.HITMS)live=true; else delete this._hit[k];
+    }
+    this.ledDigits(false,live);
+  },
   ledDigits(force,decaying){
     if(!this.on||!CFG.ledOn||this.kind!==2)return;
     const now=performance.now();
@@ -14148,10 +14234,11 @@ const HE={
   tick(){                                            // watchdog: the board went quiet
     if(!this.on)return;
     const now9=()=>performance.now();
-    /* the lights ride the watchdog rather than a timer of their own: this runs
-       at 60ms, and ledDigits is a no-op unless the picture actually changed,
-       so the cost of asking is a string compare */
-    if(CFG.ledOn)this.ledDigits();
+    /* the watchdog no longer writes. It was one of THREE things that could
+       trigger a picture — with the decay pump and noteOn itself — which is how
+       the board came to be written faster than it can redraw. ledStart's loop
+       is the only writer now; this just makes sure it is running. */
+    if(CFG.ledOn&&this.kind===2&&!this._loop)this.ledStart();
     if(this.kind===1&&this.ready&&performance.now()-(this._reqAt||0)>60)this.kcRequest();
     /* nothing pressed: the next arrow key-down is a new push, not a re-fire */
     if(this.pressure()==null&&now9()-(this.lastDownAt||0)>60){
@@ -17896,9 +17983,13 @@ const onKeyDown=e=>{
      tested before the rack slots claim them */
   if((c==='Equal'||c==='Minus')&&HOLD.tab&&!e.metaKey&&!e.ctrlKey&&!e.repeat){
     e.preventDefault();
-    /* − shortens, = lengthens. It read the other way round, which is the one
-       thing these two keys cannot do: they are a minus and a plus. */
-    {const tg=chTargets(), pat=S.patterns[S.editPat], f=c==='Minus'?0.5:2;
+    /* THESE ARE A SPEED, NOT A LENGTH (Gad, 2026-08-17), and that decides which
+       way round they go. The pair was set as "− shortens, = lengthens" on the
+       reasoning that a minus takes away — true of the NUMBER, wrong for the
+       hand: what you reach for these keys to do is make the loop go faster or
+       slower, and = is more. Double speed IS half the loop, so = halves it.
+       Same flip on audio and midi, because it is one gesture. */
+    {const tg=chTargets(), pat=S.patterns[S.editPat], f=c==='Minus'?2:0.5;
      let did=false;
      tg.forEach(i=>{ if(stretchLoop(pat.lanes[i],f))did=true; });
      /* THE TAKE FOLLOWS THE LENGTH, INSTANTLY. Without this the loop grew and
