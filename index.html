@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.1633';
+const BUILD='2026-08-17.1635';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1443,23 +1443,36 @@ const SETTINGS=[
        dirty=true; return;}
      HE._ledMode=1;
      await new Promise(r2=>setTimeout(r2,700));
-     flash('all ten digits should be DIM now. digit 5 will pulse — PLAY FAST NOTES',6000);
+     flash('all ten digits DIM? then digit 5 ramps 0→4 over 200ms, six times — PLAY FAST NOTES',6000);
      await new Promise(r2=>setTimeout(r2,900));
-     const t=[];
-     for(let i=0;i<20;i++){
-       const v=(i%2)?210:34;
-       rgb[sl*3+1]=v; rgb[sl*3+2]=Math.round(v*0.71);
-       const t0=performance.now();
-       const r=await HE.ryLightChunk(rgb,ch,0);
-       if(r!=='sent'){HE._expLock=0; HE._oneKey='failed';
-         flash('chunk write FAILED: '+r,8000); dirty=true; return;}
-       t.push(performance.now()-t0);
-       await new Promise(r2=>setTimeout(r2,120));
+     /* A RAMP, NOT A BLINK (Gad: "make it flash over 200ms from 0-4"). Two
+        alternating values can read as "nothing moved" if the eye misses the
+        moment; a level climbing 0 to 4 across 200ms is unmistakable, and it
+        also answers a second question a blink cannot — whether intermediate
+        levels survive a single-chunk write or only the endpoints do.
+        8 steps over 200ms is 25ms apart, and a chunk write measured 1.1ms. */
+     const t=[], STEPS=8, RAMPMS=200;
+     for(let cyc=0;cyc<6;cyc++){
+       for(let k=0;k<=STEPS;k++){
+         const lvl=4*k/STEPS;
+         const i0=Math.floor(lvl), i1=Math.min(4,i0+1), f=lvl-i0;
+         const g=HE.LEDLVL[i0]*(1-f)+HE.LEDLVL[i1]*f;
+         rgb[sl*3]=Math.round(HE.CHSEL[0]*g);
+         rgb[sl*3+1]=Math.round(HE.CHSEL[1]*g);
+         rgb[sl*3+2]=Math.round(HE.CHSEL[2]*g);
+         const t0=performance.now();
+         const r=await HE.ryLightChunk(rgb,ch,0);
+         if(r!=='sent'){HE._expLock=0; HE._oneKey='failed';
+           flash('chunk write FAILED: '+r,8000); dirty=true; return;}
+         t.push(performance.now()-t0);
+         await new Promise(r2=>setTimeout(r2,RAMPMS/STEPS));
+       }
+       await new Promise(r2=>setTimeout(r2,260));      // dark gap between ramps
      }
      HE._expLock=0; HE._ledSig=null;                  // hand the board back
      t.sort((a,b)=>a-b);
      HE._oneKey=t[t.length>>1].toFixed(1)+'ms';
-     copyFlash('single chunk x20 after a full baseline + mode (chunk '+ch+', slot '+sl+')  min '+t[0].toFixed(1)+
+     copyFlash('single-chunk ramp 0→4 over 200ms x6 (chunk '+ch+', slot '+sl+', '+t.length+' writes)  min '+t[0].toFixed(1)+
        'ms  median '+t[t.length>>1].toFixed(1)+'ms  max '+t[t.length-1].toFixed(1)+'ms',
        'one-key probe copied');
      dirty=true;}},
