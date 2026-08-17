@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.2005-mono';
+const BUILD='2026-08-17.2010-mono';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -8575,6 +8575,7 @@ class Engine{
     }
     const og=keep(ac.createGain()); og.gain.value=oldOut?0.0001:1;
     cur.connect(og); og.connect(b.busG); b.rackOut=og;
+    this.busMod(pi);                 // …and the modulators that aim at it
     if(oldOut){                      // crossfade old chain out — param changes stop clicking
       const n2=ac.currentTime;
       og.gain.setTargetAtTime(1,n2,0.01); oldOut.gain.setTargetAtTime(0.0001,n2,0.01);
@@ -10427,6 +10428,106 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
      they carry inside themselves */
   /* is there a tape cursor on this channel right now — the one thing a mono
      key needs to know before it decides between moving one and making one */
+  /* ───────── THE MOD RACK, ON THE BUS ─────────────────────────────────────
+     Gad: "all mods should work. none do, tested lfo and env on filter."
+     He is right and the reason is structural: every source in this instrument
+     is built INSIDE a Voice, and an audio channel has no voices. The filter
+     moved to the bus last build so the dials would be heard — the modulators
+     never followed it, so the rack drew a route from an LFO to a cutoff and
+     nothing on the other end was listening.
+     This is the voice's own wiring, on the channel: same `_fltP` shape, same
+     MODCENTS span, same MODTAPER depth and the same x0.5 for a bipolar source,
+     so a depth of 40 means on an audio channel what it means on a synth.
+     ENVELOPES ARE TRIGGERED BY KEYSTROKES, which is what he asked for — an
+     audio channel's "note" is a key, so busEnv fires from the same two places
+     a cursor is spawned or moved. */
+  busFltP(pi,idx,which){
+    const FC=(this.buses[pi]||{}).fltBus; if(!FC)return [];
+    const one=i=>{
+      const bank=FC.bank&&FC.bank[i];
+      if(bank)return bank.map(n=>n[which]);
+      const a=FC.nodes[i]; if(!a)return [];
+      const b=FC.node2&&FC.node2[i];
+      return b?[a[which],b[which]]:[a[which]];
+    };
+    const n=Math.round(idx||0);
+    if(n>=1)return one(clamp(n,1,10)-1);
+    return Object.keys(FC.nodes).map(Number).sort((a,b)=>a-b).flatMap(one);
+  }
+  /* which live params a route names on this channel's bus. FILTER ONLY, and
+     said plainly: pitch on an audio channel is the tape's speed (not an
+     AudioParam), amp is the cursor's gain inside the worklet, and neither is
+     reachable this way. dst 3 is the cutoff; a learned address into flt works
+     through the same resolver. */
+  busDest(pi,rt,p){
+    const d=Math.round(rt.dst||0), ix=Math.round(rt.idx||0);
+    const A=(!rt.dst&&(rt.tgt||rt.addr))||null;
+    if(A&&(A.rack||A.mod)==='flt'){
+      if(A.key==='frq')return this.busFltP(pi,A.slot==='*'?0:(A.slot|0)+1,'detune')
+        .map(pm=>({p:pm,span:MODCENTS}));
+      if(A.key==='q')return this.busFltP(pi,A.slot==='*'?0:(A.slot|0)+1,'Q')
+        .map(pm=>({p:pm,span:14}));
+      return [];
+    }
+    if(d===3)return this.busFltP(pi,ix,'detune').map(pm=>({p:pm,span:MODCENTS}));
+    return [];
+  }
+  /* the FREE-RUNNING sources — one oscillator per route, started with the bus
+     and torn down with it. Rebuilt by rebuildRack, so an edit to the rack is
+     heard the way every other rack edit is. */
+  busMod(pi){
+    const b=this.buses[pi], p=S.presets[pi];
+    if(!b)return;
+    for(const n of (b.modNodes||[])){try{n.stop&&n.stop();}catch(_){} try{n.disconnect();}catch(_){}}
+    b.modNodes=[]; b.busEnvs=[];
+    if(!b.fltBus||!isAudioCh(pi))return;
+    const ac=AC, now=ac.currentTime, md=p.mod||[];
+    for(let mi=0;mi<md.length;mi++){
+      const m=md[mi]; if(!m||m.off||!m.routes)continue;
+      for(const rt of effRoutes(m)){
+        if(Math.abs(rt.amt||0)<=0.5)continue;
+        const tg=this.busDest(pi,rt,p); if(!tg.length)continue;
+        if(m.src===2){                              // LFO
+          const lo=ac.createOscillator();
+          lo.frequency.value=Math.max(0.01,lfoHz(m));
+          try{this.setWave(lo,LFOW_PW[m.wav]??0,m.ph||0);}catch(_){}
+          for(const t of tg){
+            const g=ac.createGain();
+            g.gain.value=MODTAPER(rt.amt)*t.span*0.5;   // bipolar: half the span each way
+            lo.connect(g); g.connect(t.p);
+            b.modNodes.push(g);
+          }
+          lo.start(now); b.modNodes.push(lo);
+        }else if(m.src===1){                        // ENV — held until a key fires it
+          const T3=clamp(m.tmul??1,0.1,4);
+          b.busEnvs.push({tg,amt:rt.amt,
+            a:(m.a??0.01)*T3,d:(m.d??0.2)*T3,s:m.s??0.5,r:(m.r??0.2)*T3});
+        }
+      }
+    }
+  }
+  /* …AND THE ENVELOPES, ON A KEYSTROKE. A channel whose sound is a playhead
+     has no note-on to hang these off, so the key paths call this: the same
+     attack/decay/sustain the voice schedules, written to the bus filter's
+     detune where every other source sums. */
+  busEnvFire(pi,at,rel){
+    const b=this.buses[pi]; if(!b||!(b.busEnvs||[]).length)return;
+    const t0=at??AC.currentTime;
+    for(const e of b.busEnvs){
+      for(const t of e.tg){
+        const peak=MODTAPER(e.amt)*t.span, sus=peak*clamp(e.s,0,1);
+        try{
+          t.p.cancelScheduledValues(t0);
+          if(rel){t.p.setTargetAtTime(0,t0,Math.max(0.005,e.r)/5);}
+          else{
+            t.p.setValueAtTime(t.p.value||0,t0);
+            t.p.linearRampToValueAtTime(peak,t0+Math.max(0.002,e.a));
+            t.p.setTargetAtTime(sus,t0+Math.max(0.002,e.a),Math.max(0.005,e.d)/5);
+          }
+        }catch(_){}
+      }
+    }
+  }
   audRolling(pi){
     /* audCar is SYNCHRONOUS — set the instant a carrier is spawned, cleared
        the instant the tape is stopped. The stat ping is up to a frame stale,
@@ -10726,7 +10827,10 @@ function applyParam(pi,mi,si,px,v){
     Object.assign(S.presets[pi].fx[si],FXDEF[Math.round(v)]);
   if(M.id==='fx'){ if(!engine.fxLive(pi,si,spec.key))engine.rebuildRack(pi); }
   else if(M.id==='mix'||M.id==='mod'){engine.refresh(pi);
-    if(M.id==='mod'){engine.lfoLive(pi); engine.envLive(pi); engine.modReaim(pi);}}
+    if(M.id==='mod'){engine.lfoLive(pi); engine.envLive(pi); engine.modReaim(pi);
+      /* an audio channel's modulators live on the BUS and are built once —
+         nothing re-aims them, so a rack edit has to build them again */
+      if(isAudioCh(pi))engine.busMod(pi);}}
   if(isCodeCh(pi)&&(M.id==='flt'||M.id==='mod'||M.id==='vox'))engine.codeCfg(pi);
   else if(M.id==='flt'&&spec.key==='frq')engine.cutLive(pi,si);
   /* every OTHER filter dial is live too now, not just the cutoff */
@@ -19605,6 +19709,7 @@ const onKeyDown=e=>{
           AUD.gk[c]=AUD.hold={c,pi,kind:'pmono',sl:null,vel:hitVel,pk:semP,
             press:AC.currentTime,tr:Math.max(gridNow(),0)};
           engine.audPitch(pi,semP);
+          engine.busEnvFire(pi,AC.currentTime);      // the keystroke IS the note-on
           flash('loop '+(semP>0?'+':'')+semP+'st'+(vmP===2?' · glide':''));
           dirty=true; return;
         }
@@ -19711,7 +19816,8 @@ const onKeyDown=e=>{
       if(vm9>0&&(autoCur(S.presets[pi])||!first9||AUDMONO)){
         const gl9=vm9===2?Math.max(0.01,(S.presets[pi].vox||{}).glide||0.08):0;
         const ms0=Math.max(0,(atP-AC.currentTime)*1000);
-        const go=()=>engine.audMove(pi,cutAt(pi,sl),gl9,1);
+        const go=()=>{engine.audMove(pi,cutAt(pi,sl),gl9,1);
+          engine.busEnvFire(pi,AC.currentTime);};
         if(ms0<2)go(); else setTimeout(go,ms0);
         flash('cue '+(sl+1)+'/'+nS+' · '+(vm9===2?'glide':'moved'));
         dirty=true; return;
@@ -19995,6 +20101,7 @@ function endAudHold(c){
     }
     if(!Object.keys(AUD.gk).some(k8=>(AUD.gk[k8]||{}).kind==='pmono')){
       engine.audPitch(h8.pi,0);
+      engine.busEnvFire(h8.pi,AC.currentTime,true);   // …and the key-up releases it
       /* AND IT COMES BACK IN TIME (Gad, 2026-08-17). In tape mode a pitch bend
          IS a speed change — that is what tape means, and while you hold it the
          head is supposed to run away. But the loop underneath it never moved:
