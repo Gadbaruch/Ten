@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.1444';
+const BUILD='2026-08-17.1452';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1414,6 +1414,21 @@ const SETTINGS=[
     held and wiggled the whole time because HE.fps only advances while a key is
     moving. If busy is materially below idle, the lights and the instrument
     cannot share this device and the lights are the half that goes. */
+ /* MOVEMENT, SECOND ATTEMPT — off by default, and it is a SEPARATE switch from
+    `led digits` on purpose: the static map is proven harmless and this is not.
+    No noteOn hook this time; it polls chLevel(), the analyser peak already in
+    the graph. The row shows the interval so a backoff is visible rather than
+    silent, and toggling it off restores the interval and the baseline. */
+ {n:'led meter',g:'Input',h:()=>!HE.on||HE.kind!==2||!CFG.ledOn,
+   v:()=>CFG.ledMeter?(HE.METERMS+'ms'+(HE._mBase?' · '+(HE.fps||0)+'/'+HE._mBase+'Hz':'')):'off',
+   a:()=>{CFG.ledMeter=CFG.ledMeter?0:1; saveCfg();
+     HE.METERMS=120; HE._mBase=0; HE._mSeen=0; HE._mT0=0; HE._mAt=0; HE._mBackAt=0;
+     HE._ledSig=null;
+     flash(CFG.ledMeter
+       ? 'digits follow each channel\'s level · backs itself off if the sensor slows · PLAY AND CHECK THE KEYS'
+       : 'meter off — the digits are the static map again',7000);
+     if(!CFG.ledMeter)HE.ledDigits(true);
+     dirty=true;}},
  {n:'led contend',g:'Input',h:()=>!HE.on||HE.kind!==2,
    v:()=>HE._contend||'hold a key, press',
    a:async()=>{
@@ -14189,7 +14204,16 @@ const HE={
         const here=(sel===i);
         const rest=here?3:(has?2:1);      // selected 3 · full 2 · empty 1
         sig+=here?(has?'H':'S'):(has?'h':'.');
-        put(this.DIGSLOT[i],this.CHSEL,rest);
+        /* THE SECOND ATTEMPT AT MOVEMENT, and it avoids the thing that broke
+           the first one. No hook in noteOn: chLevel(i) is an analyser peak that
+           is already in the graph, so this POLLS what is sounding instead of
+           being told. The audio path never learns the lights exist. */
+        let lvl=rest;
+        if(CFG.ledMeter){
+          let e=0; try{e=chLevel(i)||0;}catch(_){}
+          if(e>0.004)lvl=rest+(4-rest)*Math.min(1,Math.sqrt(e)*1.6);
+        }
+        put(this.DIGSLOT[i],this.CHSEL,lvl);
       }
     }catch(_){return;}
     /* the guard is for STATIC state only. A decay frame says so and skips it,
@@ -14205,6 +14229,34 @@ const HE={
        device's own speed — ~6.6ms here — with no number for me to guess. */
     this._ledWant=rgb;
     this.ledDrain();
+  },
+  /* METERMS IS NOT A GUESS, IT IS A CEILING THAT LOWERS ITSELF. The lesson from
+     the flash is that writes to this device cost the sensor stream the keys
+     depend on, and I do not know the safe budget — so the instrument measures
+     its own health and takes the lights away when they start costing it.
+     Baseline is the sensor's report rate over the first second of metering; if
+     it falls below 70% of that, the interval doubles, up to a second. It never
+     speeds back up on its own: a board that struggled once gets the benefit of
+     the doubt permanently, until you toggle the row. */
+  METERMS:120, METERMAX:1000,
+  ledMeterTick(){
+    const now=performance.now();
+    if(!this._mBase){
+      if(!this._mT0)this._mT0=now;
+      if(this.fps)this._mSeen=Math.max(this._mSeen||0,this.fps);
+      if(now-this._mT0>1000&&this._mSeen)this._mBase=this._mSeen;
+    }else if(this.fps&&this.fps<this._mBase*0.7&&now-(this._mBackAt||0)>1500){
+      this._mBackAt=now;
+      if(this.METERMS<this.METERMAX){
+        this.METERMS=Math.min(this.METERMAX,this.METERMS*2);
+        flash('sensor rate '+this.fps+'Hz vs '+this._mBase+'Hz baseline — meter backed off to '
+              +this.METERMS+'ms',5000);
+        dirty=true;
+      }
+    }
+    if(now-(this._mAt||0)<this.METERMS)return;
+    this._mAt=now;
+    this.ledDigits(false,true);                     // a level is a change no signature can see
   },
   ledDrain(){
     if(this._ledBusy||!this._ledWant)return;
@@ -14242,7 +14294,10 @@ const HE={
        trigger a picture — with the decay pump and noteOn itself — which is how
        the board came to be written faster than it can redraw. Only a CHANGE in
        the static picture writes now, and this is the one place that asks. */
-    if(CFG.ledOn&&this.kind===2)this.ledDigits();   // signature-guarded: a no-op unless it changed
+    if(CFG.ledOn&&this.kind===2){
+      if(!CFG.ledMeter)this.ledDigits();            // signature-guarded: silent unless it changed
+      else this.ledMeterTick();
+    }
     if(this.kind===1&&this.ready&&performance.now()-(this._reqAt||0)>60)this.kcRequest();
     /* nothing pressed: the next arrow key-down is a new push, not a re-fire */
     if(this.pressure()==null&&now9()-(this.lastDownAt||0)>60){
