@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.1115';
+const BUILD='2026-08-17.1152';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -4416,6 +4416,11 @@ let fxwReady=false;
               v.sTgt=m.rate; v.base=Number.isFinite(m.base)&&m.base!==0?m.base:m.rate;}
             if(Number.isFinite(m.sh)&&m.sh>0)v.shift=m.sh;
             if(Number.isFinite(m.end)&&m.end>0)v.end=m.end;
+            /* START, LIVE. The end was re-aimed and the floor was not, so the
+               wrap kept the low edge the cursor was born with: moving start
+               under a sounding take moved nothing until the next trigger,
+               which on a four-bar loop is four bars of knob at silence. */
+            if(Number.isFinite(m.lo)&&m.lo>=0)v.lo=m.lo;
             if(Number.isFinite(m.gain)&&m.gain>=0)v.gain=m.gain;
             /* THE CARRIER'S REMAINING LIFE, RE-CUT. A cursor is told how long
                it lives when it is born, so a loop that grows under it still
@@ -4436,6 +4441,17 @@ let fxwReady=false;
         else if(m.t==='tpb'){const s9=Number.isFinite(m.semis)?m.semis:0, f9=Math.pow(2,s9/12);
           for(const [id,v] of this.tv){
             if(v.free)v.sTgt=Math.max(0.01,v.base*f9); else v.shift=f9;}}
+        /* THE TAPE'S WINDOW AND SPEED, so a key can obey them. a and far are
+           unsorted sample positions — far<a is the reversed crop — and rate
+           is the tape's own step before the key's note ratio. on is 0 in
+           grain mode, where the cloud's dials are the instrument and the tape
+           has no opinion about where a grain should be. */
+        else if(m.t==='twin'){
+          this.tw=(Number.isFinite(m.a)&&Number.isFinite(m.far)&&m.on)
+            ?{a:m.a,far:m.far,rate:Number.isFinite(m.rate)&&m.rate!==0?m.rate:1,
+              sh:Number.isFinite(m.sh)&&m.sh>0?m.sh:1,
+              semis:Number.isFinite(m.semis)?m.semis:0,here:m.here?1:0}
+            :null;}
         else if(m.t==='wnd'){const ms=Math.max(5,Math.min(300,+m.ms||50));
           this.pW=Math.round(sampleRate*ms/1000);}
         else if(m.t==='panic'){this.vs.clear(); this.cx.length=0; this.ng=0; this.tv.clear();}
@@ -4751,21 +4767,46 @@ let fxwReady=false;
         if(C.size>=0.999){
           if(!v.one){
             v.one=1; this.stat++;
-            const base9=live?(((this.rw/len)-0.05-C.pos*0.9)%1+1)%1
-                            :((C.pos+this.scanPh)%1+1)%1;
-            const st9=Math.max(0,Math.min(len-2,
-              (base9+(Math.random()*2-1)*C.spray*0.5)*len));
-            const step9=v.ratio*(this.carMute?this.carSh:1)
-              *Math.pow(2,(C.semis+(Math.random()*2-1)*C.jit)/12);
+            /* A KEY ON A TAPE CHANNEL IS A TAPE CURSOR. At the top of the size
+               dial this IS the tape — one continuous read — so it has to obey
+               the tape's setup: the crop is the window, the anchor is where it
+               leaves from (or wherever the carrier has got to, under 'here'),
+               the step is the tape's own speed times the key's ratio, and a
+               reversed crop is a negative step. Without this the letters read
+               the WHOLE buffer from the cloud's pos dial at the bare note
+               ratio — start, end, speed, pitch and reverse all ignored, which
+               is what "the keys are unrelated to the setup of the tape" was.
+               In GRAIN mode there is no tape window and the cloud's own dials
+               are the instrument, exactly as before. */
+            const W9=this.tw;
+            let st9,step9,lo9,hi9;
+            if(W9){
+              lo9=Math.max(0,Math.min(len-2,Math.min(W9.a,W9.far)));
+              hi9=Math.max(lo9+2,Math.min(len,Math.max(W9.a,W9.far)));
+              const anc=Math.max(lo9,Math.min(hi9-1,W9.a));
+              st9=(W9.here&&this.car!=null)
+                ?Math.max(lo9,Math.min(hi9-1,this.car*len)):anc;
+              step9=v.ratio*W9.rate*Math.pow(2,(W9.semis+C.semis
+                    +(Math.random()*2-1)*C.jit)/12);
+            }else{
+              const base9=live?(((this.rw/len)-0.05-C.pos*0.9)%1+1)%1
+                              :((C.pos+this.scanPh)%1+1)%1;
+              st9=Math.max(0,Math.min(len-2,
+                (base9+(Math.random()*2-1)*C.spray*0.5)*len));
+              step9=v.ratio*(this.carMute?this.carSh:1)
+                *Math.pow(2,(C.semis+(Math.random()*2-1)*C.jit)/12);
+              lo9=0; hi9=len;
+            }
             const rev9=Math.random()<C.rev;
             /* A WHOLE NOTE IS NOT A GRAIN: throwing it to a random point in
                the field the way the spray does gave every key a different
                place in the stereo picture, which reads as the sound jumping
                about rather than as width. It keeps the take's own stereo. */
-            this.cx.push({bus:0,wrap:1,dur:Infinity,vs:id,shp:C.shape,shift:1,ch:0,fr:0,
+            this.cx.push({bus:0,wrap:1,dur:Infinity,vs:id,shp:C.shape,
+              shift:W9?W9.sh:1,ch:0,fr:0,
               ph:st9,step:rev9?-step9:step9,sTgt:rev9?-step9:step9,
-              n:0,vel:v.vel*0.5,gl:1,gr:1,
-              gain:1,env:1,rel:0,relAt:0,life:1e12,end:len,tp:0,id:null});
+              n:0,vel:v.vel*0.5,gl:1,gr:1,lo:lo9,
+              gain:1,env:1,rel:0,relAt:0,life:1e12,end:hi9,tp:0,id:null});
             this.ng++;
           }
           continue;                       // nothing else to spawn for this voice
@@ -5586,6 +5627,101 @@ function syncMasterRat(ops,i){
 }
 /* the sync amount of op `i`: its own ratio measured against its master's */
 const syncRatOf=(ops,i)=>(ops[i].rat*Math.pow(2,(ops[i].fine||0)/1200))/syncMasterRat(ops,i);
+/* THE FILTER RACK AS NODES, WITH NOTHING PER-VOICE IN IT. It lived inside the
+   Voice constructor, which is the only reason an AUDIO channel had no filter:
+   a tape cursor and a grain are not voices, so a channel whose whole sound is
+   playheads never built one and the entire flt rack was dead on it. This is the
+   same code, lifted out and called from both — the voice hangs its envelopes
+   and mod routes on the handles it returns, the audio bus hangs nothing and
+   just hears the dials. ONE builder, so the two cannot become different
+   filters.
+   ser slots run in series, par slots branch from the chain input and sum at
+   the end (lp ser + hp par = an instant band-split). */
+function fltChain(ac,p,at){
+  const nodes={}, bank={}, node2={}, base={}, par=[];
+  let head=null, tail=null, hasBank=false, hasPol=false;
+  /* A FILTER IS BORN AT 350Hz, and the cutoff was only ever SCHEDULED at
+     `at` — which is always in the future (a note starts at currentTime+0.005
+     at the earliest, and further out under live quantize). An AudioParam's
+     `.value` reports its intrinsic value NOW, so anything asking this param
+     what it is while the voice is being built got 350, never the dial.
+     The filter envelope is exactly such a reader: it takes its `base` off
+     this param and re-schedules the whole sweep from it, so a cutoff dialled
+     to 1000 ran 350 → 5600 and settled at 3500 — the dial was not in the
+     sound at all, at any amount. Write the value AND schedule it, which is
+     the same fix and the same reason as setF's `param.value=f0` for
+     oscillator pitch (an oscillator is born at 440). */
+  const setFrq=(param,hz)=>{param.value=hz; param.setValueAtTime(hz,at);};
+  for(let i=0;i<10;i++){
+    const f=(p.flt||[])[i]; if(!f||!f.typ||f.off)continue;
+    /* THE CUTOFF IS THE CUTOFF. This used to be secretly multiplied by the
+       note ratio on any noise-rooted voice, which is most drums — so the
+       number on screen was not the number in the graph, keytracking was
+       happening with nothing in the mod rack to say so, and editing the
+       frequency while a note sounded jumped to a different value than the
+       one the note was built with (cutLive writes f.frq, the builder wrote
+       f.frq × ratio). Tracking is a MOD ROUTE now: key → filt at amt 50 is
+       exactly 1:1, and you can see it, change it, or take it off. */
+    const fFrq=clamp(f.frq,20,20000);
+    const tyName=FTYPES[Math.round(f.typ)];
+    /* A BANK IS SEVERAL RESONATORS SIDE BY SIDE. One input gain fans out to
+       each peak, each peak carries its own level, and they sum back to one
+       output — so from the chain's point of view it is still a filter with
+       an in and an out, and everything that modulates a cutoff reaches every
+       peak at once (see fParams). */
+    if(FBANK.has(tyName)){
+      const inG=ac.createGain(); inG.gain.value=1;
+      const sum=ac.createGain(); sum.gain.value=1;
+      const peaks=bankPeaks(tyName,clamp(f.spr??0.4,0,1));
+      const bnk=[];
+      for(const pk of peaks){
+        const bp=ac.createBiquadFilter();
+        bp.type='bandpass';
+        setFrq(bp.frequency,clamp(fFrq*pk.r,20,20000));
+        bp._r=pk.r;                          // its place in the shape, for cutLive
+        /* narrower as you ask for more resonance, and narrower again the
+           higher a peak sits — otherwise the top of a comb is a wash */
+        bp.Q.value=clamp((0.8+f.q*1.4)*Math.sqrt(pk.r),0.6,30);
+        const g=ac.createGain(); g.gain.value=pk.a*(1.4+f.q*0.12);
+        inG.connect(bp); bp.connect(g); g.connect(sum);
+        bnk.push(bp);
+      }
+      if(DROUTE[Math.round(f.par||0)]==='par'){
+        const pg=ac.createGain(); pg.gain.value=f.lvl??1;
+        sum.connect(pg); par.push({in:inG,out:pg});
+      }else{if(tail)tail.connect(inG); else head=inG; tail=sum;}
+      nodes[i]=bnk[0]; base[i]=fFrq;
+      bank[i]=bnk; hasBank=true;
+      continue;
+    }
+    const bq=ac.createBiquadFilter();
+    bq.type=FTYPE_W[f.typ]||'lowpass';
+    setFrq(bq.frequency,fFrq);
+    bq.Q.value=f.q; bq.gain.value=f.gn;
+    /* 24dB = the same filter twice. Q is split between the stages (√ of the
+       total) so doubling the slope does not also double the resonant peak —
+       two biquads at Q=8 ring far harder than one. */
+    let fOut=bq;
+    if(Math.round(f.pol||0)===1){
+      const bq2=ac.createBiquadFilter();
+      bq2.type=bq.type;
+      setFrq(bq2.frequency,fFrq);
+      const qh=Math.sqrt(Math.max(0.0001,f.q));
+      bq.Q.value=qh; bq2.Q.value=qh; bq2.gain.value=f.gn;
+      bq.connect(bq2); fOut=bq2;
+      node2[i]=bq2; hasPol=true;
+    }
+    /* PARALLEL FILTERS SUM, so each one needs a level of its own — without
+       it two paths side by side are always equal and the only way to balance
+       them is to detune what they are made of. */
+    if(DROUTE[Math.round(f.par||0)]==='par'){
+      const pg=ac.createGain(); pg.gain.value=f.lvl??1;
+      fOut.connect(pg); par.push({in:bq,out:pg});
+    }else{if(tail)tail.connect(bq); else head=bq; tail=fOut;}
+    nodes[i]=bq; base[i]=fFrq;
+  }
+  return {head,tail,nodes,bank,node2,base,par,hasBank,hasPol};
+}
 class Voice{
   /* live per-note pressure, 0..1 — what the 'press' MOD source follows */
   setPressure(x){
@@ -5807,90 +5943,11 @@ class Voice{
 
     /* filter chain (per voice): ser slots in series, par slots branch from the
        chain input and sum at the end (lp ser + hp par = instant band-split) */
-    this.fNodes={};
-    let fHead=null,fTail=null;
-    const fPar=[]; this.fPar=fPar;
-    const fBase={};
-    /* A FILTER IS BORN AT 350Hz, and the cutoff was only ever SCHEDULED at
-       `at` — which is always in the future (a note starts at currentTime+0.005
-       at the earliest, and further out under live quantize). An AudioParam's
-       `.value` reports its intrinsic value NOW, so anything asking this param
-       what it is while the voice is being built got 350, never the dial.
-       The filter envelope is exactly such a reader: it takes its `base` off
-       this param and re-schedules the whole sweep from it, so a cutoff dialled
-       to 1000 ran 350 → 5600 and settled at 3500 — the dial was not in the
-       sound at all, at any amount. Write the value AND schedule it, which is
-       the same fix and the same reason as setF's `param.value=f0` for
-       oscillator pitch below (an oscillator is born at 440). */
-    const setFrq=(param,hz)=>{param.value=hz; param.setValueAtTime(hz,at);};
-    for(let i=0;i<10;i++){
-      const f=p.flt[i]; if(!f.typ||f.off)continue;
-      /* THE CUTOFF IS THE CUTOFF. This used to be secretly multiplied by the
-         note ratio on any noise-rooted voice, which is most drums — so the
-         number on screen was not the number in the graph, keytracking was
-         happening with nothing in the mod rack to say so, and editing the
-         frequency while a note sounded jumped to a different value than the
-         one the note was built with (cutLive writes f.frq, the builder wrote
-         f.frq × ratio). Tracking is a MOD ROUTE now: key → filt at amt 50 is
-         exactly 1:1, and you can see it, change it, or take it off. */
-      const fFrq=clamp(f.frq,20,20000);
-      const tyName=FTYPES[Math.round(f.typ)];
-      /* A BANK IS SEVERAL RESONATORS SIDE BY SIDE. One input gain fans out to
-         each peak, each peak carries its own level, and they sum back to one
-         output — so from the chain's point of view it is still a filter with
-         an in and an out, and everything that modulates a cutoff reaches every
-         peak at once (see fParams). */
-      if(FBANK.has(tyName)){
-        const inG=ac.createGain(); inG.gain.value=1;
-        const sum=ac.createGain(); sum.gain.value=1;
-        const peaks=bankPeaks(tyName,clamp(f.spr??0.4,0,1));
-        const bank=[];
-        for(const pk of peaks){
-          const bp=ac.createBiquadFilter();
-          bp.type='bandpass';
-          setFrq(bp.frequency,clamp(fFrq*pk.r,20,20000));
-          bp._r=pk.r;                          // its place in the shape, for cutLive
-          /* narrower as you ask for more resonance, and narrower again the
-             higher a peak sits — otherwise the top of a comb is a wash */
-          bp.Q.value=clamp((0.8+f.q*1.4)*Math.sqrt(pk.r),0.6,30);
-          const g=ac.createGain(); g.gain.value=pk.a*(1.4+f.q*0.12);
-          inG.connect(bp); bp.connect(g); g.connect(sum);
-          bank.push(bp);
-        }
-        if(DROUTE[Math.round(f.par||0)]==='par'){
-          const pg=ac.createGain(); pg.gain.value=f.lvl??1;
-          sum.connect(pg); fPar.push({in:inG,out:pg});
-        }else{if(fTail)fTail.connect(inG); else fHead=inG; fTail=sum;}
-        this.fNodes[i]=bank[0]; fBase[i]=fFrq;
-        this.fBank=this.fBank||{}; this.fBank[i]=bank;
-        continue;
-      }
-      const bq=ac.createBiquadFilter();
-      bq.type=FTYPE_W[f.typ]||'lowpass';
-      setFrq(bq.frequency,fFrq);
-      bq.Q.value=f.q; bq.gain.value=f.gn;
-      /* 24dB = the same filter twice. Q is split between the stages (√ of the
-         total) so doubling the slope does not also double the resonant peak —
-         two biquads at Q=8 ring far harder than one. */
-      let fOut=bq;
-      if(Math.round(f.pol||0)===1){
-        const bq2=ac.createBiquadFilter();
-        bq2.type=bq.type;
-        setFrq(bq2.frequency,fFrq);
-        const qh=Math.sqrt(Math.max(0.0001,f.q));
-        bq.Q.value=qh; bq2.Q.value=qh; bq2.gain.value=f.gn;
-        bq.connect(bq2); fOut=bq2;
-        this.fNode2=this.fNode2||{}; this.fNode2[i]=bq2;
-      }
-      /* PARALLEL FILTERS SUM, so each one needs a level of its own — without
-         it two paths side by side are always equal and the only way to balance
-         them is to detune what they are made of. */
-      if(DROUTE[Math.round(f.par||0)]==='par'){
-        const pg=ac.createGain(); pg.gain.value=f.lvl??1;
-        fOut.connect(pg); fPar.push({in:bq,out:pg});
-      }else{if(fTail)fTail.connect(bq); else fHead=bq; fTail=fOut;}
-      this.fNodes[i]=bq; fBase[i]=fFrq;
-    }
+    const FC=fltChain(ac,p,at);
+    this.fNodes=FC.nodes; this.fPar=FC.par;
+    if(FC.hasBank)this.fBank=FC.bank;
+    if(FC.hasPol)this.fNode2=FC.node2;
+    let fHead=FC.head, fTail=FC.tail;
     /* A GAIN NODE IS BORN AT 1.0, AND THE ENVELOPE'S FIRST EVENT IS AT `at`.
        With live quantize `at` is a grid point up to a step away, so between the
        keypress that builds this voice and the note it plays, the VCA sat WIDE
@@ -7893,6 +7950,7 @@ class Engine{
   dialLive(pi,rack,slot,key,val){
     if(!Number.isFinite(val))return;
     const n=AC.currentTime;
+    if(rack==='flt')this.fltBusLive(pi,slot,key==='q'?'Q':key==='gn'?'gain':key,val);
     for(const v of this.act[pi]||[]){
       if(v.killed||!v._modParam)continue;
       let rp=null; try{rp=v._modParam({rack,slot,key});}catch(_){}
@@ -8158,6 +8216,29 @@ class Engine{
        swallowed the repeats and started them over. */
     b.fxLive={};
     let cur=ig;
+    /* THE FILTER RACK, ON THE BUS, FOR CHANNELS WHOSE SOUND IS NOT VOICES.
+       A tape cursor, a grain and a cue jump all live in the worklet — none of
+       them is a Voice — so the flt rack was built for nobody and the whole
+       page of dials did nothing on an audio channel. Here it sits between the
+       channel input and the FX chain, so it reaches the autoloop and EVERY
+       playhead at once, which is what a filter on a mixer channel is.
+       Per-voice modulation (env→filt, key→filt) is still per-voice and there
+       is no voice here — the DIALS are what this carries. */
+    b.fltBus=null;
+    if(p.cat==='audio'){
+      const FCB=fltChain(ac,p,ac.currentTime);
+      if(FCB.head||FCB.par.length){
+        const fin=keep(ac.createGain()), fout=keep(ac.createGain());
+        for(const n of Object.values(FCB.nodes))keep(n);
+        for(const bn of Object.values(FCB.bank||{}))for(const n of bn)keep(n);
+        for(const n of Object.values(FCB.node2||{}))keep(n);
+        for(const pr of FCB.par){keep(pr.in); keep(pr.out);}
+        if(FCB.head){fin.connect(FCB.head); FCB.tail.connect(fout);}
+        for(const pr of FCB.par){fin.connect(pr.in||pr); (pr.out||pr).connect(fout);}
+        cur.connect(fin); cur=fout;
+        b.fltBus=FCB;
+      }
+    }
     // FX chain (per channel): real units inline; 'send' taps to a master send slot
     // (distortion is now the 'sat' fx type — the AMP module is gone)
     this.followers=this.followers.filter(f=>f.owner!==pi);
@@ -8533,8 +8614,26 @@ class Engine{
     }
     return null;
   }
+  /* THE BUS FILTER HAS NO VOICE TO WALK. cutLive and dialLive both loop over
+     act[pi], which on an audio channel is empty — so the rack would build
+     correctly and then never move again under your hand. Same two rules, same
+     3ms slew, aimed at the chain on the bus. */
+  fltBusLive(pi,slot,which,val){
+    const FC=(this.buses[pi]||{}).fltBus; if(!FC)return;
+    const n=AC.currentTime;
+    const bank=FC.bank&&FC.bank[slot];
+    if(which==='frequency'&&bank){
+      for(const bp of bank)bp.frequency.setTargetAtTime(clamp(val*(bp._r||1),20,20000),n,0.03);
+      return;
+    }
+    for(const nd of [FC.nodes[slot],FC.node2&&FC.node2[slot]]){
+      if(!nd||!nd[which])continue;
+      try{nd[which].setTargetAtTime(val,n,0.03);}catch(_){}
+    }
+  }
   cutLive(pi,slot){
     const f=S.presets[pi].flt[slot], n=AC.currentTime;
+    this.fltBusLive(pi,slot,'frequency',clamp(f.frq,20,20000));
     for(const v of this.act[pi]){
       /* a bank moves as a SHAPE: each peak keeps its ratio to the cutoff,
          or dragging the frequency would collapse them all onto one note */
@@ -9688,8 +9787,9 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
   audPlay(pi,at,lenBeats,skipBeats=0,cue){
     const buf=this.audBuf[pi]; if(!buf)return;
     const au=Object.assign({},S.presets[pi].au||{},(this.audOv&&this.audOv[pi])||{});
-    const st=clamp(au.st??0,0,0.98), en=clamp(au.en??1,st+0.01,1);
-    const off=st*buf.duration, dur=(en-st)*buf.duration, loopSec=lenBeats*spb();
+    const D9=buf.duration, W=audWin(au);
+    const loS=W.lo*D9, hiS=W.hi*D9, aS=W.a*D9;
+    const off=loS, dur=Math.max(1e-6,hiS-loS), loopSec=lenBeats*spb();
     const sync=Math.round(au.pmode||0)===1;
     const semis=(au.semis??0)+(cue?cue.semis||0:0)+(this.audPB&&this.audPB[pi]||0);
     /* SYNC keeps the clock: the rate is the loop fit (or ×rate), and pitch
@@ -9700,7 +9800,10 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
        speed used to move nothing at all. When the route stops, the overlay
        clears and fit has it back. */
     const ovR=(this.audOv&&this.audOv[pi]||{}).rate;
-    const baseRate=audRate(au,dur,loopSec,ovR);
+    /* A REVERSED CROP IS A NEGATIVE RATE, and it composes with a negative
+       SPEED rather than fighting it — read backwards at a backwards speed is
+       forwards, which is the only answer that is not a special case. */
+    const baseRate=audRate(au,dur,loopSec,ovR)*(W.rev?-1:1);
     const rate=sync?baseRate:baseRate*Math.pow(2,semis/12);
     /* a cue that names a transient carries the place itself; the beat skip is
        what the auto cursor and the recorded jam still speak in */
@@ -9710,25 +9813,35 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
        well as carrying the pitch you dial. Without it, "sync" fitted the take
        by playing it faster and higher, which is varispeed by another name,
        and the window dial had nothing to do whenever pitch sat at zero. */
-    const shSync=sync?(1/Math.max(0.05,baseRate))*Math.pow(2,semis/12):1;
+    /* ABS: a negative baseRate is a real rate (reverse speed, reversed crop, or
+       both) and 1/max(0.05, -2) is 20 — a twenty-times shifter, which is what
+       stretch+reverse used to hand you. The shifter undoes the fit's SIZE; the
+       direction is not its business. */
+    const shSync=sync?(1/Math.max(0.05,Math.abs(baseRate)))*Math.pow(2,semis/12):1;
     const skipSec=skipBeats*spb();
     const skipBuf=(cue&&Number.isFinite(cue.frac))
-      ?clamp(cue.frac*buf.duration-off,0,Math.max(0,dur-0.01))
-      :skipSec*rate;
+      ?clamp(cue.frac*buf.duration-loS,0,Math.max(0,dur-0.01))
+      :skipSec*Math.abs(rate);
     if(skipBuf>=dur-0.001)return;
+    /* WHERE THE CURSOR LEAVES FROM: the window's ANCHOR, travelling the way its
+       rate points — so a reversed crop starts at the far edge and runs back
+       toward start, and turning the length down never moves the place the read
+       leaves from. A cue names an absolute place, so it keeps naming one. */
+    const posS=(cue&&Number.isFinite(cue.frac))?loS+skipBuf
+              :aS+(rate<0?-skipBuf:skipBuf);
     /* what this play was asked for, so a knob turned under it can work out
        the same numbers again without guessing the loop length */
     (this.audAsk=this.audAsk||[])[pi]={lenBeats,cue};
     /* ONE PATH. The cursor does everything the BufferSource layer did — crop,
        rate, fit, sync pitch, channel select, cue pan and gain — so there is no
        second way to play a clip any more, and no flag deciding which. */
-    const sr9=buf.sampleRate, len9=buf.length, k9=sr9/AC.sampleRate;
+    const sr9=buf.sampleRate, k9=sr9/AC.sampleRate;
     /* pan as constant power around the cursor — the cue's own little take
        keeps its place in the field without a node to hold it */
     const pn9=cue?clamp(cue.pan||0,-1,1):0, th9=(pn9+1)*Math.PI/4;
     this.audPlay2(pi,at,lenBeats,skipBeats,cue,{
-      pos:(off+skipBuf)*sr9,
-      end:en*len9,
+      pos:posS*sr9,
+      end:hiS*sr9,
       rate:(rate<0?Math.min(-0.05,rate):Math.max(0.05,rate))*k9,
       base:baseRate*k9,
       free:!sync,
@@ -9817,7 +9930,9 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
   audCuts(pi){
     const buf=this.audBuf[pi]; if(!buf)return null;
     const au=S.presets[pi].au||{};
-    const st=clamp(au.st??0,0,0.98), en=clamp(au.en??1,st+0.01,1);
+    /* the transients inside the WINDOW, sorted — a cue names a place, and a
+       place does not care which direction the tape happens to be running */
+    const W=audWin(au), st=W.lo, en=W.hi;
     const key=bufId(buf)+'|'+st.toFixed(4)+'|'+en.toFixed(4);
     this._cuts=this._cuts||[];
     const c=this._cuts[pi];
@@ -9854,8 +9969,10 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     const au=Object.assign({},S.presets[pi].au||{},(this.audOv&&this.audOv[pi])||{});
     if(!Math.round(au.fit||0))return;
     const a=actAt(posNow()), ph=fmod(posNow()-a.anchor,L);
-    const st=clamp(au.st??0,0,0.98), en=clamp(au.en??1,st+0.01,1);
-    this.audMove(pi,st+(ph/L)*(en-st),0,1,1);
+    const W=audWin(au);
+    /* the anchor and the far edge, not lo and hi: under a reversed crop the
+       loop's phase has to walk BACKWARDS through the take */
+    this.audMove(pi,W.a+(ph/L)*(W.far-W.a),0,1,1);
   }
   /* HOW LONG THE CARRIER HAS LEFT, and it is the switch that decides. SYNC
      cuts it to the cycle — a fitted take is re-fired every loop, so it has to
@@ -9892,14 +10009,17 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
   audLive(pi){
     const e9=this.gn&&this.gn[pi]; if(!e9||!e9.node)return;
     const buf=this.audBuf[pi]; if(!buf)return;
+    /* BEFORE the `ask` gate: a channel that has never played the loop still has
+       keys, and they need the window */
+    this.audTwin(pi);
     const ask=(this.audAsk||[])[pi]; if(!ask)return;
     const au=Object.assign({},S.presets[pi].au||{},(this.audOv&&this.audOv[pi])||{});
-    const st=clamp(au.st??0,0,0.98), en=clamp(au.en??1,st+0.01,1);
-    const dur=(en-st)*buf.duration, loopSec=Math.max(1e-6,ask.lenBeats*spb());
+    const W=audWin(au), D9=buf.duration;
+    const dur=Math.max(1e-6,(W.hi-W.lo)*D9), loopSec=Math.max(1e-6,ask.lenBeats*spb());
     const sync=Math.round(au.pmode||0)===1;
     const semis=(au.semis??0)+(ask.cue?ask.cue.semis||0:0)+(this.audPB&&this.audPB[pi]||0);
     const ovR=(this.audOv&&this.audOv[pi]||{}).rate;
-    const baseRate=audRate(au,dur,loopSec,ovR);
+    const baseRate=audRate(au,dur,loopSec,ovR)*(W.rev?-1:1);
     const rate=sync?baseRate:baseRate*Math.pow(2,semis/12);
     const k9=buf.sampleRate/AC.sampleRate;
     const r9=(rate<0?Math.min(-0.05,rate):Math.max(0.05,rate))*k9;
@@ -9910,10 +10030,48 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
          a very slow forward, and dividing the take's remaining length by it
          gave the voice a negative life, so it died on arrival */
       rate:FIN(r9,1), base:FIN(baseRate*k9,1),
-      sh:FIN(sync?(1/Math.max(0.05,baseRate))*Math.pow(2,semis/12):1,1),
-      end:FIN(en*buf.length,buf.length),
+      sh:FIN(sync?(1/Math.max(0.05,Math.abs(baseRate)))*Math.pow(2,semis/12):1,1),
+      /* BOTH EDGES OF THE WINDOW, LIVE. `end` was sent and `lo` was not, so
+         moving START under a sounding take did nothing at all — the wrap kept
+         the floor the cursor was born with, and start was the one crop dial
+         that waited for the next trigger. Both go now, every time. */
+      end:FIN(W.hi*buf.length,buf.length),
+      lo:FIN(W.lo*buf.length,0),
       gain:FIN((au.gain??0.9)*(ask.cue?(ask.cue.vol??1)*(au.kvol??1)*(ask.cue.vel??1)
                                    :(au.lvol??1)),0.9)});}catch(_){}
+  }
+  /* THE TAPE'S WINDOW AND SPEED, HANDED TO THE CLOUD SIDE OF THE WORKLET. A
+     pitch key spawns a voice through granNote, and at the top of the size dial
+     that voice is one continuous cursor — the same thing the tape is. It was
+     reading the WHOLE buffer from the cloud's own pos dial at the key's ratio
+     and nothing else, so on a tape channel the letters ignored start, end,
+     speed, pitch and reverse: "unrelated to the setup of the tape", exactly.
+     With this the worklet knows what the tape is doing and the key obeys it. */
+  audTwin(pi){
+    const e9=this.gn&&this.gn[pi]; if(!e9||!e9.node)return;
+    const buf=this.audBuf[pi]; if(!buf)return;
+    const p=S.presets[pi];
+    const au=Object.assign({},p.au||{},(this.audOv&&this.audOv[pi])||{});
+    const W=audWin(au), L9=buf.length, k9=buf.sampleRate/AC.sampleRate;
+    const lane=S.patterns[S.editPat]&&S.patterns[S.editPat].lanes[pi];
+    const dur=Math.max(1e-6,(W.hi-W.lo)*buf.duration);
+    const loopSec=Math.max(1e-6,(((this.audAsk||[])[pi]||{}).lenBeats??(lane&&lane.len)??4)*spb());
+    const ovR=(this.audOv&&this.audOv[pi]||{}).rate;
+    const sync=Math.round(au.pmode||0)===1;
+    const base=audRate(au,dur,loopSec,ovR)*(W.rev?-1:1);
+    const sem=au.semis??0;
+    /* the key's own note ratio is applied in the worklet; this is the tape's
+       own step, worked out exactly as audPlay works out the loop's. In STRETCH
+       the rate is speed alone and the pitch travels through the shifter. */
+    const rate=sync?base:base*Math.pow(2,sem/12);
+    try{e9.node.port.postMessage({t:'twin',
+      a:FIN(W.a*L9,0), far:FIN(W.far*L9,L9),
+      rate:FIN(rate*k9,1),
+      sh:FIN(sync?(1/Math.max(0.05,Math.abs(base)))*Math.pow(2,sem/12):1,1),
+      /* already in the rate or already in the shifter — never both */
+      semis:0,
+      here:Math.round(au.start||0)?1:0,
+      on:cmodeOf(p)===2?0:1});}catch(_){}
   }
   audLiveAll(){for(const i of CHANS())if(isAudioCh(i))this.audLive(i);}
   audGain(pi,g){
@@ -9958,6 +10116,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
       if(d9.tpos)this.tapeViz[pi]=d9.tpos;
       if(had||(d9.pos||[]).length+(d9.tpos||[]).length)dirty=true;};
     this.granCfg(pi);
+    this.audTwin(pi);        // a key built before the loop ever ran still needs the window
     if(this.granBuf&&this.granBuf[pi])this.granSend(pi);
     return e;
   }
@@ -10211,6 +10370,10 @@ function applyParam(pi,mi,si,px,v){
   /* these three change what the filter IS, not where it sits, so the graph has
      to be built again — rebuildRack crossfades, so it does not click */
   else if(M.id==='flt'&&(spec.key==='typ'||spec.key==='pol'||spec.key==='spr'))engine.rebuildRack(pi);
+  /* on an AUDIO channel the rack is on the BUS, built once — so anything the
+     live dials above do not cover (par/ser, a parallel slot's level) has to
+     build it again or it is heard on nothing */
+  else if(M.id==='flt'&&isAudioCh(pi))engine.rebuildRack(pi);
   else if(M.id==='osc'&&spec.key==='pw'){
     if(isNoiseW(modHolder(S.presets[pi],'osc').osc[si].wav))engine.rebuildRack(pi);  // dust: a new buffer
     else engine.pwLive(pi,si);                                  // tonal: heard now
@@ -10534,6 +10697,14 @@ function libAll(){
         const a=clamp(so.sst??0,0,0.98);
         so.sen=a>=0.999?1:clamp((clamp(so.sen,0,1)-a)/(1-a),0,1);
       }});
+    /* v30: and now the AUDIO CHANNEL's own crop, the same change and the same
+       conversion — SAVEV 28 does it for sets. Walked together, because that is
+       the lesson the entry above was written by. */
+    if(v<30)items.forEach(en=>{
+      const au=en&&en.data&&en.data.au; if(!au||au.en===undefined)return;
+      const a=clamp(au.st??0,0,0.98);
+      au.en=a>=0.999?1:clamp((clamp(au.en,0,1)-a)/(1-a),0,1);
+    });
     /* v4: the drums were rebuilt — 909/808/606 kicks and snares, a rim shot,
        snares with a tuned shell under the noise instead of noise alone, and
        basses that keep their bottom. v5: basses generate an octave or two down
@@ -10567,7 +10738,7 @@ function libNos(){
   }
   return libNoCache=m;
 }
-const LIBV=29;   // bump BOTH: libStore writes it, libAll checks it
+const LIBV=30;   // bump BOTH: libStore writes it, libAll checks it
 function libStore(a){libMigrated=true; libCache=null; libNoCache=null;
   const out=(a||[]).map(en=>en&&en.data?{...en,data:portPreset(en.data,true)}:en);
   try{localStorage.setItem(LIBKEY,JSON.stringify({v:LIBV,items:out}));}catch(_){} if(typeof prepCache!=='undefined')prepCache.clear();}
@@ -12024,9 +12195,14 @@ function setEngine(pi,key){
     engine.granCfg(pi);}
   else if(key==='gran'){
     /* 'gran' is not an engine and not a mode any more: it is the audio
-       channel with pitch keys and the auto cursor off. The spelling stays
-       for the old callers (⌥-drop, the default set's ninth channel). */
-    p.cat='audio'; (p.au=p.au||{}).kmode=1; p.au.auto=0; audDefaults(p,true);
+       channel with PITCH KEYS. The spelling stays for the old callers
+       (⌥-drop, the default set's ninth channel).
+       THE AUTO CURSOR IS ON HERE TOO NOW (Gad, 2026-08-17). It used to be part
+       of the definition — pitch keys AND no loop — which made the Cloud channel
+       of a fresh set the one audio channel that answered nothing until you
+       held a letter, and left you hunting the instrument row to find out why.
+       Keys and loop are two axes; this only ever meant to set the first. */
+    p.cat='audio'; (p.au=p.au||{}).kmode=1; audDefaults(p,true);
     engine.granNode(pi); engine.granCfg(pi);
     if(!(engine.granBuf||[])[pi]&&engine.audBuf[pi]){
       engine.granBuf=engine.granBuf||[]; engine.granBuf[pi]=engine.audBuf[pi];
@@ -12160,6 +12336,43 @@ const audSpd=au=>{
    ask for. Negative is the same speed backwards, either side of the switch.
    A route on speed drives the multiplier, which is why it works under sync
    instead of having to defeat it. */
+/* THE TAKE'S WINDOW, AND `end` IS A LENGTH (Gad, 2026-08-17). It was an
+   ABSOLUTE position, which makes 0% the head of the take — the one place it
+   can never legally be once start has moved. So half the dial was dead and its
+   numbers meant nothing where you were standing, and moving start dragged the
+   crop's length around with it instead of carrying the crop.
+   It is a SIGNED SPAN FROM START now: +100% reaches the take's end from
+   wherever start is, 50% is half of what is left, and the whole range is live
+   at every start. That frees the negative half for the obvious reading — the
+   far edge lands on the other side of start, so the crop is read BACKWARDS.
+   Exactly the rule a sampler OP already uses (`smpWin`); this is the audio
+   channel finally speaking the same language.
+   Returns the anchor and the far edge UNSORTED — `far < a` is the reversed
+   case — plus the sorted bounds, because every caller wants one or the other
+   and deriving it twice is how they disagree. */
+const audWin=au=>{
+  const a=clamp((au&&au.st!==undefined?au.st:0),0,0.98);
+  const s=clamp((au&&au.en!==undefined?au.en:1),-1,1);
+  let far=s>=0?a+s*(1-a):a*(1+s);
+  /* a zero-length crop is silence with no way to hear your way back out of it,
+     so the dial bottoms out on a sliver instead. At start 0 there is nothing
+     BEFORE to reverse into, and that falls forward for the same reason. */
+  if(far>a-0.002&&far<a+0.002)far=(s<0&&a>=0.002)?a-0.002:a+0.002;
+  far=clamp(far,0,1);
+  const rev=far<a;
+  return {a,far,rev,lo:rev?far:a,hi:rev?a:far};
+};
+/* PITCH AND SPEED ARE ONE NUMBER IN TAPE MODE, and Gad asked the right
+   question: are they different in any way? They are not. Tape resamples, so
+   `rate = fit x speed x 2^(semis/12)` — both dials multiply the same rate and
+   the ear cannot tell which one you turned. Stretch is where they separate:
+   there the rate is speed alone and pitch rides the shifter.
+   So in tape mode they are TIED — two units for one control, and you grab
+   whichever one you think in. The ranges map exactly, which is what makes this
+   honest rather than a fudge: +-24 semitones IS x0.25..x4 (2^(24/12) = 4). The
+   SIGN stays on speed, because reverse is not a pitch. */
+const spdToSemis=s=>clamp(Math.round(12*Math.log2(Math.max(0.25,Math.abs(s)))),-24,24);
+const semisToSpd=(semis,sgn)=>(sgn<0?-1:1)*clamp(+Math.pow(2,clamp(semis,-24,24)/12).toFixed(2),0.25,4);
 const audRate=(au,dur,loopSec,ov)=>{
   const spd=Number.isFinite(ov)?ov:audSpd(au);
   const fitR=Math.round((au||{}).fit||0)?(loopSec>1e-9?dur/loopSec:1):1;
@@ -12221,12 +12434,41 @@ const AUDF=[
    which they never could on the instrument row. */
 const AUDTAKE=[
  SP('start','st','lin',{min:0,max:0.98,step:0.01,fmt:v=>Math.round(v*100)+'%'}),
- SP('end','en','lin',{min:0.02,max:1,step:0.01,fmt:v=>Math.round(v*100)+'%'}),
+ /* A SIGNED LENGTH FROM START, not an absolute end — see audWin. Moving start
+    now CARRIES the crop instead of resizing it, the whole dial is live at every
+    start, and the negative half reads the crop backwards. */
+ SP('length','en','lin',{min:-1,max:1,step:0.01,
+    fmt:v=>(v<0?'◀ ':'')+Math.round(Math.abs(v)*100)+'%',
+    get:o=>o.en??1,set:(o,v)=>{o.en=clamp(+(+v).toFixed(2),-1,1);}}),
  /* ⇧ IS AN OCTAVE HERE, not ten of anything. The generic coarse step is ×10,
     which on a semitone dial is ten semitones — a minor seventh, a number
     nobody reaches for. `big` says what coarse MEANS for this param, and for a
     pitch in semitones it means twelve. Same on the cloud's own pitch below. */
- SP('pitch','semis','lin',{min:-24,max:24,step:1,big:12,fmt:v=>(v>0?'+':'')+v+'st'}),
+ /* IN TAPE MODE THIS IS THE SPEED, IN SEMITONES. Gad asked whether pitch and
+    speed are different in tape mode: they are not. Tape resamples, so the rate
+    is fit × speed × 2^(semis/12) and both dials multiply the same number — two
+    knobs for one control, and the sound cannot tell you which you turned.
+    So in tape mode pitch does not STORE anything: it is a VIEW of `spd`,
+    reading and writing it in semitones. Grab whichever unit you think in and
+    the other follows, because there is only one number underneath. The ranges
+    map exactly, which is what makes this honest rather than a fudge —
+    2^(24/12) is 4, so ±24 semitones IS ×0.25..×4. The SIGN stays on speed
+    alone: reverse is not a pitch.
+    Stretch and grain keep them apart, where they genuinely differ — there the
+    rate is speed and the pitch rides the shifter. */
+ SP('pitch','semis','lin',{min:-24,max:24,step:1,big:12,fmt:v=>(v>0?'+':'')+v+'st',
+   /* THE DIAL WRITES SPEED AND RESTS `semis` AT ZERO — it does not stop the
+      rate from reading semis. That distinction is the whole design: the rate
+      is still fit × speed × 2^(semis/12) everywhere, so a MOD ROUTE or an
+      automation curve on pitch bends it exactly as it always did; it is only
+      the DIAL that has moved house. Zeroing the rate's semis term instead
+      (the first attempt) tied the two dials and killed every route on pitch
+      in tape mode — caught by the matrix probe, whose `free +7` row writes
+      au.semis raw and went silent. */
+   get:o=>Math.round(o.cmode??0)===0?spdToSemis(audSpd(o)):clamp(Math.round(o.semis??0),-24,24),
+   set:(o,v)=>{
+     if(Math.round(o.cmode??0)===0){const s=semisToSpd(v,audSpd(o)); o.spd=s; o.rate=s; o.semis=0;}
+     else o.semis=clamp(Math.round(v),-24,24);}}),
 ];
 /* ONE LEVEL HERE, NOT TWO. There were two faders side by side — one for the
    loop rolling underneath, one for the cursors your fingers spawn — and a
@@ -12284,13 +12526,30 @@ const cmodeOf=p=>{
 };
 /* …and the two things it writes. A mode change never loses the grain size
    you had: it is parked on the channel and handed back when you return. */
+/* TAPE MODE KEEPS ITS PITCH IN THE SPEED, so anything arriving with BOTH set —
+   an old patch, or a walk in from stretch where they are genuinely separate —
+   has to be folded into one number or the dial and the sound are two numbers
+   again, which is the exact failure the tie exists to end. The RATE is
+   unchanged by this: nothing sounds different, only where the number lives
+   moves. If the fold would run past the speed dial's ends the REMAINDER stays
+   on semis, so it is exact at every value rather than at most of them. */
+function audFoldPitch(au){
+  if(!au)return;
+  const s=au.semis??0; if(!s)return;
+  const cur=audSpd(au), want=cur*Math.pow(2,s/12);
+  const spd=clamp(+want.toFixed(2),-4,4)||cur;
+  au.spd=spd; au.rate=spd;
+  const rest=+(12*Math.log2(Math.abs(want)/Math.max(1e-6,Math.abs(spd)))).toFixed(2);
+  au.semis=Math.abs(rest)<0.005?0:rest;
+}
 function applyCmode(pi){
   const p=S.presets[pi]; if(!p)return;
   const m=clamp(Math.round((p.au||{}).cmode??0),0,2);
   p.gr=p.gr||{};
   if(m===2){ if((p.gr.size??1)>=0.999)p.gr.size=p.gr._gsz??0.12; }
   else { if((p.gr.size??0.12)<0.999)p.gr._gsz=p.gr.size; p.gr.size=1; p.au.pmode=m===1?1:0; }
-  engine.granNode(pi); engine.granCfg(pi); engine.audLive(pi);
+  if(m===0)audFoldPitch(p.au);     // tape keeps its pitch in the speed
+  engine.granNode(pi); engine.granCfg(pi); engine.audLive(pi); engine.audTwin(pi);
 }
 /* WHAT AN AUDIO CHANNEL IS BEFORE YOU TOUCH IT: a tape, on the clock, looping
    by itself. Two of those three were already meant to be the defaults; the
@@ -12308,9 +12567,17 @@ function audDefaults(p,gran){
   p.au=p.au||{}; p.gr=p.gr||{};
   if(p.au.fit===undefined)p.au.fit=1;       // sync — a take that loops is meant to fill the loop
   if(p.au.auto===undefined)p.au.auto=1;     // …and the loop cursor runs by itself
-  if(!Number.isFinite(p.au.cmode))p.au.cmode=gran?2:0;
-  if(p.gr.size===undefined)p.gr.size=Math.round(p.au.cmode)===2?0.12:1;
-  if(Math.round(p.au.cmode)!==2)p.au.pmode=Math.round(p.au.cmode)===1?1:0;
+  /* `gran` is an ASK, not a fallback. ⌥-drop and the set's Cloud channel are
+     asking for the cloud in so many words, so they OVERRIDE a mode that is
+     already there — where a plain audio channel only fills in a mode it has
+     never had. (This was a fallback for one build and the Cloud channel came
+     up as a tape, because basePreset always writes cmode now and the guard
+     never fired.) */
+  if(gran)p.au.cmode=2;
+  else if(!Number.isFinite(p.au.cmode))p.au.cmode=0;
+  const m=clamp(Math.round(p.au.cmode),0,2);
+  if(m===2){if((p.gr.size??1)>=0.999)p.gr.size=p.gr._gsz??0.12;}
+  else{if((p.gr.size??0.12)<0.999)p.gr._gsz=p.gr.size; p.gr.size=1; p.au.pmode=m===1?1:0;}
 }
 /* the dials this mode uses — the page and the cursor walk this, while the
    full list stays the address book for mods and automation */
@@ -12365,11 +12632,11 @@ function audAction(d,m){
   const cur=spec.get?spec.get(pre.au):pre.au[spec.key]??AUDDEF[spec.key]??0;
   const nv=adjust(spec,cur,d,m);
   if(spec.set)spec.set(pre.au,nv); else pre.au[spec.key]=nv;
-  /* THE CROP CANNOT INVERT. Both ends used to be clamped against each other by
-     the instrument row's own handler; on the page they go through the generic
-     adjust(), which only knows the spec's own floor and ceiling. */
-  if(spec.key==='st')pre.au.st=Math.min(pre.au.st,(pre.au.en??1)-0.02);
-  if(spec.key==='en')pre.au.en=Math.max(pre.au.en,(pre.au.st??0)+0.02);
+  /* NO CLAMPING THE TWO AGAINST EACH OTHER ANY MORE. They used to be absolute
+     positions that could cross, so each one had to be held off the other —
+     which is exactly what made start drag the crop's size around. `end` is a
+     signed LENGTH now (audWin), so every value of it is legal at every start
+     and the pair cannot invert by construction. */
   if(spec.key==='cmode'){applyCmode(S.editSnd);
     flash('mode → '+['tape · resample, pitch rides speed',
       'stretch · timing held, window is the character',
@@ -13307,7 +13574,10 @@ const HE={
     this.map=(CFG.he&&CFG.he.map)||(kind===1?KC_SLOTS:RY_SLOTS);
     inDev.oninputreport=e=>this.report(e);
     this.on=true;
-    if(kind===2)await this.ryEnable(); else this.kcProbe();
+    /* info BEFORE enable, the order their driver uses: whoAmI first, then turn
+       the stream on. Asking after would put a feature read in the middle of a
+       running analog push. */
+    if(kind===2){await this.ryInfo(); await this.ryEnable();} else this.kcProbe();
     this.watch=setInterval(()=>this.tick(),60);
     this.set('autoOn',1);      // a reload should find the board already here
     flash('hid: '+this.srcName+(this.map?'':' — run `h keys` to map the keys'));
@@ -13339,14 +13609,47 @@ const HE={
     if(this.dev){try{this.dev.oninputreport=null;}catch(_){} try{this.dev.close();}catch(_){}}
     this.dev=null; this.keys={}; flash('hid off'); dirty=true;
   },
-  async ryEnable(){                                  // FUN60: one feature report turns analog on
-    const b=new Uint8Array(64); b[0]=0x1B; b[1]=0x01;
+  /* THE COMMAND ENVELOPE, and it was already right. MonsGeek's own web driver
+     (app.monsgeek.com, one bundle, /js/index.<hash>.js) builds every command
+     the same way in `___encodeCmd`: pad to 9 bytes, then
+        Bit7 -> n[7] = 255 - (sum(n[0..6]) & 255)
+        Bit8 -> n[8] = 255 - (sum(n[0..7]) & 255)
+     which is byte-for-byte what ryEnable has always done. Both commands below
+     are Bit7. Reading their bundle beats sniffing their traffic, because you
+     can only capture a screen the app lets you open — and it does not let a
+     MonsGeek-branded board open the Light Sync page at all. */
+  ryCmd(...bytes){
+    const b=new Uint8Array(64); b.set(bytes);
     let sum=0; for(let i=0;i<7;i++)sum+=b[i];
-    b[7]=(255-sum)&0xff;
+    b[7]=(255-sum)&0xff; return b;
+  },
+  async ryEnable(){                                  // FUN60: one feature report turns analog on
     /* the enable command goes to the CONFIG interface, which is not the one the
        analog reports come back on */
-    try{await (this.cfgDev||this.dev).sendFeatureReport(0,b);}
+    try{await (this.cfgDev||this.dev).sendFeatureReport(0,this.ryCmd(0x1B,0x01));}
     catch(err){flash('fun60 enable failed: '+(err&&err.message||err));}
+  },
+  /* WHAT THIS BOARD CAN ACTUALLY DO — 0x8F, the first thing their driver asks.
+     Read-only, and the safest command in the protocol. The reply carries a
+     32-bit board id at byte 1 and, at BYTE 11, whether the firmware supports
+     LIGHT SYNC: live per-key LED streaming, which is the whole prerequisite for
+     using the keyboard as TEN's display. Their own UI hides that page when
+     company === "MonsGeek", so the app can never answer this question — the
+     firmware still can. Stored on HE and flashed; never throws into connect. */
+  async ryInfo(){
+    const d=this.cfgDev||this.dev; if(!d)return;
+    try{
+      await d.sendFeatureReport(0,this.ryCmd(0x8F));
+      await new Promise(r=>setTimeout(r,20));        // their driver sleeps ~10ms between send and read
+      const dv=await d.receiveFeatureReport(0);
+      const a=new Uint8Array(dv.buffer,dv.byteOffset,dv.byteLength);
+      if(a[0]!==0x8F){this.fw={err:'0x8F answered '+a[0]}; return;}
+      const id=new DataView(a.buffer,a.byteOffset,a.byteLength).getUint32(1,true);
+      this.fw={id:id===0xFFFFFFFF?-1:id, lightSync:a[11]===1, b11:a[11],
+               raw:[...a.slice(0,16)].map(x=>x.toString(16).padStart(2,'0')).join(' ')};
+      flash('board 0x'+(id>>>0).toString(16)+' · light sync '+
+            (a[11]===1?'YES — live LEDs are on the table':'no (byte11='+a[11]+')'));
+    }catch(err){this.fw={err:String(err&&err.message||err)};}
   },
   kcProbe(){                                         // Keychron: what can this firmware do?
     const b=new Uint8Array(32); b[0]=0xA9; b[1]=0x01;
@@ -17930,11 +18233,13 @@ const onKeyDown=e=>{
         let say='';
         for(const i of tgA){
           const p9=S.presets[i]; p9.au=p9.au||{};
-          const st9=clamp(p9.au.st??0,0,0.98);
-          const w9=clamp((clamp(p9.au.en??1,0,1)-st9)*f,0.01,1-st9);
-          p9.au.en=clamp(st9+w9,st9+0.01,1);
+          /* `en` IS the length now, signed — so halving or doubling the crop is
+             the multiply it always wanted to be, and it keeps its direction */
+          const e9=clamp(p9.au.en??1,-1,1);
+          p9.au.en=clamp(e9*f,-1,1)||0.01;
+          if(Math.abs(p9.au.en)<0.01)p9.au.en=e9<0?-0.01:0.01;
           engine.audRelock(i);
-          say=Math.round((p9.au.en-st9)*100)+'% of the take';
+          say=(p9.au.en<0?'◀ ':'')+Math.round(Math.abs(p9.au.en)*100)+'% from start';
         }
         /* the cut list is cached against the crop, so it re-detects by itself
            on the next read — but the page and any running cursor need telling */
@@ -18461,7 +18766,8 @@ const onKeyDown=e=>{
       const gr9=S.presets[pi].gr||{};
       if((gr9.size??0.12)<0.999){
         const buf9=engine.audBuf[pi], au9=S.presets[pi].au||{};
-        const st9=clamp(au9.st??0,0,0.98), en9=clamp(au9.en??1,st9+0.01,1);
+        const W9=audWin(au9);
+        const st9=W9.lo, en9=W9.hi;
         const dur9=(en9-st9)*buf9.duration, loop9=Math.max(1e-6,L*spb());
         const rate9=Math.max(0.05,Math.abs(audRate(au9,dur9,loop9)));
         const bt9=clamp(sl*0.25+(cue.o||0),0,L-0.01);
@@ -19239,7 +19545,7 @@ window.addEventListener('blur',()=>{
 
 /* ---------------- persistence + migration ---------------------------- */
 const LS='ten-v1';
-const SAVEV=27;                       // bump BOTH: serialize writes it, load checks it
+const SAVEV=28;                       // bump BOTH: serialize writes it, load checks it
 /* v22: granular is the audio channel's MODE (au.amode), never a cat — old
    'gran' spellings are normalized on the way in */
 /* WHAT A SAVE SAYS vs WHAT THE RUNTIME USES.
@@ -19433,6 +19739,28 @@ function load(json){
           so.sen=a>=0.999?1:clamp((clamp(so.sen,0,1)-a)/(1-a),0,1);
         }
         if(sp.gr)p.gr=Object.assign({},sp.gr);   // the cloud's dials were being dropped on load
+        /* v<28: THE AUDIO CHANNEL'S `end` WAS AN ABSOLUTE POSITION and is a
+           signed SPAN from `start` now — the same change a sampler op got at
+           v27, and the same exact conversion, so a stored [0.5, 0.75] still
+           resolves to the window [0.5, 0.75] and nothing sounds different. */
+        if(o.v<28&&p.au&&p.au.en!==undefined){
+          const a9=clamp(p.au.st??0,0,0.98);
+          p.au.en=a9>=0.999?1:clamp((clamp(p.au.en,0,1)-a9)/(1-a9),0,1);
+        }
+        /* …AND THE MODE IS WRITTEN DOWN RATHER THAN INFERRED. cmodeOf guesses
+           from the grain size when the field is absent, which was fine while
+           only the page read it — but the pitch dial is a VIEW of speed in tape
+           mode and asks the au object directly, and a spec is handed the store,
+           not the preset. Resolving it once here means every audio channel
+           carries an explicit mode from load onward, and the inferred value is
+           exactly what the channel was already doing. */
+        if(p.cat==='audio'||p.cat==='gran'){
+          p.au.cmode=cmodeOf(p);
+          /* …and a tape channel's pitch folds into its speed, exactly (the
+             remainder stays behind if the fold would clamp), so a stored set
+             sounds the same and its dial stops disagreeing with it */
+          if(p.au.cmode===0)audFoldPitch(p.au);
+        }
         /* v<22 spelled granular as an ENGINE; it is the audio channel's mode */
         if(p.cat==='gran'){p.cat='audio'; p.au.kmode=1; p.au.auto=0;}
         /* MIX AND VOF ARE NOT RACKS ANY MORE, so the MODULES walk above no
@@ -20673,7 +21001,10 @@ function gridHTML(pat,pos,anc,chans){
       if((isAudioCh(i)||isGranCh(i))&&wb0&&!liveG){
         const wb=wb0;
         const au9=S.presets[i].au||{}, LN2=lane.len||8;
-        const st9=clamp(au9.st??0,0,0.98), en9=clamp(au9.en??1,st9+0.01,1);
+        /* the picture draws the WINDOW, sorted — which way the read runs
+           through it is the playhead's business, not the shading's */
+        const W9=audWin(au9);
+        const st9=W9.lo, en9=W9.hi;
         const key2=i+'|'+bufId(wb)+'|'+H;
         let wsvg=WAVEC.get(key2);
         if(!wsvg){
