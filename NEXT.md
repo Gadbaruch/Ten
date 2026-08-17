@@ -121,7 +121,29 @@ carrier sampled every 150ms across a x4 length change whose old cycle ended at
 handler, ahead of the audio channel's own three meanings for it, or the
 gesture would mean different things on different channels.
 
-## KIT IS A ROUND TRIP, NOT A ONE-WAY WALK (Gad, 2026-08-16)
+## KIT IS AN ENGINE AGAIN (Gad, 2026-08-16) — supersedes the entry below
+
+It spent a while in the voice-mode list on the argument that a kit IS a
+voice-allocation mode. True, and still true, but it was the ONLY entry there
+that changed the ENGINE, so walking the dial onto it applied mono and legato on
+the way past, and there was no position to come back to. An engine is a thing
+you switch TO AND FROM; a voice mode is a thing you WALK. That is the whole
+distinction, and it decides where a control lives.
+
+    voice modes  poly · mono · legato
+    engines      Synth · Kit · Proc · Audio
+
+The voice mode is now untouched by the round trip, because the two are
+different axes and nothing has to remember anything:
+
+    mono,   synth -> KIT -> synth   mode stays mono
+    legato, synth -> KIT -> synth   mode stays legato
+
+KITBACK is gone with it — the memory only existed to paper over the wrong home.
+And a display bug went with it: `engineName()` reads the ENGINES list, so a kit
+channel used to report "Synth". It says Kit now.
+
+## (superseded) KIT AS A ROUND TRIP IN THE MODE LIST
 
 Kit sits in the voice-mode list because a kit IS a voice-allocation mode — the
 pitch class picks which chain answers. But it is the only entry there that
