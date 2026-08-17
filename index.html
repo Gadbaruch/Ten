@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.2346';
+const BUILD='2026-08-17.2349';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -17692,10 +17692,38 @@ const gridName=g=>{const i=GRIDS.findIndex(x=>x&&Math.abs(x-g)<1e-9);return i>0?
 const qnext=(v,g)=>Math.ceil(v/g-1e-6)*g;   // live quantize: NEXT grid point
 /* PLAY-generated notes (arp) write into the lane while recording, so a held
    chord records as the arpeggio you actually hear — not the source note */
+/* AN AUDIO LANE DOES NOT HOLD NOTES (Gad, 2026-08-18: "arp needs to rec
+   properly too"). The arp SOUNDS on an audio channel — noteOn hands a pitch
+   straight to cueNote — but everything that records the rack's output wrote a
+   {midi} event, and an audio lane's replay reads only cue, pk and fz. So an
+   arped performance went down as notes nothing would ever play back: the
+   channel sang while you held the keys and the lane came back silent.
+   Written in the shape the channel actually speaks, decided by the same
+   kmodeOf the live keys use — a cue slot in position mode, a semitone bend in
+   pitch mode — and the slot arithmetic is cueNote's own, so an arp lands on
+   the cue a finger would have landed on. */
+function recAudEvent(pi,tBeat,midi,vel,durBeats){
+  const pat=S.patterns[S.editPat], lane=pat.lanes[pi], p=S.presets[pi];
+  const L=lane.len, t=fmod(tBeat-editAnchor(),L), dur=durBeats||0.25;
+  if(kmodeOf(p)===1){
+    const pk=Math.round(midi)-KBBASE;
+    lane.clear(ev=>ev.pk===pk&&Math.abs(ev.t-t)<1e-6);
+    lane.events.push({t,pk,dur,born:performance.now()});
+  }else{
+    const cuts=(engine.audCuts(pi)||[]).length; if(!cuts)return;
+    const cue=((Math.round(midi)-60-trSemis(p))%cuts+cuts)%cuts;
+    lane.clear(ev=>ev.cue===cue&&Math.abs(ev.t-t)<1e-6);
+    lane.events.push({t,cue,dur,vel:vel||0.9,born:performance.now()});
+  }
+  dirty=true; dirtySave=true;
+}
 function recPlayNote(pi,tBeat,midi,vel,durBeats){
   const pat=S.patterns[S.editPat];
   if(!T.playing||pat.state!=='rec')return;
   const lane=pat.lanes[pi];
+  /* the capture path builds a clip out of raw notes and is not an audio lane's
+     business; everything else goes down in the channel's own vocabulary */
+  if(isAudioCh(pi)&&!lane._cap)return recAudEvent(pi,tBeat,midi,vel,durBeats);
   if(lane._cap){
     const t=Math.max(0,tBeat-lane._cap.t0);
     lane.events.push({t,midi,vel:vel||0.9,dur:durBeats||0.2,born:performance.now()});
