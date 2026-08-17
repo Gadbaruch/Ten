@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.1202';
+const BUILD='2026-08-17.1213';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1313,10 +1313,13 @@ const SETTINGS=[
               v:()=>{const f=HE.fw; if(!f)return '— no reply';
                      return f.err?'err':(f.lightSync?'sync ✓':'sync ✗ b11='+f.b11);},
               a:()=>{const f=HE.fw;
-                     if(!f)return flash('the board sent no 0x8F reply — reconnect hid');
-                     if(f.err)return flash('0x8F failed: '+f.err);
-                     flash('board 0x'+((f.id>>>0).toString(16))+' · light sync '+
-                           (f.lightSync?'YES':'no')+' · '+f.raw);}},
+                     if(!f)return flash('the board sent no 0x8F reply — reconnect hid',6000);
+                     /* the whole reply to the clipboard: this is data to be
+                        reported back, and reading it off a 1.8s flash is how
+                        you get a screenshot of half of it */
+                     copyFlash('0x8F  id=0x'+((f.id>>>0).toString(16))+
+                       '  b11='+f.b11+'  len='+f.len+(f.err?'  ERR '+f.err:'')+
+                       '\n'+f.raw, 'board reply copied');}},
  {n:'h vel',g:'Input', h:()=>!HE.on,v:()=>Math.round(HE.cfg().est||0)===1?'window':'peak',
               a:()=>{const e2=Math.round(HE.cfg().est||0)===1?0:1; HE.set('est',e2);
                      flash(e2?'window — velocity is how deep it got in '+HE.cfg().wait+'ms'
@@ -13663,12 +13666,17 @@ const HE={
       await new Promise(r=>setTimeout(r,20));        // their driver sleeps ~10ms between send and read
       const dv=await d.receiveFeatureReport(0);
       const a=new Uint8Array(dv.buffer,dv.byteOffset,dv.byteLength);
-      if(a[0]!==0x8F){this.fw={err:'0x8F answered '+a[0]}; return;}
+      /* KEEP THE BYTES WHATEVER THEY SAY. Storing only an error on a mismatched
+         first byte threw away the one thing worth having — what the board
+         actually answered. The full report, not sixteen bytes of it: their
+         device table keys on a 32-bit id, PID 20521 is shared by a dozen
+         boards from four companies, and the rest of this reply is where the
+         rest of the answer is. */
+      const hex=[...a].map(x=>x.toString(16).padStart(2,'0')).join(' ');
       const id=new DataView(a.buffer,a.byteOffset,a.byteLength).getUint32(1,true);
-      this.fw={id:id===0xFFFFFFFF?-1:id, lightSync:a[11]===1, b11:a[11],
-               raw:[...a.slice(0,16)].map(x=>x.toString(16).padStart(2,'0')).join(' ')};
-      flash('board 0x'+(id>>>0).toString(16)+' · light sync '+
-            (a[11]===1?'YES — live LEDs are on the table':'no (byte11='+a[11]+')'));
+      this.fw={ok:a[0]===0x8F, id:id===0xFFFFFFFF?-1:id, lightSync:a[0]===0x8F&&a[11]===1,
+               b11:a[11], len:a.length, raw:hex};
+      if(a[0]!==0x8F){this.fw.err='0x8F answered 0x'+a[0].toString(16); return;}
     }catch(err){this.fw={err:String(err&&err.message||err)};}
   },
   kcProbe(){                                         // Keychron: what can this firmware do?
@@ -16368,7 +16376,19 @@ function retroCapture(){
 }
 const fmtLen=l=>(l.count%1?l.count.toFixed(2):l.count)+' '+UNIT_NAMES[l.unit];
 let helpOpen=false, dirty=true, dirtySave=false, flashMsg='', flashUntil=0;
-const flash=m=>{flashMsg=m;flashUntil=performance.now()+1800;dirty=true;};
+/* 1.8s is right for "oct 3" and wrong for anything you are meant to READ and
+   report back. Gad, 2026-08-17: "keep the bottom message loaded longer or make
+   it copy pastable if you want me to tell you what's there." Both — an optional
+   duration here, and `copyFlash` for the ones that are data. */
+const flash=(m,ms)=>{flashMsg=m;flashUntil=performance.now()+(ms||1800);dirty=true;};
+/* a keypress IS the user gesture the clipboard wants, so this works straight
+   from a settings row. Falls back to a long flash if the write is refused. */
+const copyFlash=(txt,label)=>{
+  try{navigator.clipboard.writeText(txt)
+    .then(()=>flash((label||'copied')+' — ⌘V to paste it  ·  '+txt,12000))
+    .catch(()=>flash(txt,20000));}
+  catch(_){flash(txt,20000);}
+};
 
 function cellSize(len,max){for(const c of [0.25,0.5,1,2,4]){if(len/c<=max)return c;}return 8;}
 /* arrange-level params: navigated with ←→/↑↓ right in the arrange view */
