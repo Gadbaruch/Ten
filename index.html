@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.1937-mono';
+const BUILD='2026-08-17.2005-mono';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -5673,7 +5673,16 @@ function scheduleRange(from,to){
               const ms1=Math.max(0,(timeAt(t+a.anchor)-AC.currentTime)*1000);
               const ms2=Math.max(0,(timeAt(t+Math.min(ev.dur||0.25,L3)+a.anchor)-AC.currentTime)*1000);
               setTimeout(()=>{try{engine.audPitch(li,ev.pk);}catch(_){}},ms1);
-              setTimeout(()=>{try{if(!(AUD.hold&&AUD.hold.pi===li))engine.audPitch(li,0);}catch(_){}},ms2);
+              /* AND THE RECORDED BEND COMES BACK IN TIME TOO. The live one got
+                 its relock on the key-up; this one had none, so every replay
+                 of a stored bend left the take a little further out of phase
+                 with the bar — and unlike the live case it happens on EVERY
+                 loop, so the error is not a one-off, it accumulates until the
+                 take has nothing to do with the clock. Same call, same reason:
+                 under sync the loop has an opinion about where in the take you
+                 should be, and free has none (audRelock returns early there). */
+              setTimeout(()=>{try{if(!(AUD.hold&&AUD.hold.pi===li)){
+                engine.audPitch(li,0); engine.audRelock(li);}}catch(_){}},ms2);
             }else if(ev.fz!==undefined){
               const ms1=Math.max(0,(timeAt(t+a.anchor)-AC.currentTime)*1000);
               const dSec=Math.min(ev.dur||0.25,L3)*spb();
@@ -10419,6 +10428,12 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
   /* is there a tape cursor on this channel right now — the one thing a mono
      key needs to know before it decides between moving one and making one */
   audRolling(pi){
+    /* audCar is SYNCHRONOUS — set the instant a carrier is spawned, cleared
+       the instant the tape is stopped. The stat ping is up to a frame stale,
+       and two keys inside one frame would both read "no cursor" and both make
+       one, which is the very thing one-playhead exists to prevent. The stat is
+       the fallback for a cursor this engine did not spawn itself. */
+    if((this.audCar||[])[pi])return true;
     const st=(this.gn&&this.gn[pi]&&this.gn[pi].stat)||null;
     return !!(st&&(st.tv|0)>0);
   }
@@ -19580,8 +19595,15 @@ const onKeyDown=e=>{
              true) was giving. */
           const semP=(noteOf(c,pi)??0)+S.oct*12+trSemis(p9);
           AUD.gk=AUD.gk||{};
-          AUD.gk[c]=AUD.hold={c,pi,kind:'pmono',sl:null,vel:hitVel,
-            press:AC.currentTime,tr:gridNow()};
+          /* CARRY THE SEMITONE. The hold recorded nothing at all — no `pk`,
+             so `endAudHold`'s recorder had nothing to write and a pitch
+             performance vanished the moment you let go. It is the same event
+             the lane already replays (`ev.pk` → audPitch), and the 'pitch'
+             branch below already knows how to write one; it just never got a
+             hold with a pk on it. Under AUDMONO this is the ONLY path a pitch
+             key takes, so "recording pitch keys doesn't work" was all of it. */
+          AUD.gk[c]=AUD.hold={c,pi,kind:'pmono',sl:null,vel:hitVel,pk:semP,
+            press:AC.currentTime,tr:Math.max(gridNow(),0)};
           engine.audPitch(pi,semP);
           flash('loop '+(semP>0?'+':'')+semP+'st'+(vmP===2?' · glide':''));
           dirty=true; return;
@@ -19956,6 +19978,21 @@ function endAudHold(c){
   if(AUD.gk&&AUD.gk[c]&&AUD.gk[c].kind==='pmono'){
     const h8=AUD.gk[c]; delete AUD.gk[c];
     if(AUD.hold===h8)AUD.hold=null;
+    /* …AND IT IS WRITTEN DOWN, exactly the way the 'pitch' branch writes one:
+       into retro so tab+N can reveal it afterwards, and into the lane when rec
+       is on. Same {t, pk, dur} shape the replay above already reads. */
+    if(h8.pk!==undefined&&h8.tr!=null){
+      const lane8=S.patterns[S.editPat].lanes[h8.pi], L8=lane8.len;
+      const dur8=Math.max(0.05,h8.press!=null?(AC.currentTime-h8.press)/spb():0.25);
+      retroBuf[h8.pi].push({t:h8.tr,pk:h8.pk,dur:dur8});
+      if(retroBuf[h8.pi].length>512)retroBuf[h8.pi].shift();
+      if(S.patterns[S.editPat].state==='rec'){
+        const qt8=fmod(h8.tr-editAnchor(),L8);
+        lane8.clear(ev=>ev.pk===h8.pk&&Math.abs(ev.t-qt8)<1e-6);
+        lane8.events.push({t:qt8,pk:h8.pk,dur:dur8,born:performance.now()});
+        dirtySave=true;
+      }
+    }
     if(!Object.keys(AUD.gk).some(k8=>(AUD.gk[k8]||{}).kind==='pmono')){
       engine.audPitch(h8.pi,0);
       /* AND IT COMES BACK IN TIME (Gad, 2026-08-17). In tape mode a pitch bend
