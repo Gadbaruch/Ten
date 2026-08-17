@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.1635';
+const BUILD='2026-08-17.1643';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1414,6 +1414,30 @@ const SETTINGS=[
     held and wiggled the whole time because HE.fps only advances while a key is
     moving. If busy is materially below idle, the lights and the instrument
     cannot share this device and the lights are the half that goes. */
+ /* DIGIT 5 BY HAND, and the `write` row is the experiment hiding inside the
+    dials: `chunk` sends only the 56-byte block containing slot 31 — one report —
+    while `full` sends all seven. Dial the brightness with each and the answer
+    falls out of your own eyes: if it moves on `full` and not on `chunk`, the
+    firmware needs the whole picture and per-key movement is dead here. Needs
+    `led digits` on, because that is the path proven to actually light the board. */
+ {n:'d5 on',g:'Input',h:()=>!HE.on||HE.kind!==2||!CFG.ledOn,
+   v:()=>CFG.d5on?'hand dial':'off',
+   a:()=>{CFG.d5on=CFG.d5on?0:1;
+     if(CFG.d5on&&!CFG.d5b){CFG.d5b=255; CFG.d5h=300;}   // start bright and magenta: unmissable
+     saveCfg(); HE._ledSig=null; HE.ledDigits(true);
+     flash(CFG.d5on?'digit 5 is yours — dial `d5 bright` and `d5 hue`':'digit 5 back to normal',5000);
+     dirty=true;}},
+ {n:'d5 bright',g:'Input',h:()=>!HE.on||HE.kind!==2||!CFG.ledOn||!CFG.d5on,
+   v:()=>String(CFG.d5b|0),
+   a:d=>{CFG.d5b=clamp((CFG.d5b|0)+d*16,0,255); saveCfg(); HE.d5Push(); dirty=true;}},
+ {n:'d5 hue',g:'Input',h:()=>!HE.on||HE.kind!==2||!CFG.ledOn||!CFG.d5on,
+   v:()=>String(CFG.d5h|0)+'°',
+   a:d=>{CFG.d5h=fmod((CFG.d5h|0)+d*15,360); saveCfg(); HE.d5Push(); dirty=true;}},
+ {n:'d5 write',g:'Input',h:()=>!HE.on||HE.kind!==2||!CFG.ledOn||!CFG.d5on,
+   v:()=>CFG.d5full?'full 7':'chunk 1',
+   a:()=>{CFG.d5full=CFG.d5full?0:1; saveCfg();
+     flash(CFG.d5full?'dial now writes ALL SEVEN chunks':'dial now writes ONE chunk — the real question',5000);
+     HE.d5Push(); dirty=true;}},
  /* THE EXPERIMENT GAD ASKED FOR: can ONE key move without the board blinking.
     Pulses Digit5 alone, twenty times, writing only the 56-byte chunk that
     contains it — 1 report instead of 7. Three things to watch, and only eyes
@@ -1423,28 +1447,32 @@ const SETTINGS=[
  {n:'led 1key',g:'Input',h:()=>!HE.on||HE.kind!==2,
    v:()=>HE._oneKey||'pulse digit5 only',
    a:async()=>{
-     /* THE MODE FIRST, AND THE WHOLE PICTURE ONCE. The first run of this proved
-        nothing: it never put the board into LightUserPicture, so if `led digits`
-        was off the board was showing LightAlwaysOn and NO picture write of any
-        shape would have been visible. "digit 5 didnt do anything to my eye" was
-        a broken experiment, not a negative result. Baseline the full frame, set
-        the mode, THEN pulse one chunk against a background we know is on. */
+     /* STOP BUILDING A SECOND PATH. Three runs of this reported "no change",
+        including a baseline that should have dimmed all ten digits — while
+        `led digits` demonstrably lights the board with the same two calls. When
+        a parallel implementation disagrees with a working one, the difference
+        is in MY path, and testing it again only measures my own mistake.
+        So this no longer establishes anything. It requires `led digits` to be
+        ON, lets THAT write the picture and set the mode, then changes exactly
+        one variable on top of a display already known to be working: does a
+        single-chunk write move one lamp. */
      const sl=HE.DIGSLOT[5], ch=HE.chunkOfSlot(sl);
+     HE._expLock=0; HE._ledSig=null;
+     HE.ledDigits(true);                              // the PROVEN path paints and sets the mode
+     await new Promise(r2=>setTimeout(r2,600));
+     /* read back what it actually put on the board and ramp from exactly that,
+        so the lamp starts where the working picture left it */
      const rgb=new Array(HE.LEDN*3).fill(0);
-     for(let i=0;i<10;i++){const s2=HE.DIGSLOT[i];        // every digit visibly dim to start
-       rgb[s2*3]=0; rgb[s2*3+1]=34; rgb[s2*3+2]=24;}
-     HE._expLock=1;                                   // nothing else may write while this runs
-     const base=await HE.ryLightPic(rgb,0);
-     if(base!=='sent'){HE._expLock=0; HE._oneKey='failed';
-       flash('baseline picture FAILED: '+base,9000); dirty=true; return;}
-     const md=await HE.ryLightMode(13,{bright:4,speed:0,option:0});
-     if(md!=='sent'){HE._expLock=0; HE._oneKey='failed';
-       flash('mode 13 FAILED: '+md+' — the board never entered picture mode',9000);
-       dirty=true; return;}
-     HE._ledMode=1;
-     await new Promise(r2=>setTimeout(r2,700));
-     flash('all ten digits DIM? then digit 5 ramps 0→4 over 200ms, six times — PLAY FAST NOTES',6000);
-     await new Promise(r2=>setTimeout(r2,900));
+     const p9=S.patterns[S.editPat];
+     for(let i=0;i<10;i++){const s2=HE.DIGSLOT[i];
+       const has=!!(p9&&p9.lanes[i]&&p9.lanes[i].events.length);
+       const g=HE.LEDLVL[(S.curPreset|0)===i?3:(has?2:1)];
+       rgb[s2*3]=Math.round(HE.CHSEL[0]*g);
+       rgb[s2*3+1]=Math.round(HE.CHSEL[1]*g);
+       rgb[s2*3+2]=Math.round(HE.CHSEL[2]*g);}
+     HE._expLock=1;                                   // now hold the board still
+     flash('the digits are lit by `led digits` — DIGIT 5 will ramp 0→4 six times. PLAY FAST NOTES',6000);
+     await new Promise(r2=>setTimeout(r2,1200));
      /* A RAMP, NOT A BLINK (Gad: "make it flash over 200ms from 0-4"). Two
         alternating values can read as "nothing moved" if the eye misses the
         moment; a level climbing 0 to 4 across 200ms is unmistakable, and it
@@ -13719,6 +13747,14 @@ const RY_SLOTS={1:'Escape',2:'Tab',3:'CapsLock',4:'ShiftLeft',5:'ControlLeft',7:
                 57:'KeyL',58:'Comma',61:'Digit0',62:'KeyP',63:'Semicolon',64:'Period',
                 65:'AltRight',67:'Minus',68:'BracketLeft',69:'Quote',70:'Slash',73:'Equal',
                 74:'BracketRight',81:'Enter'};
+/* h 0..360, s/v 0..1 -> 0..255 triple. Only the digit-5 hand dial uses it. */
+function hsv2rgb(h,s,v){
+  const c=v*s, x=c*(1-Math.abs((h/60)%2-1)), m=v-c;
+  let r=0,g=0,b=0;
+  if(h<60){r=c;g=x;} else if(h<120){r=x;g=c;} else if(h<180){g=c;b=x;}
+  else if(h<240){g=x;b=c;} else if(h<300){r=x;b=c;} else {r=c;b=x;}
+  return [Math.round((r+m)*255),Math.round((g+m)*255),Math.round((b+m)*255)];
+}
 const HE={
   on:false, srcName:'', dev:null, kind:0,          // 1 = analogsense, 2 = rongyuan
   keys:{},                                          // keyId -> stroke state
@@ -14289,15 +14325,10 @@ const HE={
      disabled: a note-flash on this board costs the board's own responsiveness,
      and that trade is not close. If it ever comes back it needs a channel that
      is not the one the sensor is reading on. */
-  ledDigits(force,decaying){
-    if(!this.on||!CFG.ledOn||this.kind!==2)return;
-    /* AN EXPERIMENT OWNS THE BOARD WHILE IT RUNS. Without this the 60ms watchdog
-       rewrites the whole picture underneath a probe — which is very likely why
-       "i didnt see any changes" came back even for a baseline that should have
-       dimmed every digit. A test competing with the thing it is testing cannot
-       produce a result. */
-    if(this._expLock)return;
-    const now=performance.now();
+  /* ONE FRAME BUILDER, so `chunk` and `full` are a real A/B: the same bytes go
+     on the wire either way and only the number of reports differs. Returns the
+     rgb array and stashes the signature; writing is somebody else's job. */
+  buildFrame(){
     const rgb=new Array(this.LEDN*3).fill(0);
     let sig='';
     /* LEVELS ARE CONTINUOUS HERE, and indexing the table with a fraction is how
@@ -14328,8 +14359,31 @@ const HE={
           if(e>0.004)lvl=rest+(4-rest)*Math.min(1,Math.sqrt(e)*1.6);
         }
         put(this.DIGSLOT[i],this.CHSEL,lvl);
+        /* THE HAND DIAL WINS ON DIGIT 5. Gad: "can you give me a param to
+           change brightness and hue of digit 5 only, maybe i can see" — right,
+           and better than another scripted animation: a dial he can hold still
+           and stare at, rather than a flash to catch. */
+        if(CFG.d5on&&i===5){
+          const c=hsv2rgb((CFG.d5h|0)%360,1,clamp((CFG.d5b|0)/255,0,1));
+          const s5=this.DIGSLOT[5];
+          rgb[s5*3]=c[0]; rgb[s5*3+1]=c[1]; rgb[s5*3+2]=c[2];
+          sig+='D'+CFG.d5h+'/'+CFG.d5b;
+        }
       }
-    }catch(_){return;}
+    }catch(_){return null;}
+    this._sig=sig;
+    return rgb;
+  },
+  ledDigits(force,decaying){
+    if(!this.on||!CFG.ledOn||this.kind!==2)return;
+    /* AN EXPERIMENT OWNS THE BOARD WHILE IT RUNS. Without this the 60ms watchdog
+       rewrites the whole picture underneath a probe — which is very likely why
+       "i didnt see any changes" came back even for a baseline that should have
+       dimmed every digit. A test competing with the thing it is testing cannot
+       produce a result. */
+    if(this._expLock)return;
+    const rgb=this.buildFrame(); if(!rgb)return;
+    const sig=this._sig;
     /* the guard is for STATIC state only. A decay frame says so and skips it,
        or the flash would be written once and then held. */
     if(!force&&!decaying&&sig===this._ledSig)return;
@@ -14371,6 +14425,20 @@ const HE={
     if(now-(this._mAt||0)<this.METERMS)return;
     this._mAt=now;
     this.ledDigits(false,true);                     // a level is a change no signature can see
+  },
+  /* the dial's own writer, so `chunk` vs `full` is a real A/B rather than two
+     different code paths that might differ for some other reason: ONE frame
+     builder, two ways of putting it on the wire. */
+  d5Push(){
+    if(!this.on||this.kind!==2||!CFG.ledOn)return;
+    this._ledSig=null;
+    if(CFG.d5full){this.ledDigits(true); return;}
+    const rgb=this.buildFrame(); if(!rgb)return;
+    const sl=this.DIGSLOT[5];
+    this._ledWrites=(this._ledWrites||0)+1;
+    this.ryLightSlots(rgb,[sl],0).then(r=>{
+      if(r!=='sent')flash('chunk write: '+r,6000);
+    });
   },
   ledDrain(){
     if(this._ledBusy||!this._ledWant)return;
