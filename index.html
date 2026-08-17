@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.1625';
+const BUILD='2026-08-17.1629';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1423,11 +1423,23 @@ const SETTINGS=[
  {n:'led 1key',g:'Input',h:()=>!HE.on||HE.kind!==2,
    v:()=>HE._oneKey||'pulse digit5 only',
    a:async()=>{
-     flash('pulsing DIGIT 5 alone, 20 writes of ONE chunk — PLAY FAST NOTES WHILE IT RUNS',6000);
+     /* THE MODE FIRST, AND THE WHOLE PICTURE ONCE. The first run of this proved
+        nothing: it never put the board into LightUserPicture, so if `led digits`
+        was off the board was showing LightAlwaysOn and NO picture write of any
+        shape would have been visible. "digit 5 didnt do anything to my eye" was
+        a broken experiment, not a negative result. Baseline the full frame, set
+        the mode, THEN pulse one chunk against a background we know is on. */
      const sl=HE.DIGSLOT[5], ch=HE.chunkOfSlot(sl);
      const rgb=new Array(HE.LEDN*3).fill(0);
-     for(let i=0;i<10;i++){const s2=HE.DIGSLOT[i];        // the chunk's other lamps, held steady
+     for(let i=0;i<10;i++){const s2=HE.DIGSLOT[i];        // every digit visibly dim to start
        rgb[s2*3]=0; rgb[s2*3+1]=34; rgb[s2*3+2]=24;}
+     const base=await HE.ryLightPic(rgb,0);
+     if(base!=='sent'){HE._oneKey='failed'; flash('baseline write: '+base,8000); dirty=true; return;}
+     await HE.ryLightMode(13,{bright:4,speed:0,option:0});
+     HE._ledMode=1; HE._ledSig=null;
+     await new Promise(r2=>setTimeout(r2,700));
+     flash('all ten digits should be DIM now. digit 5 will pulse — PLAY FAST NOTES',6000);
+     await new Promise(r2=>setTimeout(r2,900));
      const t=[];
      for(let i=0;i<20;i++){
        const v=(i%2)?210:34;
@@ -1440,7 +1452,7 @@ const SETTINGS=[
      }
      t.sort((a,b)=>a-b);
      HE._oneKey=t[t.length>>1].toFixed(1)+'ms';
-     copyFlash('single chunk x20 (chunk '+ch+' of 7, slot '+sl+')  min '+t[0].toFixed(1)+
+     copyFlash('single chunk x20 after a full baseline + mode (chunk '+ch+', slot '+sl+')  min '+t[0].toFixed(1)+
        'ms  median '+t[t.length>>1].toFixed(1)+'ms  max '+t[t.length-1].toFixed(1)+'ms',
        'one-key probe copied');
      dirty=true;}},
