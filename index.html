@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.2336';
+const BUILD='2026-08-17.2341';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -21746,16 +21746,24 @@ function clearLane(pi){
      same key without ever saying so */
   const jumps9=l.events.filter(ev=>ev.cue!==undefined||ev.pk!==undefined||ev.fz!==undefined).length;
   pushUndo(pi===0?'clear master lane':'clear lane');
-  /* A cleared lane is a lane with nothing decided about it yet, and its length
-     was decided by what used to be in it. Keeping a 4-bar loop after wiping
-     the 4 bars leaves you playing into a shape you can no longer see the
-     reason for — so the length goes back to listening along with the notes. */
-  initLane(l);
+  /* TWO PRESSES, TWO DIFFERENT ERASES (Gad, 2026-08-18: "shift+del should not
+     reset loop length, can do this across the board"). The length is a shape
+     you DECIDED — often minutes before the notes you are wiping — and taking
+     it away with them meant every clear cost you that decision too. So the
+     first press takes the notes and leaves the shape; a second one, on a lane
+     that is already empty, takes the shape as well. Nothing to remember: press
+     it twice and you are back at a lane with nothing decided about it.
+     tab+⇧⌫ still resets the length on its own, at any time, for when the notes
+     are not in the way. */
+  const had9=l.events.length;
+  if(had9){ l.clear(); delete l._cap; delete l._rec; }
+  else initLane(l);
   if(retroBuf[pi])retroBuf[pi]=[];
   flash(pi===0?'master timeline cleared'
              :'ch '+pi+CLIPKEYS[(S.clipAt||{})[pi]??0]+' cleared'+
-              (jumps9?' — '+jumps9+' recorded jump'+(jumps9>1?'s':'')+' gone':
-               ' — back to 1 bar, listening'));
+              (jumps9?' — '+jumps9+' recorded jump'+(jumps9>1?'s':'')+' gone':'')+
+              (had9?' — loop still '+(l.count%1?l.count.toFixed(2):l.count)+'×'+UNIT_NAMES[l.unit]
+                   :' — back to 1 bar, listening'));
   dirty=true; dirtySave=true;
 }
 /* the first free slot in the rack you are on, or null if it is full */
@@ -22483,8 +22491,19 @@ function gridHTML(pat,pos,anc,chans){
            from the loop end exactly as free speeds always did. */
         {
           const fe=frOf(LN2);
-          if(fe>0.02&&fe<en9-0.01)
+          if(fe>0.02&&fe<en9-0.01){
             ct+='<i class="loopend" style="top:'+(fe*H).toFixed(1)+'px"></i>';
+            /* AND THE TAIL IT NEVER REACHES GOES DIM (Gad, 2026-08-18: "in
+               audio maybe loop length should show better the part that is
+               actually the loop maybe highlight the bg like in midi ch").
+               The line said where the loop ends; it did not say that
+               everything under it is silent. Same dim the crop already uses,
+               so the LIT part of the column is exactly what you hear — one
+               visual rule for "this does not play", whether it was cropped
+               out or the loop simply never gets there. */
+            ct+='<i class="crx" style="top:'+(fe*H).toFixed(1)+'px;height:'+
+                ((en9-fe)*H).toFixed(1)+'px"></i>';
+          }
         }
         /* the cue marks are the cuts themselves now — no beat arithmetic in
            between, because a transient is a place in the take, not a beat */
