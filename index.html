@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.1345';
+const BUILD='2026-08-17.1355';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1393,8 +1393,14 @@ const SETTINGS=[
      const r=await HE.ryBrightProbe(1200);
      if(typeof r==='string'){HE._probe='failed'; flash('probe: '+r,8000); dirty=true; return;}
      HE._probe=r.med+'ms';
-     copyFlash('0x07 x'+r.n+' ramp 0-4-0  min '+r.min+'ms  median '+r.med+
-       'ms  max '+r.max+'ms  → RAM, live-modulatable','probe copied');
+     /* and the one the per-channel design needs: a whole PICTURE round trip */
+     const q=await HE.ryPicProbe(6);
+     const pic=(typeof q==='string')?('picture FAILED: '+q)
+       :('0x0C picture x'+q.n+'  min '+q.min+'ms  median '+q.med+'ms  max '+q.max+'ms  → '+
+         (q.med<25?'fast enough for per-channel movement':'too slow — flash must be global'));
+     HE._probe=r.med+'ms / '+(typeof q==='string'?'err':q.med+'ms');
+     copyFlash('0x07 bright x'+r.n+' ramp 0-4-0  min '+r.min+'ms  median '+r.med+
+       'ms  max '+r.max+'ms\n'+pic,'probe copied');
      dirty=true;}},
  {n:'h vel',g:'Input', h:()=>!HE.on,v:()=>Math.round(HE.cfg().est||0)===1?'window':'peak',
               a:()=>{const e2=Math.round(HE.cfg().est||0)===1?0:1; HE.set('est',e2);
@@ -13939,6 +13945,32 @@ const HE={
      but five VALUES is not five visible STEPS — the firmware may round it to
      on/off. Walking it slowly, one level per second, is the only way to see
      which, so this ramps 0-4-0 instead of flickering. Nine writes, not 24. */
+  /* AND IS 0x0C RAM TOO. This is the question the whole design turns on, and I
+     called it "flash" once already on the same vendorSleep evidence that was
+     wrong about 0x07. PER-CHANNEL brightness cannot use the global bright
+     field — that is board-wide — so it has to be RGB scaling inside the
+     PICTURE, and a note-flash decaying over 100ms means rewriting the picture
+     several times per note. Seven reports a picture, so the number that
+     matters is the whole-picture round trip, not one chunk.
+     Latency is not the wear answer and cannot be — a device may ack fast and
+     commit lazily. It IS the possibility answer: slow here and per-channel
+     movement is off regardless. */
+  async ryPicProbe(n){
+    const d=this.cfgDev||this.dev; if(!d)return 'no device';
+    n=Math.min(n||6,6);
+    const rgb=new Array(this.LEDN*3).fill(0), t=[];
+    for(let i=0;i<n;i++){
+      for(const sl of this.DIGSLOT){const v=(i%2)?60:0; rgb[sl*3+1]=v;}
+      const t0=performance.now();
+      const r=await this.ryLightPic(rgb,0);
+      if(r!=='sent')return 'FAILED at '+i+': '+r;
+      t.push(performance.now()-t0);
+      await new Promise(r2=>setTimeout(r2,120));
+    }
+    t.sort((a,b)=>a-b);
+    this._ledWrites=(this._ledWrites||0)+n;
+    return {n,min:+t[0].toFixed(2),med:+t[t.length>>1].toFixed(2),max:+t[t.length-1].toFixed(2)};
+  },
   BRIGHTRAMP:[0,1,2,3,4,3,2,1,0],
   async ryBrightProbe(stepMs){
     const d=this.cfgDev||this.dev; if(!d)return 'no device';
