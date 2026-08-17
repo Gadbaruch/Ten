@@ -5,6 +5,127 @@ name "ten-gad"` → localhost:3033 is Gad's, `ten-main` → 3032 is Claude's, bo
 serving this directory · one file, `index.html`, no build step. See CLAUDE.md
 for who may be destructive where.
 
+## THE TAPE GETS ITS FILTER, ITS LENGTH AND ITS KEYS (Gad, 2026-08-17)
+
+Six asks in one batch. Two of them turned out to be the same question — what
+does the audio channel's own setup MEAN, and who obeys it.
+
+**THE FILTER RACK NOW REACHES EVERY PLAYHEAD.** It lived inside the Voice
+constructor, and a tape cursor, a grain and a cue jump are not voices — so an
+audio channel built one for nobody and the whole `flt` page was dead on it.
+`fltChain(ac,p,at)` is that code lifted out unchanged; the voice hangs its
+envelopes and mod routes on the handles it returns, the bus hangs nothing and
+just hears the dials. It sits between the channel input and the FX chain, so it
+is a mixer channel's filter: the autoloop and every key at once. Live dials too
+— `fltBusLive` is cutLive/dialLive aimed at the bus, since both of those walk
+`act[pi]` and an audio channel has no voices in it. Measured on white noise,
+the loop rolling:
+
+    no filter          centroid 6649   rms 0.131
+    24dB lp @600        centroid  494   rms 0.036
+    dial to 5000 LIVE   centroid 3591   rms 0.110
+    hp @4000            centroid 10025  rms 0.178
+
+**IT COSTS SOMETHING AND HE SHOULD KNOW:** `mkFlt(0)` is a 12dB LOWPASS AT
+9kHz, ON by default, and it was inert on audio channels until now. Every
+existing audio channel is a hair darker. Measured against the previous build on
+the factory take: peak moves by at most 0.014 of 0.47, rms by 0.001. With that
+slot switched off on both sides the matrix probe is IDENTICAL on ten of eleven
+cases, every column — so nothing else moved.
+
+**PROOF THE EXTRACTION CHANGED NO NOTE:** `probe.sh preset` A/B over eight
+factory sounds. Every deterministic column matches exactly (hz on all eight,
+rms and peak on the pitched ones). The snares differ by up to 0.03 in peak and
+PA01's hz by 255 — and a control run of the SAME probe twice on ONE build moves
+them by 0.067 and 853, because they are noise-rooted and their peak bin is not
+a stable quantity. Run the control before reading a delta on a noisy preset.
+
+**`end` IS A SIGNED LENGTH FROM START.** Gad: "when you move start it will
+carry end position with it, maybe its not end position its more like length,
+and -100% length would reverse the sample from its start pos." It was an
+ABSOLUTE position, so 0% was the head of the take — the one place it can never
+legally be once start has moved — and half the dial was dead. `audWin(au)` is
+the resolver, the same rule a sampler op already had (`smpWin`), and the seven
+readers of the crop all go through it now. Verified on a 200→3200 sweep, where
+which way the playhead runs reads straight off whether the peak rises or falls:
+
+    start  length   window       rev     heard              dir
+     0      100%    0 - 1        no      269 → 452          rising
+     0.5    100%    0.5 - 1      no      1098 → 1830        rising
+     0.5   -100%    0 - 0.5      YES     581 → 344          FALLING
+     0.5     50%    0.5 - 0.75   no      1109 → 1561, wrap  rising
+     0.5    -50%    0.25 - 0.5   YES     581 → 409, wrap    FALLING
+
+and the crop CARRIES with start — 50% resolves to [0.25,0.625] at start 0.25
+and [0.75,0.875] at start 0.75, where before it resized.
+
+**SAVEV 27 → 28, LIBV 29 → 30, with the identical exact conversion**
+(`en = (en - st)/(1 - st)`). A stored `[0.5, 0.75]` still resolves to
+[0.5, 0.75] — verified on five old crops, all exact, and both racks walked
+TOGETHER because that is the lesson the LIBV 28→29 entry below was written by.
+No export needed; a stored set loads to the same sound.
+
+**START IS LIVE.** Only `end` was re-aimed, so the wrap kept the floor the
+cursor was born with and start was the one crop dial that waited for the next
+trigger. Both edges go now, every time. Moved from 0 to 75% under a rolling
+loop, on a 200→3200 sweep:
+
+    start 0        344 → 474 Hz     (early in the sweep)
+    start 0.75     2681 → 2982 Hz   instantly, then wraps inside [0.75,1]
+    tape voices    1                re-aimed, not retriggered
+
+**PITCH AND SPEED ARE ONE NUMBER IN TAPE MODE.** Gad asked whether they differ:
+they do not. Tape resamples, so the rate is `fit × speed × 2^(semis/12)` and
+both dials multiply the same thing. They are TIED now — two units for one
+control, grab whichever you think in — and the ranges map exactly, which is
+what makes it honest: 2^(24/12) is 4, so ±24 semitones IS ×0.25..×4. The sign
+stays on speed; reverse is not a pitch. Stretch and grain keep them apart,
+where they genuinely differ.
+
+    tape:     speed ×2 → pitch +12st · ×0.5 → −12st · ×1.5 → +7st · ×−2 → +12st
+              pitch +12st → ×2 · −12st → ×0.5 · +7st → ×1.5 · +24st → ×4
+    stretch:  speed ×2 leaves pitch 0 · pitch +12st leaves speed ×2
+    heard:    a 440 take at ×2 comes out at 880.2, not 1760
+
+**THE DIAL WRITES SPEED AND RESTS `semis` AT ZERO — it does not stop the RATE
+from reading semis.** That distinction is the whole design and the first
+attempt got it wrong: zeroing the rate's semis term tied the dials and killed
+every MOD ROUTE and automation curve on pitch. Caught by the matrix probe,
+whose `free +7` row writes `au.semis` raw and went silent (hz −175). Now only
+the dial has moved house. `audFoldPitch` folds a patch that arrives with both
+set into one number without changing the rate, keeping any remainder on semis
+if the fold would clamp.
+
+**A PITCH KEY OBEYS THE TAPE.** At the top of the size dial a cloud voice IS a
+continuous cursor — the same thing the tape is — but it read the WHOLE buffer
+from the cloud's own pos dial at the bare note ratio. So on a tape channel the
+letters ignored start, length, speed, pitch and reverse: "unrelated to the
+setup of the tape", exactly. A `twin` message carries the tape's window and
+step into the worklet and the spawn uses them. On a 200→3200 sweep, crop
+[0.5,0.75] (which is 800..1600 Hz):
+
+    midi 60, speed ×1     883 → 1324    inside the crop, at the take's speed
+    midi 72, speed ×1    1927 → 2552    double speed — an octave up
+    midi 60, speed ×2    1938 → 2563    IDENTICAL, which is the point
+    full crop             215 → 291     the whole take
+    crop [0.25,0.5] rev   732 → 485     FALLING
+
+In GRAIN mode there is no tape window (`on:0`) and the cloud's dials are the
+instrument, exactly as before.
+
+**THE CLOUD CHANNEL LOOPS BY ITSELF NOW.** `setEngine(pi,'gran')` defined
+itself as "pitch keys AND the auto cursor off", which made channel 9 of a fresh
+set the one audio channel that answered nothing until you held a letter. Keys
+and loop are two axes; it only ever meant to set the first. The Cloud channel
+now comes up grain · pitch keys · autoloop ON · size 0.12.
+
+One trap this cost half an hour: `audDefaults(p,'gran')` guarded on
+`!Number.isFinite(cmode)`, and basePreset writes `cmode:0` now — so the flag
+never fired and the Cloud channel came up as a TAPE. A `gran` call is an ASK,
+not a fallback: it OVERRIDES the mode. And a probe that never calls `play()`
+never resumes the AudioContext, so its recorder captures nothing and every row
+reads empty — that is not a silent instrument, it is a suspended one.
+
 ## A FRESH AUDIO CHANNEL WAS A CLOUD, AND FREE WAS RETRIGGERING (Gad, 2026-08-17)
 
 Three asks about the granular synth, and the first two turned out to be one
