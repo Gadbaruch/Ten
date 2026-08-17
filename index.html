@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.2329';
+const BUILD='2026-08-17.2336';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -10440,9 +10440,22 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     if(!Math.round(au.fit||0))return;
     const a=actAt(posNow()), ph=fmod(posNow()-a.anchor,L);
     const W=audWin(au);
-    /* the anchor and the far edge, not lo and hi: under a reversed crop the
-       loop's phase has to walk BACKWARDS through the take */
-    this.audMove(pi,W.a+(ph/L)*(W.far-W.a),0,1,1);
+    /* SPEED IS PART OF THE MAP (Gad, 2026-08-18: "with sync on doubling and
+       halving should land the playhead in the correct moment, right now it
+       gets displaced, even with sync on"). The phase was laid LINEARLY across
+       the crop, which says the take covers the crop exactly once a cycle —
+       true only at speed x1. Under sync the rate is (crop/loop) x speed, so a
+       cycle covers `speed` traversals: at x0.25 a quarter, at x2 twice. The
+       map was asking for a quarter-speed take to be four times further along
+       than it can be, which throws it forward, and by exactly that factor.
+       A route on speed outranks the dial here for the same reason it does in
+       audRate — when something is driving the rate, that IS the rate. */
+    const ovR9=(this.audOv&&this.audOv[pi]||{}).rate;
+    const spd9=Number.isFinite(ovR9)?ovR9:audSpd(au);
+    /* fmod is the positive modulo, so a NEGATIVE speed folds to the right
+       place walking backwards; the reversed CROP is already carried by a to
+       far, and the two compose the way they do everywhere else. */
+    this.audMove(pi,W.a+fmod((ph/L)*spd9,1)*(W.far-W.a),0,1,1);
   }
   /* WHERE THE CARRIER DIES, and it is the switch that decides. SYNC cuts it to
      the cycle — a fitted take is re-fired every loop, so it has to die exactly
