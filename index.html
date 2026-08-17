@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.2349';
+const BUILD='2026-08-17.2354';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -9735,6 +9735,15 @@ class Engine{
        and re-arms it only when the sensor reports it back at REST. Drop that
        frame and the key never re-arms, so the second fast note is dropped in
        silence. The keyboard's job is to be played. */
+    /* A PITCH KEY IS A NOTE TOO (Gad, 2026-08-18: "yes pitch keys should go
+       through the play rack"). engineGranP is true for a pitch-mode AUDIO
+       channel as well as a real cloud, so everything the rack generated for
+       one built a granular voice — which is not what a pitch key does under
+       one playhead. It BENDS the head. With a door here the arp, chance,
+       nudge, humanize and the rest reach it exactly as they reach a cue, and
+       recPlayNote already writes the pk events that come back. A real cloud
+       channel is untouched: it is the audio+pitch pair that is redirected. */
+    if(AUDMONO&&p.cat==='audio'&&kmodeOf(p)===1)return this.audBendNote(at,pi,midi,vel);
     if(engineGranP(p))return this.granNote(at,pi,midi,vel,null);
     /* A CUE IS A NOTE. Position keys used to fire from the key handler and
        return, which meant the whole PLAY rack — chords, the arp, everything
@@ -10383,6 +10392,40 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     sh._drop=()=>setTimeout(()=>{const a=E.act[pi],i=a.indexOf(sh); if(i>=0)a.splice(i,1);},1200);
     this.act[pi].push(sh);
     if(this.act[pi].length>24){const old9=this.act[pi].shift(); old9&&old9.kill&&old9.kill();}
+    return sh;
+  }
+  /* ONE BEND, NOTE-SHAPED — a handle the rack can release, steal or choke,
+     because that is what it expects to be given. The bend is a CHANNEL-wide
+     thing rather than a voice, so the last one to land owns it: a release only
+     clears the head if this shim is still the one in force, or an arp step's
+     note-off would cancel the step that had already replaced it. */
+  audBendNote(at,pi,midi,vel){
+    const E=this, semis=Math.round(midi)-KBBASE;
+    const ms=Math.max(0,(at-AC.currentTime)*1000);
+    this.audBendCur=this.audBendCur||[];
+    const sh={_bend:1,midi,released:false,killed:false,press:0,pressN:[],nodes:[],
+      release(t){ if(this.released)return; this.released=true;
+        const d=Math.max(0,((t??AC.currentTime)-AC.currentTime)*1000);
+        const off=()=>{ if(E.audBendCur[pi]!==sh)return;   // something newer owns it
+          E.audBendCur[pi]=null;
+          E.audPitch(pi,0); E.busEnvFire(pi,AC.currentTime,true);
+          if(!autoCur(S.presets[pi])){E.audStop(pi);return;}
+          if(E.audBendMovedClock(pi)){E.audReturn(pi);
+            setTimeout(()=>{try{E.audReturn(pi);}catch(_){}},80);} };
+        if(d<2)off(); else setTimeout(off,d); },
+      kill(){this.killed=true;this.release();},
+      setPressure(){}};
+    const go=()=>{ if(sh.killed)return;
+      /* with the loop off there is no head to bend, so the note makes the one */
+      if(!autoCur(S.presets[pi])&&!E.audRolling(pi)){
+        const l9=S.patterns[S.editPat]&&S.patterns[S.editPat].lanes[pi];
+        if(l9)E.audPlay(pi,AC.currentTime+0.005,l9.len,0);
+      }
+      E.audBendCur[pi]=sh;
+      E.audPitch(pi,semis); E.busEnvFire(pi,AC.currentTime); };
+    if(ms<2)go(); else setTimeout(go,ms);
+    this.act[pi].push(sh);
+    setTimeout(()=>{const a=E.act[pi],i=a.indexOf(sh); if(i>=0)a.splice(i,1);},1500);
     return sh;
   }
   audCuts(pi){
