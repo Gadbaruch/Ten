@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.1643';
+const BUILD='2026-08-17.1655';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1414,6 +1414,17 @@ const SETTINGS=[
     held and wiggled the whole time because HE.fps only advances while a key is
     moving. If busy is materially below idle, the lights and the instrument
     cannot share this device and the lights are the half that goes. */
+ /* THE OVERRIDE, and it is here to be left alone. Writing while a key is down
+    costs notes on this board — measured by hand, at the one-report floor — so
+    the gate is not a tuning choice, it is the only way the lights and the
+    instrument coexist. This exists so the finding stays reproducible, not
+    because anyone should play with it on. */
+ {n:'led anytime',g:'Input',h:()=>!HE.on||HE.kind!==2||!CFG.ledOn,
+   v:()=>CFG.ledAny?'ON — costs notes':'only when idle',
+   a:()=>{CFG.ledAny=CFG.ledAny?0:1; saveCfg();
+     flash(CFG.ledAny?'writes now happen WHILE YOU PLAY — this is what drops notes'
+                     :'back to writing only in the gaps',6000);
+     dirty=true;}},
  /* DIGIT 5 BY HAND, and the `write` row is the experiment hiding inside the
     dials: `chunk` sends only the 56-byte block containing slot 31 — one report —
     while `full` sends all seven. Dial the brightness with each and the answer
@@ -1515,7 +1526,7 @@ const SETTINGS=[
      HE.METERMS=120; HE._mBase=0; HE._mSeen=0; HE._mT0=0; HE._mAt=0; HE._mBackAt=0;
      HE._ledSig=null;
      flash(CFG.ledMeter
-       ? 'digits follow each channel\'s level · backs itself off if the sensor slows · PLAY AND CHECK THE KEYS'
+       ? 'meter on — but writes only happen when your hands are OFF the keys, so it moves in the gaps'
        : 'meter off — the digits are the static map again',7000);
      if(!CFG.ledMeter)HE.ledDigits(true);
      dirty=true;}},
@@ -14440,8 +14451,28 @@ const HE={
       if(r!=='sent')flash('chunk write: '+r,6000);
     });
   },
+  /* WRITE ONLY WHEN THE HANDS ARE OFF. The experiment finally answered it, and
+     the answer closes the road: Gad dialled digit 5 by hand and "both hue and
+     brightness works in both chunk and full, and in both modes the keyboard
+     notes playing fail during changes… only at rest the notes play normally."
+     So single-chunk targeting DOES work — one report moves one key, which was
+     his hunch and it was right. But ONE REPORT IS THE FLOOR and it still costs
+     notes, so this was never about traffic volume. Any write at all stalls the
+     board's key scan, and no schedule, rate or chunking can beat a floor.
+     What is left is honest and still useful: the board is a STATUS DISPLAY that
+     refreshes in the gaps. Nothing is dropped — a deferred frame is written the
+     moment you stop, and the newest state always wins. */
+  ledIdle(){
+    if(this.pressure()!=null)return false;                 // a key is physically down
+    if(performance.now()-(this.lastDownAt||0)<220)return false;   // …and just after
+    if(typeof kbHeld!=='undefined'&&kbHeld&&kbHeld.size)return false;
+    return true;
+  },
   ledDrain(){
     if(this._ledBusy||!this._ledWant)return;
+    /* not idle: keep the frame, write it when the hands lift. The 60ms watchdog
+       is already calling back, so nothing needs its own timer. */
+    if(!CFG.ledAny&&!this.ledIdle())return;
     const rgb=this._ledWant; this._ledWant=null; this._ledBusy=1;
     this._ledWrites=(this._ledWrites||0)+1;
     this.ryLightPic(rgb,0).then(r=>{
