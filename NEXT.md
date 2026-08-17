@@ -5,6 +5,50 @@ name "ten-gad"` → localhost:3033 is Gad's, `ten-main` → 3032 is Claude's, bo
 serving this directory · one file, `index.html`, no build step. See CLAUDE.md
 for who may be destructive where.
 
+## THE SPRAY BAND BELONGED TO THE KEYS MODE, NOT THE CLOUD (Gad, 2026-08-17)
+
+Gad: "there is this dotted line with a range around it… it keeps running
+visually even if im not in grain mode and not playing any notes, does it even
+make sense to keep it?"
+
+**WHAT IT IS:** the centre the grains are sprayed around and how wide that
+spray is. The dotted line is `cpos` — the cloud's read position, which is the
+`pos` dial plus the scan phase — and the band is `cspr`, the spray width. In
+grain mode it is the most useful thing on the waveform: it shows where the
+cloud is chewing and how much of the take it is reaching for.
+
+**WHY IT WAS THERE WITH NOTHING PLAYING:** the draw was gated on `isGranCh(i)`,
+which is `kmode===1` — the KEYS mode, not the read mode. Exactly the confusion
+the chain row's Sound cell had. So a TAPE channel with pitch keys carried a
+band and a centre line permanently.
+
+Gated on the thing that actually decides now — the grain SIZE below its top,
+which is precisely what `carMute` asks. Not on the mode field and NOT on a
+grain count: at the top of the size dial a held key is one continuous cursor
+that still counts in `ng`, so counting grains would have put the band straight
+back on a tape channel the moment you played a note. Measured across all four:
+
+    tape, idle          band 0   line 0
+    tape, key held      band 0   line 0     (g was 1 — the trap)
+    grain, idle         band 1   line 1
+    grain, playing      band 1   line 1
+
+The MOVEMENT was already honest, incidentally: `scanPh` only advances past the
+`!vs.size && !ng` early exit, so an idle cloud's band sits still. What was
+running on Gad's screen was a granulated LOOP — a carrier with the size dial
+down spawns an 'auto' voice, and that is a cloud genuinely reading.
+
+**Two things this turned up, raised not fixed:**
+
+- **`from: pos` names a dial that is not on the page in tape mode.** In
+  tape/stretch a key now starts at the crop's `start`; the cloud's own `pos`
+  dial is only on the grain half. The field should probably read
+  `start | here` outside grain mode.
+- **The size dial and the mode field can disagree.** `audAction`'s `gr` branch
+  writes `pre.gr.size` and calls granCfg without touching `au.cmode`, so
+  dialling size down on the cloud page leaves the mode saying tape while the
+  cloud runs. `applyCmode` keeps them in step from the other direction only.
+
 ## AN OFF THAT ARRIVED BEFORE ITS OWN ON (Gad, 2026-08-17)
 
 Gad: "key mashing i managed to get some hanging note once in a while. we

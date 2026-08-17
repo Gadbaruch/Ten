@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.1410';
+const BUILD='2026-08-17.1414';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -21590,7 +21590,25 @@ function gridHTML(pat,pos,anc,chans){
         const gst=(engine.gn&&engine.gn[i]&&engine.gn[i].stat)||null;
         if(gst&&(isGranCh(i)||(gst.g|0)>0||(gst.v|0)>0)){
           let gd='';
-          if(Number.isFinite(gst.cpos)){
+          /* THE SPRAY BAND BELONGS TO THE CLOUD, and only the cloud. It was
+             drawn whenever `isGranCh` — which is the KEYS mode, not the read
+             mode, the same confusion the chain row's Sound cell had — so a
+             TAPE channel with pitch keys carried a band and a centre line
+             permanently. And they MOVED: cpos is pos+scanPh, and scanPh
+             advances every block at the scan rate whether or not a single
+             grain exists, so it walked the take forever with nothing playing
+             and nothing to show. It is the centre the grains are sprayed
+             around and how wide that spray is; with no cloud it is the answer
+             to a question nobody asked.
+             Gated on the thing that actually decides — the grain SIZE below
+             its top, which is exactly what carMute asks — rather than on the
+             mode field or on a grain count. At the top of the size dial a
+             held key is one continuous cursor and still counts in `ng`, so
+             counting grains would have put the band back on a tape channel
+             the moment you played a note; and the size dial can be turned on
+             the cloud page without the mode field following it. */
+          const cloudOn=((S.presets[i].gr||{}).size??0.12)<0.999;
+          if(Number.isFinite(gst.cpos)&&cloudOn){
             const spr=Math.max(0.006,Math.min(1,gst.cspr||0));
             const y0=((gst.cpos-spr/2)%1+1)%1;
             const band=(y,ht)=>'<rect class="gspr" x="0" y="'+(y*H).toFixed(1)+
