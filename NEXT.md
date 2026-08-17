@@ -5,6 +5,81 @@ name "ten-gad"` → localhost:3033 is Gad's, `ten-main` → 3032 is Claude's, bo
 serving this directory · one file, `index.html`, no build step. See CLAUDE.md
 for who may be destructive where.
 
+## A FRESH AUDIO CHANNEL WAS A CLOUD, AND FREE WAS RETRIGGERING (Gad, 2026-08-17)
+
+Three asks about the granular synth, and the first two turned out to be one
+bug wearing two faces.
+
+**THE DEFAULT MODE WAS UNREACHABLE.** `cmodeOf` reads `au.cmode` when it has
+one and otherwise GUESSES from "is the grain size below its top" — and a
+channel with no `gr` object at all reads `gr.size??0.12` there, which is mode
+2. Nothing wrote `cmode` when a channel became audio, so every new audio
+channel opened in GRAIN. Not merely the label: `granCfg` sends the same
+`gr.size??0.12` to the worklet, so `carMute` came up true and the tape carrier
+really was silent with a grain train doing its reading. Measured on a 440 tone,
+a channel freshly turned to audio and nothing else touched:
+
+    fresh audio channel      live (before)     now
+    cmode                    2  grain          0  tape
+    grains alive             2                 0
+    cloud voices             1                 0
+    rms                      0.1487            0.2545
+    peak bin                 444.1 Hz          438.7 Hz
+    centroid                 516               440
+
+1.7x quieter, 4 Hz sharp, and a centroid 76 Hz above the fundamental — grain
+sidebands. `audDefaults(p)` writes all of it now, both halves TOGETHER (`cmode`
+and `gr.size`, or they can disagree again), from the four places a channel
+becomes audio: setEngine's two branches, the plain drop, and audPlace. sync and
+autoloop were already the intent and are written explicitly beside it.
+
+**NO MIGRATION, DELIBERATELY.** A stored channel with neither field WAS
+behaving as a cloud, so it still opens as one — verified by stripping `cmode`
+and `gr` from a save and loading it: cmode 2, slot says grain. The new default
+is for channels that do not exist yet. SAVEV/LIBV untouched; both fields were
+already stored.
+
+**AND THE SLOT SAYS WHICH READ IT IS.** The Sound cell in the chain row said
+'clip', or 'grain' off `isGranCh` — which is the KEYS mode and not the read at
+all, so a tape channel with pitch keys announced itself as grain. It carries
+`cmode` now: tape · stretch · grain, and a tape channel with pitch keys says
+tape.
+
+**FREE WAS RETRIGGERING AT THE BAR LINE.** Under sync the loop cursor is
+re-fired every cycle and that is right — the take is fitted, so it dies exactly
+where the next one is born. Free, the take runs at its own speed and will be
+somewhere in the middle of itself when the bar comes round, so re-firing it is
+a hard restart. Two halves, both needed: the carrier was SPAWNED again each
+cycle by `audCycle`, and it was also born with a LIFE cut to the cycle, so even
+with nothing re-firing it it died at the bar line. Same probe both builds — a
+take four times longer than the loop, so "did it retrigger" is a shape:
+
+    free, take 8s, loop 2s      resets in 6.3s   playhead reached
+    live (before)               3                0.25   the last 3/4 never sounds
+    now                         0                0.773  one unbroken read
+    sync, same probe, now       3                0.996  unchanged, one per bar
+
+`audCar` is the carrier already rolling — set where one is spawned, cleared
+wherever the tape is stopped (audStop, and allOff's panic). `audCarLeft(pi)` is
+the deadline, and it is the switch that decides: the cycle under sync, none at
+all under free. It rides on `audLive`, which every audio edit goes through, so
+the switch is live under a sounding take — flipped both ways mid-note:
+
+    free  ->  0 resets, x1        sync ->  1 reset, x4 (fitted)  ->  free again 0 resets
+    tape voices 1 throughout — nothing stacks
+
+**Regression net:** `tools/probe.sh matrix ch=8 --ab` is IDENTICAL on all
+eleven cases, every column, once both tabs are levelled to the same preset
+first. Worth knowing: the probe takes whichever preset was on the channel, and
+the two origins hold different sets — an unlevelled A/B reads as hundreds of Hz
+of difference that is entirely the filter and fx racks either side.
+
+**Still open, raised not shipped:** releasing a cue grab re-fires the loop at
+the LOOP's phase (`audPlay(pi,now,L,fmod(pos-anchor,L))`), which under free
+means letting go of a key jumps the take somewhere it was never going to be. It
+is the same category error as the cycle retrigger and it was not what was
+asked. Gad's call.
+
 ## The model, in one paragraph
 
 An audio channel is a **cursor spawner**. Every playhead reading the take —

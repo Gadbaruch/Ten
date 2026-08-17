@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.1024';
+const BUILD='2026-08-17.1057';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1356,7 +1356,7 @@ const SETTINGS=[
 ];
 function basePreset(name){return{
   name, cat:'misc', tr:0, trs:0, prep:null,
-  au:{gain:0.9,semis:0,rate:1,st:0,en:1,fit:1,src:0,pmode:0,chan:0,
+  au:{gain:0.9,semis:0,rate:1,st:0,en:1,fit:1,src:0,pmode:0,chan:0,cmode:0,
       kmode:0,auto:1,start:0,kvol:1,lvol:1,wnd:50,cues:{}},
   osc:rack(mkOsc), amp:rack(mkAmp), flt:rack(mkFlt), env:rack(mkEnv),
   lfo:rack(mkLfo), mod:rack(mkMod), fx:rack(mkFx), ply:rack(mkPly),
@@ -9639,9 +9639,18 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
       this.arpPool[pi]=pool.filter(n2=>n2.until>now-8);
     }
   }
+  /* FREE IS NOT ON THE CLOCK, AND THE CYCLE END IS NOT ITS BUSINESS. Under
+     sync the loop cursor is re-fired every cycle and that is exactly right:
+     the take is fitted to the bar, so the cursor dies where the next one is
+     born and the seam is inaudible. Free, the take runs at its own speed —
+     it will be somewhere in the middle of itself when the bar comes round —
+     and re-firing it there is a HARD RESTART, which is what Gad hears as
+     "it retriggers at the loop end". So a free carrier is spawned ONCE and
+     left to wrap its own crop; `audCar` is the one already rolling. */
   audCycle(li,lane,act,s0,s1,fresh){
     if(!this.audBuf[li])return;
     const L=lane.len;
+    const free=!Math.round((S.presets[li].au||{}).fit||0);
     if(fresh){                          // pattern just switched: cut the old cycle, join in progress
       this.audStop(li,timeAt(s0));
       const c0=act.anchor+Math.floor((s0-act.anchor)/L+1e-9)*L;
@@ -9649,7 +9658,10 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     }
     let t=act.anchor+Math.ceil((s0-act.anchor)/L-1e-9)*L;
     if(t<s0-1e-6)t+=L;
-    for(;t<s1-1e-9;t+=L)this.audPlay(li,timeAt(t),L);
+    for(;t<s1-1e-9;t+=L){
+      if(free&&(this.audCar||[])[li])return;
+      this.audPlay(li,timeAt(t),L);
+    }
   }
   /* THE TAPE IS A CURSOR IN THE WORKLET, and now it is the only tape there is.
      Everything a clip play needs travels in this one message: where to start,
@@ -9672,6 +9684,11 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
       ch:FIN(P9.ch,0),gl:FIN(P9.gl,1),gr:FIN(P9.gr,1),gain:FIN(P9.gain,0.9),
       wrap:P9.wrap?1:0,lo:FIN(P9.lo,0),car:P9.car?1:0,
       durF:FIN(Math.round(P9.durSec*AC.sampleRate),1e9)});
+    /* WHICH CURSOR IS THE LOOP'S. Only the carrier is the cycle's to re-fire,
+       and under free it must not be re-fired at all — so the one place that
+       spawns one is the one place that records it. Cleared wherever the tape
+       is stopped, which is the only way a carrier can leave. */
+    if(P9.car)(this.audCar=this.audCar||[])[pi]=id;
     return true;
   }
   audPlay(pi,at,lenBeats,skipBeats=0,cue){
@@ -9732,6 +9749,10 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
          it reached the end exactly as the cycle re-fired it — and became
          "changing pitch stops the loop" the moment pitch moved the rate and
          the two stopped coinciding. Its life still ends it each cycle. */
+      /* …AND A FREE CARRIER HAS NO DEADLINE. Its life was cut to the cycle,
+         so even with nothing re-firing it, it died at the bar line and left
+         the rest of the loop silent. Free means the loop has no opinion
+         about it: it wraps its own crop until something stops it. */
       wrap:1, lo:off*sr9,
       /* the loop is the carrier: with no cue behind it, this is the
          autonomous playhead the cloud follows */
@@ -9749,7 +9770,8 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
          of the bar silent instead of coming round again. It wraps the crop,
          so the cycle is the only thing that should end it. */
       durSec:(cue&&Number.isFinite(cue.life))?cue.life
-        :(cue||rate<0)?1e6:Math.max(0.05,loopSec-skipSec)});
+        :(cue||rate<0||!Math.round(au.fit||0))?1e6
+        :Math.max(0.05,loopSec-skipSec)});
     return this._lastTid;
   }
   /* a fade-out then the stop, so a released cue does not click on the way out */
@@ -9833,16 +9855,29 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     const L=lane&&lane.len; if(!(L>0))return;
     const ask=(this.audAsk||[])[pi];
     if(ask)ask.lenBeats=L;
-    this.audLive(pi);
+    this.audLive(pi);                // …which carries the carrier's life with it
     if(!T.playing)return;
-    const a=actAt(posNow()), ph=fmod(posNow()-a.anchor,L);
-    const e9=this.gn&&this.gn[pi];
-    if(e9&&e9.node)
-      try{e9.node.port.postMessage({t:'tset',left:Math.max(0.02,(L-ph)*spb())});}catch(_){}
     const au=Object.assign({},S.presets[pi].au||{},(this.audOv&&this.audOv[pi])||{});
     if(!Math.round(au.fit||0))return;
+    const a=actAt(posNow()), ph=fmod(posNow()-a.anchor,L);
     const st=clamp(au.st??0,0,0.98), en=clamp(au.en??1,st+0.01,1);
     this.audMove(pi,st+(ph/L)*(en-st),0,1,1);
+  }
+  /* HOW LONG THE CARRIER HAS LEFT, and it is the switch that decides. SYNC
+     cuts it to the cycle — a fitted take is re-fired every loop, so it has to
+     die exactly where the next one is born. FREE has no deadline at all, and
+     null means "nothing to say", so a channel with no answer never overwrites
+     one the cursor was born with. Sent from audLive, which every audio edit
+     goes through, so flipping the switch under a sounding take re-aims the
+     take that is already running instead of the next one. */
+  audCarLeft(pi){
+    const au=Object.assign({},S.presets[pi].au||{},(this.audOv&&this.audOv[pi])||{});
+    if(!Math.round(au.fit||0))return 1e9;
+    if(!T.playing)return null;
+    const lane=S.patterns[S.editPat]&&S.patterns[S.editPat].lanes[pi];
+    const L=lane&&lane.len; if(!(L>0))return null;
+    const a=actAt(posNow());
+    return Math.max(0.02,(L-fmod(posNow()-a.anchor,L))*spb());
   }
   audRelockAll(){for(const i of CHANS())if(isAudioCh(i))this.audRelock(i);}
   audOff(pi,id){
@@ -9851,6 +9886,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
   }
   audStop(pi,at){
     at=at??AC.currentTime+0.002;
+    (this.audCar=this.audCar||[])[pi]=null;   // the carrier goes with everything else
     const e9=this.gn&&this.gn[pi];
     if(e9&&e9.node){try{e9.node.port.postMessage(
       {t:'tclr',frame:Math.round(at*AC.sampleRate)});}catch(_){}}
@@ -9873,7 +9909,9 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     const rate=sync?baseRate:baseRate*Math.pow(2,semis/12);
     const k9=buf.sampleRate/AC.sampleRate;
     const r9=(rate<0?Math.min(-0.05,rate):Math.max(0.05,rate))*k9;
+    const left9=this.audCarLeft(pi);
     try{e9.node.port.postMessage({t:'tset',
+      ...(left9==null?{}:{left:left9}),
       /* a negative rate is a real rate: a floor of +0.05 turned reverse into
          a very slow forward, and dividing the take's remaining length by it
          gave the voice a negative life, so it died on arrival */
@@ -10075,6 +10113,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
        all-notes-off with nothing in the app able to end them */
     for(const k9 in (this.gn||{})){const e9=this.gn[k9];
       if(e9&&e9.node){try{e9.node.port.postMessage({t:'panic'});}catch(_){}}}
+    this.audCar=[];                 // a panic takes the carriers with it
     this.arpPool.forEach(p=>p.length=0);}
   click(at,accent){
     const o=AC.createOscillator(),g=AC.createGain();
@@ -11983,14 +12022,18 @@ function setEngine(pi,key){
   else if(key==='audio'){
     /* fitted by default: a take on a channel that loops is nearly always
        meant to fill the loop, and the alternative is discovering that your
-       four-bar phrase runs at whatever speed it happened to be recorded at */
-    p.cat='audio'; p.au=p.au||{}; if(p.au.fit===undefined)p.au.fit=1; delete p.au.amode;}
+       four-bar phrase runs at whatever speed it happened to be recorded at
+       — and TAPE by default, which needs the worklet told: granCfg only runs
+       by itself when the node is BUILT, so a channel that has held one before
+       would keep the size the last engine left in it. */
+    p.cat='audio'; p.au=p.au||{}; delete p.au.amode; audDefaults(p);
+    engine.granCfg(pi);}
   else if(key==='gran'){
     /* 'gran' is not an engine and not a mode any more: it is the audio
        channel with pitch keys and the auto cursor off. The spelling stays
        for the old callers (⌥-drop, the default set's ninth channel). */
-    p.cat='audio'; (p.au=p.au||{}).kmode=1; p.au.auto=0; p.gr=p.gr||{};
-    engine.granNode(pi);
+    p.cat='audio'; (p.au=p.au||{}).kmode=1; p.au.auto=0; audDefaults(p,true);
+    engine.granNode(pi); engine.granCfg(pi);
     if(!(engine.granBuf||[])[pi]&&engine.audBuf[pi]){
       engine.granBuf=engine.granBuf||[]; engine.granBuf[pi]=engine.audBuf[pi];
       engine.granSend(pi);
@@ -12254,6 +12297,26 @@ function applyCmode(pi){
   if(m===2){ if((p.gr.size??1)>=0.999)p.gr.size=p.gr._gsz??0.12; }
   else { if((p.gr.size??0.12)<0.999)p.gr._gsz=p.gr.size; p.gr.size=1; p.au.pmode=m===1?1:0; }
   engine.granNode(pi); engine.granCfg(pi); engine.audLive(pi);
+}
+/* WHAT AN AUDIO CHANNEL IS BEFORE YOU TOUCH IT: a tape, on the clock, looping
+   by itself. Two of those three were already meant to be the defaults; the
+   first was NOT REACHABLE. `cmode` had no stored value on a fresh channel, so
+   cmodeOf fell through to its "is the grain size below its top" guess — and a
+   channel with no `gr` at all reads 0.12 there, which is mode 2. Worse, that
+   was not merely a label: granCfg sends `gr.size??0.12` to the worklet, so the
+   carrier came up MUTED and a brand-new audio channel really was a cloud. Both
+   halves are written now, together, or they can disagree again.
+   `mode` for gran, because the ⌥-drop and the set's Cloud channel ARE the
+   cloud — that path asks for it, so it says so instead of leaving cmodeOf to
+   infer it. */
+function audDefaults(p,gran){
+  if(!p)return;
+  p.au=p.au||{}; p.gr=p.gr||{};
+  if(p.au.fit===undefined)p.au.fit=1;       // sync — a take that loops is meant to fill the loop
+  if(p.au.auto===undefined)p.au.auto=1;     // …and the loop cursor runs by itself
+  if(!Number.isFinite(p.au.cmode))p.au.cmode=gran?2:0;
+  if(p.gr.size===undefined)p.gr.size=Math.round(p.au.cmode)===2?0.12:1;
+  if(Math.round(p.au.cmode)!==2)p.au.pmode=Math.round(p.au.cmode)===1?1:0;
 }
 /* the dials this mode uses — the page and the cursor walk this, while the
    full list stays the address book for mods and automation */
@@ -15855,7 +15918,10 @@ function audPlace(pi,rec,startBeat,name='mic'){
   poolAdd(cv,name+' ch'+pi,{k:'r'});
   if(engineGranP(S.presets[pi])){engine.granBuf=engine.granBuf||[];
     engine.granBuf[pi]=cv; engine.granSend(pi);}
-  S.presets[pi].cat='audio';
+  /* a channel that was already audio keeps whatever mode it was in — this only
+     fills in a synth channel that just became one by being recorded onto */
+  S.presets[pi].cat='audio'; audDefaults(S.presets[pi]);
+  engine.granCfg(pi);
   flash('◉ audio: '+(L/4)+' bar loop ('+['overwrite','overdub','smart'][mode]+')');
   dirty=true; dirtySave=true;
 }
@@ -19757,7 +19823,8 @@ document.addEventListener('drop',e=>{
       }else{
         const pi=S.layer>=2?S.editSnd:S.curPreset;
         pushUndo('audio drop');
-        S.presets[pi].cat='audio';
+        S.presets[pi].cat='audio'; audDefaults(S.presets[pi]);
+        engine.granCfg(pi);
         engine.setChanBuf(pi,buf,f.name.slice(0,18));
         const g9=takeToLane(pi,buf); engine.audLive(pi);
         flash('audio → channel '+pi+' · '+f.name.slice(0,20)+' ('+buf.duration.toFixed(1)+'s)'+takeSay(g9));
@@ -19963,8 +20030,17 @@ function sectionChips(pre,defs){
          it is the one model's parameters. Nine slots offered eight things that
          do not exist. */
       if(M.id==='osc'&&isPageCh(S.editSnd)){
+        /* AND THE CELL SAYS WHICH READ IT IS. It said 'clip' — or 'grain' off
+           isGranCh, which is the KEYS mode and not the read at all, so a tape
+           channel with pitch keys announced itself as grain and a granulated
+           loop with position keys called itself a clip. The one thing this
+           cell can usefully carry is the mode the sound page is in, which is
+           also the only field on that page that changes what the others mean. */
         items.push({mi,si:0,M,label:isCodeCh(S.editSnd)?(pre.pmodel||'proc')
-          :isGranCh(S.editSnd)?'grain':isWtCh(S.editSnd)?'table':'clip'});
+          :isWtCh(S.editSnd)?'table'
+          :(isAudioCh(S.editSnd)||isGranCh(S.editSnd))
+            ?(['tape','stretch','grain'][cmodeOf(pre)]||'tape')
+          :'clip'});
         continue;
       }
       if(M.flat){ items.push({mi,si:-1,M,label:M.name.toLowerCase()}); continue; }
