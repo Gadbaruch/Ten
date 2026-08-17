@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.2038-mono';
+const BUILD='2026-08-17.2039-mono';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -20233,10 +20233,35 @@ function endAudHold(c){
        when the last finger leaves, which is what a grab has always meant. */
     if(tid)engine.audOff(pi,tid);
     const others9=Object.keys(AUD.gk||{}).some(k9=>(AUD.gk[k9]||{}).pi===pi);
-    if(!others9)engine.audStop(pi);
     const lane=S.patterns[S.editPat].lanes[pi], L=lane.len;
-    /* the jump's length is the held gesture, like a note's */
-    const durB=Math.max(0.05,press!=null?(AC.currentTime-press)/spb():0.25);
+    /* QUANTIZE THE OFF TOO (Gad, 2026-08-17: "in cue mode you should quantize
+       note offs to the q-grid size, will sound cleaner"). Quantizing only the
+       START and letting the release land wherever the finger left is what makes
+       a chopped break sound ragged: the hits are in time and the gaps between
+       them are not, so every jump has a different length and the ones that end
+       just before a grid point leave a hole. Ending on the grid makes each grab
+       a whole number of steps, which is what a chop IS.
+       The RECORDED length is quantized with it — the ear and the lane have to
+       agree, or a jam that sounded clean comes back ragged. */
+    const gq9=gridOf(lane), nowB9=gridNow();
+    const offB9=CFG.qOn?qnext(nowB9,gq9):nowB9;
+    const wait9=Math.max(0,(gridTime(offB9)-AC.currentTime)*1000);
+    const endIt=()=>{
+      /* …unless a finger arrived in the meantime: the grab it started owns the
+         channel now and this stale release must not take it away */
+      if(Object.keys(AUD.gk||{}).some(k=>(AUD.gk[k]||{}).pi===pi))return;
+      engine.audStop(pi);
+      if(T.playing&&autoCur(S.presets[pi])){
+        const a3=actAt(posNow());
+        engine.audPlay(pi,AC.currentTime+0.006,lane.len,fmod(posNow()-a3.anchor,lane.len));
+      }
+    };
+    if(!others9){ if(wait9<2)endIt(); else setTimeout(endIt,wait9); }
+    /* the jump's length is the held gesture, like a note's — ON THE GRID when
+       quantize is on, measured from the same clock the off lands on */
+    const durB=CFG.qOn&&tr!=null
+      ?Math.max(gq9,Math.round((offB9-tr)/gq9)*gq9)
+      :Math.max(0.05,press!=null?(AC.currentTime-press)/spb():0.25);
     if(sl!=null&&tr!=null){
       retroBuf[pi].push({t:tr,cue:sl,dur:durB});
       if(retroBuf[pi].length>512)retroBuf[pi].shift();
@@ -20251,11 +20276,10 @@ function endAudHold(c){
        in phase whether or not the auto cursor was on — so with auto OFF, a
        grab you released handed you the take playing from the loop position,
        all the way to its end, sounding for all the world like the cue had
-       never stopped. */
-    if(T.playing&&autoCur(S.presets[pi])&&!others9){
-      const a2=actAt(posNow());
-      engine.audPlay(pi,AC.currentTime+0.006,L,fmod(posNow()-a2.anchor,L));
-    }
+       never stopped.
+       IT LIVES IN `endIt` NOW, with the stop it belongs to: the two are one
+       gesture and quantizing the stop without the resume would leave a hole
+       exactly as long as the wait. */
     dirty=true; return 'went';
   }
   return '';
