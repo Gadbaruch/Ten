@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.1325';
+const BUILD='2026-08-17.1335';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1379,6 +1379,22 @@ const SETTINGS=[
      if(CFG.ledOn){HE._ledSig=null; HE.ledDigits(true);
        flash('digits show which channels have content · green = has events',6000);}
      else{HE.ryLightMode(1,{bright:4}); flash('lights back to always-on',4000);}
+     dirty=true;}},
+ /* CAN THE LIGHT BE MODULATED AT ALL — 24 timed brightness writes, and it
+    flashes the board while it measures so the answer is visible as well as
+    numeric. ~1ms median means 0x07 is RAM and brightness is a live dial;
+    tens of ms means it is a flash commit and this is where the lights stop. */
+ {n:'led probe',g:'Input',h:()=>!HE.on||HE.kind!==2,
+   v:()=>HE._probe||'press to time it',
+   a:async()=>{
+     flash('timing 24 brightness writes — the board will flash',6000);
+     const r=await HE.ryBrightProbe(24);
+     if(typeof r==='string'){HE._probe='failed'; flash('probe: '+r,8000); dirty=true; return;}
+     HE._probe=r.med+'ms';
+     copyFlash('0x07 x'+r.n+'  min '+r.min+'ms  median '+r.med+'ms  max '+r.max+'ms  → '+
+       (r.med<5?'RAM — brightness can be modulated live'
+               :'slow, looks like a flash commit — do not modulate'),
+       'probe copied');
      dirty=true;}},
  {n:'h vel',g:'Input', h:()=>!HE.on,v:()=>Math.round(HE.cfg().est||0)===1?'window':'peak',
               a:()=>{const e2=Math.round(HE.cfg().est||0)===1?0:1; HE.set('est',e2);
@@ -13877,22 +13893,58 @@ const HE={
     try{await d.sendFeatureReport(0,b);}catch(err){return 'FAILED '+(err&&err.message||err);}
     return 'sent';
   },
+  /* IS 0x07 RAM OR FLASH — asked with a stopwatch instead of inferred from the
+     vendor's own sleep, which is a host-side `await et(ms)` and says only that
+     they are cautious. A flash commit is tens of milliseconds and a RAM write
+     is about one, so the round trip tells us what the sleep cannot.
+     It matters because 0x07 is ONE report against a picture's seven, so if it
+     is RAM then brightness is a dial we can actually turn — the only live
+     modulation this board would have. BOUNDED at 24 writes, hard, because the
+     whole point is to find out without paying for the answer. */
+  async ryBrightProbe(n){
+    const d=this.cfgDev||this.dev; if(!d)return 'no device';
+    n=Math.min(n||24,24);
+    const t=[];
+    for(let i=0;i<n;i++){
+      const b=i%2?0:4;                                  // full/off so it is visible too
+      const t0=performance.now();
+      try{await d.sendFeatureReport(0,this.ryCmd8(0x07,13,4,b,0,0,200,200));}
+      catch(err){return 'FAILED at '+i+': '+(err&&err.message||err);}
+      t.push(performance.now()-t0);
+      await new Promise(r=>setTimeout(r,40));
+    }
+    t.sort((a,b)=>a-b);
+    this._ledWrites=(this._ledWrites||0)+n;
+    await this.ryLightMode(13,{bright:4,speed:0,option:0});   // leave it lit
+    return {n,min:+t[0].toFixed(2),med:+t[t.length>>1].toFixed(2),
+            max:+t[t.length-1].toFixed(2)};
+  },
   /* THE DIGITS SHOW WHICH CHANNELS HAVE ANYTHING IN THEM. First real use of the
      board as TEN's display: lane with events = green, empty = dark, and the
      focused one brighter so your hand knows where it is without the screen.
      Slot numbers come straight from RY_SLOTS — the keymap read proved the LED
      index and the sensor index are the same index. */
-  DIGSLOT:[7,13,19,25,31,37,43,49,55,61],
+  /* LANE n IS DIGIT n, and lane 0 is DIGIT ZERO. Gad: "you have digit 2 as 1."
+     The digit handler is unambiguous — `lanes[+c.slice(5)]` — so Digit1 is
+     lane 1 and Digit0 is lane 0, which puts Digit0's slot at the FRONT of this
+     table, not the end. Indexing it 0..9 against [Digit1..Digit9,Digit0] shifted
+     every lamp one key to the right.
+     Two more from the same reading: the focused channel is `S.curPreset` —
+     `S.curCh` does not exist anywhere in this file, so the highlight had never
+     once fired — and the lanes the digits edit belong to `S.editPat`, not
+     `S.curPat`, which are different the moment you edit one pattern while
+     another plays. */
+  DIGSLOT:[61,7,13,19,25,31,37,43,49,55],
   ledDigits(force){
     if(!this.on||!CFG.ledOn||this.kind!==2)return;
     const now=performance.now();
     const rgb=new Array(this.LEDN*3).fill(0);
     let sig='';
     try{
-      const p=S.patterns[S.curPat];
+      const p=S.patterns[S.editPat];
       for(let i=0;i<10;i++){
         const has=!!(p&&p.lanes[i]&&p.lanes[i].events.length);
-        const here=(S.curCh===i);
+        const here=(S.curPreset===i);
         const c=has?(here?[0,255,90]:[0,90,30]):(here?[40,40,40]:[0,0,0]);
         sig+=has?(here?'H':'h'):(here?'F':'.');
         const sl=this.DIGSLOT[i];
