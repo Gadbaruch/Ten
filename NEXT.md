@@ -183,6 +183,54 @@ what a level-0 modulator does everywhere else in the rack, and it is more
 useful than silence, but it is not what "0 = nothing" reads like on the dial.
 Gad's call if it ever bites.
 
+## A SYNTH OP'S SAMPLE NOW TRAVELS WITH THE SET (Gad, 2026-08-17)
+
+Gad: "fix the saving loading of samples in synths, when I reload the set
+samples revert to noise."
+
+`opSamples` was a Map in memory and nothing else. Nothing wrote it and nothing
+read it back, so every reload found `get(pi+':'+i)` undefined and fell through
+the `|| E.noiseBuf` on the other side: the op came back as NOISE with all its
+settings intact and none of its sound. This is also the real answer to the
+question he asked this morning — "does choosing a mode on op2 revert the sample
+to noise" — the mode was never the trigger, a reload was.
+
+**A reference is not enough here**, unlike the audio channel's `audRef`: a
+dropped file cannot be re-fetched and a synth op's sample is usually a dropped
+file. So the AUDIO TRAVELS, as 16-bit PCM, deduped by buffer so one take
+feeding six ops is written once. Two top-level keys, `smp` (the blobs) and
+`osmp` (which op points at which) — additive, so no SAVEV bump: an old build
+ignores them and a new build reading an old save is exactly where it was.
+
+Round trip on a take built as three lines at 311/523/787 Hz — save, wipe the
+map the way a reload does, load:
+
+                        311 Hz   523 Hz   787 Hz   centroid
+    before save          -38.0    -41.9    -45.7      470
+    map wiped (= today)  -72.3    -76.0    -73.2     7992   <- noise, his bug
+    after load           -38.0    -41.9    -45.7      473
+
+16-bit costs nothing measurable at these lengths: the lines return to 0.1 dB.
+
+**THE QUOTA IS THE PART THAT NEEDED DESIGNING, not the encoder.** The autosave
+was `try{setItem(LS,serialize())}catch(_){}` — one empty catch, survivable
+while a set was only numbers and NOT survivable once it carries audio, because
+over quota the whole set would stop saving without a word. It now retries
+without the audio and says so once; the linked file (⌘⇧E) has no such limit and
+still gets everything. Verified the fallback keeps the names and the mapping
+and drops only the data: 167171 bytes full, 103150 lean, blobs-with-audio
+1 → 0.
+
+**The rule:** an empty catch around a write is a bug waiting for the payload to
+get bigger. This one was written when a set could not exceed a few kilobytes.
+
+## OP LEVEL STEPS (Gad, 2026-08-17)
+
+Plain ↑↓ is 0.01 and ⇧↑↓ is 0.1, via `step:0.01, big:0.1` — `big` says what the
+coarse step MEANS rather than leaving it as ten of the fine one, so ⇧ also
+SNAPS to the tenths grid instead of drifting off it: from 0.37 it goes to 0.5,
+0.6, 0.7. ⌥ still divides, giving 0.001.
+
 ## THE CROP IS A DESTINATION, AND AN FM DRIVER'S LEVEL IS LIVE (Gad, 2026-08-17)
 
 Two asks: make the op sample params modulatable and automatable, and let op2's

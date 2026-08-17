@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.1009';
+const BUILD='2026-08-17.1018';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1494,7 +1494,11 @@ const OSC_P=sl=>[
            flash('smp: drop an audio file on this op to give it a sample');}}}),
   SP('mode','mode','enum',{opts:OPMODE}),
   SP('dest','dst','enum',{opts:DEST}),
-  SP('level','amt','lin',{min:0,max:1,step:0.05}),
+  /* ⇧ IS A TENTH AND A PLAIN PRESS IS A HUNDREDTH (Gad, 2026-08-17). One
+     step of 0.05 was too big to place a level by ear and too small to cross
+     the range; `big` says what the coarse step MEANS here rather than leaving
+     it as ten of the fine one. */
+  SP('level','amt','lin',{min:0,max:1,step:0.01,big:0.1}),
   ...(Math.round((sl&&sl.wav)||0)===14?WTF:[]),
   /* a smp op picks its buffer from the POOL — drop still works, the pool is
      how one take feeds many mouths */
@@ -13893,6 +13897,77 @@ function poolAdd(buf,name,src){
   POOL.push({name:String(name||'take').slice(0,18),buf,src:src||{k:'r'}});
   return POOL.length-1;
 }
+/* ---- A SYNTH OP'S SAMPLE, WRITTEN INTO THE SET ------------------------
+   `opSamples` was a Map in memory and nothing else, so every reload read
+   `get(pi+':'+i)` as undefined and fell through the `||E.noiseBuf` on the
+   other side: the op came back as NOISE, with all its settings intact and
+   none of its sound. Gad hit this twice — once as "does choosing a mode on
+   op2 revert the sample to noise" and once plainly.
+   A reference is not enough here, unlike the audio channel's: a dropped file
+   cannot be re-fetched, and a synth op's sample is usually a dropped file.
+   So the AUDIO TRAVELS, as 16-bit PCM — half the size of the float data it
+   came from and inaudible against it at these lengths — deduped by buffer so
+   one take feeding six ops is written once.
+   The cap is the point of failure to design for: localStorage is a few
+   megabytes and setItem was throwing into an empty catch, which would have
+   turned "your samples come back" into "your set stopped saving" without a
+   word. Over budget, a take is written as a NAMED HOLE instead, exactly the
+   way the audio channel already reports one. */
+const SMPCAP=3*1024*1024;             // total base64 budget for one set
+function b64enc(u8){let s='';const C=0x8000;
+  for(let i=0;i<u8.length;i+=C)s+=String.fromCharCode.apply(null,u8.subarray(i,i+C));
+  return btoa(s);}
+function b64dec(b){const s=atob(b),u=new Uint8Array(s.length);
+  for(let i=0;i<s.length;i++)u[i]=s.charCodeAt(i); return u;}
+function smpEnc(buf){
+  const ch=Math.min(2,buf.numberOfChannels), n=buf.length;
+  const out=new Int16Array(n*ch);
+  for(let c=0;c<ch;c++){const d=buf.getChannelData(c);
+    for(let i=0;i<n;i++){const v=d[i]; out[i*ch+c]=Math.max(-32768,Math.min(32767,Math.round(v*32767)));}}
+  return {r:buf.sampleRate,c:ch,n,d:b64enc(new Uint8Array(out.buffer))};
+}
+function smpDec(o){
+  if(!o||!o.d||!o.n)return null;
+  const u=b64dec(o.d), i16=new Int16Array(u.buffer,u.byteOffset,u.byteLength>>1);
+  const ch=Math.max(1,o.c|0), n=o.n|0;
+  const buf=AC.createBuffer(ch,n,o.r||AC.sampleRate);
+  for(let c=0;c<ch;c++){const d=buf.getChannelData(c);
+    for(let i=0;i<n;i++)d[i]=i16[i*ch+c]/32767;}
+  return buf;
+}
+/* every op sample in the set: the blobs, deduped, and who points at which */
+function opSmpSave(noAudio){
+  const blobs={}, at={}, holes=[]; let spent=0, id=0;
+  const seen=new Map();
+  for(let pi=0;pi<10;pi++)for(let i=0;i<10;i++){
+    const buf=engine.opSamples.get(pi+':'+i); if(!buf)continue;
+    const e=POOL.find(p2=>p2.buf===buf);
+    const nm=(e&&e.name)||'take', src=(e&&e.src)||{k:'r'};
+    let k=seen.get(buf);
+    if(k===undefined){
+      k='s'+(id++);
+      const enc=noAudio?null:smpEnc(buf);
+      if(enc&&spent+enc.d.length<=SMPCAP){spent+=enc.d.length; blobs[k]={n:nm,src,...enc};}
+      else{blobs[k]={n:nm,src}; holes.push(nm);}      // named hole: settings keep, sound does not
+      seen.set(buf,k);
+    }
+    at[pi+':'+i]=k;
+  }
+  return {smp:blobs,osmp:at,_holes:holes,_bytes:spent};
+}
+function opSmpLoad(blobs,at){
+  if(!blobs||!at)return;
+  const made={}, miss=[];
+  for(const k in blobs){
+    const b=blobs[k]; if(!b)continue;
+    const buf=smpDec(b);
+    if(buf){made[k]=buf; poolAdd(buf,b.n||'take',b.src||{k:'r'});}
+    else miss.push(b.n||'take');
+  }
+  for(const key in at){const buf=made[at[key]]; if(buf)engine.opSamples.set(key,buf);}
+  if(miss.length)setTimeout(()=>flash('op samples this set could not carry — '+
+    [...new Set(miss)].slice(0,3).join(' · ')+' — drop the file on the op again'),700);
+}
 /* the take on a channel, as something a save can write down */
 function audRef(pi){
   const buf=engine.audBuf[pi]||(engine.granBuf||[])[pi];
@@ -19203,7 +19278,7 @@ function portPreset(p,out){
   if(Array.isArray(q.kit))q.kit=q.kit.map(k=>k?portPreset(k,out):null);
   return q;
 }
-function serialize(){return JSON.stringify({v:SAVEV,bpm:T.bpm,metro:S.metro,hum:S.hum,grv:S.grv,oct:S.oct,master:S.master,mLvl:S.mLvl??0.8,dj:S.dj,gmT:S.gmT||[],arrOn:S.arrOn!==false,
+function serialize(noAudio){const _os=opSmpSave(noAudio); return JSON.stringify({v:SAVEV,bpm:T.bpm,metro:S.metro,hum:S.hum,grv:S.grv,oct:S.oct,master:S.master,mLvl:S.mLvl??0.8,dj:S.dj,gmT:S.gmT||[],arrOn:S.arrOn!==false,
   clips:S.clips,scenes:S.scenes,clipAt:S.clipAt,sceneAt:S.sceneAt,
   arr:S.arr,
   patterns:S.patterns.map(p=>({state:p.state==='edit'?'on':p.state,sw:p.sw||0,lanes:p.lanes})),
@@ -19213,6 +19288,10 @@ function serialize(){return JSON.stringify({v:SAVEV,bpm:T.bpm,metro:S.metro,hum:
      reference per channel: a factory phrase comes back by itself, and anything
      else comes back as a named hole with all its settings intact. */
   aud:S.presets.map((p,i)=>audRef(i)),
+  /* …and the SYNTH ops' samples, which unlike a channel's take cannot be
+     re-fetched, so the audio itself travels. Two keys: the deduped blobs and
+     the map of which op points at which. */
+  smp:_os.smp, osmp:_os.osmp,
   presets:S.presets.map(p=>portPreset({...p,modLoop:p.modLoop.toJSON()},true))});}
 function convertV3Preset(sp,i){ // v3-and-earlier preset data -> v4 racks
   const p=basePreset(sp.name||('P'+i));
@@ -19409,11 +19488,28 @@ function load(json){
     /* …and the takes. Last, after every channel exists and its dials are set,
        so a re-fetched factory phrase lands on a channel that is ready for it. */
     restoreAudio(o.aud);
+    /* op samples before the racks are heard again: a voice built without them
+       falls through to noiseBuf, which is the whole bug this fixes */
+    opSmpLoad(o.smp,o.osmp);
+    for(let i=0;i<10;i++)engine.rebuildRack(i);
     return true;
   }catch(err){console.warn('load failed',err);return false;}
 }
+let _smpQuota=false;
 setInterval(()=>{if(dirtySave){dirtySave=false;
-  try{localStorage.setItem(LS,serialize());}catch(_){}
+  /* THE AUTOSAVE MUST NOT DIE BECAUSE THE AUDIO DID NOT FIT. This was one
+     empty catch, which was survivable while a set was only numbers and is not
+     now that it carries samples: over quota, the whole set stopped saving
+     without a word. Drop the audio and keep the set — and SAY so, once, because
+     an autosave that quietly saves less than you think is worse than one that
+     fails loudly. The linked FILE has no such limit and still gets everything. */
+  try{localStorage.setItem(LS,serialize());_smpQuota=false;}
+  catch(_){
+    try{localStorage.setItem(LS,serialize(true));
+      if(!_smpQuota){_smpQuota=true;
+        flash('set is bigger than this browser will hold — autosaving WITHOUT the op samples · ⌘⇧E links a file that keeps them');}
+    }catch(_2){}
+  }
   bakPush('auto');
   fileWrite();}},1500);
 /* ---------------- AUTOSAVE INTO A REAL FILE ---------------------------
