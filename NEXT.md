@@ -5,6 +5,83 @@ name "ten-gad"` → localhost:3033 is Gad's, `ten-main` → 3032 is Claude's, bo
 serving this directory · one file, `index.html`, no build step. See CLAUDE.md
 for who may be destructive where.
 
+## THE KEYBOARD IS A DISPLAY — ⚠ TO BE CONTINUED (2026-08-17)
+
+**Status: the easy half shipped, the interesting half is OPEN.** Gad: "im still
+not convinced there isnt a better route" — and he should not be, because there
+are untried routes below and one PROOF that a better one exists.
+
+### What works and is shipped
+
+The FUN60 PRO (id 2600, `ry5088_akko_fun60_1m_8k`) speaks a protocol TEN can
+drive over the WebHID connection it already had. Command envelope is what
+`ryEnable` always used: pad to 9 bytes, `Bit7 → n[7] = 255-(sum(n[0..6])&255)`,
+or `Bit8` at n[8] for commands that need byte 7 for data.
+
+    0x8F  device info      id at byte 1 (0xa28 = 2600), byte 11 = lightSync (0)
+    0x8A  read keymap      n[1]=layer n[2]=255 n[3]=chunk n[4]=profile · 8×64
+    0x0A  write one key    a[1]=layer a[2]=slot a[5]=SAVE a[6]=batch · a[8..11]
+    0x0C  write picture    hdr[3]=chunk hdr[4]=len hdr[5]=last · 7×56 = 378 B
+    0x07  light mode       Bit8 · [1]=type(13=UserPicture) [3]=bright [4]=opt<<4
+    0xAC  FLASH ERASE      never send
+
+**The keymap slot index IS `RY_SLOTS`'s index** — 54/54 matched. The sensor
+table this file already had is also the keymap's and the LED buffer's index map.
+That is how right alt got fixed in firmware: slot 65 held `00 50 00 00`, the
+Left Arrow usage in byte 1 where the firmware does not read, and writing
+`00 00 50 00` fixed it permanently.
+
+Shipped: the digits show channel state (selected 3 · has-events 2 · empty 1, one
+teal hue), letters wear the selected hue, and **writes happen only when the
+hands are off the keys**.
+
+### ⚠ THE OPEN PROBLEM: live targeted values
+
+**ANY write while a key is down drops notes.** Measured by hand-dialling one
+key while playing: single-chunk (1 report) and full-picture (7 reports) both
+move the lamp, and both break note input. One report is the FLOOR, so this is
+not about traffic volume — three rounds went to rate limits, coalescing, a
+single-write drain and auto-backoff, and none of them could beat a floor.
+
+The mechanism is the hall state machine: it disarms a key on release and re-arms
+only when the sensor reports it back at REST. Lose that sample and the next fast
+press is dropped in silence — "i cant play two notes fast after each other".
+Note that `led contend` showed the report RATE going UP under writes (625→769Hz),
+so it is not starvation of the stream; it looks like the MCU stalling its scan.
+
+### WHAT HAS NOT BEEN TRIED — start here
+
+1. **OUTPUT REPORTS.** Everything so far used `sendFeatureReport`. The vendor's
+   own transport also has `write()` → `sendReport` on an output/`out-input`
+   collection, and output reports are the normal high-rate HID channel. **This
+   is the cheapest untried thing and it may simply be the answer.**
+2. **The native agent's command, which is PROOF a good path exists.**
+   `LightMusicFollow2` and `LightScreenColor` stream live from MonsGeek's
+   DESKTOP binary via gRPC (`vt.controlFeature`), not from the web app. That
+   binary evidently drives the LEDs live without ruining typing. Its command is
+   in no JavaScript — it needs the Mach-O reversed or its HID traffic sniffed.
+3. **Another interface.** TEN writes to `cfgDev`. The board exposes several HID
+   collections and they were never enumerated and tried one by one.
+4. **`0x29 SET_SCREEN_24BITDATA`** — streaming-shaped, and one of the few
+   commands with NO vendorSleep in the driver. Nominally for TFT models; never
+   tried on this board.
+5. **`LightUserColor` (type 25)** — in the LightList, never investigated.
+6. **Polling rate.** The board is 8K. Whether the stall scales with it, or with
+   the `0x1B` analog-enable mode, is unmeasured.
+
+The vendor's own bundle is one file, `app.monsgeek.com/js/index.<hash>.js`, plus
+~210 lazily-imported chunks that only load once a device is granted — diff the
+referenced names against the fetched ones to get them. Gad's driver is
+`617f329a` (magnetism, no hitbox); three other chunks disagree with it on
+opcodes, so always check which one serves id 2600.
+
+**Method note, earned the hard way:** three experiments returned "no change" and
+none of them could have shown a change — one never set the light mode, two built
+their own picture path instead of using the one already known to work, and the
+60ms watchdog overwrote a baseline mid-test. Before believing a null result,
+prove the apparatus would have shown a positive one. `HE._expLock` exists for
+this; use it.
+
 ## THE CLOUD CURSOR WAS DRAWN SOMEWHERE THE GRAINS WERE NOT (Gad, 2026-08-17)
 
 Gad: "the cloud cursor, it should move with the main playhead no?? why is it
