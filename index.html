@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-18.1117';
+const BUILD='2026-08-18.1122';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -10454,7 +10454,13 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     this.audBendCur=this.audBendCur||[];
     const sh={_bend:1,midi,semis,bornAt:AC.currentTime,
       released:false,killed:false,press:0,pressN:[],nodes:[],
-      release(t){ if(this.released)return; this.released=true;
+      /* A FINGER OUTRANKS A STEAL. This channel's voice mode is mono, so
+         trigger releases the previous voice on every new note — and on a bend
+         shim that arrived as "clear the head" one block after setting it,
+         which is the 0 that appeared after every keypress. A rack-generated
+         step has nobody holding it and is released normally; a shim a KEY owns
+         may only be released by the key-up that owns it. */
+      release(t){ if(this.released||this.keyHeld)return; this.released=true;
         const d=Math.max(0,((t??AC.currentTime)-AC.currentTime)*1000);
         const off=()=>{ if(E.audBendCur[pi]!==sh)return;   // something newer owns it
           E.audBendCur[pi]=null;
@@ -15035,8 +15041,15 @@ const HE={
       ? [...kbHeld].every(c=>this.LEDMOD[c]) : true;
     if(this._hl&&onlyMods)return true;                     // painting a highlight
     if(!onlyMods)return false;                             // a note key is down
-    if(this.pressure()!=null)return false;                 // a key is physically down
-    if(performance.now()-(this.lastDownAt||0)<220)return false;   // …and just after
+    /* ASK THE MAGNET, DO NOT WAIT OUT A CLOCK. Gad: "the release is a bit more
+       delayed then press, cant you check the magnatic to see if its pressed or
+       not?" — right, and the sensor is already telling us. pressure() is null
+       exactly when every key is back at rest, so the 220ms was a guess standing
+       in for an answer the board hands over for free, and it was the whole
+       reason releasing lagged behind pressing. What is left is one frame of
+       slack for the gap between analog reports, not a fifth of a second. */
+    if(this.pressure()!=null)return false;                 // the magnet says a key is down
+    if(performance.now()-(this.lastDownAt||0)<40)return false;
     return true;
   },
   ledDrain(){
@@ -15079,9 +15092,16 @@ const HE={
        the board came to be written faster than it can redraw. Only a CHANGE in
        the static picture writes now, and this is the one place that asks. */
     if(CFG.ledOn&&this.kind===2){
-      if(!CFG.ledMeter)this.ledDigits();            // signature-guarded: silent unless it changed
-      if(this._ledWant)this.ledDrain();             // …but a held-back frame keeps trying
-      else this.ledMeterTick();
+      /* BRACES, because the last edit here created a dangling else: inserting
+         the drain line between the if and its else re-bound `else
+         ledMeterTick()` to `if(this._ledWant)`. So the meter ran EVERY tick
+         with the meter switched off — and ledMeterTick calls ledDigits with
+         decaying=true, which exists precisely to bypass the signature guard.
+         A write every 120ms forever, which is the flicker Gad saw. Measured at
+         rest, nothing held and nothing changed: 4 pictures in 2.3s. */
+      if(CFG.ledMeter){ this.ledMeterTick(); }
+      else { this.ledDigits(); }
+      if(this._ledWant)this.ledDrain();             // a held-back frame keeps trying
     }
     if(this.kind===1&&this.ready&&performance.now()-(this._reqAt||0)>60)this.kcRequest();
     /* nothing pressed: the next arrow key-down is a new push, not a re-fire */
@@ -20245,12 +20265,32 @@ const onKeyDown=e=>{
              audio, instead of clearing the bend behind its back. */
           const firep=()=>{
             if(AUD.gk[c]!==hp)return;                // let go before it landed
-            hp.tv=engine.trigger(AC.currentTime+0.004,pi,KBBASE+semP,hitVel);
+            engine.audPitch(pi,semP);
+            engine.busEnvFire(pi,AC.currentTime);    // the keystroke IS the note-on
           };
           if(msp<2)firep(); else setTimeout(firep,msp);
           flash('loop '+(semP>0?'+':'')+semP+'st'+(vmP===2?' · glide':'')+
                 (msp>=2?' · on the grid':''));
           dirty=true; return;
+          /* IT STILL RETURNS, AND THE ATTEMPT IS WHY (Gad, 2026-08-18: "yes
+             pitch keys should go through the play rack"). Routing it through
+             engine.trigger WORKS for the rack — an arp on a hand-played key
+             records 21 events across 16 distinct times, all pk, none dead —
+             and legato survived it. What did not is ownership of the END.
+             This channel's voice mode is MONO, so trigger steals: it releases
+             the previous voice on every new note, and on a bend shim that
+             arrives as "clear the head" one block after setting it. A keyHeld
+             flag fixed that. Then the LAST key-up left the head bent, because
+             the steal had already popped that voice out of trigger's own mono
+             list, so the wrapper's release reached nothing. Releasing the shim
+             by name fixed that. Then a bend still survived — one shim left
+             unreleased in act, and something re-bent after the clear.
+             Three seams, each revealed by fixing the one before it, and the
+             failure mode is a STUCK BEND on the most-used key in the
+             instrument. The routing is worth having; it needs the mono steal
+             and the shim lifetime designed together rather than patched apart,
+             and a probe that watches every bend edge from a fresh page. */
+
         }
         engine.granNode(pi);
         engine.granBuf=engine.granBuf||[];
@@ -20677,12 +20717,6 @@ function endAudHold(c){
         dirty=true; return 'went';
       }
     }
-    /* THE SHIM OWNS THE AUDIO. Releasing the handle runs audBendNote's own
-       release: legato fall-back to the newest key still down, the auto-off
-       stop, and the two-stage return. Clearing the bend here as well would be
-       doing it behind the shim's back — and getting a different answer. */
-    if(h8.tv&&h8.tv.release){try{h8.tv.release(AC.currentTime);}catch(_){}
-      dirty=true; return 'went';}
     if(!Object.keys(AUD.gk).some(k8=>(AUD.gk[k8]||{}).kind==='pmono')){
       engine.audPitch(h8.pi,0);
       engine.busEnvFire(h8.pi,AC.currentTime,true);   // …and the key-up releases it

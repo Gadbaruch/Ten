@@ -53,14 +53,27 @@ with our removal of poly mode from this channel type, it feels very good").
    The generic keyboard recorder DOES write a raw {midi} event and would have
    been that writer the moment a pitch key went through the rack; it speaks
    recAudEvent now, so the door is safe before anything walks through it.
-   **THE REAL BLOCKER IS OWNERSHIP.** A hand-played pitch key returns from the
-   `pmono` branch before `engine.trigger`, so the rack never sees it. Falling
-   through is one line — noteOn already has `audBendNote` — but `pmono`
-   registers `AUD.gk`, and `endAudHold`'s pmono half owns the release, the
-   legato fall-back, the auto-off stop and the retro/lane write. trigger's
-   handle owns none of those. Moving all four onto the shim is the change, and
-   half of it is a stuck bend on the most-used key in the instrument, so it
-   gets its own turn with the release measured first.
+   **THE ROUTING WAS BUILT, MEASURED AND REVERTED — read this before rebuilding
+   it.** Sending the keydown through `engine.trigger` WORKS for the rack: an arp
+   on a hand-played pitch key recorded 21 events across 16 distinct times, all
+   pk, none dead, and the legato fall-back survived the move onto the shim.
+   What did not survive is ownership of the END, in three seams, each found by
+   fixing the one before:
+     1. This channel's voice mode is MONO, so trigger STEALS — it releases the
+        previous voice on every new note, and on a bend shim that arrives as
+        "clear the head" one block after setting it. Every keypress read
+        `[pitch, 0]`. A `keyHeld` flag (only the key-up that owns a shim may
+        release it) fixed that.
+     2. The LAST key-up then left the head bent: the steal had already popped
+        that voice out of trigger's own mono list, so the wrapper's release
+        reached nothing. Releasing the shim by name fixed that.
+     3. A bend STILL survived — one shim left unreleased in `act`, and a bend
+        arriving after the clear.
+   The failure mode is a stuck bend on the most-used key in the instrument, so
+   it came out. Rebuild it by designing the mono steal and the shim lifetime
+   TOGETHER rather than patching them apart, and write a probe that logs every
+   bend edge from a fresh page before touching the key path — the readings that
+   matter are the ones after the last release.
    Retro rec is a third writer worth checking with it (`retroBuf` → the retro
    block writes `midi:` on every event plus cue/pk when present).
 2. **The loop-length cell back in the grid**, above the meter.
