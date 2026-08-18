@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-17.2354';
+const BUILD='2026-08-18.1033';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -4957,21 +4957,32 @@ let fxwReady=false;
        phase it actually read at, because the wrap may have folded it back
        inside the crop and the caller wants that written back. */
     rdCur(c,ph,SL,SR,len,live,ew,W){
+      /* THE CROP IS A LOOP FOR EVERY READ, not only the plain one (Gad,
+         2026-08-18: "in stretch mode when speed is larger than the loop length
+         the sample should loop - currently is stops and retriggered at loop
+         start"). The shifted branch returned before the fold below ever ran,
+         and tRd CLAMPS at the buffer ends — so a stretched cursor walked to
+         the end of its crop and stopped dead there, silent until audCycle
+         re-fired it on the bar line. That is the retrigger he hears, and it is
+         the only difference between the two reads that was never intended. */
+      const lo9=c.lo||0, hi9=c.end||len, w9=Math.max(1,hi9-lo9);
+      const fold9=x=>(x<lo9||x>=hi9)?((x-lo9)%w9+w9)%w9+lo9:x;
       if(c.shift!==1){
+        /* both taps fold too: they read up to a window BEHIND the head, so at
+           the seam one of them is still on the far side of it */
+        const i2=c.wrap?fold9(ph):ph;
         const p1=c.tp, p2=(c.tp+W*0.5)%W;
         const w1=Math.sin(Math.PI*p1/W), w2=Math.sin(Math.PI*p2/W);
-        this.tRd(ph-p1,SL,SR,len); const a1=this._rl, b1=this._rr;
-        this.tRd(ph-p2,SL,SR,len); const a2=this._rl, b2=this._rr;
+        this.tRd(c.wrap?fold9(i2-p1):i2-p1,SL,SR,len); const a1=this._rl, b1=this._rr;
+        this.tRd(c.wrap?fold9(i2-p2):i2-p2,SL,SR,len); const a2=this._rl, b2=this._rr;
         this._rl=a1*w1+a2*w2; this._rr=b1*w1+b2*w2;
-        return ph;
+        return i2;
       }
       if(c.wrap){
         /* A LOOP HAS ENDS OF ITS OWN. Grains wrap the whole buffer; a
            key-spawned cursor wraps the CROP, so playing a cue near the end
            runs on into the start again instead of stopping there. */
-        let i2=ph;
-        const lo9=c.lo||0, hi9=c.end||len, w9=Math.max(1,hi9-lo9);
-        if(i2<lo9||i2>=hi9)i2=((i2-lo9)%w9+w9)%w9+lo9;
+        const i2=fold9(ph);
         const i0=i2|0, fx=i2-i0, i1=(i0+1)%len;
         const ef=live?1:Math.min(1,i2/ew,(len-1-i2)/ew);   // a ring has no edges
         this._rl=(SL[i0]+(SL[i1]-SL[i0])*fx)*ef;
