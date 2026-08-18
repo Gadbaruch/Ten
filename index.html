@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-18.2037';
+const BUILD='2026-08-18.2039';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -21956,7 +21956,19 @@ function mouseFocus(kind,i){
   else if(kind==='mod'){S.curMod=i; S.curParam=0; S.slotParam=0; S.curSlot=0;}
   else if(kind==='msl'){S.mSlot=i; S.mDj=null; S.mParam=0;}
   else if(kind==='dj'){S.mDj=i; S.mParam=0;}
-  else if(kind==='ch'){ if(S.layer>=2)S.editSnd=i; else S.curPreset=i; }
+  /* A SETTINGS SECTION IS CLICKABLE. The headers have emitted data-h="sgrp:n"
+     all along and nothing here answered to it, so clicking a section did
+     nothing while clicking a ROW inside it worked — the one place the panel
+     looked broken. Land on the first visible row of that group, which is where
+     the keyboard would put you too. */
+  else if(kind==='sgrp'){
+    const g=SETSECT[i];
+    const first=setVis().find(x=>x.g===g);
+    if(first)S.setSel=SETTINGS.indexOf(first);
+  }
+  /* picking a channel leaves the master — clicking ch 5 while the master strip
+     is up used to move a cursor you could not see */
+  else if(kind==='ch'){ S.mSel=false; if(S.layer>=2)S.editSnd=i; else S.curPreset=i; }
   /* the desk rows: pick the channel, then the drag replays the real binding
      (alt+↑↓ level, alt+←→ pan) rather than growing a second way to set them */
   else if(kind==='lvl'||kind==='pan'){ S.curPreset=i; if(S.layer>=2)S.editSnd=i; }
