@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-18.1526';
+const BUILD='2026-08-18.1529';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -14691,10 +14691,19 @@ const HE={
   /* ONE FRAME BUILDER, so `chunk` and `full` are a real A/B: the same bytes go
      on the wire either way and only the number of reports differs. Returns the
      rgb array and stashes the signature; writing is somebody else's job. */
-  /* WHAT WORKS WHILE TAB IS HELD — the keys that actually have a meaning under
-     it, so the red field is not a wall you have to remember your way through:
-     - / =  loop length · backspace  erase · the digits  arm that channel. */
-  TABKEYS:['Minus','Equal','Backspace'],
+  /* WHAT WORKS WHILE TAB IS HELD — so the red field is not a wall you have to
+     remember your way through:
+       ← ↓ ↑ →   loop modifications   (right alt · menu · right ctrl · fn)
+       - =       loop length
+       backspace erase
+       digits    arm that channel
+     The arrows are here on Gad's word, not on a grep: "we do use arrow keys in
+     tab for loop modifications, when i refer to arrow keys i mean right side
+     alt fn menu ctrl." I could not find a HOLD.tab arrow branch and left them
+     dark for it, which was the wrong authority to trust — he plays this and I
+     do not. If a lamp here turns out to lead nowhere that is a missing
+     BINDING to fix, not a colour to take away. */
+  TABKEYS:['AltRight','ContextMenu','ControlRight','Fn','Minus','Equal','Backspace'],
   buildFrame(){
     const rgb=new Array(this.LEDN*3).fill(0);
     let sig='';
