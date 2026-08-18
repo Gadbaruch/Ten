@@ -272,6 +272,27 @@ because the numbers are the method and a summary drops them first. If a thread
 does have to end, everything needed to continue is in there or it was not
 really finished.
 
+## END A BATCH WITH A QA CHECKLIST (Gad, 2026-08-18)
+
+"Everytime we do a long list of fixes like that and we split up the work into
+steps, i want you to give me a QA check list in the end so i dont have to
+scroll up." Any time a session works through a LIST — his numbered asks, a
+batch of reports — the last message is a checklist he can play from, not a
+summary he has to reconstruct. It goes in the chat, and the same list goes into
+`NEXT.md` so it survives the thread.
+
+One line per item, and each line says:
+
+- **what changed**, in his words where he gave them
+- **exactly what to do** to see it — the mode, the setting, the gesture
+- **what right looks like**, and what the bug looked like, so a pass is a
+  judgement he can make in one go
+- **the number** if there is one, and **"not measured"** if there is not.
+  A thing shipped on reasoning rather than a measurement is the first thing he
+  should test, and it has to say so.
+
+Order it by what is most likely to be wrong, not by what was hardest to build.
+
 ## Scope
 
 Ship exactly what was asked, and say plainly what it breaks. Do not widen a

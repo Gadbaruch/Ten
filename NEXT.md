@@ -10,6 +10,11 @@ with our removal of poly mode from this channel type, it feels very good").
 - **Pitch survives a mode switch**, both ways and through the fit: stretch +3
   → tape → grain → stretch reads 523.3 / 523.3 / 522.4 / 523.3 where the last
   hop used to come home at 440. Time is what gives instead, deliberately.
+- **The cloud's read position no longer slews.** `pos` was in the same slew as
+  size, gain and width — right for anything rendered THROUGH a grain, wrong for
+  the address it is spawned at, which cannot click. Indicative only, the
+  estimator was noisy: the address arrives inside one 46ms sample where it used
+  to take ~134ms with fade at 0.25.
 - **The loop length is a row above the meters** — every lane at once, and a
   lane still listening shows a dot rather than the length it will not keep.
 - **Auto off replays, and pitch keys fall back.** A recorded lane replayed into
