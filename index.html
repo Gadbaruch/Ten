@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-18.1137';
+const BUILD='2026-08-18.1146';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -2831,7 +2831,14 @@ const altOf=e=>KM.altLatch||KM.scp;
 /* ⌘ IS ⌘ AND ⌃ IS NOT. Control used to stand in for command so the shortcuts
    worked on a PC, which was fine while control meant nothing on its own — it
    is the FUNCTION LAYER now, and ⌃c has to be "hold volume", not "copy". */
-const cmdOf=e=>!!e.metaKey;
+/* LEFT WIN IS THE LATCH AND NOTHING ELSE (Gad, 2026-08-17: "win button (latch)
+   is somehow doing save, load, export and import… make win ONLY do latch").
+   MetaLeft IS ⌘, so every ⌘-shortcut still fired from it — that is where save,
+   open, export and import were coming from. KM.sl is set by LATCHKEY, which is
+   MetaLeft, so "a meta is down and it is only the left one" is exactly a latch
+   press and exactly not a command. Right ⌘ is untouched and still does all of
+   them, and the tools layer on left ⌥ carries c/x/v/z/s. */
+const cmdOf=e=>!!e.metaKey&&!(KM.sl&&!KM.metaR);
 /* THE TOOLS LAYER, armed rather than held — see the TOOLKEY block in
    onKeyDown for why. A tap arms it for a short window, the next c/x/v/z/s
    spends it, tapping again while armed puts it away, and it lapses by itself
@@ -2876,7 +2883,7 @@ function disarmTools(cancel){ if(TOOLT){clearTimeout(TOOLT); TOOLT=null;}
    So: the hold OR the flag. Any control is tools, whichever side it is on and
    whether or not we saw it arrive — unless the mic is actually open, which is
    the one case where a control is doing something else. */
-const toolsOf=e=>(HOLD.t||!!e.altKey)&&!MIC._down&&!e.metaKey&&!altOf(e);
+const toolsOf=e=>(HOLD.t||!!e.altKey)&&!MIC._down&&!cmdOf(e)&&!altOf(e);
 /* THE FUNCTION LAYER IS ⌥. It was ⌃ for a day, and control is the one
    modifier a left hand cannot reach while it plays. ⌥S and ⌥A keep their old
    meanings (solo, the arp grab) — they were never bare letters. The one true
@@ -2885,7 +2892,7 @@ const toolsOf=e=>(HOLD.t||!!e.altKey)&&!MIC._down&&!e.metaKey&&!altOf(e);
    A scope stays open on the LETTER once ⌥ has opened it, so the thumb can
    come off ⌥ and the arrows step normally; ⌥ held through an arrow is still
    the fine step, same as everywhere else. */
-const ctlOf=e=>altOf(e)&&!e.metaKey&&!ALTSUS.size;
+const ctlOf=e=>altOf(e)&&!cmdOf(e)&&!ALTSUS.size;
 /* ⌃ IS THE INSTRUMENT: quantize, tempo, the click — the settings you set and
    then live inside. Reach matters for performance keys; these are not that,
    and giving them their own modifier keeps ⌥ purely the channel's. */
@@ -2894,7 +2901,7 @@ const ctlOf=e=>altOf(e)&&!e.metaKey&&!ALTSUS.size;
    quantize toggle at once. */
 /* a LATCHED global has no shift held, so the shiftKey test cannot be the gate
    in that case — it is the gate only while the key is genuinely down */
-const gblOf=e=>!e.metaKey&&!altOf(e)&&((KM.shl&&!!e.shiftKey)||KM.shlLatch);
+const gblOf=e=>!cmdOf(e)&&!altOf(e)&&((KM.shl&&!!e.shiftKey)||KM.shlLatch);
 const LATCH={held:false,used:false,on:false};
 /* HELD KEYS SCOPE THE ARROWS. The arrows always mean "adjust"; the key you are
    holding says adjust WHAT. tab = the loop, m = tempo. `used` records whether
@@ -14692,8 +14699,11 @@ const HE={
         return (this._sig=sig, rgb);
       }
       this._hl=0;
-      /* everything by its ROLE, then the channels on top */
-      for(const code in LEDROLE)set(code,LEDC[LEDROLE[code]],1);
+      /* everything by its ROLE, then the channels on top. LEDDIM is the one
+         exception: Gad wants ← and ↓ at half of → and ↑, so the pair you step
+         BACK with reads differently from the pair you step forward with
+         without costing a second colour. */
+      for(const code in LEDROLE)set(code,LEDC[LEDROLE[code]],LEDDIM[code]||1);
       for(const sl in RY_KEYS){const code=RY_KEYS[sl];
         if(/^Key[A-Z]$/.test(code))set(code,LEDC.yellow,1);}   // letters: full yellow
       sig+='L'+sel;
@@ -17974,7 +17984,7 @@ const LEDC={
      bright yellow, and the other channel digits should be darker yellow like
      more orange". A different hue made them read as a different KIND of thing;
      they are the same thing, not selected. */
-  yellow:[255,200,0], amber:[255,130,0], red:[255,0,0], teal:[0,200,160],
+  yellow:[255,228,90], amber:[255,130,0], red:[255,0,0], teal:[0,200,160],
   wave:[255,120,0],
   blue:[0,80,255], pink:[255,0,140], white:[255,255,255],
   /* the three held modifiers each get their OWN hue, or "the keys light up"
@@ -17985,6 +17995,9 @@ const LEDGBL=['KeyQ','KeyO','KeyB','KeyM','KeyS','Escape'];
 const LEDTOOL=['KeyC','KeyX','KeyV','KeyZ','KeyS'];
 const LEDSCOPE=['KeyA','KeyU','KeyD','KeyE','KeyF','KeyL','KeyK','Slash','KeyR',
   'KeyG','KeyS','KeyP','KeyC','KeyQ','KeyB','KeyO','KeyX','Semicolon','Quote'];
+/* ← is AltRight and ↓ is ContextMenu on this board; ↑ is ControlRight and → is
+   the fn slot. Half brightness on the two that go back. */
+const LEDDIM={AltRight:0.5,ContextMenu:0.5};
 const LEDROLE={Tab:'red',Backspace:'red',
   Enter:'white',Space:'white',Escape:'white',
   AltRight:'teal',ContextMenu:'teal',ControlRight:'teal',Fn:'teal',
@@ -18035,6 +18048,7 @@ function escapeAction(e){
   dirty=true;
 }
 const onKeyDown=e=>{
+  if(e.code==='MetaRight')KM.metaR=true;      // the ⌘ that is still a ⌘
   if(e.isTrusted){MODS.shift=e.shiftKey; MODS.alt=e.altKey; MODS.ctrl=e.ctrlKey; MODS.meta=e.metaKey;
     /* A LOST SHIFT KEY-UP LATCHES EVERYTHING YOU PLAY. Left shift is the latch,
        and its state was believed until a matching key-up arrived — but mashing
@@ -20621,6 +20635,8 @@ function endAudHold(c){
   return '';
 }
 const onKeyUp=e=>{
+  if(e.code==='MetaRight')KM.metaR=true;      // the ⌘ that is still a ⌘
+  if(e.code==='MetaRight'||!e.metaKey)KM.metaR=false;
   if(e.isTrusted){MODS.shift=e.shiftKey; MODS.alt=e.altKey; MODS.ctrl=e.ctrlKey; MODS.meta=e.metaKey;
     if(!e.shiftKey){KM.sl=false; KM.sr=false;}}
   const c=e.code;
