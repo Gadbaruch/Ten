@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-18.1646';
+const BUILD='2026-08-18.2037';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -18172,7 +18172,9 @@ const LEDGBLDIG=true;
 const LEDTOOL=['KeyC','KeyX','KeyV','KeyZ','KeyS','KeyN','KeyL','KeyE','KeyI',
   'KeyQ','KeyO','KeyB','KeyM','KeyK','KeyJ'];
 const LEDSCOPE=['KeyA','KeyU','KeyD','KeyE','KeyF','KeyL','KeyK','Slash','KeyR',
-  'KeyG','KeyS','KeyP','KeyC','KeyQ','KeyB','KeyO','KeyX','Semicolon','Quote'];
+  'KeyG','KeyS','KeyP','KeyC','KeyQ','KeyB','KeyO','KeyX','Semicolon','Quote',
+  /* -/= add and remove a slot inside the held scope, so they belong to it */
+  'Minus','Equal'];
 /* ← is AltRight and ↓ is ContextMenu on this board; ↑ is ControlRight and → is
    the fn slot. Half brightness on the two that go back. */
 const LEDDIM={AltRight:0.5,ContextMenu:0.5};
@@ -18192,14 +18194,25 @@ const LEDROLE={Tab:'red',Backspace:'red',
      than doing anything themselves — one hue for "this arms something" */
   MetaLeft:'pink', Slash:'pink'};
 const RY_DEFAULT_SLOTS={71:'ArrowRight'};
+/* A CLUSTER ARROW IS A REAL PRESS. The dial and the repeat are gated on
+   e.isTrusted — to keep AREP's own synthetic repeats from re-driving
+   themselves — and the right cluster's arrows are synthetic too, so right ctrl
+   got no pressure dial and no shift step at all. Gad: "dial behavior is gone
+   from R-ctrl (arrow up), also shift doesnt work as dial speed modifier."
+   The dispatch is synchronous, so a flag set across it is exact: THIS arrow
+   came from a finger on a key, AREP's did not. */
+let ARROWSYN=false;
 const arrowAlias=(e,kind)=>{
   const a=RIGHTARROW[e.code];
   if(!a)return false;
   e.preventDefault();
   /* the modifier a right-cluster key IS must not ride along — right alt is the
      LEFT arrow here, not ⌥←. Only shift travels, because ⇧← is its own thing. */
-  document.dispatchEvent(new KeyboardEvent(kind,{code:a,key:a,bubbles:true,
-    shiftKey:e.shiftKey,repeat:e.repeat}));
+  ARROWSYN=true;
+  try{
+    document.dispatchEvent(new KeyboardEvent(kind,{code:a,key:a,bubbles:true,
+      shiftKey:e.shiftKey,repeat:e.repeat}));
+  }finally{ARROWSYN=false;}
   return true;
 };
 /* the tap half of escape, run from the key-up so the hold can claim the key
@@ -18256,9 +18269,9 @@ const onKeyDown=e=>{
      With a dial on the primary and a menu on the secondary — an lfo, whose
      ←→ is the waveform — it said "not stepped" and let the system's repeat run
      the wave list end to end under one finger. */
-  if(e.isTrusted&&e.repeat&&e.code.indexOf('Arrow')===0
-     &&(AREP.code||arepStepped(e.code)))return;
-  if(e.isTrusted&&!e.repeat&&e.code.indexOf('Arrow')===0){
+  const fingerArrow=(e.isTrusted||ARROWSYN)&&e.code.indexOf('Arrow')===0;
+  if(fingerArrow&&e.repeat&&(AREP.code||arepStepped(e.code)))return;
+  if(fingerArrow&&!e.repeat){
     if(AREP.stopT&&AREP.code===e.code){clearTimeout(AREP.stopT); AREP.stopT=null;}  // that was a bounce
     if(arrowRefire(e.code)){e.preventDefault(); return;}
     arepStart(e.code);
@@ -20911,7 +20924,7 @@ const onKeyUp=e=>{
      is holding a note. So the key-up arms a stop a moment ahead: a bounce
      sends its next key-down within a few milliseconds and cancels it, a
      finger that has actually left does not. */
-  if(e.isTrusted&&c.indexOf('Arrow')===0&&AREP.code===c){
+  if((e.isTrusted||ARROWSYN)&&c.indexOf('Arrow')===0&&AREP.code===c){
     if(AREP.stopT)clearTimeout(AREP.stopT);
     AREP.stopT=setTimeout(()=>{AREP.stopT=null; arepStop();},90);
   }
