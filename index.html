@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-18.1531';
+const BUILD='2026-08-18.1533';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -14766,6 +14766,10 @@ const HE={
       if(held){
         set(held.k,held.c,1);
         for(const code of held.set)set(code,held.c,0.55);
+        /* under LEFT SHIFT the digits stay lit in their own colours — they are
+           the thing the modifier acts on, and a mute you cannot see the target
+           of is a mute you press twice */
+        if(held.t.charAt(0)==='G')digits();
         sig='M'+held.t;
         this._hl=1;
         return (this._sig=sig, rgb);
@@ -18086,7 +18090,10 @@ const LEDC={
 /* which keys do anything under each held modifier — the highlight sets */
 /* what is LEFT on shift after the merge — esc opens settings and c copies the
    patch as JSON. Everything else on this modifier is now free. */
+/* left shift is performance now: mute on a digit, solo with ctrl held. The
+   digits are painted by their own row, so only esc is listed here. */
 const LEDGBL=['Escape'];
+const LEDGBLDIG=true;
 const LEDTOOL=['KeyC','KeyX','KeyV','KeyZ','KeyS','KeyN','KeyL','KeyE','KeyI',
   'KeyQ','KeyO','KeyB','KeyM','KeyK','KeyJ'];
 const LEDSCOPE=['KeyA','KeyU','KeyD','KeyE','KeyF','KeyL','KeyK','Slash','KeyR',
@@ -19497,6 +19504,27 @@ const onKeyDown=e=>{
     }
     else if(S.layer>=1){
       const l2=S.patterns[S.editPat].lanes[n];
+      /* MUTE AND SOLO HAD NO BINDING AT ALL. lane.mute and lane.solo are read
+         by the scheduler and written by NOTHING — the toggle has been sitting
+         inside `if(false)` and the only way either got set was loading a set
+         that already had it. So a muted lane was permanently silent with no
+         gesture that could clear it, which is exactly Gad's "digit 3 is stuck
+         on red": the lights did not invent that state, they made a silent
+         channel finally say why it was silent.
+         Left shift is free now that the globals moved to ⌥, and mute/solo are
+         performance, which is what he wanted that hand back for:
+             ⇧ + digit    mute
+             ⇧⌃ + digit   solo   (⌃ is the scope hand, not a note hand) */
+      if(KM.shl&&e.shiftKey&&!e.repeat&&n>=CH_LOW){
+        e.preventDefault();
+        const kind=KM.scp?'solo':'mute', other=kind==='solo'?'mute':'solo';
+        pushUndo(kind);
+        l2[kind]=!l2[kind];
+        if(l2[kind])l2[other]=false;      // you cannot insist on a channel and silence it
+        if(S.layer<2){S.curPreset=n; S.mSel=false;}
+        flash((S.presets[n]?S.presets[n].name:'ch '+n)+' '+kind+' '+(l2[kind]?'ON':'off'));
+        dirty=true; dirtySave=true; return;
+      }
       if(rs(e)&&!e.repeat){
         /* ⇧+digit used to solo. Solo has ⌥s now, and this is the gesture that
            was needed for picking several channels out at once — which is the
