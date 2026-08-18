@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-18.1631';
+const BUILD='2026-08-18.1646';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -4664,7 +4664,12 @@ let fxwReady=false;
         /* the pitch bend destination: free voices move their rate (tape), sync
            voices move only the shifter (the clock is not for sale) */
         else if(m.t==='tpb'){const s9=Number.isFinite(m.semis)?m.semis:0, f9=Math.pow(2,s9/12);
+          /* the bend's OWN slew. Without a glide it is the 20ms the render
+             loop has always used — fast enough to read as a step, slow enough
+             not to click. With one, the rate takes exactly the time asked. */
+          const k9=(Number.isFinite(m.gl)&&m.gl>0)?1/Math.max(1,m.gl*sampleRate):0;
           for(const [id,v] of this.tv){
+            v.sK=k9;
             if(v.free)v.sTgt=Math.max(0.01,v.base*f9);
             else v.shift=(v.shc||1)*f9;}}
         /* THE TAPE'S WINDOW AND SPEED, so a key can obey them. a and far are
@@ -4794,7 +4799,7 @@ let fxwReady=false;
             if(c.env>1)c.env=1;
             if(c.env<=0&&(c.rel||c.n>=c.life)){dead=1;break;}
             if(!c.wrap&&c.ph>=c.end-1){c.rel=1;continue;}
-            if(c.step!==c.sTgt)c.step+=(c.sTgt-c.step)*sT;
+            if(c.step!==c.sTgt)c.step+=(c.sTgt-c.step)*(c.sK||sT);
             c.ph+=c.step; c.n++;
             if(c.bp!=null){c.bp+=c.base;
               const lo8=c.lo||0, hi8=c.end||len, w8=Math.max(1,hi8-lo8);
@@ -4808,7 +4813,7 @@ let fxwReady=false;
             if(!c.wrap&&c.ph>=c.end-1){c.rel=1;continue;}
             amp=c.env*c.gain;
           }
-          if(c.step!==c.sTgt)c.step+=(c.sTgt-c.step)*sT;   // a bend glides, it does not step
+          if(c.step!==c.sTgt)c.step+=(c.sTgt-c.step)*(c.sK||sT);   // a bend glides, it does not step
           if(c.gTo!=null){                                 // …and so does a move
             c.ph+=(c.gTo-c.ph)*c.gK;
             if(Math.abs(c.gTo-c.ph)<2)c.gTo=null;
@@ -10758,12 +10763,18 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     const st=(this.gn&&this.gn[pi]&&this.gn[pi].stat)||null;
     return !!(st&&(st.tv|0)>0);
   }
-  audPitch(pi,semis){
+  /* GLIDE IS A LEGATO IDEA (Gad, 2026-08-18: "glide right now is applied on cue
+     positions, but it mostly makes sense on pitch mode instead… glide is in
+     effect only when pressing another note on top of previously held one").
+     So the time is passed per BEND rather than read off the preset here: the
+     first note lands instantly, and only a note arriving over a held one
+     slides. Nothing is a glide by default. */
+  audPitch(pi,semis,glideSec){
     this.audPB=this.audPB||{}; this.audPB[pi]=semis||0;
     const au=S.presets[pi].au||{};
     const e9=this.gn&&this.gn[pi];
     if(e9&&e9.node){try{e9.node.port.postMessage(
-      {t:'tpb',semis:(au.semis??0)+(semis||0)});}catch(_){}}
+      {t:'tpb',semis:(au.semis??0)+(semis||0),gl:glideSec>0?glideSec:0});}catch(_){}}
   }
   /* the granular channel: one worklet node per channel, notes over the port */
   granNode(pi){
@@ -20241,7 +20252,16 @@ const onKeyDown=e=>{
              audio, instead of clearing the bend behind its back. */
           const firep=()=>{
             if(AUD.gk[c]!==hp)return;                // let go before it landed
-            engine.audPitch(pi,semP);
+            /* GLIDE IS WHAT HAPPENS WHEN A NOTE LANDS ON A HELD ONE, and
+               nothing else. A first press is instant — the head is where you
+               put it — and only the second slides, which is what legato means
+               everywhere else in the instrument. Reading it off vox.mode alone
+               made every note a glide, including the one with nothing to glide
+               FROM. */
+            const heldP=Object.keys(AUD.gk||{}).some(k9=>k9!==c&&(AUD.gk[k9]||{}).kind==='pmono'
+                                                     &&(AUD.gk[k9]||{}).pi===pi);
+            const glP=(vmP===2&&heldP)?Math.max(0.01,(S.presets[pi].vox||{}).glide||0.08):0;
+            engine.audPitch(pi,semP,glP);
             engine.busEnvFire(pi,AC.currentTime);    // the keystroke IS the note-on
           };
           if(msp<2)firep(); else setTimeout(firep,msp);
@@ -20369,7 +20389,13 @@ const onKeyDown=e=>{
         engine.audPlay(pi,AC.currentTime+0.005,L,0);   // no cursor yet: make the one
       }
       if(vm9>0&&(autoCur(S.presets[pi])||!first9||AUDMONO)){
-        const gl9=vm9===2?Math.max(0.01,(S.presets[pi].vox||{}).glide||0.08):0;
+        /* …AND A CUE ONLY GLIDES ONTO A HELD ONE. It used to glide whenever the
+           voice mode said legato, so with the loop off every jump slid up from
+           the crop's start — "it glides always from start position". A first
+           press lands where you put it; the slide is what happens when the
+           next one arrives over it. */
+        const heldC=Object.keys(AUD.gk||{}).some(k9=>k9!==c&&(AUD.gk[k9]||{}).pi===pi);
+        const gl9=(vm9===2&&heldC)?Math.max(0.01,(S.presets[pi].vox||{}).glide||0.08):0;
         const ms0=Math.max(0,(atP-AC.currentTime)*1000);
         const go=()=>{engine.audMove(pi,cutAt(pi,sl),gl9,1);
           engine.busEnvFire(pi,AC.currentTime);};
@@ -20689,7 +20715,11 @@ function endAudHold(c){
         if(!g8||g8.kind!=='pmono'||g8.pi!==h8.pi)continue;
         if(!prev8||(g8.press||0)>(prev8.press||0))prev8=g8;}
       if(prev8&&prev8.pk!==undefined){
-        engine.audPitch(h8.pi,prev8.pk);
+        /* falling back IS landing on a held note, so it slides by the same
+           rule that brought you here */
+        const vm8=clamp(Math.round((S.presets[h8.pi].vox||{}).mode||0),0,2);
+        engine.audPitch(h8.pi,prev8.pk,
+          vm8===2?Math.max(0.01,(S.presets[h8.pi].vox||{}).glide||0.08):0);
         dirty=true; return 'went';
       }
     }
