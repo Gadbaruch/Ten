@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-18.1154';
+const BUILD='2026-08-18.1216';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1391,7 +1391,7 @@ const SETTINGS=[
  {n:'led digits',g:'Input',h:()=>!HE.on||HE.kind!==2,
    v:()=>CFG.ledOn?('on · '+(HE._ledWrites||0)+' writes'):'off',
    a:()=>{CFG.ledOn=CFG.ledOn?0:1; saveCfg();
-     if(CFG.ledOn){HE._ledSig=null; HE._ledLast=null; HE._ledMode=0; HE.ledDigits(true);
+     if(CFG.ledOn){HE._ledSig=null; HE._lastDrawnSig=null; HE._ledMode=0; HE.ledDigits(true);
        flash('yellow = selected channel · teal = the rest · bright = has events',6000);}
      else{HE._ledSig=null; HE.ryLightMode(1,{bright:4}); flash('lights back to always-on',4000);}
      dirty=true;}},
@@ -4953,10 +4953,22 @@ let fxwReady=false;
       const SL=live?this.ring:this.L, SR=live?this.ring:this.R;
       if(!this.cur)this.cur=Object.assign({},P);
       const C=this.cur, kS=Math.min(1,(N/sampleRate)/Math.max(0.005,P.fade));
-      for(const key of ['pos','spray','size','dens','semis','jit','shape','rev','width','gain','flow','dif']){
+      for(const key of ['spray','size','dens','semis','jit','shape','rev','width','gain','flow','dif']){
         if(!Number.isFinite(C[key]))C[key]=P[key];   // a NaN slew never recovers on its own
         C[key]+=(P[key]-C[key])*kS;
       }
+      /* POS DOES NOT SLEW (Gad, 2026-08-18: "in grain i want the cloud to
+         follow the start position more tightly, it moves now but with some
+         delay"). The slew is there so a dial move is not a step in the
+         WAVEFORM — true of size, gain, width, everything a grain is rendered
+         through. It is not true of the read POSITION: a grain reads from
+         wherever it is spawned and has its own envelope either side, so moving
+         the address between grains cannot click. Slewing it just meant the
+         cloud arrived at the place you dialled a fade-time late, which is the
+         lag he can hear. The one exception is a GLIDE, which is a position
+         move you asked for over a time you chose — that lives on the cursor's
+         own gTo and is untouched by this. */
+      C.pos=P.pos;
       this.scanPh=(this.scanPh+(P.scan*N)/len)%1;
       /* PITCH MODE: no grains at all — each voice is a dual-tap resampler
          (the ten-psh idea aimed at the buffer): the read center holds the
@@ -14802,31 +14814,36 @@ const HE={
      down: one or two reports is the floor we measured, and holding the repaint
      until your hands stop is worse than a risk we already know the size of.
      A full repaint (7 chunks) still waits for a gap. */
-  DIFFMAX:2,
   ledDrain(){
     if(this._ledBusy||!this._ledWant)return;
     /* not idle: keep the frame, write it when the hands lift. The 60ms watchdog
        is already calling back, so nothing needs its own timer. */
+    /* THE DIFF IS OUT. Writing only the changed chunks was provably right in
+       isolation — 2 reports, correct chunks, correct colours — and on the real
+       board Gad got "channel digits dont change color on new ch selection". The
+       flaw is the premise, not the arithmetic: _ledLast is what I BELIEVE the
+       board is showing, and every time that belief is wrong the diff computes
+       "nothing to send" and the board stays wrong forever. A full picture
+       carries no belief. Correctness beats six saved reports.
+       The lag it was meant to fix is fixed differently below: a SELECTION-only
+       change is allowed through while keys are held, because that is the one
+       repaint you need to see immediately, and it is what Gad actually asked
+       for. Everything else still waits for a gap. */
     const rgb=this._ledWant;
-    /* which chunks differ from what the board is actually showing */
-    const prev=this._ledLast, ch=[];
-    if(prev){
-      for(let c=0;c<7;c++){
-        const a=c*56, b=Math.min(a+56,this.LEDN*3);
-        for(let i=a;i<b;i++)if(rgb[i]!==prev[i]){ch.push(c); break;}
-      }
-      if(!ch.length){this._ledWant=null; return;}          // nothing to say
-    }
-    const small=prev&&ch.length<=this.DIFFMAX;
-    if(!small&&!this.ledIdle())return;                     // a big repaint waits for a gap
+    /* WHAT "SELECTION ONLY" ACTUALLY IS. The first go stripped the leading
+       L<n> and compared the rest — and never matched, because the selection is
+       in the signature TWICE: the L number and the position of the S marker.
+       Now that content no longer changes a digit's colour, a normal frame's
+       signature is nothing BUT selection ('L7' plus ten slots with one S). So
+       the honest test is simply that neither frame is a highlight: normal to
+       normal can only be a channel change. */
+    const isHl=x=>!x||x.charAt(0)==='M';
+    const selOnly=!isHl(this._ledSig)&&!isHl(this._lastDrawnSig);
+    if(!selOnly&&!this.ledIdle())return;
     this._ledWant=null; this._ledBusy=1;
     this._ledWrites=(this._ledWrites||0)+1;
-    this._ledLast=rgb.slice();
-    const put=small
-      ? (async()=>{for(const c of ch){const r=await this.ryLightChunk(rgb,c,0); if(r!=='sent')return r;}
-                   return 'sent';})()
-      : this.ryLightPic(rgb,0);
-    put.then(r=>{
+    this._lastDrawnSig=this._ledSig;
+    this.ryLightPic(rgb,0).then(r=>{
       if(r!=='sent'){flash('led write: '+r,6000); return;}
       /* the mode only has to be set once — resending it per frame doubles the
          traffic and it is the same value every time */
