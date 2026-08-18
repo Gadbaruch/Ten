@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-18.1108';
+const BUILD='2026-08-18.1117';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -3040,7 +3040,9 @@ const ctlOf=e=>altOf(e)&&!e.metaKey&&!ALTSUS.size;
 /* LEFT SHIFT ONLY. It used to accept ctrl as well, and ctrl is the scope key
    now — holding it and pressing q would have been the quality scope AND the
    quantize toggle at once. */
-const gblOf=e=>!e.metaKey&&!altOf(e)&&KM.shl&&!!e.shiftKey;
+/* a LATCHED global has no shift held, so the shiftKey test cannot be the gate
+   in that case — it is the gate only while the key is genuinely down */
+const gblOf=e=>!e.metaKey&&!altOf(e)&&((KM.shl&&!!e.shiftKey)||KM.shlLatch);
 const LATCH={held:false,used:false,on:false};
 /* HELD KEYS SCOPE THE ARROWS. The arrows always mean "adjust"; the key you are
    holding says adjust WHAT. tab = the loop, m = tempo. `used` records whether
@@ -10450,11 +10452,24 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     const E=this, semis=Math.round(midi)-KBBASE;
     const ms=Math.max(0,(at-AC.currentTime)*1000);
     this.audBendCur=this.audBendCur||[];
-    const sh={_bend:1,midi,released:false,killed:false,press:0,pressN:[],nodes:[],
+    const sh={_bend:1,midi,semis,bornAt:AC.currentTime,
+      released:false,killed:false,press:0,pressN:[],nodes:[],
       release(t){ if(this.released)return; this.released=true;
         const d=Math.max(0,((t??AC.currentTime)-AC.currentTime)*1000);
         const off=()=>{ if(E.audBendCur[pi]!==sh)return;   // something newer owns it
           E.audBendCur[pi]=null;
+          /* LEGATO LIVES ON THE SHIM NOW, because the shim is what owns the
+             sound once a pitch key goes through the rack. One head means one
+             pitch, so a chord of them is a STACK: the newest press holds the
+             bend and a release hands it to the newest one still down. Newest
+             by BIRTH, not by array order — the rack can spawn several inside
+             one block and their order in act is the order they were made, not
+             the order a finger arrived. */
+          let back=null;
+          for(const o of (E.act[pi]||[]))
+            if(o&&o._bend&&o!==sh&&!o.released&&!o.killed&&
+               (!back||(o.bornAt||0)>(back.bornAt||0)))back=o;
+          if(back){E.audBendCur[pi]=back; E.audPitch(pi,back.semis); return;}
           E.audPitch(pi,0); E.busEnvFire(pi,AC.currentTime,true);
           if(!autoCur(S.presets[pi])){E.audStop(pi);return;}
           if(E.audBendMovedClock(pi)){E.audReturn(pi);
@@ -10472,7 +10487,12 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
       E.audPitch(pi,semis); E.busEnvFire(pi,AC.currentTime); };
     if(ms<2)go(); else setTimeout(go,ms);
     this.act[pi].push(sh);
-    setTimeout(()=>{const a=E.act[pi],i=a.indexOf(sh); if(i>=0)a.splice(i,1);},1500);
+    /* swept only once it is RELEASED — a held key can outlast any timer, and a
+       shim reaped while the finger is still down is a bend nothing can end */
+    const sweep=()=>{const a=E.act[pi],i=a.indexOf(sh);
+      if(sh.released||sh.killed){if(i>=0)a.splice(i,1);return;}
+      setTimeout(sweep,1500);};
+    setTimeout(sweep,1500);
     return sh;
   }
   audCuts(pi){
@@ -14881,7 +14901,7 @@ const HE={
          Reading KM.scp alone made a latched scope drop back to normal colours
          while it was still very much open, which is the worst case: the board
          says you are out of a mode you are in. */
-      const held = KM.shl   ? {k:'ShiftLeft',  set:LEDGBL,  c:LEDC.gbl,   t:'G'}
+      const held = (KM.shl||KM.shlLatch) ? {k:'ShiftLeft',set:LEDGBL,c:LEDC.gbl,t:KM.shlLatch?'GL':'G'}
                  : HOLD.t   ? {k:'AltLeft',    set:LEDTOOL, c:LEDC.tool,  t:'T'}
                  : altOf({}) ? {k:'ControlLeft',set:LEDSCOPE,c:LEDC.scope,t:KM.altLatch?'CL':'C'}
                  : null;
@@ -14930,7 +14950,13 @@ const HE={
     const sig=this._sig;
     /* the guard is for STATIC state only. A decay frame says so and skips it,
        or the flash would be written once and then held. */
-    if(!force&&!decaying&&sig===this._ledSig)return;
+    /* A DEFERRED FRAME MUST STILL BE RETRIED. Gad: "i dont see colors returning
+       after letting go of modifier yet." This line marked the signature DONE
+       before the write happened — so when the idle gate deferred it, every
+       later tick computed the same signature, matched, and returned early.
+       ledDrain was never called again and the un-highlight frame sat stranded
+       forever. `||this._ledWant` keeps asking until something actually lands. */
+    if(!force&&!decaying&&sig===this._ledSig&&!this._ledWant)return;
     this._ledSig=sig;
     /* LOWEST LATENCY IS NOT A SHORTER TIMER, IT IS NO TIMER. Gad: "do it all
        with as low latency as you can." A fixed floor either lags or overruns,
@@ -15054,6 +15080,7 @@ const HE={
        the static picture writes now, and this is the one place that asks. */
     if(CFG.ledOn&&this.kind===2){
       if(!CFG.ledMeter)this.ledDigits();            // signature-guarded: silent unless it changed
+      if(this._ledWant)this.ledDrain();             // …but a held-back frame keeps trying
       else this.ledMeterTick();
     }
     if(this.kind===1&&this.ready&&performance.now()-(this._reqAt||0)>60)this.kcRequest();
@@ -18352,7 +18379,15 @@ const onKeyDown=e=>{
      swallow its own event: gblOf reads KM.shl and the letter after it decides
      what happens. */
   if(e.code==='ShiftLeft'){KM.shl=true;
-    if(PICK){PICK.peek=true; dirty=true;}}
+    if(PICK){PICK.peek=true; dirty=true;}
+    /* LEFT SHIFT LATCHES TOO (Gad, 2026-08-17), the same gesture as the other
+       two: latch key + the modifier. It was the only one of the three that
+       could not be put down, which made the global layer the one you had to
+       hold a finger on while reaching across for ⇧esc or ⇧b. */
+    if(!e.repeat){
+      if(KM.shlLatch){KM.shlLatch=false; flash('global released'); dirty=true;}
+      else if(KM.sl){KM.shlLatch=true; LATCH.used=true; flash('⇧ global latched'); dirty=true;}
+    }}
   if(e.code==='ShiftRight'){KM.sr=true;
     if(PICK){PICK.peek=true; dirty=true;}
     if(!e.repeat){
@@ -20194,28 +20229,28 @@ const onKeyDown=e=>{
             press:AC.currentTime,tr:Math.max(t0p,trp)};
           AUD.gk[c]=AUD.hold=hp;
           const msp=CFG.qOn?Math.max(0,(gridTime(hp.tr)-AC.currentTime)*1000):0;
+          /* THROUGH THE RACK (Gad, 2026-08-18: "yes pitch keys should go
+             through the play rack"). The key used to bend the head itself and
+             return, so the arp, chance, nudge and the rest simply did not
+             exist on a pitch-mode audio channel. It goes through trigger now,
+             the same door every other note uses, and noteOn hands it to
+             audBendNote — so a generated step reaches the head exactly as a
+             finger does, and the recorder writes whatever the rack produced.
+             OWNERSHIP SPLIT, which is the part that had to be got right: the
+             SHIM owns the sound — the fire, the legato fall-back, the auto-off
+             stop, the return — and the HOLD keeps the bookkeeping the shim
+             knows nothing about: retro, the lane write, and being the thing
+             AUD.gk answers when the replay asks whether a finger owns the
+             channel. The key-up releases the handle and lets the shim do the
+             audio, instead of clearing the bend behind its back. */
           const firep=()=>{
             if(AUD.gk[c]!==hp)return;                // let go before it landed
-            engine.audPitch(pi,semP);
-            engine.busEnvFire(pi,AC.currentTime);    // the keystroke IS the note-on
+            hp.tv=engine.trigger(AC.currentTime+0.004,pi,KBBASE+semP,hitVel);
           };
           if(msp<2)firep(); else setTimeout(firep,msp);
           flash('loop '+(semP>0?'+':'')+semP+'st'+(vmP===2?' · glide':'')+
                 (msp>=2?' · on the grid':''));
           dirty=true; return;
-          /* WHY THIS STILL RETURNS, and what it costs (Gad, 2026-08-18: "yes
-             pitch keys should go through the play rack"). Falling through to
-             engine.trigger below is what would put the key through the rack —
-             noteOn already has its door (audBendNote) and the recorder above
-             already speaks this lane's vocabulary. What is NOT resolved is
-             ownership: this branch registers AUD.gk, and endAudHold's pmono
-             half owns the release, the legato fall-back, the auto-off stop and
-             the retro/lane write. trigger's handle owns none of those, so
-             routing through means moving all four onto the shim, and getting
-             it half right is a stuck bend on the most-used key in the
-             instrument. Do it as its own change, with the release measured
-             first. Until then the ARP does not reach a hand-played pitch key:
-             three keys held under one record at a single time. */
         }
         engine.granNode(pi);
         engine.granBuf=engine.granBuf||[];
@@ -20642,6 +20677,12 @@ function endAudHold(c){
         dirty=true; return 'went';
       }
     }
+    /* THE SHIM OWNS THE AUDIO. Releasing the handle runs audBendNote's own
+       release: legato fall-back to the newest key still down, the auto-off
+       stop, and the two-stage return. Clearing the bend here as well would be
+       doing it behind the shim's back — and getting a different answer. */
+    if(h8.tv&&h8.tv.release){try{h8.tv.release(AC.currentTime);}catch(_){}
+      dirty=true; return 'went';}
     if(!Object.keys(AUD.gk).some(k8=>(AUD.gk[k8]||{}).kind==='pmono')){
       engine.audPitch(h8.pi,0);
       engine.busEnvFire(h8.pi,AC.currentTime,true);   // …and the key-up releases it
@@ -21254,7 +21295,7 @@ window.addEventListener('blur',()=>{
   HOLD.c=false; HOLD.n=false; HOLD.r=false; HOLD.i=false; HOLD.v=false; HOLD.q=false; HOLD.sc=false; HOLD.dig=-1;
   HOLD.opt=null; HOLD.optUsed=false; HOLD.optLatch=false; HOLD.optLatched=false;
   HOLD.ms=null; HOLD.msLatch=false; HOLD.msLatched=false;
-  KM.srLatch=false; KM.altLatch=false;
+  KM.srLatch=false; KM.altLatch=false; KM.shlLatch=false;
   eraseHold=null;
   for(const c in liveV){liveV[c]&&liveV[c].release&&liveV[c].release(AC.currentTime);delete liveV[c];}
   /* …and every audio hold, through the real release path rather than a delete:
