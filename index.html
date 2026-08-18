@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-18.1613';
+const BUILD='2026-08-18.1631';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -13302,8 +13302,14 @@ function applyCmode(pi){
      back it starts again. Only the pitch is promised. */
   const prev0=Number.isFinite(p.au._mode0)?p.au._mode0:m;
   if(prev0!==m){
-    const want=audHeardRatio(p.au,prev0);
-    if(m===1)p.au.semis=clamp(+(12*Math.log2(Math.max(1e-6,want))).toFixed(2),-24,24);
+    const want=audHeardRatio(p.au,prev0,p.gr);
+    if(m===2){
+      /* what the channel already gives before the cloud's dial has a say */
+      const base=Math.abs(audFitR(p.au))*Math.abs(audSpd(p.au))*
+                 Math.pow(2,(p.au.semis??0)/12);
+      p.gr.semis=clamp(+(12*Math.log2(Math.max(1e-6,want)/Math.max(1e-6,base))).toFixed(2),-24,24);
+    }
+    else if(m===1)p.au.semis=clamp(+(12*Math.log2(Math.max(1e-6,want))).toFixed(2),-24,24);
     else{
       const f0=Math.abs(audFitR(p.au))||1, sg=audSpd(p.au)<0?-1:1;
       const s0=sg*clamp(+(want/f0).toFixed(2),0.25,4);
@@ -13321,9 +13327,22 @@ function applyCmode(pi){
 /* WHAT THIS CHANNEL IS ACTUALLY SOUNDING AT, as a ratio, in the mode given.
    Stretch's shifter undoes the whole fitted rate and carries the dial alone;
    everything else multiplies fit, speed and semis together. */
-function audHeardRatio(au,mode){
-  const sem=Math.pow(2,(au.semis??0)/12);
-  return Math.round(mode)===1?sem:Math.abs(audFitR(au))*Math.abs(audSpd(au))*sem;
+function audHeardRatio(au,mode,gr){
+  const m=Math.round(mode), sem=Math.pow(2,(au.semis??0)/12);
+  /* GRAIN KEEPS ITS PITCH IN THE CLOUD (Gad, 2026-08-18: "you should make the
+     pitch carry also to grain, doesnt rn"). granCfg sends gr.semis and nothing
+     else — the channel's own transposition never reaches a grain, because the
+     carrier is muted and the grains do the reading at their own step. So grain
+     is a THIRD family, not a tape-like one, and the conversion has to go
+     through the cloud's dial rather than the speed. */
+  const tape=Math.abs(audFitR(au))*Math.abs(audSpd(au))*sem;
+  /* MEASURED, not assumed: a grain reads at the tape's rate AND the cloud's
+     dial. Entering grain from stretch +7 with only gr.semis set came out at
+     987.6Hz — 440 x 2^(14/12) — because au.semis was still in the carrier the
+     grains are sprayed along. The cloud's semis is an OFFSET on top of the
+     channel's own transposition, so the conversion has to divide it out. */
+  if(m===2)return tape*Math.pow(2,(((gr||{}).semis)??0)/12);
+  return m===1?sem:tape;
 }
 /* …AND THE OTHER DIRECTION, which never existed. applyCmode writes the SIZE
    from the mode; nothing wrote the MODE from the size, so turning size down on
@@ -13440,6 +13459,16 @@ function audAction(d,m){
     dirty=true; dirtySave=true; return;}
   if(spec.key==='wnd')engine.audWnd(S.editSnd);
   engine.audLive(S.editSnd);         // …and the take that is already running hears it
+  /* SPEED AND SYNC MOVE WHERE THE BAR PUTS YOU (Gad, 2026-08-18: "resetting
+     speed to x1 in sync on should position the time synced, right now it looses
+     position"). Under sync the head's correct place is phase x speed through
+     the crop, so changing the speed changes the answer — audLive re-rated it
+     and left it wherever the old speed had carried it. audRelock is that
+     answer, and it goes through the same 3ms equal-power splice a cue flip
+     uses, so it is a seam rather than a click. It returns early when sync is
+     off, which is right: a free take is not on the clock and has nowhere to
+     come back to. */
+  if(spec.key==='rate'||spec.key==='fit')engine.audRelock(S.editSnd);
   recAutoAud(S.editSnd,pre,'aud',spec,spec.get?spec.get(pre.au):pre.au[spec.key]);
   flash('audio '+spec.lbl+' = '+fmtVal(spec,spec.get?spec.get(pre.au):pre.au[spec.key]));
   dirty=true; dirtySave=true;
