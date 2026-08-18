@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-18.1513';
+const BUILD='2026-08-18.1524';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -10482,7 +10482,22 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
        line gets the whole cycle (floor lands on its own boundary, +1 is the
        next); one joining mid-cycle — audCycle's `fresh` branch — gets what is
        left, which is exactly what its birth durSec already said. */
-    const die=a.anchor+(Math.floor((b9-a.anchor)/L+1e-9)+1)*L;
+    let die=a.anchor+(Math.floor((b9-a.anchor)/L+1e-9)+1)*L;
+    /* NEVER BEHIND THE PLAYHEAD (Gad, 2026-08-18: "messing around with tab-=
+       can stop the autoloop untill retrigger"). The boundary is measured from
+       where the carrier STARTED, on the grid it is being asked about — and
+       tab+-/= changes that grid underneath it. Halve the loop while a carrier
+       is a beat and a half into its cycle and the first boundary after its
+       birth is now BEHIND the playhead: it is handed a life it has already
+       spent, dies on the spot, and audCycle does not spawn the next one until
+       the following line. That gap is the silence he hears, and it lasts until
+       something retriggers.
+       A deadline in the past is not a deadline, it is a stop. Walk it forward
+       to the next boundary that has not happened yet, which is where the
+       successor is actually coming from. */
+    const nowB=posNow();
+    if(die<=nowB+1e-9)
+      die=a.anchor+(Math.floor((nowB-a.anchor)/L+1e-9)+1)*L;
     return Math.round(timeAt(die)*AC.sampleRate);
   }
   audRelockAll(){for(const i of CHANS())if(isAudioCh(i))this.audRelock(i);}
