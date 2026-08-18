@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-18.1122';
+const BUILD='2026-08-18.1128';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -2955,8 +2955,9 @@ const KM={sl:false,shl:false,sr:false,srLatch:false,altLatch:false,scp:false};
 /* WHAT THE LATCH IS, physically. Gad's board sends one of these from its win
    key — macOS binds none of them, which is exactly why they were already the
    sound scope's stand-ins before the sound scope moved to backslash. */
-/* LATCH MOVED TO LEFT WIN (Gad, 2026-08-17), and it is lit navy because a
-   latch is a STATE you are in, not an action you take. This frees ` — nothing
+/* LATCH MOVED TO LEFT WIN (Gad, 2026-08-17), and it is lit PINK alongside the
+   dice — the two keys that change what your NEXT press means rather than doing
+   anything themselves. This frees ` — nothing
    claims it yet. NOTE: left win is also ⌘, so ⌘-chords through the LEFT hand
    now arm the latch; the tools layer on left ⌥ carries c/x/v/z/s, which is
    what that layer exists for, and right ⌘ is untouched. */
@@ -14928,12 +14929,12 @@ const HE={
         const has=!!(p&&p.lanes[i]&&p.lanes[i].events.length);
         const here=(sel===i);
         sig+=here?(has?'H':'S'):(has?'h':'.');
-        let g=here?1:(has?0.55:0.22);
+        let g=here?1:(has?0.62:0.28);
         /* the polled envelope still rides on top when the meter is on — it
            writes only in the gaps now, so it moves when you pause */
         if(CFG.ledMeter&&!here){let e=0; try{e=chLevel(i)||0;}catch(_){}
           if(e>0.004)g=Math.min(1,g+(1-g)*Math.min(1,Math.sqrt(e)*1.6));}
-        const c=here?LEDC.yellow:LEDC.orange;
+        const c=here?LEDC.yellow:LEDC.amber;
         const code=RY_KEYS[this.DIGSLOT[i]];
         if(CFG.d5on&&i===5){
           const h5=hsv2rgb((CFG.d5h|0)%360,1,clamp((CFG.d5b|0)/255,0,1));
@@ -18238,14 +18239,20 @@ const RY_SLOT_OF=(()=>{const m={};for(const k in RY_KEYS)m[RY_KEYS[k]]=+k;return
 
 /* WHAT EACH KEY IS, IN COLOUR (Gad, 2026-08-17). Roles, not decoration:
    yellow  the selected channel and every letter — where your hands play
-   orange  the other channels, dim empty / brighter with events in them
+   amber   the other channels — the same yellow, darker and oranger:
+           dim when empty, brighter with events in them
    red     tab and backspace, the two that destroy something
    teal    the arrow cluster and the punctuation dials
    blue    modifiers · dark blue the latch, because it is a STATE not an action
    white   enter, space, escape */
 const LEDC={
-  yellow:[255,200,0], orange:[255,90,0], red:[255,0,0], teal:[0,200,160],
-  blue:[0,80,255], navy:[0,20,120], white:[255,255,255],
+  /* the unselected digits are the SAME family as the selected one, just darker
+     and pushed toward orange — Gad: "selected and letters should be the same
+     bright yellow, and the other channel digits should be darker yellow like
+     more orange". A different hue made them read as a different KIND of thing;
+     they are the same thing, not selected. */
+  yellow:[255,200,0], amber:[255,130,0], red:[255,0,0], teal:[0,200,160],
+  blue:[0,80,255], pink:[255,0,140], white:[255,255,255],
   /* the three held modifiers each get their OWN hue, or "the keys light up"
      tells you a modifier is down without telling you WHICH */
   gbl:[200,0,255], tool:[0,255,110], scope:[0,230,255]};
@@ -18258,9 +18265,14 @@ const LEDROLE={Tab:'red',Backspace:'red',
   Enter:'white',Space:'white',Escape:'white',
   AltRight:'teal',ContextMenu:'teal',ControlRight:'teal',Fn:'teal',
   Comma:'teal',Period:'teal',Minus:'teal',Equal:'teal',BracketLeft:'teal',
-  BracketRight:'teal',Semicolon:'teal',Quote:'teal',Slash:'teal',Backslash:'teal',
-  ShiftLeft:'blue',ShiftRight:'blue',ControlLeft:'blue',AltLeft:'blue',
-  CapsLock:'blue',MetaLeft:'navy'};
+  BracketRight:'teal',Semicolon:'teal',Quote:'teal',Backslash:'teal',
+  ShiftLeft:'blue',ShiftRight:'blue',AltLeft:'blue',CapsLock:'blue',
+  /* the scope key wears its own HELD colour at rest, so the key you reach for
+     and the layer it opens are the same thing to look at */
+  ControlLeft:'scope',
+  /* latch and dice are the two that change what the NEXT press means rather
+     than doing anything themselves — one hue for "this arms something" */
+  MetaLeft:'pink', Slash:'pink'};
 const RY_DEFAULT_SLOTS={71:'ArrowRight'};
 const arrowAlias=(e,kind)=>{
   const a=RIGHTARROW[e.code];
