@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-18.1533';
+const BUILD='2026-08-18.1613';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -4597,7 +4597,27 @@ let fxwReady=false;
                wrap kept the low edge the cursor was born with: moving start
                under a sounding take moved nothing until the next trigger,
                which on a four-bar loop is four bars of knob at silence. */
-            if(Number.isFinite(m.lo)&&m.lo>=0)v.lo=m.lo;
+            /* THE HEAD TRAVELS WITH START (Gad, 2026-08-18: "in grain i want
+               the cloud to follow the start position more tightly", and then
+               "cloud moves only after loop circles back retriggered"). Both
+               edges have been live for a while, but they only moved where the
+               cursor WRAPS — the head itself kept reading wherever it already
+               was and did not land inside the new window until it came round.
+               Moving start by X now moves the read by X, so the cloud is where
+               you put it rather than a cycle later. It is a translation, not a
+               relock: the phase INSIDE the window is yours, and dragging start
+               should slide what you are hearing, not re-seat it on the bar. */
+            if(Number.isFinite(m.lo)&&m.lo>=0){
+              const d9=m.lo-(v.lo||0);
+              if(d9&&Number.isFinite(v.ph)){
+                v.ph+=d9; if(Number.isFinite(v.bp))v.bp+=d9;
+                const hi9=v.end||0, w9=Math.max(1,hi9-m.lo);
+                if(v.ph<m.lo||v.ph>=hi9)v.ph=((v.ph-m.lo)%w9+w9)%w9+m.lo;
+                if(Number.isFinite(v.bp)&&(v.bp<m.lo||v.bp>=hi9))
+                  v.bp=((v.bp-m.lo)%w9+w9)%w9+m.lo;
+              }
+              v.lo=m.lo;
+            }
             if(Number.isFinite(m.gain)&&m.gain>=0)v.gain=m.gain;
             /* THE CARRIER'S REMAINING LIFE, RE-CUT. A cursor is told how long
                it lives when it is born, so a loop that grows under it still
@@ -17748,6 +17768,21 @@ function recAudEvent(pi,tBeat,midi,vel,durBeats){
   dirty=true; dirtySave=true;
 }
 function recPlayNote(pi,tBeat,midi,vel,durBeats){
+  /* RETRO HEARS THE RACK, NOT THE FINGERS (Gad, 2026-08-18: "the arp recording
+     issue is a root issue, cause also midi channels dont record the output of
+     the arp which is expected intended behavior"). Armed rec has written the
+     arp's output since pre/post went — measured, 40 events across 32 distinct
+     times on a midi channel. Retro had not, because retroBuf is fed at the KEY
+     and the key is one held note however many the rack makes of it. Holding
+     tab afterwards therefore handed you three long notes where you had just
+     heard an arpeggio. It is fed here now, whether or not rec is armed, since
+     retro's whole point is that you did not have to arm anything — and the
+     key's own push is suppressed while a generator is running, or the two
+     would both land. */
+  if(T.playing&&retroBuf[pi]){
+    retroBuf[pi].push({t:tBeat,midi,vel:vel||0.9,dur:durBeats||0.25});
+    if(retroBuf[pi].length>512)retroBuf[pi].shift();
+  }
   const pat=S.patterns[S.editPat];
   if(!T.playing||pat.state!=='rec')return;
   const lane=pat.lanes[pi];
@@ -21029,9 +21064,19 @@ const onKeyUp=e=>{
        displacement and clamped fast taps to 0.05 stubs. Retro is how most
        takes happen; it has to hear the same lengths live rec writes. */
     const heldB=r.press?Math.max(0,(AC.currentTime-r.press)/spb()):0;
-    retroBuf[r.pi].push({t:r.ts,midi:r.midi,vel:r.vel,
-      dur:Math.max(0.05,heldB,gridNow()-r.ts)});
-    if(retroBuf[r.pi].length>512)retroBuf[r.pi].shift();
+    /* …AND NOT WHEN A GENERATOR IS MAKING THE NOTES. Same test the lane write
+       uses: with an arp, chord or random-pitch slot running, what you heard was
+       the rack's output and recPlayNote has already put it in retro. Pushing
+       the held key on top would give tab BOTH — the arpeggio and the three
+       long notes underneath it. */
+    const plyR=isKit(S.presets[r.pi])
+      ?(kitSlot(S.presets[r.pi],r.midi)||{ply:[]}).ply:S.presets[r.pi].ply;
+    const genR=T.playing&&plyR.some(sl=>(sl.typ===2||sl.typ===1||sl.typ===13)&&!sl.off);
+    if(!genR){
+      retroBuf[r.pi].push({t:r.ts,midi:r.midi,vel:r.vel,
+        dur:Math.max(0.05,heldB,gridNow()-r.ts)});
+      if(retroBuf[r.pi].length>512)retroBuf[r.pi].shift();
+    }
     delete rPend[c];
   }
   if(c==='Tab'){
@@ -22025,7 +22070,12 @@ const chipList=pre=>sectionChips(pre).flatMap(g=>g.items);
 function initLane(l){
   if(!l)return;
   l.clear(); delete l._cap; delete l._rec;
-  l.unit='B'; l.count=1; l.auto=true; l.state='on'; l.grid=0.25;
+  /* THE DEFAULT LENGTH IS THE ONE IN SETTINGS (Gad, 2026-08-18: "should reset
+     the bars to defaultlengeth (in settings)"). A hard 1 was a second answer
+     to a question `defLen` already answers, and the two disagreed the moment
+     he changed it. It still comes up LISTENING, so the length only shows if
+     you turn listening off — but when it does, it is the one you chose. */
+  l.unit='B'; l.count=DEFLENS[CFG.defLen]; l.auto=true; l.state='on'; l.grid=0.25;
   l.qlive=1; l.qpost=1;
 }
 function clearLane(pi){
@@ -22046,7 +22096,28 @@ function clearLane(pi){
      are not in the way. */
   const had9=l.events.length;
   if(had9){ l.clear(); delete l._cap; delete l._rec; }
-  else initLane(l);
+  else{
+    initLane(l);
+    /* …AND AN AUDIO CHANNEL GOES BACK TO ITS OWN INITIAL STATE, keeping the
+       take (Gad: "should reset also audio states to init without removing the
+       sample"). The second press is "nothing decided about this lane yet", and
+       on an audio channel the decisions are not only in the lane — speed, crop,
+       sync, keys mode and the cloud are all things you set. The BUFFER is not a
+       decision, it is the material, so it stays; ⌫ on the sample field is still
+       the only thing that takes a take off a channel. */
+    if(isAudioCh(pi)&&S.presets[pi]){
+      /* AUDDEF is the initial state this file already names — crop, speed,
+         sync, levels, window — and audDefaults adds the ones that decide what
+         the channel IS. kmode and auto are set explicitly because "init" for a
+         tape channel is position keys with the loop running, which is what a
+         fresh one comes up as. */
+      const au9=S.presets[pi].au||(S.presets[pi].au={});
+      Object.assign(au9,AUDDEF,{kmode:0,auto:1});
+      delete au9._mode0;
+      audDefaults(S.presets[pi]);
+      applyCmode(pi); engine.audLive(pi); engine.audTwin(pi);
+    }
+  }
   if(retroBuf[pi])retroBuf[pi]=[];
   flash(pi===0?'master timeline cleared'
              :'ch '+pi+CLIPKEYS[(S.clipAt||{})[pi]??0]+' cleared'+
