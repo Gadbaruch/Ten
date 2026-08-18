@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-18.1059';
+const BUILD='2026-08-18.1104';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -14871,9 +14871,19 @@ const HE={
          press right now" instead of making you find the lit ones among the
          lit ones. Each modifier owns a different hue, or the highlight would
          tell you a modifier is down without telling you which. */
-      const held = KM.shl ? {k:'ShiftLeft', set:LEDGBL,   c:LEDC.gbl,   t:'G'}
-                 : HOLD.t ? {k:'AltLeft',   set:LEDTOOL,  c:LEDC.tool,  t:'T'}
-                 : KM.scp ? {k:'ControlLeft',set:LEDSCOPE,c:LEDC.scope, t:'C'}
+      /* A LATCH KEEPS THE HIGHLIGHT UP (Gad, 2026-08-17: "when modifiers are
+         unpressed return to normal colors, unless they are latched, then bring
+         back when unlatched"). So each one asks the SAME question its handlers
+         ask, rather than only "is the key physically down":
+           global  KM.shl        — left shift has no latch, so it clears on release
+           tools   HOLD.t        — armed rather than held, so it already persists
+           scope   altOf()       — KM.scp OR KM.altLatch, which is the latched one
+         Reading KM.scp alone made a latched scope drop back to normal colours
+         while it was still very much open, which is the worst case: the board
+         says you are out of a mode you are in. */
+      const held = KM.shl   ? {k:'ShiftLeft',  set:LEDGBL,  c:LEDC.gbl,   t:'G'}
+                 : HOLD.t   ? {k:'AltLeft',    set:LEDTOOL, c:LEDC.tool,  t:'T'}
+                 : altOf({}) ? {k:'ControlLeft',set:LEDSCOPE,c:LEDC.scope,t:KM.altLatch?'CL':'C'}
                  : null;
       if(held){
         set(held.k,held.c,1);
