@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-18.1146';
+const BUILD='2026-08-18.1154';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1391,7 +1391,7 @@ const SETTINGS=[
  {n:'led digits',g:'Input',h:()=>!HE.on||HE.kind!==2,
    v:()=>CFG.ledOn?('on · '+(HE._ledWrites||0)+' writes'):'off',
    a:()=>{CFG.ledOn=CFG.ledOn?0:1; saveCfg();
-     if(CFG.ledOn){HE._ledSig=null; HE._ledMode=0; HE.ledDigits(true);
+     if(CFG.ledOn){HE._ledSig=null; HE._ledLast=null; HE._ledMode=0; HE.ledDigits(true);
        flash('yellow = selected channel · teal = the rest · bright = has events',6000);}
      else{HE._ledSig=null; HE.ryLightMode(1,{bright:4}); flash('lights back to always-on',4000);}
      dirty=true;}},
@@ -14791,14 +14791,42 @@ const HE={
     if(performance.now()-(this.lastDownAt||0)<40)return false;
     return true;
   },
+  /* WRITE ONLY THE CHUNKS THAT CHANGED. Gad: "when I switch a channel and then
+     immediately press the keys, the channel color doesn't change until I
+     release the letter keys." That is the idle gate doing its job, but paying
+     a SEVEN-report full picture for a change that touches two lamps is what
+     made the gate bite so hard in the first place.
+     A channel switch moves the old selected digit and the new one — at most two
+     56-byte chunks, often one. So diff against the frame last written and send
+     only what moved, and let a change that small through even while keys are
+     down: one or two reports is the floor we measured, and holding the repaint
+     until your hands stop is worse than a risk we already know the size of.
+     A full repaint (7 chunks) still waits for a gap. */
+  DIFFMAX:2,
   ledDrain(){
     if(this._ledBusy||!this._ledWant)return;
     /* not idle: keep the frame, write it when the hands lift. The 60ms watchdog
        is already calling back, so nothing needs its own timer. */
-    if(!this.ledIdle())return;
-    const rgb=this._ledWant; this._ledWant=null; this._ledBusy=1;
+    const rgb=this._ledWant;
+    /* which chunks differ from what the board is actually showing */
+    const prev=this._ledLast, ch=[];
+    if(prev){
+      for(let c=0;c<7;c++){
+        const a=c*56, b=Math.min(a+56,this.LEDN*3);
+        for(let i=a;i<b;i++)if(rgb[i]!==prev[i]){ch.push(c); break;}
+      }
+      if(!ch.length){this._ledWant=null; return;}          // nothing to say
+    }
+    const small=prev&&ch.length<=this.DIFFMAX;
+    if(!small&&!this.ledIdle())return;                     // a big repaint waits for a gap
+    this._ledWant=null; this._ledBusy=1;
     this._ledWrites=(this._ledWrites||0)+1;
-    this.ryLightPic(rgb,0).then(r=>{
+    this._ledLast=rgb.slice();
+    const put=small
+      ? (async()=>{for(const c of ch){const r=await this.ryLightChunk(rgb,c,0); if(r!=='sent')return r;}
+                   return 'sent';})()
+      : this.ryLightPic(rgb,0);
+    put.then(r=>{
       if(r!=='sent'){flash('led write: '+r,6000); return;}
       /* the mode only has to be set once — resending it per frame doubles the
          traffic and it is the same value every time */
@@ -17992,7 +18020,7 @@ const LEDC={
   gbl:[200,0,255], tool:[0,255,110], scope:[0,230,255]};
 /* which keys do anything under each held modifier — the highlight sets */
 const LEDGBL=['KeyQ','KeyO','KeyB','KeyM','KeyS','Escape'];
-const LEDTOOL=['KeyC','KeyX','KeyV','KeyZ','KeyS'];
+const LEDTOOL=['KeyC','KeyX','KeyV','KeyZ','KeyS','KeyN','KeyL','KeyE','KeyI'];
 const LEDSCOPE=['KeyA','KeyU','KeyD','KeyE','KeyF','KeyL','KeyK','Slash','KeyR',
   'KeyG','KeyS','KeyP','KeyC','KeyQ','KeyB','KeyO','KeyX','Semicolon','Quote'];
 /* ← is AltRight and ↓ is ContextMenu on this board; ↑ is ControlRight and → is
@@ -18535,6 +18563,23 @@ const onKeyDown=e=>{
       const op=K==='KeyC'?'copy':K==='KeyX'?'cut':'paste';
       if(modLearnOp(op))return;
       clipboardOp(op); return;}
+    /* THE WHOLE FILE SET, not just save. Gad: "I still don't have export. I have
+       save. but not export load and all the stuff that were only on win, are now
+       gone." Taking them off the win key was only half of "put all the tools
+       from win ONLY on left alt" — new, load, export and import lived on ⌘ and
+       nowhere else, so removing ⌘ from the left hand removed them outright.
+       They are ⌥ keys now, alongside the save that already was one. */
+    if(K==='KeyN'){e.preventDefault(); HOLD.tUsed=true; disarmTools();
+      PICK={mode:'new',sel:S.setSlot??0,confirm:true,peek:false};
+      flash('start a new set? enter confirms · esc cancels'); dirty=true; return;}
+    if(K==='KeyL'){e.preventDefault(); HOLD.tUsed=true; disarmTools();
+      PEEKED=null; PICK={mode:'load',sel:S.setSlot??0,confirm:false,peek:false};
+      dirty=true; return;}
+    if(K==='KeyE'){e.preventDefault(); HOLD.tUsed=true; disarmTools();
+      if(e.shiftKey)linkFile(); else {PICK={mode:'export',sel:0}; dirty=true;}
+      return;}
+    if(K==='KeyI'){e.preventDefault(); HOLD.tUsed=true; disarmTools();
+      importSet(); return;}
   }
   AC.resume();
   const c=e.code;
