@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-18.1217';
+const BUILD='2026-08-18.1444';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -14717,7 +14717,7 @@ const HE={
          without costing a second colour. */
       for(const code in LEDROLE)set(code,LEDC[LEDROLE[code]],LEDDIM[code]||1);
       for(const sl in RY_KEYS){const code=RY_KEYS[sl];
-        if(/^Key[A-Z]$/.test(code))set(code,LEDC.yellow,1);}   // letters: full yellow
+        if(/^Key[A-Z]$/.test(code))set(code,LEDC.yellow,0.74);}  // letters: just under the selected digit
       sig+='L'+sel;
       for(let i=0;i<10;i++){
         const here=(sel===i);
@@ -14728,6 +14728,8 @@ const HE={
            ten lamps at two levels reads as inconsistency rather than as
            information. One level for "not selected", full yellow for the one
            that is, exactly matching the letters. */
+        /* the selected digit is FULL, and the letters sit just under it — it
+           is the one lamp that has to be findable without looking */
         set(RY_KEYS[this.DIGSLOT[i]], here?LEDC.yellow:LEDC.amber, here?1:0.45);
       }
     }catch(_){return null;}
@@ -18029,15 +18031,18 @@ const LEDC={
      bright yellow, and the other channel digits should be darker yellow like
      more orange". A different hue made them read as a different KIND of thing;
      they are the same thing, not selected. */
-  yellow:[255,228,90], amber:[255,130,0], red:[255,0,0], teal:[0,200,160],
+  yellow:[255,238,130], amber:[255,130,0], red:[255,0,0], teal:[0,200,160],
   wave:[255,120,0],
   blue:[0,80,255], pink:[255,0,140], white:[255,255,255],
   /* the three held modifiers each get their OWN hue, or "the keys light up"
      tells you a modifier is down without telling you WHICH */
   gbl:[200,0,255], tool:[0,255,110], scope:[0,230,255]};
 /* which keys do anything under each held modifier — the highlight sets */
-const LEDGBL=['KeyQ','KeyO','KeyB','KeyM','KeyS','Escape'];
-const LEDTOOL=['KeyC','KeyX','KeyV','KeyZ','KeyS','KeyN','KeyL','KeyE','KeyI'];
+/* what is LEFT on shift after the merge — esc opens settings and c copies the
+   patch as JSON. Everything else on this modifier is now free. */
+const LEDGBL=['Escape','KeyC'];
+const LEDTOOL=['KeyC','KeyX','KeyV','KeyZ','KeyS','KeyN','KeyL','KeyE','KeyI',
+  'KeyQ','KeyO','KeyB','KeyM','KeyK'];
 const LEDSCOPE=['KeyA','KeyU','KeyD','KeyE','KeyF','KeyL','KeyK','Slash','KeyR',
   'KeyG','KeyS','KeyP','KeyC','KeyQ','KeyB','KeyO','KeyX','Semicolon','Quote'];
 /* ← is AltRight and ↓ is ContextMenu on this board; ↑ is ControlRight and → is
@@ -19154,7 +19159,7 @@ const onKeyDown=e=>{
   /* THE ACTION IS THE PRESS. Waiting for the keyup to decide tap-vs-hold made
      the click land late; now the toggle fires the moment the key goes down and
      the scope opens anyway — arrows after it still set the tempo. */
-  if(c==='KeyM'&&gblOf(e)&&!HOLD.q){
+  if(c==='KeyM'&&toolsOf(e)&&!HOLD.q){
     if(!e.repeat){HOLD.m=true; HOLD.mUsed=false;
       S.metro=!S.metro; flash('click '+(S.metro?'on':'off')); dirty=true;}
     return;}
@@ -19163,12 +19168,12 @@ const onKeyDown=e=>{
      utility, so it sits with the other things left shift carries. */
   if(c==='KeyC'&&KM.shl&&e.shiftKey&&!e.ctrlKey&&!e.repeat){e.preventDefault();
     copyPatch(); return;}
-  if(c==='KeyO'&&gblOf(e)&&!e.repeat){               // ⌃o — how recording meets what is there
+  if(c==='KeyO'&&toolsOf(e)&&!e.repeat){               // ⌃o — how recording meets what is there
     CFG.overdub=CFG.overdub?0:1; saveCfg();
     flash(CFG.overdub?'OVERDUB — recording adds to what is there'
                      :'OVERWRITE — recording replaces what the playhead passes');
     dirty=true; return;}
-  if(c==='KeyB'&&gblOf(e)&&!e.repeat){               // tap tempo, on repeated taps
+  if(c==='KeyB'&&toolsOf(e)&&!e.repeat){               // tap tempo, on repeated taps
     const n2=performance.now();
     taps=taps.filter(t2=>n2-t2<3000); taps.push(n2);
     if(taps.length>=2){
@@ -19184,7 +19189,14 @@ const onKeyDown=e=>{
   /* ⌃s — THE SCALE, held: ←→ walks the scales, ↑↓ moves the key a semitone.
      Tapped: scale on/off. The browser wants ⌃s for saving a page it did not
      write; preventDefault takes it back. */
-  if(c==='KeyS'&&gblOf(e)&&!e.repeat&&!HOLD.q){   // …unless the q scope is open: q+s = snap
+/* ONE LAYER FOR THE INSTRUMENT-WIDE SETTINGS (Gad, 2026-08-18). Left shift held
+   q/o/b/m/s and left alt held the tools, and between two whole modifier layers
+   exactly ONE letter collided — s, save against scale. Two layers to keep one
+   letter apart is a bad trade, so they merge onto left ⌥ and LEFT SHIFT IS
+   FREED for performance.
+   Save keeps s: it is ⌘s everywhere on earth and the muscle memory is not
+   ours to spend. Scale takes K, next to the KEY it belongs with. */
+  if(c==='KeyK'&&toolsOf(e)&&!e.repeat&&!HOLD.q){   // …unless the q scope is open: q+s = snap
     e.preventDefault(); HOLD.sc=true; HOLD.scUsed=false;
     CFG.scaleOn=CFG.scaleOn?0:1; saveCfg();
     flash('scale '+(CFG.scaleOn?NN[CFG.key||0]+' '+SCALES[CFG.scale||0][0]:'OFF — chromatic'));
@@ -19212,14 +19224,14 @@ const onKeyDown=e=>{
             :'already on the '+gridName(g0)+' grid · ch '+tg.join(' '));
     dirty=true; dirtySave=true; return;
   }
-  if(c==='KeyQ'&&gblOf(e)&&!e.repeat&&S.layer>=1&&!HOLD.q){
+  if(c==='KeyQ'&&toolsOf(e)&&!e.repeat&&S.layer>=1&&!HOLD.q){
     e.preventDefault(); HOLD.q=true; HOLD.qUsed=false;
     /* the toggle moved to the RELEASE: reaching for q+s (post-rec snap) or
        q+digit (grid) used to flip live-Q on the way in, every time. Tap =
        toggle; hold-and-use = the scope, with Q left exactly as it was. */
     flash('Q — tap toggles live quantize · s snaps recorded notes · digits set the grid');
     dirty=true; return;}
-  if(c==='KeyQ'&&gblOf(e)&&!e.repeat&&!HOLD.q){  // ⌃q = live-quantize toggle, everywhere
+  if(c==='KeyQ'&&toolsOf(e)&&!e.repeat&&!HOLD.q){  // ⌃q = live-quantize toggle, everywhere
     CFG.qOn=CFG.qOn?0:1; saveCfg();
     flash('live quantize '+(CFG.qOn?'ON':'OFF')+' · grid '+gridName(gridOf())+' — digits change it, s snaps');
     dirty=true; return;}
