@@ -10,6 +10,8 @@ with our removal of poly mode from this channel type, it feels very good").
 - **Pitch survives a mode switch**, both ways and through the fit: stretch +3
   → tape → grain → stretch reads 523.3 / 523.3 / 522.4 / 523.3 where the last
   hop used to come home at 440. Time is what gives instead, deliberately.
+- **The loop length is a row above the meters** — every lane at once, and a
+  lane still listening shows a dot rather than the length it will not keep.
 - **Auto off replays, and pitch keys fall back.** A recorded lane replayed into
   silence with the loop off, because the replay MOVES a head and there was none
   to move (alive 0 → 0.4 of the loop, which is the two gestures' own length).
@@ -76,7 +78,6 @@ with our removal of poly mode from this channel type, it feels very good").
    matter are the ones after the last release.
    Retro rec is a third writer worth checking with it (`retroBuf` → the retro
    block writes `midi:` on every event plus cue/pk when present).
-2. **The loop-length cell back in the grid**, above the meter.
 4. **Grain: quantize the density.**
 5. **Grain: the cloud should follow `pos` more tightly** — it moves with a lag,
    and that lag is the slew every cloud dial goes through.
@@ -2368,7 +2369,7 @@ audio, not from the param. That is a probe limitation, not a finding.
    Whole notes are centred now (they keep the take's own stereo); grains
    still scatter, which is right for grains and wrong as a "width" control.
 
-6. **More factory phrases** — `python3 tools/gen_samples.py <name>` re-rolls
+5. **More factory phrases** — `python3 tools/gen_samples.py <name>` re-rolls
    one, no args does the shelf. Prompts are the shelf; see the docstring for
    what to ask for (phrases, never one-shots).
 
