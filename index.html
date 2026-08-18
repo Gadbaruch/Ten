@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-18.1502';
+const BUILD='2026-08-18.1513';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -14676,44 +14676,60 @@ const HE={
   /* ONE FRAME BUILDER, so `chunk` and `full` are a real A/B: the same bytes go
      on the wire either way and only the number of reports differs. Returns the
      rgb array and stashes the signature; writing is somebody else's job. */
+  /* WHAT WORKS WHILE TAB IS HELD — the keys that actually have a meaning under
+     it, so the red field is not a wall you have to remember your way through:
+     - / =  loop length · backspace  erase · the digits  arm that channel. */
+  TABKEYS:['Minus','Equal','Backspace'],
   buildFrame(){
     const rgb=new Array(this.LEDN*3).fill(0);
     let sig='';
     const set=(code,c,g)=>{const sl=RY_SLOT_OF[code]; if(sl===undefined)return;
       rgb[sl*3]=Math.round(c[0]*g); rgb[sl*3+1]=Math.round(c[1]*g); rgb[sl*3+2]=Math.round(c[2]*g);};
+    /* THE CHANNEL ROW, shared by the resting board and the record field — the
+       digits mean the same thing in both, so they are painted by one piece of
+       code rather than two that can drift. */
+    const digits=()=>{
+      const p=S.patterns[S.editPat], sel=S.curPreset|0, mSel=!!S.mSel;
+      const anySolo=!!(p&&p.lanes.some(l=>l&&l.solo));
+      sig+='L'+(mSel?'M':sel);
+      for(let i=0;i<10;i++){
+        const lane=p&&p.lanes[i];
+        const here=i===0?mSel:(!mSel&&sel===i);
+        const has=!!(lane&&lane.events&&lane.events.length);
+        const audible=lane?(anySolo?!!lane.solo:!lane.mute):false;
+        const silenced=has&&!audible;
+        /* CHANNEL 0 IS THE MASTER and it is pure white — it is not one of the
+           ten, it is what the ten go through, so it does not share their hue.
+           Level 2 at rest so it reads as present without competing with the
+           cursor, full when it IS the cursor. */
+        const c = i===0 ? LEDC.white
+                : here ? LEDC.yellow
+                : silenced ? LEDC.red : LEDC.amber;
+        const lvl = i===0 ? (here?4:2) : here?4:(!has?0:4);
+        sig+=(here?'S':'.')+(i===0?'m':has?(audible?'p':'m'):'-');
+        set(RY_KEYS[this.DIGSLOT[i]], c, this.LEDLVL[lvl]);
+      }
+      return mSel;
+    };
     try{
-      const p=S.patterns[S.editPat], sel=S.curPreset|0;
-      /* A HELD MODIFIER TAKES THE WHOLE BOARD. Gad: "highlight only other keys
-         that work with it and make them follow the same color." Only means
-         only — everything else goes dark, so the board answers "what can I
-         press right now" instead of making you find the lit ones among the
-         lit ones. Each modifier owns a different hue, or the highlight would
-         tell you a modifier is down without telling you which. */
-      /* A LATCH KEEPS THE HIGHLIGHT UP (Gad, 2026-08-17: "when modifiers are
-         unpressed return to normal colors, unless they are latched, then bring
-         back when unlatched"). So each one asks the SAME question its handlers
-         ask, rather than only "is the key physically down":
-           global  KM.shl        — left shift has no latch, so it clears on release
-           tools   HOLD.t        — armed rather than held, so it already persists
-           scope   altOf()       — KM.scp OR KM.altLatch, which is the latched one
-         Reading KM.scp alone made a latched scope drop back to normal colours
-         while it was still very much open, which is the worst case: the board
-         says you are out of a mode you are in. */
-      /* RECORDING TAKES THE WHOLE FIELD (Gad, 2026-08-18: "when i hold tab key
-         or during when tab/rec is latched, the whole letter keyboard becomes
-         red like the tab"). It outranks the modifier highlights because it is
-         not a layer you are choosing, it is a thing that is HAPPENING to
-         everything you play — and every letter is armed, so every letter says
-         so. Tab itself sits at full, the field just under it. */
-      const recOn = HOLD.tab || HOLD.tabLatch ||
-                    (S.arr&&S.arr.state==='rec');
+      /* RECORDING TAKES THE WHOLE FIELD (Gad, 2026-08-18). It outranks the
+         modifier highlights because it is not a layer you are choosing, it is
+         a thing HAPPENING to everything you play — and every letter is armed,
+         so every letter says so. The channel row and the keys that mean
+         something under tab keep their resting colours on top of it, so the
+         field tells you what is armed AND what you can still reach. */
+      const recOn = HOLD.tab || HOLD.tabLatch || (S.arr&&S.arr.state==='rec');
       if(recOn){
-        set('Tab',LEDC.red,1);
         for(const sl in RY_KEYS){const code=RY_KEYS[sl];
           if(/^Key[A-Z]$/.test(code))set(code,LEDC.red,0.6);}
+        set('Tab',LEDC.red,1);
+        for(const code of this.TABKEYS)
+          set(code,LEDC[LEDROLE[code]]||LEDC.teal,LEDDIM[code]||1);
+        sig='R'+(HOLD.tab?'h':'')+(HOLD.tabLatch?'l':'')+
+            (S.arr&&S.arr.state==='rec'?'r':'');
+        digits();
         this._hl=1;
-        return (this._sig='R'+(HOLD.tab?'h':'')+(HOLD.tabLatch?'l':'')+
-                          (S.arr&&S.arr.state==='rec'?'r':''), rgb);
+        return (this._sig=sig, rgb);
       }
       const held = (KM.shl||KM.shlLatch) ? {k:'ShiftLeft',set:LEDGBL,c:LEDC.gbl,t:KM.shlLatch?'GL':'G'}
                  : HOLD.t   ? {k:'AltLeft',    set:LEDTOOL, c:LEDC.tool,  t:'T'}
@@ -14727,45 +14743,13 @@ const HE={
         return (this._sig=sig, rgb);
       }
       this._hl=0;
-      /* everything by its ROLE, then the channels on top. LEDDIM is the one
-         exception: Gad wants ← and ↓ at half of → and ↑, so the pair you step
-         BACK with reads differently from the pair you step forward with
-         without costing a second colour. */
       for(const code in LEDROLE)set(code,LEDC[LEDROLE[code]],LEDDIM[code]||1);
+      const mSel=digits();
+      /* THE LETTERS FOLLOW THE CURSOR'S HUE, so the field your hands play on
+         says which strip they are playing into — white while the master is
+         selected, yellow otherwise. */
       for(const sl in RY_KEYS){const code=RY_KEYS[sl];
-        if(/^Key[A-Z]$/.test(code))set(code,LEDC.yellow,0.74);}  // letters: just under the selected digit
-      sig+='L'+sel;
-      /* BRIGHTNESS IS WHAT YOU HEAR, HUE IS WHERE YOU ARE (Gad, 2026-08-18).
-         Selection stopped being a brightness because brightness had a better
-         job — it says whether the channel is SOUNDING:
-             nothing in it        0   dark
-             sounding             4   full
-             muted, or not soloed 1   lit enough to still read the colour
-         The audible test is the SCHEDULER's own, lifted verbatim from the two
-         places that decide what plays — `anySolo ? !lane.solo : lane.mute`
-         means silent — so the board can never disagree with your ears.
-         One departure, because the rule as stated would hide it: a SELECTED but
-         empty channel shows at 1 rather than 0. A selection you cannot see is
-         not a selection. */
-      const anySolo=!!(p&&p.lanes.some(l=>l&&l.solo));
-      for(let i=0;i<10;i++){
-        const lane=p&&p.lanes[i];
-        const here=(sel===i);
-        const has=!!(lane&&lane.events&&lane.events.length);
-        const audible=lane?(anySolo?!!lane.solo:!lane.mute):false;
-        /* THE SELECTED DIGIT IS ALWAYS FULL, content or not, muted or not — it
-           is the cursor, and a cursor that dims when the thing under it is
-           quiet is a cursor you have to hunt for. Hue alone says selected.
-           SILENCED-BUT-LOADED IS RED, full brightness: a channel holding
-           something you cannot hear is not a dim version of a playing one, it
-           is a different state, and red is the colour the board already uses
-           for the keys that take something away. */
-        const silenced=has&&!audible;
-        const lvl=here?4:(!has?0:4);
-        sig+=(here?'S':'.')+(has?(audible?'p':'m'):'-');
-        set(RY_KEYS[this.DIGSLOT[i]],
-            here?LEDC.yellow:(silenced?LEDC.red:LEDC.amber), this.LEDLVL[lvl]);
-      }
+        if(/^Key[A-Z]$/.test(code))set(code,mSel?LEDC.white:LEDC.yellow,0.74);}
     }catch(_){return null;}
     this._sig=sig;
     return rgb;
