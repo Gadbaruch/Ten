@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-18.1444';
+const BUILD='2026-08-18.1452';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -14719,18 +14719,27 @@ const HE={
       for(const sl in RY_KEYS){const code=RY_KEYS[sl];
         if(/^Key[A-Z]$/.test(code))set(code,LEDC.yellow,0.74);}  // letters: just under the selected digit
       sig+='L'+sel;
+      /* BRIGHTNESS IS WHAT YOU HEAR, HUE IS WHERE YOU ARE (Gad, 2026-08-18).
+         Selection stopped being a brightness because brightness had a better
+         job — it says whether the channel is SOUNDING:
+             nothing in it        0   dark
+             sounding             4   full
+             muted, or not soloed 1   lit enough to still read the colour
+         The audible test is the SCHEDULER's own, lifted verbatim from the two
+         places that decide what plays — `anySolo ? !lane.solo : lane.mute`
+         means silent — so the board can never disagree with your ears.
+         One departure, because the rule as stated would hide it: a SELECTED but
+         empty channel shows at 1 rather than 0. A selection you cannot see is
+         not a selection. */
+      const anySolo=!!(p&&p.lanes.some(l=>l&&l.solo));
       for(let i=0;i<10;i++){
+        const lane=p&&p.lanes[i];
         const here=(sel===i);
-        sig+=here?'S':'.';
-        /* EVERY UNSELECTED DIGIT IS IDENTICAL. Gad: "unselected channel digits
-           colors are inconsistent, make them all the same except selected".
-           They were two brightnesses — brighter with events, dim without — and
-           ten lamps at two levels reads as inconsistency rather than as
-           information. One level for "not selected", full yellow for the one
-           that is, exactly matching the letters. */
-        /* the selected digit is FULL, and the letters sit just under it — it
-           is the one lamp that has to be findable without looking */
-        set(RY_KEYS[this.DIGSLOT[i]], here?LEDC.yellow:LEDC.amber, here?1:0.45);
+        const has=!!(lane&&lane.events&&lane.events.length);
+        const audible=lane?(anySolo?!!lane.solo:!lane.mute):false;
+        const lvl=!has?(here?1:0):(audible?4:1);
+        sig+=(here?'S':'.')+lvl;
+        set(RY_KEYS[this.DIGSLOT[i]], here?LEDC.yellow:LEDC.amber, this.LEDLVL[lvl]);
       }
     }catch(_){return null;}
     this._sig=sig;
