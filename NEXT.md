@@ -44,18 +44,25 @@ with our removal of poly mode from this channel type, it feels very good").
    not run again, because its output is already in the events. The arp reaches
    a pitch-mode audio channel and steps properly — distinct times 1 → 15 for
    three keys held two beats.
-   **WHAT IS NOT EXPLAINED, and must be before this is called done:** with
-   THREE keys held, both audio lanes came back with a mix of `cue`/`pk` events
-   AND raw `midi` ones (audio cue: 19 events, kinds [midi, cue]; audio pitch:
-   17, kinds [midi, pk]). One key alone records clean (1 event, cue 7, no raw
-   midi), so it is the chord/multi-note path, not the single-note one. A raw
-   midi event on an audio lane is dead — the replay reads only cue/pk/fz — so
-   this is the same family as the arp bug and something other than
-   `recPlayNote` is writing. Find that writer first.
-   Also still true: a hand-played pitch key returns from the `pmono` branch
-   before the note path, so it does not pass through the rack at all. And this
-   has to work with tab-held retro rec, which is a THIRD writer (`retroBuf` →
-   the retro block writes `midi:` on every event plus cue/pk when present).
+   **THERE WAS NO ROGUE WRITER — that hunt is closed.** The mixed
+   `[midi, cue]` lanes were a PROBE ARTEFACT: three channels tested in one page
+   load without a reload. Re-run fresh with a trap on the lane's own push, both
+   modes come back with zero events outside the vocabulary. The "distinct times
+   1 → 15" in that commit message came from the same bad run and is WRONG —
+   fresh, it is still 1.
+   The generic keyboard recorder DOES write a raw {midi} event and would have
+   been that writer the moment a pitch key went through the rack; it speaks
+   recAudEvent now, so the door is safe before anything walks through it.
+   **THE REAL BLOCKER IS OWNERSHIP.** A hand-played pitch key returns from the
+   `pmono` branch before `engine.trigger`, so the rack never sees it. Falling
+   through is one line — noteOn already has `audBendNote` — but `pmono`
+   registers `AUD.gk`, and `endAudHold`'s pmono half owns the release, the
+   legato fall-back, the auto-off stop and the retro/lane write. trigger's
+   handle owns none of those. Moving all four onto the shim is the change, and
+   half of it is a stuck bend on the most-used key in the instrument, so it
+   gets its own turn with the release measured first.
+   Retro rec is a third writer worth checking with it (`retroBuf` → the retro
+   block writes `midi:` on every event plus cue/pk when present).
 2. **The loop-length cell back in the grid**, above the meter.
 4. **Grain: quantize the density.**
 5. **Grain: the cloud should follow `pos` more tightly** — it moves with a lag,

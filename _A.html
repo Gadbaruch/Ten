@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-18.1108';
+const BUILD='2026-08-18.1056';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -2097,18 +2097,7 @@ const FX_P=sl=>{
     SP('size','p1','lin',{min:0,max:1,step:0.05,fmt:v=>Math.round(50+v*750)+'ms'}),SPMIX()];
   return base.concat(tail[t]||[]);
 };
-/* STAGE IS GONE (Gad, 2026-08-18: "we should kill the idea of pre and post and
-   ALWAYS record the notes coming OUT of play effects never just the incoming
-   notes this will simplify the architecture and force decisions"). It was a
-   per-slot switch for a question the instrument should only have one answer to,
-   and the default answer was the surprising one: an arp you could hear was
-   recorded as the single key you were holding, so the take never matched the
-   performance. Now the rack's OUTPUT is what the lane gets, on midi and audio
-   alike, and p6 is left in the data as a spare rather than migrated out.
-   The half that makes it safe was already written and is now unconditional: on
-   REPLAY (durSec != null) a generator does not run again, because its output is
-   already in the events. Record the output once, replay it as notes. */
-const PLY_SCOPE=[];
+const PLY_SCOPE=[SP('stage','p6','enum',{opts:['post','pre']})];   // pre = the recorder captures the output
 const PLY_P=sl=>{
   const base=[SP('type','typ','enum',{opts:PTYPES,skip:PHIDE})];
   const T=(...a)=>base.concat(a,PLY_SCOPE);
@@ -9969,19 +9958,19 @@ class Engine{
     for(let i2=0;i2<p.ply.length;i2++){  // chord slots BEFORE the arp expand pre-pool
       const sl=p.ply[i2];
       if(sl.typ===1&&!sl.off&&(arpIdx<0||i2<arpIdx)){
-        if(durSec!=null)continue;              // already in the lane, do not chord it twice
+        if(Math.round(sl.p6||0)===1&&durSec!=null)continue;   // already in the lane
         midis=midis.flatMap(m=>{const q=chordShapeFor(sl,m);return q.iv.map(o=>m+q.rt+o);});
         pads=pads.flatMap(m=>{const q=chordShapeFor(sl,m);return q.iv.map(o=>m+q.rt+o);});
         strum=sl.p2||0;   // a chord on a kit still spans pads
-        chordPre=true;                         // record the CHORD, never the root
+        if(Math.round(sl.p6||0)===1)chordPre=true;   // stage=pre: record the chord, not the root
       }
     }
     /* random pitch. With an arp running the offset belongs on each arp STEP,
        so arpTick does it there instead of once for the whole held note. */
     const rpS=arpIdx<0?p.ply.find(sl=>sl.typ===13&&!sl.off):null;
-    if(rpS&&durSec==null)                  // same double-apply guard
+    if(rpS&&!(Math.round(rpS.p6||0)===1&&durSec!=null))     // same double-apply
       midis=midis.map(m=>rpitApply(m,rpS,p));
-    const rpPre=!!rpS;
+    const rpPre=!!(rpS&&Math.round(rpS.p6||0)===1);
     if((chordPre||rpPre)&&durSec==null&&T.playing)   // live play: write every sounding note into the lane
       for(const m of midis)recPlayNote(pi,posNow(),Math.round(m),vel,0.25);
     let pcHandle=null;
@@ -10161,7 +10150,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
             en.heard=true;
             const v=this.noteOn(gridTime(bg),pi,en.midi,en.vel,en.pad??en.midi);
             v.release(gridTime(bg+div*0.85));
-            recPlayNote(pi,bg,en.midi,en.vel,div*0.85);
+            if(Math.round(euc.p6||0)===1)recPlayNote(pi,bg,en.midi,en.vel,div*0.85);
           }
         }
         const nw=gridNow();
@@ -10214,7 +10203,8 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
         for(const m of hits){
           const v=this.noteOn(gridTime(bg),pi,rpA?rpitApply(m,rpA,S.presets[pi]):m,pick.vel,pick.pad??m);
           v.release(gridTime(bg+div*0.85));
-          recPlayNote(pi,bg,m,pick.vel,div*0.85);   // the recorder captures the arp OUTPUT
+          if(Math.round(arp.p6||0)===1)             // stage=pre: the recorder captures the arp output
+            recPlayNote(pi,bg,m,pick.vel,div*0.85);
         }
         }
       }
@@ -14871,19 +14861,9 @@ const HE={
          press right now" instead of making you find the lit ones among the
          lit ones. Each modifier owns a different hue, or the highlight would
          tell you a modifier is down without telling you which. */
-      /* A LATCH KEEPS THE HIGHLIGHT UP (Gad, 2026-08-17: "when modifiers are
-         unpressed return to normal colors, unless they are latched, then bring
-         back when unlatched"). So each one asks the SAME question its handlers
-         ask, rather than only "is the key physically down":
-           global  KM.shl        — left shift has no latch, so it clears on release
-           tools   HOLD.t        — armed rather than held, so it already persists
-           scope   altOf()       — KM.scp OR KM.altLatch, which is the latched one
-         Reading KM.scp alone made a latched scope drop back to normal colours
-         while it was still very much open, which is the worst case: the board
-         says you are out of a mode you are in. */
-      const held = KM.shl   ? {k:'ShiftLeft',  set:LEDGBL,  c:LEDC.gbl,   t:'G'}
-                 : HOLD.t   ? {k:'AltLeft',    set:LEDTOOL, c:LEDC.tool,  t:'T'}
-                 : altOf({}) ? {k:'ControlLeft',set:LEDSCOPE,c:LEDC.scope,t:KM.altLatch?'CL':'C'}
+      const held = KM.shl ? {k:'ShiftLeft', set:LEDGBL,   c:LEDC.gbl,   t:'G'}
+                 : HOLD.t ? {k:'AltLeft',   set:LEDTOOL,  c:LEDC.tool,  t:'T'}
+                 : KM.scp ? {k:'ControlLeft',set:LEDSCOPE,c:LEDC.scope, t:'C'}
                  : null;
       if(held){
         set(held.k,held.c,1);
@@ -20203,19 +20183,6 @@ const onKeyDown=e=>{
           flash('loop '+(semP>0?'+':'')+semP+'st'+(vmP===2?' · glide':'')+
                 (msp>=2?' · on the grid':''));
           dirty=true; return;
-          /* WHY THIS STILL RETURNS, and what it costs (Gad, 2026-08-18: "yes
-             pitch keys should go through the play rack"). Falling through to
-             engine.trigger below is what would put the key through the rack —
-             noteOn already has its door (audBendNote) and the recorder above
-             already speaks this lane's vocabulary. What is NOT resolved is
-             ownership: this branch registers AUD.gk, and endAudHold's pmono
-             half owns the release, the legato fall-back, the auto-off stop and
-             the retro/lane write. trigger's handle owns none of those, so
-             routing through means moving all four onto the shim, and getting
-             it half right is a stuck bend on the most-used key in the
-             instrument. Do it as its own change, with the release measured
-             first. Until then the ARP does not reach a hand-played pitch key:
-             three keys held under one record at a single time. */
         }
         engine.granNode(pi);
         engine.granBuf=engine.granBuf||[];
@@ -20432,7 +20399,7 @@ const onKeyDown=e=>{
         if(S.layer>=1)rPend[c]={pi,ts:tr,midi,vel:hitVel,press:AC.currentTime};   // retro memory hears everything
         /* an active arp generates the notes — record ITS output (recPlayNote), not the held note */
         const plyOf=isKit(S.presets[pi])?(kitSlot(S.presets[pi],midi)||{ply:[]}).ply:S.presets[pi].ply;
-        const arpOn=T.playing&&plyOf.some(sl=>(sl.typ===2||sl.typ===1||sl.typ===13)&&!sl.off);
+        const arpOn=T.playing&&plyOf.some(sl=>(sl.typ===2||sl.typ===1||sl.typ===13)&&!sl.off&&Math.round(sl.p6||0)===1);
         if(recording&&arpOn&&lane.auto&&!lane._cap&&!lane.events.length){   // arp: still start the listen window
           if(CFG.listen)startCapture(lane,tr);
           else{lane.unit='B';lane.count=DEFLENS[CFG.defLen];lane.auto=false;}
@@ -20451,18 +20418,8 @@ const onKeyDown=e=>{
              a session away, is already in the lane instead of existing only in
              a pend entry that a stopped recorder would have thrown away. */
           if(!lane._cap){
-            /* AN AUDIO LANE DOES NOT HOLD NOTES, here either. This is the
-               generic live recorder and it writes a raw {midi} event, which an
-               audio lane's replay never reads — the same dead event recAudEvent
-               was written to stop the PLAY rack producing. It has never fired
-               on an audio channel because the cue and pitch branches return
-               before it; the moment a pitch key goes through the rack it does,
-               so it speaks the channel's vocabulary before that happens. */
-            if(isAudioCh(pi))recAudEvent(pi,tr,midi,hitVel,Math.max(0.05,gridOf()));
-            else{
-              lane.clear(ev=>ev.midi===midi&&Math.abs(ev.t-qt)<1e-6);
-              lane.events.push({t:qt,midi,vel:hitVel,dur:Math.max(0.05,gridOf()),born:performance.now()});
-            }
+            lane.clear(ev=>ev.midi===midi&&Math.abs(ev.t-qt)<1e-6);
+            lane.events.push({t:qt,midi,vel:hitVel,dur:Math.max(0.05,gridOf()),born:performance.now()});
             dirtySave=true;
           }
         }
