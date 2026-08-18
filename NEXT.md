@@ -7,6 +7,9 @@ with our removal of poly mode from this channel type, it feels very good").
 
 ## Landed this session, newest first — all measured unless it says otherwise
 
+- **Pitch survives a mode switch**, both ways and through the fit: stretch +3
+  → tape → grain → stretch reads 523.3 / 523.3 / 522.4 / 523.3 where the last
+  hop used to come home at 440. Time is what gives instead, deliberately.
 - **Auto off replays, and pitch keys fall back.** A recorded lane replayed into
   silence with the loop off, because the replay MOVES a head and there was none
   to move (alive 0 → 0.4 of the loop, which is the two gestures' own length).
@@ -35,15 +38,25 @@ with our removal of poly mode from this channel type, it feels very good").
 
 ## Open, in the order Gad asked for them
 
-1. **Kill pre/post — ALWAYS record what comes OUT of the play rack**, on midi
-   and audio alike. His call, and it subsumes the unfinished half above: a
-   hand-played pitch key returns from the `pmono` branch before the note path,
-   so three keys held under an arp still record three events at ONE time
-   (measured: distinct t = 1). Has to work with tab-held retro rec.
-2. **Pitch stays the same across tape/stretch/grain.** `applyCmode` folds pitch
-   into speed entering tape and never unfolds leaving it, so the round trip
-   loses it — measured: stretch +3 → tape → stretch comes back at 440.
-3. **The loop-length cell back in the grid**, above the meter.
+1. **PRE/POST IS GONE — finish the job.** The switch is removed and the rack's
+   output is what records, on midi and audio alike (his call). The double-apply
+   guards are unconditional now: on REPLAY (`durSec != null`) a generator does
+   not run again, because its output is already in the events. The arp reaches
+   a pitch-mode audio channel and steps properly — distinct times 1 → 15 for
+   three keys held two beats.
+   **WHAT IS NOT EXPLAINED, and must be before this is called done:** with
+   THREE keys held, both audio lanes came back with a mix of `cue`/`pk` events
+   AND raw `midi` ones (audio cue: 19 events, kinds [midi, cue]; audio pitch:
+   17, kinds [midi, pk]). One key alone records clean (1 event, cue 7, no raw
+   midi), so it is the chord/multi-note path, not the single-note one. A raw
+   midi event on an audio lane is dead — the replay reads only cue/pk/fz — so
+   this is the same family as the arp bug and something other than
+   `recPlayNote` is writing. Find that writer first.
+   Also still true: a hand-played pitch key returns from the `pmono` branch
+   before the note path, so it does not pass through the rack at all. And this
+   has to work with tab-held retro rec, which is a THIRD writer (`retroBuf` →
+   the retro block writes `midi:` on every event plus cue/pk when present).
+2. **The loop-length cell back in the grid**, above the meter.
 4. **Grain: quantize the density.**
 5. **Grain: the cloud should follow `pos` more tightly** — it moves with a lag,
    and that lag is the slew every cloud dial goes through.
