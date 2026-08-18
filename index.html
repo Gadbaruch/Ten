@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-18.1051';
+const BUILD='2026-08-18.1056';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -13347,8 +13347,41 @@ function applyCmode(pi){
   p.gr=p.gr||{};
   if(m===2){ if((p.gr.size??1)>=0.999)p.gr.size=p.gr._gsz??0.12; }
   else { if((p.gr.size??0.12)<0.999)p.gr._gsz=p.gr.size; p.gr.size=1; p.au.pmode=m===1?1:0; }
-  if(m===0)audFoldPitch(p.au);     // tape keeps its pitch in the speed
+  /* THE PITCH SURVIVES THE SWITCH (Gad, 2026-08-18: "switching between tape
+     and stretch and grain the pitch should stay the same"). The two families
+     keep it in different places — tape and grain in the RATE (fit x speed),
+     stretch in the SHIFTER (semis alone, which is why it holds 440 at every
+     fit) — so the same numbers mean different pitches on either side, and
+     changing the mode moved the sound. audFoldPitch only ever went one way and
+     did not know about the fit, so even entering tape was wrong once sync had
+     a say. Converted BOTH ways now, through the ratio you actually hear.
+     Time is what gives instead, and it has to: that difference IS the two
+     modes. Going to stretch the take stops running at the tape's speed; going
+     back it starts again. Only the pitch is promised. */
+  const prev0=Number.isFinite(p.au._mode0)?p.au._mode0:m;
+  if(prev0!==m){
+    const want=audHeardRatio(p.au,prev0);
+    if(m===1)p.au.semis=clamp(+(12*Math.log2(Math.max(1e-6,want))).toFixed(2),-24,24);
+    else{
+      const f0=Math.abs(audFitR(p.au))||1, sg=audSpd(p.au)<0?-1:1;
+      const s0=sg*clamp(+(want/f0).toFixed(2),0.25,4);
+      p.au.spd=s0; p.au.rate=s0;
+      /* whatever the speed range could not reach stays on semis, so a fit
+         further out than two octaves is still heard where it was */
+      const rest=+(12*Math.log2(Math.max(1e-6,want)/Math.max(1e-6,Math.abs(s0)*f0))).toFixed(2);
+      p.au.semis=Math.abs(rest)<0.005?0:rest;
+    }
+  }
+  else if(m===0)audFoldPitch(p.au);   // a patch arriving with both set, folded as before
+  p.au._mode0=m;
   engine.granNode(pi); engine.granCfg(pi); engine.audLive(pi); engine.audTwin(pi);
+}
+/* WHAT THIS CHANNEL IS ACTUALLY SOUNDING AT, as a ratio, in the mode given.
+   Stretch's shifter undoes the whole fitted rate and carries the dial alone;
+   everything else multiplies fit, speed and semis together. */
+function audHeardRatio(au,mode){
+  const sem=Math.pow(2,(au.semis??0)/12);
+  return Math.round(mode)===1?sem:Math.abs(audFitR(au))*Math.abs(audSpd(au))*sem;
 }
 /* …AND THE OTHER DIRECTION, which never existed. applyCmode writes the SIZE
    from the mode; nothing wrote the MODE from the size, so turning size down on
