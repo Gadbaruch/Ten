@@ -43,6 +43,53 @@ with our removal of poly mode from this channel type, it feels very good").
 - **A deadline, not a duration**, for the carrier's life; and a relock on the
   bar line no longer resurrects the carrier that is leaving.
 
+## QA CHECKLIST — the batch of 2026-08-18, ordered by what is most likely wrong
+
+Build 2026-08-18.1526 on localhost:3033. "not measured" means shipped on
+reasoning; test those first.
+
+ 1. Let go of a cue or pitch key at the very END of a loop — should play on
+    into the next bar. Was: a cycle of silence. NOT REPRODUCED synthetically.
+ 2. Stretch, speed larger than the loop length — sample should keep looping.
+    Was: stopped, retriggered at the bar. NOT A/B'd (failure mode is DC, not
+    silence; the probe asked the wrong question).
+ 3. Grain, move the start position while it plays, fade turned up — should
+    follow at once. ~134ms -> inside one 46ms sample, but the estimator was
+    NOISY; trust ears over the number.
+ 4. tab+-/= to halve or double the loop under a running take — no gap. Was
+    alive 0.93 with a 280ms silence; now 1.00, zero.
+ 5. Autoloop OFF: hold a key across a bar (cue and pitch) — sounds throughout
+    (0.37 -> 1.00). Let go — stops. Play again — sounds. Replay a recorded
+    lane — sounds (0.00 -> 0.40).
+ 6. Hold key 1, add key 2, release 2 — falls back to key 1 (bends 0,2 -> 0).
+ 7. Bend and release at speed x0.25 — lands where it would have been. Was 4.1s
+    forward in a 9.6s take; now -0.05s. Same for -12st.
+ 8. tape -> stretch -> grain -> tape — pitch does not move (523.3/523.3/522.4/
+    523.3; the last hop used to come home at 440). Speed and TIME do change.
+ 9. Pitch dial with sync on and a take that does not fill the bar — reads the
+    transposition you hear (0.85 take reads -3st). Was 0. Clamps past two
+    octaves of fit, which is honest.
+10. ⇧⌫ with notes — notes go, LENGTH STAYS. Again on the empty lane — resets
+    to 1 bar, listening. tab+⇧⌫ resets outright. (The two resets disagree: 1
+    bar vs 2. Gad's call.)
+11. ⇧⌫ with the STRIP up, cursor on the `sample` field — clears the lane, keeps
+    the take. Was: emptied the channel and left the performance.
+12. The `Loop` row above the meters — every lane, a dot for one still
+    listening.
+13. Audio lane, sync on, speed not x1 — the part the loop never reaches is
+    dimmed.
+14. Double/halve with sync on — playhead lands right (was +1.99s at x0.25,
+    -2.66s at x2; now 0 at every speed including reverse).
+15. Off-grid cue and pitch with quantize on — both land on the grid and record
+    where they sounded (pitch was 1.13 against the cue's 0.25).
+16. Arp on an audio channel in CUE mode with rec — the lane holds the arp's
+    output, not midi notes. In PITCH mode it still records at one time: that
+    is the open routing below.
+17. `stage` (pre/post) is gone from the play rack — output is always what
+    records, midi and audio alike. Sweep normal synth channels for fallout.
+18. `pos` and `scan` are gone from the grain page. Freeze still works; stored
+    mod/automation aimed at them now points at nothing.
+
 ## Open, in the order Gad asked for them
 
 1. **PRE/POST IS GONE — finish the job.** The switch is removed and the rack's
