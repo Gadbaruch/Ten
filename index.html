@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-18.1524';
+const BUILD='2026-08-18.1526';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -19306,7 +19306,13 @@ const onKeyDown=e=>{
      was the whole vocabulary. It reads as the field's own erase, it is
      undoable like any other (the buffer travels with the undo entry), and
      the take stays in the pool, so the same ⌫ is a step you can walk back. */
-  if(c==='Backspace'&&!e.repeat&&!HOLD.tab&&HOLD.dig<0&&S.layer>=2&&
+  /* …AND NOT WITH SHIFT (Gad, 2026-08-18: "r-shift+del should work normally to
+     delete key performance also when ch strip is visible"). ⇧⌫ is the LANE, at
+     every depth — that is the one thing it has always meant — but this branch
+     never asked, so standing on the sample field turned it into "empty the
+     channel". The field's own erase is the UNSHIFTED key; shift falls through
+     to the lane clear below, the same as it does everywhere else. */
+  if(c==='Backspace'&&!e.repeat&&!rs(e)&&!HOLD.tab&&HOLD.dig<0&&S.layer>=2&&
      MODULES[S.curMod]&&MODULES[S.curMod].prs&&isAudioCh(S.editSnd)&&
      (prsFieldDefs()[S.curParam]||{}).k==='sample'){
     e.preventDefault();
