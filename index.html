@@ -1209,7 +1209,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-18.1033';
+const BUILD='2026-08-18.1049';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -2944,7 +2944,12 @@ const KM={sl:false,shl:false,sr:false,srLatch:false,altLatch:false,scp:false};
 /* WHAT THE LATCH IS, physically. Gad's board sends one of these from its win
    key — macOS binds none of them, which is exactly why they were already the
    sound scope's stand-ins before the sound scope moved to backslash. */
-const LATCHKEY=c=>c==='Backquote'||c==='ScrollLock'||c==='Pause'||c==='Insert';
+/* LATCH MOVED TO LEFT WIN (Gad, 2026-08-17), and it is lit navy because a
+   latch is a STATE you are in, not an action you take. This frees ` — nothing
+   claims it yet. NOTE: left win is also ⌘, so ⌘-chords through the LEFT hand
+   now arm the latch; the tools layer on left ⌥ carries c/x/v/z/s, which is
+   what that layer exists for, and right ⌘ is untouched. */
+const LATCHKEY=c=>c==='MetaLeft';
 /* Latch works on the MODIFIERS too: hold latch, tap shift or option, and it
    stays down until you tap it again. Two-handed chords on a laptop keyboard
    are the thing that stops being playable first. */
@@ -5761,7 +5766,14 @@ function scheduleRange(from,to){
             if(ev.pk!==undefined){
               const ms1=Math.max(0,(timeAt(t+a.anchor)-AC.currentTime)*1000);
               const ms2=Math.max(0,(timeAt(t+Math.min(ev.dur||0.25,L3)+a.anchor)-AC.currentTime)*1000);
-              setTimeout(()=>{try{engine.audPitch(li,ev.pk);}catch(_){}},ms1);
+              setTimeout(()=>{try{
+                /* …and so does a recorded bend: with the loop off there is
+                   nothing to bend until the replay makes it */
+                if(!autoCur(S.presets[li])&&!engine.audRolling(li)){
+                  const l7=S.patterns[S.editPat]&&S.patterns[S.editPat].lanes[li];
+                  if(l7)engine.audPlay(li,AC.currentTime+0.005,l7.len,0);
+                }
+                engine.audPitch(li,ev.pk);}catch(_){}},ms1);
               /* AND THE RECORDED BEND COMES BACK IN TIME TOO. The live one got
                  its relock on the key-up; this one had none, so every replay
                  of a stored bend left the take a little further out of phase
@@ -5774,6 +5786,7 @@ function scheduleRange(from,to){
                  no there and nothing is spliced. */
               setTimeout(()=>{try{if(!(AUD.hold&&AUD.hold.pi===li)){
                 engine.audPitch(li,0);
+                if(!autoCur(S.presets[li])){engine.audStop(li);return;}
                 if(engine.audBendMovedClock(li)){engine.audReturn(li);
                   setTimeout(()=>{try{engine.audReturn(li);}catch(_){}},80);}}}catch(_){}},ms2);
             }else if(ev.fz!==undefined){
@@ -5825,12 +5838,25 @@ function scheduleRange(from,to){
                 ?Math.max(0.001,(S.presets[li].vox||{}).glide||0.08):0;
               const ms7=Math.max(0,(timeAt(tt+a.anchor)-AC.currentTime)*1000);
               const to7=cutAt(li,ev.cue);
-              setTimeout(()=>{try{engine.audMove(li,to7,gl7,1,1);
+              /* A REPLAY NEEDS A HEAD TO MOVE (Gad, 2026-08-18: "autoloop off
+                 should still playback and record key presses"). The gesture is
+                 audMove, which sends the cursor that is already reading
+                 somewhere else — and with the loop off there is no cursor at
+                 all, so a recorded lane replayed into silence. The LIVE key has
+                 made its own head since the auto-off fix; the replay has to do
+                 the same, and end it at the close of the gesture for the same
+                 reason: with no loop underneath, the jump IS the sound. */
+              const off7=!autoCur(S.presets[li]);
+              setTimeout(()=>{try{
+                if(off7&&!engine.audRolling(li))
+                  engine.audPlay(li,AC.currentTime+0.005,L2,0);
+                engine.audMove(li,to7,gl7,1,1);
                 engine.busEnvFire(li,AC.currentTime);}catch(_){}},ms7);
               const te7=tt+dj2, ms8=Math.max(0,(timeAt(te7+a.anchor)-AC.currentTime)*1000);
               setTimeout(()=>{try{
                 if(AUD.hold&&AUD.hold.pi===li)return;   // a finger owns it now
                 engine.busEnvFire(li,AC.currentTime,true);
+                if(off7){engine.audStop(li);return;}    // no bar to hand it back to
                 engine.audRelock(li);                   // …back where the bar asks
               }catch(_){}},ms8);
               return;
@@ -14792,44 +14818,48 @@ const HE={
   buildFrame(){
     const rgb=new Array(this.LEDN*3).fill(0);
     let sig='';
-    /* LEVELS ARE CONTINUOUS HERE, and indexing the table with a fraction is how
-       the decay came out BLACK: a hit at 70ms is level 2.6, LEDLVL[2.6] is
-       undefined, `||0` made it dark, and every note would have blinked off
-       mid-fade instead of falling to rest. Interpolate between the two nearest
-       stops — the named levels still land exactly on their own values. */
-    const put=(sl,c,lvl)=>{
-      const x=Math.max(0,Math.min(4,lvl)), i0=Math.floor(x), i1=Math.min(4,i0+1), f=x-i0;
-      const g=this.LEDLVL[i0]*(1-f)+this.LEDLVL[i1]*f;
+    const set=(code,c,g)=>{const sl=RY_SLOT_OF[code]; if(sl===undefined)return;
       rgb[sl*3]=Math.round(c[0]*g); rgb[sl*3+1]=Math.round(c[1]*g); rgb[sl*3+2]=Math.round(c[2]*g);};
     try{
       const p=S.patterns[S.editPat], sel=S.curPreset|0;
-      for(const sl of this.letterSlots())put(sl,this.CHSEL,1);  // letters = the selected hue
+      /* A HELD MODIFIER TAKES THE WHOLE BOARD. Gad: "highlight only other keys
+         that work with it and make them follow the same color." Only means
+         only — everything else goes dark, so the board answers "what can I
+         press right now" instead of making you find the lit ones among the
+         lit ones. Each modifier owns a different hue, or the highlight would
+         tell you a modifier is down without telling you which. */
+      const held = KM.shl ? {k:'ShiftLeft', set:LEDGBL,   c:LEDC.gbl,   t:'G'}
+                 : HOLD.t ? {k:'AltLeft',   set:LEDTOOL,  c:LEDC.tool,  t:'T'}
+                 : KM.scp ? {k:'ControlLeft',set:LEDSCOPE,c:LEDC.scope, t:'C'}
+                 : null;
+      if(held){
+        set(held.k,held.c,1);
+        for(const code of held.set)set(code,held.c,0.55);
+        sig='M'+held.t;
+        this._hl=1;
+        return (this._sig=sig, rgb);
+      }
+      this._hl=0;
+      /* everything by its ROLE, then the channels on top */
+      for(const code in LEDROLE)set(code,LEDC[LEDROLE[code]],1);
+      for(const sl in RY_KEYS){const code=RY_KEYS[sl];
+        if(/^Key[A-Z]$/.test(code))set(code,LEDC.yellow,1);}   // letters: full yellow
       sig+='L'+sel;
       for(let i=0;i<10;i++){
         const has=!!(p&&p.lanes[i]&&p.lanes[i].events.length);
         const here=(sel===i);
-        const rest=here?3:(has?2:1);      // selected 3 · full 2 · empty 1
         sig+=here?(has?'H':'S'):(has?'h':'.');
-        /* THE SECOND ATTEMPT AT MOVEMENT, and it avoids the thing that broke
-           the first one. No hook in noteOn: chLevel(i) is an analyser peak that
-           is already in the graph, so this POLLS what is sounding instead of
-           being told. The audio path never learns the lights exist. */
-        let lvl=rest;
-        if(CFG.ledMeter){
-          let e=0; try{e=chLevel(i)||0;}catch(_){}
-          if(e>0.004)lvl=rest+(4-rest)*Math.min(1,Math.sqrt(e)*1.6);
-        }
-        put(this.DIGSLOT[i],this.CHSEL,lvl);
-        /* THE HAND DIAL WINS ON DIGIT 5. Gad: "can you give me a param to
-           change brightness and hue of digit 5 only, maybe i can see" — right,
-           and better than another scripted animation: a dial he can hold still
-           and stare at, rather than a flash to catch. */
+        let g=here?1:(has?0.55:0.22);
+        /* the polled envelope still rides on top when the meter is on — it
+           writes only in the gaps now, so it moves when you pause */
+        if(CFG.ledMeter&&!here){let e=0; try{e=chLevel(i)||0;}catch(_){}
+          if(e>0.004)g=Math.min(1,g+(1-g)*Math.min(1,Math.sqrt(e)*1.6));}
+        const c=here?LEDC.yellow:LEDC.orange;
+        const code=RY_KEYS[this.DIGSLOT[i]];
         if(CFG.d5on&&i===5){
-          const c=hsv2rgb((CFG.d5h|0)%360,1,clamp((CFG.d5b|0)/255,0,1));
-          const s5=this.DIGSLOT[5];
-          rgb[s5*3]=c[0]; rgb[s5*3+1]=c[1]; rgb[s5*3+2]=c[2];
-          sig+='D'+CFG.d5h+'/'+CFG.d5b;
-        }
+          const h5=hsv2rgb((CFG.d5h|0)%360,1,clamp((CFG.d5b|0)/255,0,1));
+          set(code,h5,1); sig+='D'+CFG.d5h+'/'+CFG.d5b;
+        }else set(code,c,g);
       }
     }catch(_){return null;}
     this._sig=sig;
@@ -14912,10 +14942,22 @@ const HE={
      What is left is honest and still useful: the board is a STATUS DISPLAY that
      refreshes in the gaps. Nothing is dropped — a deferred frame is written the
      moment you stop, and the newest state always wins. */
+  /* A MODIFIER IS NOT A NOTE. The gate exists because writing while a key is
+     down drops NOTES — but the whole point of the held-modifier highlight is to
+     paint while a modifier is down, and if modifiers counted as "busy" the
+     highlight could never appear at all. So they do not: only a key that could
+     have been a note holds the lights off. Pressing a letter UNDER a modifier
+     is a command rather than a note, and a dropped command is recoverable in a
+     way a dropped note in a take is not. */
+  LEDMOD:{ShiftLeft:1,ShiftRight:1,ControlLeft:1,ControlRight:1,AltLeft:1,
+          AltRight:1,MetaLeft:1,MetaRight:1,CapsLock:1,ContextMenu:1,Fn:1},
   ledIdle(){
+    const onlyMods=(typeof kbHeld!=='undefined'&&kbHeld)
+      ? [...kbHeld].every(c=>this.LEDMOD[c]) : true;
+    if(this._hl&&onlyMods)return true;                     // painting a highlight
+    if(!onlyMods)return false;                             // a note key is down
     if(this.pressure()!=null)return false;                 // a key is physically down
     if(performance.now()-(this.lastDownAt||0)<220)return false;   // …and just after
-    if(typeof kbHeld!=='undefined'&&kbHeld&&kbHeld.size)return false;
     return true;
   },
   ledDrain(){
@@ -15709,7 +15751,10 @@ const MIC={stream:null,on:false,latched:false,node:null,ring:null,w:0,sr:0,
    ⌃+letter chords (⌃b ⌃c ⌃o ⌃q ⌃m, ⌃+tab) still answer to either control —
    they read e.ctrlKey, not which key it came from — so the tools layer, when
    it grows bindings, has to say what happens to those. */
-const MICKEY=c=>c==='ControlRight'||c==='Fn';
+/* ESCAPE IS THE MIC, and now it is the only one: right ctrl became the UP
+   arrow. Tap escapes, hold past 200ms opens the mic while you lean on it,
+   ⇧esc opens settings — all unchanged, only the fallback is gone. */
+const MICKEY=c=>c==='Fn';
 /* WHAT THE TOOLS KEY PHYSICALLY IS. Gad's board remaps its left control to
    PrintScreen, so ControlLeft never arrives and tools never fired — the press
    went to the MIC instead, which was still claiming PrintScreen from when it
@@ -18063,13 +18108,59 @@ const modsOf=()=>({shiftKey:MODS.shift,altKey:MODS.alt,ctrlKey:MODS.ctrl,metaKey
    F13-F16 stay because they cost nothing and nothing else in TEN reads them —
    but they are not the recommended route any more: MonsGeek stops at F12, and
    F1-F12 are media keys on macOS unless a System Settings toggle is flipped. */
-const RIGHTARROW={AltRight:'ArrowLeft',ContextMenu:'ArrowUp',
+/* Gad, 2026-08-17: "R-menu key is doing UP arrow but should be doing down.
+   R-control key is doing mic on off but should be doing UP arrow." Right ctrl
+   leaves MICKEY entirely for this, which is fine because escape's HOLD has
+   been the real mic all along and right ctrl was only ever the fallback. */
+const RIGHTARROW={AltRight:'ArrowLeft',ContextMenu:'ArrowDown',ControlRight:'ArrowUp',
   F13:'ArrowLeft',F14:'ArrowRight',F15:'ArrowUp',F16:'ArrowDown'};
 /* fn IS THE RIGHT ARROW, out of the box. It sends no keycode at all, so the
    sensor is the only way to it — but its matrix slot is a property of the
    board, not of a session, and 71 is where the FUN60 keeps it (everything
    around it is in RY_SLOTS; that hole is fn). Shipping it means the fourth
    arrow works on a fresh profile. */
+/* EVERY SLOT ON THE BOARD, decoded from its own 0x8A keymap dump rather than
+   hand-listed. RY_SLOTS covers only the keys the SENSOR needs and stops at 52;
+   the six the lighting needs and it never had are here — ShiftRight 76,
+   ContextMenu 77, Backspace 79, Backslash 80, Enter 81, ControlRight 83.
+   Slot 65 is right alt and 71 is fn. */
+const RY_KEYS={1:'Escape',2:'Tab',3:'CapsLock',4:'ShiftLeft',5:'ControlLeft',
+  7:'Digit1',8:'KeyQ',9:'KeyA',13:'Digit2',14:'KeyW',15:'KeyS',16:'KeyZ',
+  17:'MetaLeft',19:'Digit3',20:'KeyE',21:'KeyD',22:'KeyX',23:'AltLeft',
+  25:'Digit4',26:'KeyR',27:'KeyF',28:'KeyC',31:'Digit5',32:'KeyT',33:'KeyG',
+  34:'KeyV',37:'Digit6',38:'KeyY',39:'KeyH',40:'KeyB',41:'Space',43:'Digit7',
+  44:'KeyU',45:'KeyJ',46:'KeyN',49:'Digit8',50:'KeyI',51:'KeyK',52:'KeyM',
+  55:'Digit9',56:'KeyO',57:'KeyL',58:'Comma',61:'Digit0',62:'KeyP',
+  63:'Semicolon',64:'Period',65:'AltRight',67:'Minus',68:'BracketLeft',
+  69:'Quote',70:'Slash',71:'Fn',73:'Equal',74:'BracketRight',76:'ShiftRight',
+  77:'ContextMenu',79:'Backspace',80:'Backslash',81:'Enter',83:'ControlRight'};
+const RY_SLOT_OF=(()=>{const m={};for(const k in RY_KEYS)m[RY_KEYS[k]]=+k;return m;})();
+
+/* WHAT EACH KEY IS, IN COLOUR (Gad, 2026-08-17). Roles, not decoration:
+   yellow  the selected channel and every letter — where your hands play
+   orange  the other channels, dim empty / brighter with events in them
+   red     tab and backspace, the two that destroy something
+   teal    the arrow cluster and the punctuation dials
+   blue    modifiers · dark blue the latch, because it is a STATE not an action
+   white   enter, space, escape */
+const LEDC={
+  yellow:[255,200,0], orange:[255,90,0], red:[255,0,0], teal:[0,200,160],
+  blue:[0,80,255], navy:[0,20,120], white:[255,255,255],
+  /* the three held modifiers each get their OWN hue, or "the keys light up"
+     tells you a modifier is down without telling you WHICH */
+  gbl:[200,0,255], tool:[0,255,110], scope:[0,230,255]};
+/* which keys do anything under each held modifier — the highlight sets */
+const LEDGBL=['KeyQ','KeyO','KeyB','KeyM','KeyS','Escape'];
+const LEDTOOL=['KeyC','KeyX','KeyV','KeyZ','KeyS'];
+const LEDSCOPE=['KeyA','KeyU','KeyD','KeyE','KeyF','KeyL','KeyK','Slash','KeyR',
+  'KeyG','KeyS','KeyP','KeyC','KeyQ','KeyB','KeyO','KeyX','Semicolon','Quote'];
+const LEDROLE={Tab:'red',Backspace:'red',
+  Enter:'white',Space:'white',Escape:'white',
+  AltRight:'teal',ContextMenu:'teal',ControlRight:'teal',Fn:'teal',
+  Comma:'teal',Period:'teal',Minus:'teal',Equal:'teal',BracketLeft:'teal',
+  BracketRight:'teal',Semicolon:'teal',Quote:'teal',Slash:'teal',Backslash:'teal',
+  ShiftLeft:'blue',ShiftRight:'blue',ControlLeft:'blue',AltLeft:'blue',
+  CapsLock:'blue',MetaLeft:'navy'};
 const RY_DEFAULT_SLOTS={71:'ArrowRight'};
 const arrowAlias=(e,kind)=>{
   const a=RIGHTARROW[e.code];
@@ -20454,6 +20545,25 @@ function endAudHold(c){
         lane8.clear(ev=>ev.pk===h8.pk&&Math.abs(ev.t-qt8)<1e-6);
         lane8.events.push({t:qt8,pk:h8.pk,dur:dur8,born:performance.now()});
         dirtySave=true;
+      }
+    }
+    /* LETTING GO OF THE TOP NOTE FALLS BACK TO THE ONE UNDERNEATH (Gad,
+       2026-08-18: "letting go of key 2 should return to previously held key
+       1"). One head means one pitch, so a chord of pitch keys is a STACK, not
+       a chord: the newest press owns the bend and a release hands it to the
+       newest one still down. Without this the release did nothing at all while
+       any other key was held — the head stayed on the note you had just let
+       go, which is the opposite of falling back. Newest by press time rather
+       than by key order, because that is what "previously held" means with two
+       fingers arriving in either order. */
+    {
+      let prev8=null;
+      for(const k8 in AUD.gk){const g8=AUD.gk[k8];
+        if(!g8||g8.kind!=='pmono'||g8.pi!==h8.pi)continue;
+        if(!prev8||(g8.press||0)>(prev8.press||0))prev8=g8;}
+      if(prev8&&prev8.pk!==undefined){
+        engine.audPitch(h8.pi,prev8.pk);
+        dirty=true; return 'went';
       }
     }
     if(!Object.keys(AUD.gk).some(k8=>(AUD.gk[k8]||{}).kind==='pmono')){
