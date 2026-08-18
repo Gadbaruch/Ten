@@ -1,4 +1,62 @@
-# BRANCH `audio-mono` — OPEN, five things, with what is already known
+# WHERE THE AUDIO CHANNEL STANDS — 2026-08-18, main
+
+`audio-mono` is MERGED into main and Gad is testing on plain localhost:3033
+again. One playhead is the model now: a cue MOVES the head, it does not add
+one, and poly is gone from this channel type by his own call ("i'm feeling safe
+with our removal of poly mode from this channel type, it feels very good").
+
+## Landed this session, newest first — all measured unless it says otherwise
+
+- **Auto off replays, and pitch keys fall back.** A recorded lane replayed into
+  silence with the loop off, because the replay MOVES a head and there was none
+  to move (alive 0 → 0.4 of the loop, which is the two gestures' own length).
+  And a pitch key release did nothing while another key was held, so the head
+  stayed on the note you had just let go: bends read 0, 2, then 2. It hands
+  back to the newest key still down now — 0, 2, then 0.
+- **The stretched read never folded** — rdCur returned before the wrap and tRd
+  CLAMPS, so a stretched cursor sat on its last sample until the bar re-fired
+  it. NOT A/B'd: the failure mode is DC, not silence, and the probe asked the
+  wrong question. Write the zero-crossing probe before trusting it.
+- **The rack has a door into a pitch-mode audio channel** (`audBendNote`), so
+  generated notes bend the head instead of building granular voices. HALF DONE
+  — a hand-played pitch key still short-circuits past the rack, see below.
+- **The arp recorded {midi} onto audio lanes**, which their replay never reads:
+  it sang and the lane came back silent. `recAudEvent` writes cue/pk now.
+- **Quantize never reached the pitch keys** — one channel had two feels. Both
+  paths use the same clock and the same length rule now (1.13 → 1.25).
+- **⇧⌫ keeps the loop length**; a second press resets it, tab+⇧⌫ still does it
+  outright. The audio lane dims the tail the loop never reaches.
+- **The relock's map knew the loop but not the speed** — exact at x1, wrong by
+  the speed factor everywhere else, always forward under x1. Every doubling,
+  every tempo change and every cue release landed by that map.
+- **Sync is a transposition and the pitch dial reported half the rate.**
+- **A deadline, not a duration**, for the carrier's life; and a relock on the
+  bar line no longer resurrects the carrier that is leaving.
+
+## Open, in the order Gad asked for them
+
+1. **Kill pre/post — ALWAYS record what comes OUT of the play rack**, on midi
+   and audio alike. His call, and it subsumes the unfinished half above: a
+   hand-played pitch key returns from the `pmono` branch before the note path,
+   so three keys held under an arp still record three events at ONE time
+   (measured: distinct t = 1). Has to work with tab-held retro rec.
+2. **Pitch stays the same across tape/stretch/grain.** `applyCmode` folds pitch
+   into speed entering tape and never unfolds leaving it, so the round trip
+   loses it — measured: stretch +3 → tape → stretch comes back at 440.
+3. **The loop-length cell back in the grid**, above the meter.
+4. **Grain: quantize the density.**
+5. **Grain: the cloud should follow `pos` more tightly** — it moves with a lag,
+   and that lag is the slew every cloud dial goes through.
+6. **Grain: pitch on the FEEDBACK repeats only** — each repetition up by a set
+   number of semitones.
+7. Still unreproduced: **"let go near the end of the loop and it stops until
+   next round"**. The broadcast that caused it is gone (endIt hands the head
+   back instead of stopping everything), but a synthetic release 100ms before
+   the line reads clean on BOTH builds, so the probe never exercised the path.
+   Needs his hands or a better probe.
+8. **⇧⌫ resets to 1 bar, tab+⇧⌫ to 2.** Two answers to "reset the length".
+
+# BRANCH `audio-mono` — the five it opened with, for reference
 
 Written 2026-08-17 at the end of a session, so the next one starts with the
 analysis rather than repeating it. Served at http://localhost:3033/audio-mono/

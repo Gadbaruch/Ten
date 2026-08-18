@@ -243,6 +243,35 @@ not. It used to latch shut and kill that arrow for the session; a 250ms clock
 re-arms it now. F13–F16 sidestep this entirely, because TEN's synthesized arrow
 is untrusted and never enters the guard.
 
+## ROOM, AND WHOSE PROBLEM IT IS (Gad, 2026-08-18)
+
+"Do i really have to keep switching threads all the time?" No. The context
+summarizes itself and the work carries on — a thread does NOT have to be ended
+because it is long. Gad's own measurement is the one that matters: a fresh
+thread costs about twenty minutes relearning what this one already knows, so
+STAYING IN IS THE CHEAPER MOVE and announcing "I am out of room" is usually
+self-inflicted. Do not wrap up early. Do not triage a list down because it
+looks long; take it two or three at a time and keep going.
+
+What actually spends the room, in order:
+
+- **Inline probes.** A pasted measurement script is a large block and they are
+  90% identical to each other. They belong in `tools/probe.js` as named probes
+  — `tools/probe.sh cursor chs=9` — written once and run for nothing. Reaching
+  for an inline `javascript_exec` twelve times in a session is the single
+  biggest waste and it has happened in every session so far.
+- **Wide reads.** `sed -n '10200,10340p'` to find one line. Grep for the line,
+  read eight around it.
+- **Re-dumping results.** Print the two numbers that decide the question, not
+  the whole JSON.
+
+**AND KEEP `NEXT.md` CURRENT AS YOU GO, not at the end.** It is the thing that
+makes a fresh thread cheap, and it is the only part of a session that survives
+one. Write the entry when a fix is committed and merged — with the numbers,
+because the numbers are the method and a summary drops them first. If a thread
+does have to end, everything needed to continue is in there or it was not
+really finished.
+
 ## Scope
 
 Ship exactly what was asked, and say plainly what it breaks. Do not widen a
