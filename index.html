@@ -990,6 +990,14 @@ const KEYN=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
 const CFG=Object.assign({overdub:0,listen:1,defLen:1,scaleOn:1,key:0,scale:0,wild:35,amix:0,qOn:1,vgrid:1,
   uiCell:9,uiLift:11,uiDim:5,uiText:62,theme:'dark',font:'mono',rowH:14},
   (()=>{try{return JSON.parse(localStorage.getItem('ten-cfg'))||{};}catch(_){return{};}})());
+/* PURGE THE PROBE KEYS FROM A SAVED CONFIG. Gad: "digit 5 is always brighter…
+   clean up all the testing params we added in settings they might be fucking
+   up with the keyboard". They were: d5on had persisted in his ten-cfg and was
+   still overriding digit 5 long after the row that set it was the last thing on
+   his mind. Deleting the ROWS is not enough when the VALUES outlive them. */
+for(const k of ['ledMeter','ledAny','d5on','d5b','d5h','d5full','hidArrows',
+                'toolKey','scopeKey','kWin','kMenu'])
+  if(k in CFG)delete CFG[k];
 const saveCfg=()=>{try{localStorage.setItem('ten-cfg',JSON.stringify(CFG));}catch(_){}};
 const DEFLENS=[1,2,4,8];
 function snapToPCs(midi,pcs){          // nearest note whose pitch-class is allowed
@@ -1209,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-18.1128';
+const BUILD='2026-08-18.1136';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1386,163 +1394,6 @@ const SETTINGS=[
      if(CFG.ledOn){HE._ledSig=null; HE._ledMode=0; HE.ledDigits(true);
        flash('yellow = selected channel · teal = the rest · bright = has events',6000);}
      else{HE._ledSig=null; HE.ryLightMode(1,{bright:4}); flash('lights back to always-on',4000);}
-     dirty=true;}},
- /* HOW MANY BRIGHTNESS LEVELS ARE THERE, REALLY. The timing question is
-    answered — min 0.8ms, median 1ms, so 0x07 is RAM and the vendorSleep was
-    only caution. The open one is whether 0..4 is five visible STEPS or an
-    on/off the firmware rounds. Flickering at 40ms cannot show that; walking it
-    at 1.2s a step can, so this ramps 0-1-2-3-4-3-2-1-0 and names each level as
-    it lands. Nine writes. Watch the board, read the flash, they should agree. */
- {n:'led probe',g:'Input',h:()=>!HE.on||HE.kind!==2,
-   v:()=>HE._probe||'ramp 0-4-0',
-   a:async()=>{
-     flash('walking brightness 0→4→0, about a second a step — watch the board',5000);
-     const r=await HE.ryBrightProbe(1200);
-     if(typeof r==='string'){HE._probe='failed'; flash('probe: '+r,8000); dirty=true; return;}
-     HE._probe=r.med+'ms';
-     /* and the one the per-channel design needs: a whole PICTURE round trip */
-     const q=await HE.ryPicProbe(6);
-     const pic=(typeof q==='string')?('picture FAILED: '+q)
-       :('0x0C picture x'+q.n+'  min '+q.min+'ms  median '+q.med+'ms  max '+q.max+'ms  → '+
-         (q.med<25?'fast enough for per-channel movement':'too slow — flash must be global'));
-     HE._probe=r.med+'ms / '+(typeof q==='string'?'err':q.med+'ms');
-     copyFlash('0x07 bright x'+r.n+' ramp 0-4-0  min '+r.min+'ms  median '+r.med+
-       'ms  max '+r.max+'ms\n'+pic,'probe copied');
-     dirty=true;}},
- /* THE ONE THAT MATTERS NOW: do the LED writes starve the sensor stream this
-    board's velocity depends on. Four seconds, two halves, and a key has to be
-    held and wiggled the whole time because HE.fps only advances while a key is
-    moving. If busy is materially below idle, the lights and the instrument
-    cannot share this device and the lights are the half that goes. */
- /* THE OVERRIDE, and it is here to be left alone. Writing while a key is down
-    costs notes on this board — measured by hand, at the one-report floor — so
-    the gate is not a tuning choice, it is the only way the lights and the
-    instrument coexist. This exists so the finding stays reproducible, not
-    because anyone should play with it on. */
- {n:'led anytime',g:'Input',h:()=>!HE.on||HE.kind!==2||!CFG.ledOn,
-   v:()=>CFG.ledAny?'ON — costs notes':'only when idle',
-   a:()=>{CFG.ledAny=CFG.ledAny?0:1; saveCfg();
-     flash(CFG.ledAny?'writes now happen WHILE YOU PLAY — this is what drops notes'
-                     :'back to writing only in the gaps',6000);
-     dirty=true;}},
- /* DIGIT 5 BY HAND, and the `write` row is the experiment hiding inside the
-    dials: `chunk` sends only the 56-byte block containing slot 31 — one report —
-    while `full` sends all seven. Dial the brightness with each and the answer
-    falls out of your own eyes: if it moves on `full` and not on `chunk`, the
-    firmware needs the whole picture and per-key movement is dead here. Needs
-    `led digits` on, because that is the path proven to actually light the board. */
- {n:'d5 on',g:'Input',h:()=>!HE.on||HE.kind!==2||!CFG.ledOn,
-   v:()=>CFG.d5on?'hand dial':'off',
-   a:()=>{CFG.d5on=CFG.d5on?0:1;
-     if(CFG.d5on&&!CFG.d5b){CFG.d5b=255; CFG.d5h=300;}   // start bright and magenta: unmissable
-     saveCfg(); HE._ledSig=null; HE.ledDigits(true);
-     flash(CFG.d5on?'digit 5 is yours — dial `d5 bright` and `d5 hue`':'digit 5 back to normal',5000);
-     dirty=true;}},
- {n:'d5 bright',g:'Input',h:()=>!HE.on||HE.kind!==2||!CFG.ledOn||!CFG.d5on,
-   v:()=>String(CFG.d5b|0),
-   a:d=>{CFG.d5b=clamp((CFG.d5b|0)+d*16,0,255); saveCfg(); HE.d5Push(); dirty=true;}},
- {n:'d5 hue',g:'Input',h:()=>!HE.on||HE.kind!==2||!CFG.ledOn||!CFG.d5on,
-   v:()=>String(CFG.d5h|0)+'°',
-   a:d=>{CFG.d5h=fmod((CFG.d5h|0)+d*15,360); saveCfg(); HE.d5Push(); dirty=true;}},
- {n:'d5 write',g:'Input',h:()=>!HE.on||HE.kind!==2||!CFG.ledOn||!CFG.d5on,
-   v:()=>CFG.d5full?'full 7':'chunk 1',
-   a:()=>{CFG.d5full=CFG.d5full?0:1; saveCfg();
-     flash(CFG.d5full?'dial now writes ALL SEVEN chunks':'dial now writes ONE chunk — the real question',5000);
-     HE.d5Push(); dirty=true;}},
- /* THE EXPERIMENT GAD ASKED FOR: can ONE key move without the board blinking.
-    Pulses Digit5 alone, twenty times, writing only the 56-byte chunk that
-    contains it — 1 report instead of 7. Three things to watch, and only eyes
-    and fingers can answer them: does ONLY that digit change, is the whole-board
-    flash gone, and do the keys still play while it runs. If a lone chunk blanks
-    the rest of the board, press `led digits` twice to rewrite it whole. */
- {n:'led 1key',g:'Input',h:()=>!HE.on||HE.kind!==2,
-   v:()=>HE._oneKey||'pulse digit5 only',
-   a:async()=>{
-     /* STOP BUILDING A SECOND PATH. Three runs of this reported "no change",
-        including a baseline that should have dimmed all ten digits — while
-        `led digits` demonstrably lights the board with the same two calls. When
-        a parallel implementation disagrees with a working one, the difference
-        is in MY path, and testing it again only measures my own mistake.
-        So this no longer establishes anything. It requires `led digits` to be
-        ON, lets THAT write the picture and set the mode, then changes exactly
-        one variable on top of a display already known to be working: does a
-        single-chunk write move one lamp. */
-     const sl=HE.DIGSLOT[5], ch=HE.chunkOfSlot(sl);
-     HE._expLock=0; HE._ledSig=null;
-     HE.ledDigits(true);                              // the PROVEN path paints and sets the mode
-     await new Promise(r2=>setTimeout(r2,600));
-     /* read back what it actually put on the board and ramp from exactly that,
-        so the lamp starts where the working picture left it */
-     const rgb=new Array(HE.LEDN*3).fill(0);
-     const p9=S.patterns[S.editPat];
-     for(let i=0;i<10;i++){const s2=HE.DIGSLOT[i];
-       const has=!!(p9&&p9.lanes[i]&&p9.lanes[i].events.length);
-       const g=HE.LEDLVL[(S.curPreset|0)===i?3:(has?2:1)];
-       rgb[s2*3]=Math.round(HE.CHSEL[0]*g);
-       rgb[s2*3+1]=Math.round(HE.CHSEL[1]*g);
-       rgb[s2*3+2]=Math.round(HE.CHSEL[2]*g);}
-     HE._expLock=1;                                   // now hold the board still
-     flash('the digits are lit by `led digits` — DIGIT 5 will ramp 0→4 six times. PLAY FAST NOTES',6000);
-     await new Promise(r2=>setTimeout(r2,1200));
-     /* A RAMP, NOT A BLINK (Gad: "make it flash over 200ms from 0-4"). Two
-        alternating values can read as "nothing moved" if the eye misses the
-        moment; a level climbing 0 to 4 across 200ms is unmistakable, and it
-        also answers a second question a blink cannot — whether intermediate
-        levels survive a single-chunk write or only the endpoints do.
-        8 steps over 200ms is 25ms apart, and a chunk write measured 1.1ms. */
-     const t=[], STEPS=8, RAMPMS=200;
-     for(let cyc=0;cyc<6;cyc++){
-       for(let k=0;k<=STEPS;k++){
-         const lvl=4*k/STEPS;
-         const i0=Math.floor(lvl), i1=Math.min(4,i0+1), f=lvl-i0;
-         const g=HE.LEDLVL[i0]*(1-f)+HE.LEDLVL[i1]*f;
-         rgb[sl*3]=Math.round(HE.CHSEL[0]*g);
-         rgb[sl*3+1]=Math.round(HE.CHSEL[1]*g);
-         rgb[sl*3+2]=Math.round(HE.CHSEL[2]*g);
-         const t0=performance.now();
-         const r=await HE.ryLightChunk(rgb,ch,0);
-         if(r!=='sent'){HE._expLock=0; HE._oneKey='failed';
-           flash('chunk write FAILED: '+r,8000); dirty=true; return;}
-         t.push(performance.now()-t0);
-         await new Promise(r2=>setTimeout(r2,RAMPMS/STEPS));
-       }
-       await new Promise(r2=>setTimeout(r2,260));      // dark gap between ramps
-     }
-     HE._expLock=0; HE._ledSig=null;                  // hand the board back
-     t.sort((a,b)=>a-b);
-     HE._oneKey=t[t.length>>1].toFixed(1)+'ms';
-     copyFlash('single-chunk ramp 0→4 over 200ms x6 (chunk '+ch+', slot '+sl+', '+t.length+' writes)  min '+t[0].toFixed(1)+
-       'ms  median '+t[t.length>>1].toFixed(1)+'ms  max '+t[t.length-1].toFixed(1)+'ms',
-       'one-key probe copied');
-     dirty=true;}},
- /* MOVEMENT, SECOND ATTEMPT — off by default, and it is a SEPARATE switch from
-    `led digits` on purpose: the static map is proven harmless and this is not.
-    No noteOn hook this time; it polls chLevel(), the analyser peak already in
-    the graph. The row shows the interval so a backoff is visible rather than
-    silent, and toggling it off restores the interval and the baseline. */
- {n:'led meter',g:'Input',h:()=>!HE.on||HE.kind!==2||!CFG.ledOn,
-   v:()=>CFG.ledMeter?(HE.METERMS+'ms'+(HE._mBase?' · '+(HE.fps||0)+'/'+HE._mBase+'Hz':'')):'off',
-   a:()=>{CFG.ledMeter=CFG.ledMeter?0:1; saveCfg();
-     HE.METERMS=120; HE._mBase=0; HE._mSeen=0; HE._mT0=0; HE._mAt=0; HE._mBackAt=0;
-     HE._ledSig=null;
-     flash(CFG.ledMeter
-       ? 'meter on — but writes only happen when your hands are OFF the keys, so it moves in the gaps'
-       : 'meter off — the digits are the static map again',7000);
-     if(!CFG.ledMeter)HE.ledDigits(true);
-     dirty=true;}},
- {n:'led contend',g:'Input',h:()=>!HE.on||HE.kind!==2,
-   v:()=>HE._contend||'hold a key, press',
-   a:async()=>{
-     flash('HOLD A KEY DOWN AND KEEP WIGGLING IT for 4 seconds — measuring the sensor',4500);
-     const r=await HE.ryContendProbe();
-     if(typeof r==='string'){HE._contend='—'; flash(r,9000); dirty=true; return;}
-     const drop=r.idle.med?Math.round((1-r.busy.med/r.idle.med)*100):0;
-     HE._contend=r.idle.med+'→'+r.busy.med+'Hz';
-     copyFlash('sensor report rate\n  writes OFF  n='+r.idle.n+'  lo '+r.idle.lo+
-       '  median '+r.idle.med+'  hi '+r.idle.hi+' Hz\n  writes ON   n='+r.busy.n+
-       '  lo '+r.busy.lo+'  median '+r.busy.med+'  hi '+r.busy.hi+' Hz\n  → '+drop+
-       '% drop'+(drop>15?' — the writes ARE starving the sensor':' — not the cause'),
-       'contention copied');
      dirty=true;}},
  {n:'h vel',g:'Input', h:()=>!HE.on,v:()=>Math.round(HE.cfg().est||0)===1?'window':'peak',
               a:()=>{const e2=Math.round(HE.cfg().est||0)===1?0:1; HE.set('est',e2);
@@ -14304,14 +14155,6 @@ const RY_SLOTS={1:'Escape',2:'Tab',3:'CapsLock',4:'ShiftLeft',5:'ControlLeft',7:
                 57:'KeyL',58:'Comma',61:'Digit0',62:'KeyP',63:'Semicolon',64:'Period',
                 65:'AltRight',67:'Minus',68:'BracketLeft',69:'Quote',70:'Slash',73:'Equal',
                 74:'BracketRight',81:'Enter'};
-/* h 0..360, s/v 0..1 -> 0..255 triple. Only the digit-5 hand dial uses it. */
-function hsv2rgb(h,s,v){
-  const c=v*s, x=c*(1-Math.abs((h/60)%2-1)), m=v-c;
-  let r=0,g=0,b=0;
-  if(h<60){r=c;g=x;} else if(h<120){r=x;g=c;} else if(h<180){g=c;b=x;}
-  else if(h<240){g=x;b=c;} else if(h<300){r=x;b=c;} else {r=c;b=x;}
-  return [Math.round((r+m)*255),Math.round((g+m)*255),Math.round((b+m)*255)];
-}
 const HE={
   on:false, srcName:'', dev:null, kind:0,          // 1 = analogsense, 2 = rongyuan
   keys:{},                                          // keyId -> stroke state
@@ -14745,33 +14588,7 @@ const HE={
      but five VALUES is not five visible STEPS — the firmware may round it to
      on/off. Walking it slowly, one level per second, is the only way to see
      which, so this ramps 0-4-0 instead of flickering. Nine writes, not 24. */
-  /* AND IS 0x0C RAM TOO. This is the question the whole design turns on, and I
-     called it "flash" once already on the same vendorSleep evidence that was
-     wrong about 0x07. PER-CHANNEL brightness cannot use the global bright
-     field — that is board-wide — so it has to be RGB scaling inside the
-     PICTURE, and a note-flash decaying over 100ms means rewriting the picture
-     several times per note. Seven reports a picture, so the number that
-     matters is the whole-picture round trip, not one chunk.
-     Latency is not the wear answer and cannot be — a device may ack fast and
-     commit lazily. It IS the possibility answer: slow here and per-channel
-     movement is off regardless. */
-  async ryPicProbe(n){
-    const d=this.cfgDev||this.dev; if(!d)return 'no device';
-    n=Math.min(n||6,6);
-    const rgb=new Array(this.LEDN*3).fill(0), t=[];
-    for(let i=0;i<n;i++){
-      for(const sl of this.DIGSLOT){const v=(i%2)?60:0; rgb[sl*3+1]=v;}
-      const t0=performance.now();
-      const r=await this.ryLightPic(rgb,0);
-      if(r!=='sent')return 'FAILED at '+i+': '+r;
-      t.push(performance.now()-t0);
-      await new Promise(r2=>setTimeout(r2,120));
-    }
-    t.sort((a,b)=>a-b);
-    this._ledWrites=(this._ledWrites||0)+n;
-    return {n,min:+t[0].toFixed(2),med:+t[t.length>>1].toFixed(2),max:+t[t.length-1].toFixed(2)};
-  },
-  /* DO THE WRITES STARVE THE READS. Gad, with the two clues that cracked it:
+/* DO THE WRITES STARVE THE READS. Gad, with the two clues that cracked it:
      "the issue is not an issue on my mac keyboard" and "the first note i play on
      the monsgeek is not delayed but i cannot play rapid notes."
      That is not main-thread cost — I had already made noteOn free and it did not
@@ -14785,52 +14602,7 @@ const HE={
      with writes off, then with writes flat out. HE.fps only advances while a key
      is MOVING, so a key has to be held and wiggled throughout — hence the
      instruction rather than a silent probe. */
-  async ryContendProbe(){
-    const d=this.cfgDev||this.dev; if(!d)return 'no device';
-    const on0=CFG.ledOn;
-    const samp=async(ms,writing)=>{
-      const seen=[]; const t0=performance.now();
-      while(performance.now()-t0<ms){
-        if(writing){
-          const rgb=new Array(this.LEDN*3).fill(0);
-          for(const sl of this.DIGSLOT)rgb[sl*3+1]=(seen.length%2)?200:40;
-          await this.ryLightPic(rgb,0);
-        }
-        await new Promise(r=>setTimeout(r,40));
-        if(this.fps)seen.push(this.fps);
-      }
-      if(!seen.length)return null;
-      seen.sort((a,b)=>a-b);
-      return {n:seen.length,lo:seen[0],med:seen[seen.length>>1],hi:seen[seen.length-1]};
-    };
-    CFG.ledOn=0; this._ledSig=null;
-    const idle=await samp(2000,false);
-    const busy=await samp(2000,true);
-    CFG.ledOn=on0; this._ledSig=null;
-    if(!idle||!busy)return 'no sensor frames — hold a key down and wiggle it during the test';
-    return {idle,busy};
-  },
-  BRIGHTRAMP:[0,1,2,3,4,3,2,1,0],
-  async ryBrightProbe(stepMs){
-    const d=this.cfgDev||this.dev; if(!d)return 'no device';
-    const ms=stepMs||1200, seq=this.BRIGHTRAMP, t=[];
-    for(let i=0;i<seq.length;i++){
-      const b=seq[i];
-      const t0=performance.now();
-      try{await d.sendFeatureReport(0,this.ryCmd8(0x07,13,4,b,0,0,200,200));}
-      catch(err){return 'FAILED at '+i+': '+(err&&err.message||err);}
-      t.push(performance.now()-t0);
-      flash('brightness '+b+'  '+'█'.repeat(b||0)+'·'.repeat(4-(b||0)),ms+200);
-      dirty=true;
-      await new Promise(r=>setTimeout(r,ms));
-    }
-    t.sort((a,b)=>a-b);
-    this._ledWrites=(this._ledWrites||0)+seq.length;
-    await this.ryLightMode(13,{bright:4,speed:0,option:0});   // leave it lit
-    return {n:seq.length,min:+t[0].toFixed(2),med:+t[t.length>>1].toFixed(2),
-            max:+t[t.length-1].toFixed(2)};
-  },
-  /* THE DIGITS SHOW WHICH CHANNELS HAVE ANYTHING IN THEM. First real use of the
+/* THE DIGITS SHOW WHICH CHANNELS HAVE ANYTHING IN THEM. First real use of the
      board as TEN's display: lane with events = green, empty = dark, and the
      focused one brighter so your hand knows where it is without the screen.
      Slot numbers come straight from RY_SLOTS — the keymap read proved the LED
@@ -14926,20 +14698,15 @@ const HE={
         if(/^Key[A-Z]$/.test(code))set(code,LEDC.yellow,1);}   // letters: full yellow
       sig+='L'+sel;
       for(let i=0;i<10;i++){
-        const has=!!(p&&p.lanes[i]&&p.lanes[i].events.length);
         const here=(sel===i);
-        sig+=here?(has?'H':'S'):(has?'h':'.');
-        let g=here?1:(has?0.62:0.28);
-        /* the polled envelope still rides on top when the meter is on — it
-           writes only in the gaps now, so it moves when you pause */
-        if(CFG.ledMeter&&!here){let e=0; try{e=chLevel(i)||0;}catch(_){}
-          if(e>0.004)g=Math.min(1,g+(1-g)*Math.min(1,Math.sqrt(e)*1.6));}
-        const c=here?LEDC.yellow:LEDC.amber;
-        const code=RY_KEYS[this.DIGSLOT[i]];
-        if(CFG.d5on&&i===5){
-          const h5=hsv2rgb((CFG.d5h|0)%360,1,clamp((CFG.d5b|0)/255,0,1));
-          set(code,h5,1); sig+='D'+CFG.d5h+'/'+CFG.d5b;
-        }else set(code,c,g);
+        sig+=here?'S':'.';
+        /* EVERY UNSELECTED DIGIT IS IDENTICAL. Gad: "unselected channel digits
+           colors are inconsistent, make them all the same except selected".
+           They were two brightnesses — brighter with events, dim without — and
+           ten lamps at two levels reads as inconsistency rather than as
+           information. One level for "not selected", full yellow for the one
+           that is, exactly matching the letters. */
+        set(RY_KEYS[this.DIGSLOT[i]], here?LEDC.yellow:LEDC.amber, here?1:0.45);
       }
     }catch(_){return null;}
     this._sig=sig;
@@ -14975,49 +14742,10 @@ const HE={
     this._ledWant=rgb;
     this.ledDrain();
   },
-  /* METERMS IS NOT A GUESS, IT IS A CEILING THAT LOWERS ITSELF. The lesson from
-     the flash is that writes to this device cost the sensor stream the keys
-     depend on, and I do not know the safe budget — so the instrument measures
-     its own health and takes the lights away when they start costing it.
-     Baseline is the sensor's report rate over the first second of metering; if
-     it falls below 70% of that, the interval doubles, up to a second. It never
-     speeds back up on its own: a board that struggled once gets the benefit of
-     the doubt permanently, until you toggle the row. */
-  METERMS:120, METERMAX:1000,
-  ledMeterTick(){
-    const now=performance.now();
-    if(!this._mBase){
-      if(!this._mT0)this._mT0=now;
-      if(this.fps)this._mSeen=Math.max(this._mSeen||0,this.fps);
-      if(now-this._mT0>1000&&this._mSeen)this._mBase=this._mSeen;
-    }else if(this.fps&&this.fps<this._mBase*0.7&&now-(this._mBackAt||0)>1500){
-      this._mBackAt=now;
-      if(this.METERMS<this.METERMAX){
-        this.METERMS=Math.min(this.METERMAX,this.METERMS*2);
-        flash('sensor rate '+this.fps+'Hz vs '+this._mBase+'Hz baseline — meter backed off to '
-              +this.METERMS+'ms',5000);
-        dirty=true;
-      }
-    }
-    if(now-(this._mAt||0)<this.METERMS)return;
-    this._mAt=now;
-    this.ledDigits(false,true);                     // a level is a change no signature can see
-  },
-  /* the dial's own writer, so `chunk` vs `full` is a real A/B rather than two
+/* the dial's own writer, so `chunk` vs `full` is a real A/B rather than two
      different code paths that might differ for some other reason: ONE frame
      builder, two ways of putting it on the wire. */
-  d5Push(){
-    if(!this.on||this.kind!==2||!CFG.ledOn)return;
-    this._ledSig=null;
-    if(CFG.d5full){this.ledDigits(true); return;}
-    const rgb=this.buildFrame(); if(!rgb)return;
-    const sl=this.DIGSLOT[5];
-    this._ledWrites=(this._ledWrites||0)+1;
-    this.ryLightSlots(rgb,[sl],0).then(r=>{
-      if(r!=='sent')flash('chunk write: '+r,6000);
-    });
-  },
-  /* WRITE ONLY WHEN THE HANDS ARE OFF. The experiment finally answered it, and
+/* WRITE ONLY WHEN THE HANDS ARE OFF. The experiment finally answered it, and
      the answer closes the road: Gad dialled digit 5 by hand and "both hue and
      brightness works in both chunk and full, and in both modes the keyboard
      notes playing fail during changes… only at rest the notes play normally."
@@ -15057,7 +14785,7 @@ const HE={
     if(this._ledBusy||!this._ledWant)return;
     /* not idle: keep the frame, write it when the hands lift. The 60ms watchdog
        is already calling back, so nothing needs its own timer. */
-    if(!CFG.ledAny&&!this.ledIdle())return;
+    if(!this.ledIdle())return;
     const rgb=this._ledWant; this._ledWant=null; this._ledBusy=1;
     this._ledWrites=(this._ledWrites||0)+1;
     this.ryLightPic(rgb,0).then(r=>{
@@ -15093,15 +14821,10 @@ const HE={
        the board came to be written faster than it can redraw. Only a CHANGE in
        the static picture writes now, and this is the one place that asks. */
     if(CFG.ledOn&&this.kind===2){
-      /* BRACES, because the last edit here created a dangling else: inserting
-         the drain line between the if and its else re-bound `else
-         ledMeterTick()` to `if(this._ledWant)`. So the meter ran EVERY tick
-         with the meter switched off — and ledMeterTick calls ledDigits with
-         decaying=true, which exists precisely to bypass the signature guard.
-         A write every 120ms forever, which is the flicker Gad saw. Measured at
-         rest, nothing held and nothing changed: 4 pictures in 2.3s. */
-      if(CFG.ledMeter){ this.ledMeterTick(); }
-      else { this.ledDigits(); }
+      /* ONE caller, and it writes only when the picture changed. The meter that
+         used to sit here is gone with the rest of the probes: it wrote every
+         120ms by design, which was the flicker. */
+      this.ledDigits();
       if(this._ledWant)this.ledDrain();             // a held-back frame keeps trying
     }
     if(this.kind===1&&this.ready&&performance.now()-(this._reqAt||0)>60)this.kcRequest();
@@ -18252,6 +17975,7 @@ const LEDC={
      more orange". A different hue made them read as a different KIND of thing;
      they are the same thing, not selected. */
   yellow:[255,200,0], amber:[255,130,0], red:[255,0,0], teal:[0,200,160],
+  wave:[255,120,0],
   blue:[0,80,255], pink:[255,0,140], white:[255,255,255],
   /* the three held modifiers each get their OWN hue, or "the keys light up"
      tells you a modifier is down without telling you WHICH */
@@ -18265,8 +17989,11 @@ const LEDROLE={Tab:'red',Backspace:'red',
   Enter:'white',Space:'white',Escape:'white',
   AltRight:'teal',ContextMenu:'teal',ControlRight:'teal',Fn:'teal',
   Comma:'teal',Period:'teal',Minus:'teal',Equal:'teal',BracketLeft:'teal',
-  BracketRight:'teal',Semicolon:'teal',Quote:'teal',Backslash:'teal',
-  ShiftLeft:'blue',ShiftRight:'blue',AltLeft:'blue',CapsLock:'blue',
+  BracketRight:'teal',Semicolon:'teal',Quote:'teal',
+  /* \\ opens the sound scope, where , . pick the ENGINE — the wave key */
+  Backslash:'wave',
+  ShiftLeft:'blue',ShiftRight:'blue',AltLeft:'blue',
+  CapsLock:'white',   // modcap: where captured knob moves live
   /* the scope key wears its own HELD colour at rest, so the key you reach for
      and the layer it opens are the same thing to look at */
   ControlLeft:'scope',
@@ -23143,6 +22870,25 @@ function mixCell(vol,pan,lvl,live){
          (g>0.004?'<i class="mfill" style="left:'+pc(fl)+';width:'+pc(fr-fl)+'"></i>':'')+
          '<i class="mctr" style="left:'+line+'"></i>';
 }
+/* HOW LONG EACH LOOP IS, in a row of its own above the meters (Gad,
+   2026-08-18: "i kinda miss the info of the looplength we used to have a cell
+   for that in the grid, can we bring it back and put it above the meter plz").
+   It survived only as a float that appeared while tab was HELD, and only over
+   the channel you were on — which is the one channel whose length you already
+   know, because your hands are on it. As a row it answers the question it is
+   actually asked: are these two lanes the same length, and is that one still
+   twice the others. Audio lanes get it too; they were showing the word "clip",
+   which is the one thing the column already tells you.
+   A lane still LISTENING has no length yet and says so with a dot rather than
+   the 1 it is not going to keep. */
+function loopRow(pat){
+  return colRow('lprow',i=>{
+    const l=pat.lanes[i]; if(!l)return '';
+    if(l.auto&&!l.events.length)return sp('d','·');
+    const n=l.count%1?String(l.count).replace(/^0/,''):String(l.count);
+    return sp(i===S.curPreset?'a':'v',(n+UNIT_NAMES[l.unit]).slice(0,CELLW));
+  }, sp('d',pad('Loop',GUTW)));
+}
 function meterRow(LN,PR,peeking){
   const soloing=CHANS().some(i=>LN(i).solo);
   return colRow('mrow',i=>{
@@ -23326,6 +23072,7 @@ function renderPat(L,pos){
      belongs to the channel columns and has to be there whether the grid is
      drawn vertically or not */
   {if(!CHWdone){measureChar(); CHWdone=true;}
+   rawAt.add(L.length); L.push(loopRow(showPat));
    rawAt.add(L.length); L.push(meterRow(LN,PR,!!pkL));}
   /* Loop length and transpose are things you set and then stop thinking about,
      so they are not worth two permanent rows. They appear on the hold that
