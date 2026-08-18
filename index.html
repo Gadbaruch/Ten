@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-18.1452';
+const BUILD='2026-08-18.1502';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -14699,6 +14699,22 @@ const HE={
          Reading KM.scp alone made a latched scope drop back to normal colours
          while it was still very much open, which is the worst case: the board
          says you are out of a mode you are in. */
+      /* RECORDING TAKES THE WHOLE FIELD (Gad, 2026-08-18: "when i hold tab key
+         or during when tab/rec is latched, the whole letter keyboard becomes
+         red like the tab"). It outranks the modifier highlights because it is
+         not a layer you are choosing, it is a thing that is HAPPENING to
+         everything you play — and every letter is armed, so every letter says
+         so. Tab itself sits at full, the field just under it. */
+      const recOn = HOLD.tab || HOLD.tabLatch ||
+                    (S.arr&&S.arr.state==='rec');
+      if(recOn){
+        set('Tab',LEDC.red,1);
+        for(const sl in RY_KEYS){const code=RY_KEYS[sl];
+          if(/^Key[A-Z]$/.test(code))set(code,LEDC.red,0.6);}
+        this._hl=1;
+        return (this._sig='R'+(HOLD.tab?'h':'')+(HOLD.tabLatch?'l':'')+
+                          (S.arr&&S.arr.state==='rec'?'r':''), rgb);
+      }
       const held = (KM.shl||KM.shlLatch) ? {k:'ShiftLeft',set:LEDGBL,c:LEDC.gbl,t:KM.shlLatch?'GL':'G'}
                  : HOLD.t   ? {k:'AltLeft',    set:LEDTOOL, c:LEDC.tool,  t:'T'}
                  : altOf({}) ? {k:'ControlLeft',set:LEDSCOPE,c:LEDC.scope,t:KM.altLatch?'CL':'C'}
@@ -14737,9 +14753,18 @@ const HE={
         const here=(sel===i);
         const has=!!(lane&&lane.events&&lane.events.length);
         const audible=lane?(anySolo?!!lane.solo:!lane.mute):false;
-        const lvl=!has?(here?1:0):(audible?4:1);
-        sig+=(here?'S':'.')+lvl;
-        set(RY_KEYS[this.DIGSLOT[i]], here?LEDC.yellow:LEDC.amber, this.LEDLVL[lvl]);
+        /* THE SELECTED DIGIT IS ALWAYS FULL, content or not, muted or not — it
+           is the cursor, and a cursor that dims when the thing under it is
+           quiet is a cursor you have to hunt for. Hue alone says selected.
+           SILENCED-BUT-LOADED IS RED, full brightness: a channel holding
+           something you cannot hear is not a dim version of a playing one, it
+           is a different state, and red is the colour the board already uses
+           for the keys that take something away. */
+        const silenced=has&&!audible;
+        const lvl=here?4:(!has?0:4);
+        sig+=(here?'S':'.')+(has?(audible?'p':'m'):'-');
+        set(RY_KEYS[this.DIGSLOT[i]],
+            here?LEDC.yellow:(silenced?LEDC.red:LEDC.amber), this.LEDLVL[lvl]);
       }
     }catch(_){return null;}
     this._sig=sig;
@@ -18049,9 +18074,9 @@ const LEDC={
 /* which keys do anything under each held modifier — the highlight sets */
 /* what is LEFT on shift after the merge — esc opens settings and c copies the
    patch as JSON. Everything else on this modifier is now free. */
-const LEDGBL=['Escape','KeyC'];
+const LEDGBL=['Escape'];
 const LEDTOOL=['KeyC','KeyX','KeyV','KeyZ','KeyS','KeyN','KeyL','KeyE','KeyI',
-  'KeyQ','KeyO','KeyB','KeyM','KeyK'];
+  'KeyQ','KeyO','KeyB','KeyM','KeyK','KeyJ'];
 const LEDSCOPE=['KeyA','KeyU','KeyD','KeyE','KeyF','KeyL','KeyK','Slash','KeyR',
   'KeyG','KeyS','KeyP','KeyC','KeyQ','KeyB','KeyO','KeyX','Semicolon','Quote'];
 /* ← is AltRight and ↓ is ContextMenu on this board; ↑ is ControlRight and → is
@@ -18592,6 +18617,11 @@ const onKeyDown=e=>{
       dirty=true; return;}
     if(K==='KeyC'||K==='KeyX'||K==='KeyV'){e.preventDefault(); HOLD.tUsed=true; disarmTools();
       const op=K==='KeyC'?'copy':K==='KeyX'?'cut':'paste';
+      /* ⌥⇧ IS THE WHOLE PATCH (Gad, 2026-08-18). Bare ⌥x/c/v answers to a mod
+         learn first, which is right when you are wiring a modulator and wrong
+         when you meant the channel — so the shifted form skips that and always
+         means the whole thing: sound, racks, mix, pitch and lane. */
+      if(e.shiftKey){clipboardOp(op); return;}
       if(modLearnOp(op))return;
       clipboardOp(op); return;}
     /* THE WHOLE FILE SET, not just save. Gad: "I still don't have export. I have
@@ -19175,8 +19205,8 @@ const onKeyDown=e=>{
   /* ⇧c, not ⌃c: tools owns every control now, and copy is what a person means
      by control-c. This is the CHANNEL'S PATCH as JSON — an instrument-wide
      utility, so it sits with the other things left shift carries. */
-  if(c==='KeyC'&&KM.shl&&e.shiftKey&&!e.ctrlKey&&!e.repeat){e.preventDefault();
-    copyPatch(); return;}
+  /* the patch as JSON moves off shift with everything else — ⌥j for json */
+  if(c==='KeyJ'&&toolsOf(e)&&!e.repeat){e.preventDefault(); copyPatch(); return;}
   if(c==='KeyO'&&toolsOf(e)&&!e.repeat){               // ⌃o — how recording meets what is there
     CFG.overdub=CFG.overdub?0:1; saveCfg();
     flash(CFG.overdub?'OVERDUB — recording adds to what is there'
