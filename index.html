@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-18.2039';
+const BUILD='2026-08-18.2053';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -10315,6 +10315,18 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     const lane=S.patterns[S.editPat].lanes[pi], L=lane.len||4;
     const vm=clamp(Math.round((S.presets[pi].vox||{}).mode||0),0,2);
     if(vm>0){                       // mono/legato: move the head, do not add one
+      /* …BUT THERE HAS TO BE A HEAD TO MOVE (Gad, 2026-08-18: "autoloop off arp
+         doesnt work, not on pitch or position"). audMove sends the cursor that
+         is already reading somewhere else, and with the loop off there is no
+         cursor at all — so every cue the rack generated moved nothing and the
+         channel stayed silent, which is also why nothing recorded: there was
+         no sound to record. The live key has made its own head since the
+         auto-off fix and audBendNote does the same for pitch; this is the
+         third door and it was the one still shut. */
+      if(!autoCur(S.presets[pi])&&!this.audRolling(pi)){
+        const l8=S.patterns[S.editPat]&&S.patterns[S.editPat].lanes[pi];
+        if(l8)this.audPlay(pi,Math.max(at,AC.currentTime+0.004),l8.len,0);
+      }
       const gl=vm===2?Math.max(0.01,(S.presets[pi].vox||{}).glide||0.08):0;
       this.audMove(pi,cue.frac,gl,1);
       const shM={_cue:1,midi,released:false,killed:false,press:0,pressN:[],nodes:[],
@@ -21951,7 +21963,13 @@ const MOUSE={on:false,acc:0,y:0,kind:null,moved:false};
 function mouseFocus(kind,i){
   if(kind==='cp'||kind==='set'){ if(S.layer===-1)S.setSel=i; else S.curParam=i; }
   else if(kind==='slot')S.slotParam=i;
-  else if(kind==='mst')S.mParam=i;
+  /* 'mst' was the name in here and 'mpr' is the name the markup emits — the
+     master rack's slot-param row has been tagged for the mouse since it was
+     written and nothing ever answered to it. Both spellings work now rather
+     than renaming one and leaving a stale caller somewhere. */
+  else if(kind==='mst'||kind==='mpr')S.mParam=i;
+  /* the explorer's own row, likewise emitted and likewise dead */
+  else if(kind==='exp'){ if(PICK)PICK.sel=i; }
   else if(kind==='sl'){S.curSlot=i; S.slotParam=0;}
   else if(kind==='mod'){S.curMod=i; S.curParam=0; S.slotParam=0; S.curSlot=0;}
   else if(kind==='msl'){S.mSlot=i; S.mDj=null; S.mParam=0;}
