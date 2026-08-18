@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-18.1529';
+const BUILD='2026-08-18.1531';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -14720,7 +14720,11 @@ const HE={
         const lane=p&&p.lanes[i];
         const here=i===0?mSel:(!mSel&&sel===i);
         const has=!!(lane&&lane.events&&lane.events.length);
-        const audible=lane?(anySolo?!!lane.solo:!lane.mute):false;
+        /* the scheduler silences on a THIRD condition too — muteHold, the
+           momentary mute — so the lights have to know about it or a choked
+           channel would read as playing */
+        const audible=lane?((anySolo?!!lane.solo:!lane.mute)
+                            &&!(typeof muteHold!=='undefined'&&muteHold&&muteHold.lane===i)):false;
         const silenced=has&&!audible;
         /* CHANNEL 0 IS THE MASTER and it is pure white — it is not one of the
            ten, it is what the ten go through, so it does not share their hue.
