@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-20.1713';
+const BUILD='2026-08-20.1823';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -20824,7 +20824,20 @@ const onKeyDown=e=>{
         else if(lane.auto){lane.unit='B';lane.count=DEFLENS[CFG.defLen];lane.auto=false;
           flash('● the ONE is set — '+lane.count+' bar loop');}
         else flash('● the ONE is set');
-        pend[c]={t0:0,sweep:0,ts:0,bornAt:performance.now(),lane:pi,qt:0,midi,vel:hitVel};
+        /* …BUT SETTING THE ONE IS NOT RECORDING THE KEY (Gad, 2026-08-20). This
+           is the FIRST note into an empty pattern — which is exactly how you
+           record an arp onto a fresh channel — and it was the one branch that
+           never asked whether a generator is running. So the held key got a
+           pend, endNote wrote it, and on an audio lane that is a {midi} event
+           the replay cannot read: measured on his set, a 1/16 arp came back as
+           `MIDI67 / MIDI68 at t=0, dur 1.888` — t exactly 0 because this
+           branch forces qt:0, and dur exactly how long the key was held. The
+           arp's own steps were being written correctly by recPlayNote the
+           whole time; these were the fingers landing on top.
+           The ONE still gets set, and the listen window still opens above —
+           only the note stands down, the same test the branch below uses. */
+        if(!genOn(pi,midi))
+          pend[c]={t0:0,sweep:0,ts:0,bornAt:performance.now(),lane:pi,qt:0,midi,vel:hitVel};
       }else{
         /* live quantize applies whenever it's on — stopped or playing, rec or not */
         /* live quantize applies whenever it's on — stopped or playing, rec or not */
