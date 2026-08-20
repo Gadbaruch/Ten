@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-20.1646';
+const BUILD='2026-08-20.1713';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -10055,7 +10055,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
       const K0=isKit(p)?kitSlot(p,pads[0]):null;
       if(isKit(p)&&!K0)return;
       const pr0=K0||prepEffective(p,pads[0]);
-      const mv=(pr0.vox&&pr0.vox.mode)|0;
+      const mv=voxOf(pr0);
       if(mv>=1)return durSec==null
         ? this.monoTrigger(at,pi,midis[0],pads[0],vel,mv,pcHandle)
         : this.monoSeq(at,pi,midis[0],pads[0],vel,durSec,mv);
@@ -10508,7 +10508,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     const cue=Object.assign({},(au.cues||{})[sl]||{o:0,semis:0,vol:1,pan:0},
       {vel:vel??1,frac:cutAt(pi,sl)});
     const lane=S.patterns[S.editPat].lanes[pi], L=lane.len||4;
-    const vm=clamp(Math.round((S.presets[pi].vox||{}).mode||0),0,2);
+    const vm=voxOf(S.presets[pi]);
     if(vm>0){                       // mono/legato: move the head, do not add one
       const glR=this._glide;          // the key worked it out; the rack carried it
       /* …BUT THERE HAS TO BE A HEAD TO MOVE (Gad, 2026-08-18: "autoloop off arp
@@ -13165,7 +13165,7 @@ function prsFieldDefs(){
     ...(AUDMONO
       ?[{k:'glide',v:()=>clamp(Math.round((p.vox||{}).mode||0),0,2)===2
           ?Math.round(((p.vox||{}).glide||0.08)*1000)+'ms':'snap'}]
-      :[{k:'voice',v:()=>['poly','mono','legato'][clamp(Math.round((p.vox||{}).mode||0),0,2)]}]),
+      :[{k:'voice',v:()=>['poly','mono','legato'][voxOf(p)]}]),
     /* IT NAMES THE DIAL IT ACTUALLY POINTS AT. 'pos' is the CLOUD's position
        dial, which only exists on the grain half of the page — and since the
        keys began obeying the tape's setup, a key in tape or stretch leaves
@@ -13893,7 +13893,10 @@ function _prsAction(d){
          poly spawns one per key, mono keeps ONE and moves it, legato does
          that and glides between where it was and where you sent it. */
       p.vox=p.vox||{};
-      p.vox.mode=fmod(Math.round(p.vox.mode||0)+(d>0?1:-1),3);
+      /* an audio channel walks mono<->legato only: poly is not one of its
+         states, so it must not be one of the places the dial can stop */
+      if(p.cat==='audio')p.vox.mode=voxOf(p)===2?1:2;
+      else p.vox.mode=fmod(Math.round(p.vox.mode||0)+(d>0?1:-1),3);
       flash('voice → '+['poly (a cursor per key)','mono (one cursor, moved)',
         'legato (one cursor, glided)'][p.vox.mode]);
     }
@@ -16085,6 +16088,20 @@ const isAudioCh=pi=>S.presets[pi].cat==='audio';
    a set written here still loads on main with its levels intact.
    ──────────────────────────────────────────────────────────────────────── */
 const AUDMONO=1;
+/* NO POLY ON AN AUDIO CHANNEL (Gad, 2026-08-20: "you can remove completely the
+   option of poly from audio channels fyi"). One playhead is the model and has
+   been since audio-mono, but the FLOOR that enforces it was applied in the key
+   handler and nowhere else — `trigger` and `cueNote` both read vox.mode raw,
+   and a channel saved at 0 therefore spawned a cursor per key through the rack
+   while the same channel's own key handler moved one head. That is the whole
+   of "keys became polyphonic, position creates new playheads instead of
+   jumping": measured on his set, three position keys took the tape from ONE
+   cursor to FOUR and the doors read audPlay audPlay audPlay, where a set whose
+   ch9 happened to be saved at mode 1 read audMove and looked perfect. It also
+   took the arp down with it, because the arp fires cues through the same door.
+   Every reader asks this now, so there is one answer. */
+const voxOf=p=>{const v=clamp(Math.round((p&&p.vox||{}).mode||0),0,2);
+  return (p&&p.cat==='audio')?Math.max(1,v):v;};
 /* GRAN IS A MODE OF THE AUDIO CHANNEL now (au.amode 1); cat 'gran' survives
    as the legacy spelling so old saves keep singing */
 /* PITCH KEYS SPAWN CURSORS THROUGH THE CLOUD — that is what 'gran' was.
@@ -22003,6 +22020,11 @@ function load(json){
         p.modLoop.auto=false;
         return p;});
     }
+    /* AND A SET SAVED WITH ONE HEALS ON LOAD. The readers all floor it now, but
+       leaving 0 in the file means the number on disk disagrees with the number
+       the instrument uses, and the next thing to read it raw is a new bug. */
+    S.presets.forEach(p=>{ if(p&&p.cat==='audio'&&p.vox&&Math.round(p.vox.mode||0)<1)
+      p.vox.mode=1; });
     if(o.v<10)S.presets.forEach(p=>{
       p.ply.forEach(sl=>{
         if(sl.typ===2)sl.p1=[0,3,6,9][clamp(Math.round(sl.p1||0),0,3)];  // arp divs gained ./T variants
