@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-20.1950';
+const BUILD='2026-08-20.2114';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -18110,7 +18110,29 @@ function recPlayNote(pi,tBeat,midi,vel,durBeats){
      key's own push is suppressed while a generator is running, or the two
      would both land. */
   if(T.playing&&retroBuf[pi]){
-    retroBuf[pi].push({t:tBeat,midi,vel:vel||0.9,dur:durBeats||0.25});
+    /* IN THE CHANNEL'S OWN VOCABULARY, HERE TOO (Gad, 2026-08-20: "i hear the
+       arp fine when playing, but not after recording" — on RETRO, which is the
+       gesture I never tested). Both retro commits refuse an audio channel
+       outright unless the buffer holds a cue, pk or fz:
+
+         if(isAudioCh(pi)&&!retroBuf[pi].some(n=>n.cue!==undefined||
+            n.pk!==undefined||n.fz!==undefined)){flash('audio channel — tab
+            records the input');return;}
+
+       and this push wrote a raw {midi}. A hand-played cue or pitch key puts a
+       real cue/pk in the buffer, so retro worked by hand; the ARP comes
+       through here, so its whole take was thrown away and you got the flash
+       instead. Same conversion recAudEvent does, and the same lesson as the
+       listen window earlier today: the clock changes, the vocabulary does
+       not. */
+    let ent={t:tBeat,midi,vel:vel||0.9,dur:durBeats||0.25};
+    if(isAudioCh(pi)){
+      const pR=S.presets[pi];
+      if(kmodeOf(pR)===1)ent.pk=Math.round(midi)-KBBASE;
+      else{const cR=(engine.audCuts(pi)||[]).length;
+        if(cR)ent.cue=((Math.round(midi)-60-trSemis(pR))%cR+cR)%cR;}
+    }
+    retroBuf[pi].push(ent);
     if(retroBuf[pi].length>512)retroBuf[pi].shift();
   }
   const pat=S.patterns[S.editPat];
