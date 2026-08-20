@@ -903,24 +903,44 @@ async function probeMono() {
     engine[nm] = function (...a) { if (a[0] === ch) doors.push(nm); return fn.apply(this, a); };
     undo.push(() => { engine[nm] = fn; });
   }
-  const cur = () => { try { const st = engine.gn[ch] && engine.gn[ch].stat; return st ? (st.tv | 0) : -1; }
-                      catch (_) { return -1; } };
+  /* ASK THE WORKLET, DO NOT READ THE CACHE. `gn[ch].stat` is the last stat that
+     happened to arrive and is up to a frame stale — read during a jump's 3ms
+     splice it reports TWO cursors, and this probe called that polyphony and
+     said "POLY — bug" on a build that was fine. A ping is a round trip and the
+     answer is the truth. Verified 2026-08-20: cached said 1/2/1 where the ping
+     said 1/1/1 through the same gesture. */
+  const node = engine.gn[ch] && engine.gn[ch].node;
+  const cur = () => new Promise(res => {
+    if (!node) return res(-1);
+    const to = setTimeout(() => res(-1), 400);
+    const h = e => { if (e.data && e.data.t === 'stat') {
+      clearTimeout(to); node.port.removeEventListener('message', h); res(e.data.tv | 0); } };
+    node.port.addEventListener('message', h);
+    if (node.port.start) node.port.start();
+    node.port.postMessage({ t: 'ping', want: 'stat' });
+  });
   const K = (t, c) => document.dispatchEvent(
     new KeyboardEvent(t, { code: c, key: c, bubbles: true, cancelable: true }));
-  K('keydown', 'KeyA'); await sleep(180); const c1 = cur();
-  K('keydown', 'KeyS'); await sleep(180); const c2 = cur();
-  K('keyup', 'KeyA'); K('keyup', 'KeyS'); await sleep(320); const c3 = cur();
+  K('keydown', 'KeyA'); await sleep(180); const c1 = await cur();
+  K('keydown', 'KeyS'); await sleep(180); const c2 = await cur();
+  K('keyup', 'KeyA'); K('keyup', 'KeyS'); await sleep(320); const c3 = await cur();
   for (const u of undo) u();
   try { stop(); } catch (_) {}
   try { if (trim) { engine.comp.disconnect(trim); trim.disconnect();
                     engine.comp.connect(AC.destination); } } catch (_) {}
-  const bad = doors.indexOf('audPlay') >= 0 || c2 > 1;
-  if (bad) notes.push('POLYPHONIC: a second cursor or an audPlay with the loop on — '
-                    + 'a cue must move the one head, not make another');
+  /* audPlay ALONE IS NOT THE BUG. The cycle scheduler respawns the loop cursor
+     with it every bar, so it appears in a perfectly mono run; and with auto
+     OFF a cursor per key is the documented model, not a fault. The bug is a
+     SECOND CURSOR while the loop is on. */
+  const bad = p.au.auto && c2 > 1;
+  if (bad) notes.push('POLYPHONIC: a second cursor with the loop on — a cue must move '
+                    + 'the one head, not make another');
+  if (!p.au.auto) notes.push('auto is OFF, so a cursor per key IS the model here — '
+                           + 'that is the polyphonic sampler, not a bug');
   return { cols: ['cursors', 'doors', 'verdict'],
     rows: [{ k: (kmode ? 'pitch' : 'position') + ' ch' + ch,
       cursors: c1 + ' / ' + c2 + ' / ' + c3, doors: doors.join(' ') || '(none)',
-      verdict: bad ? 'POLY — bug' : 'mono' }] };
+      verdict: bad ? 'POLY — bug' : (p.au.auto ? 'mono' : 'auto off — per-key cursors expected') }] };
 }
 
 const HELP = {
