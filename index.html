@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-20.1312';
+const BUILD='2026-08-20.1329';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -10509,12 +10509,14 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
         const d=Math.max(0,((t??AC.currentTime)-AC.currentTime)*1000);
         const off=()=>{ if(E.audBendCur[pi]!==sh)return;   // something newer owns it
           E.audBendCur[pi]=null;
-          /* NO NOTE STACK HERE. monoTrigger already keeps one — push on the
-             way in, pop on the way out, and re-fire the note underneath — and
-             a second stack living on the shim is what made the first attempt
-             at this fight itself. For ONE playhead every note is a retune, so
-             the shim's whole job is: bend on the way in, clear on the way out,
-             and let the pop decide what comes back. */
+          /* the shim keeps note priority again while the rack door is closed:
+             newest press owns the bend, a release hands it to the newest key
+             still down, by BIRTH rather than array order */
+          let back=null;
+          for(const o of (E.act[pi]||[]))
+            if(o&&o._bend&&o!==sh&&!o.released&&!o.killed&&
+               (!back||(o.bornAt||0)>(back.bornAt||0)))back=o;
+          if(back){E.audBendCur[pi]=back; E.audPitch(pi,back.semis); return;}
           E.audPitch(pi,0); E.busEnvFire(pi,AC.currentTime,true);
           if(!autoCur(S.presets[pi])){E.audStop(pi);return;}
           if(E.audBendMovedClock(pi)){E.audReturn(pi);
@@ -20446,15 +20448,12 @@ const onKeyDown=e=>{
              audio, instead of clearing the bend behind its back. */
           const firep=()=>{
             if(AUD.gk[c]!==hp)return;                // let go before it landed
-            /* THROUGH THE RACK (Gad: "yes pitch keys should go through the play
-               rack", and "arp isnt working at all" on pitch). trigger is the
-               door every other note uses: it feeds the arp pool, applies chance
-               and nudge, and keeps the mono note stack. noteOn hands an audio
-               pitch channel to audBendNote, so a generated step reaches the head
-               exactly as a finger does — and the recorder writes what the rack
-               produced, which is the whole of "always record the output". */
-            hp.tv=engine.trigger(AC.currentTime+0.004,pi,KBBASE+semP,hitVel);
-            return;
+            /* REVERTED with the cue side — see the note there. The arp reached
+               a hand-played pitch key through this door (28 bends, 17 events,
+               15 distinct times) and plain playing stopped working with the
+               loop off, which is the trade nobody wants. */
+            engine.audPitch(pi,semP,glP);
+            engine.busEnvFire(pi,AC.currentTime);
             /* GLIDE IS WHAT HAPPENS WHEN A NOTE LANDS ON A HELD ONE, and
                nothing else. A first press is instant — the head is where you
                put it — and only the second slides, which is what legato means
@@ -20619,16 +20618,18 @@ const onKeyDown=e=>{
            is what the jump slides from */
         const gl9=(vm9===2&&(heldC||autoCur(S.presets[pi])))
           ?Math.max(0.01,(S.presets[pi].vox||{}).glide||0.08):0;
-        /* THROUGH THE RACK (Gad, 2026-08-18: "go ahead with cue keys"). The
-           position key was the last one still handling itself and returning,
-           so the arp, chance, nudge and the rest did not exist on a position
-           channel and nothing recorded the rack's output. trigger is the door:
-           a cue slot travels as note 60+slot, cueNote turns it back into a
-           place, and the mono stack there is monoTrigger's — the one stack, as
-           on the pitch side. The glide the key worked out still goes, because
-           cueNote reads it from vox and this hold is what tells it a finger is
-           already down. */
-        hj.tv=engine.trigger(atP,pi,60+sl+trSemis(p9),vel9);
+        /* REVERTED, and the reason is worth keeping: routing this through
+           engine.trigger made the ARP work on position keys (16 head moves
+           across 3 places, 19 events recorded) and broke PLAIN PLAYING — a
+           single cue key stopped moving the head at all, and a probe showed
+           trigger was never reached. Basic playing outranks the arp, so it
+           goes back to moving the head itself until the reason is found rather
+           than guessed at. The pitch side is reverted with it for the same
+           reason: he could not test either one. */
+        const ms0=Math.max(0,(atP-AC.currentTime)*1000);
+        const go=()=>{engine.audMove(pi,cutAt(pi,sl),gl9,1);
+          engine.busEnvFire(pi,AC.currentTime);};
+        if(ms0<2)go(); else setTimeout(go,ms0);
         flash('cue '+(sl+1)+'/'+nS+' · '+(vm9===2?'glide':'moved'));
         dirty=true; return;
       }
@@ -20929,11 +20930,6 @@ function endAudHold(c){
         dirtySave=true;
       }
     }
-    /* THE HANDLE OWNS THE END. trigger gave us a mono handle; releasing it
-       pops the note stack and re-fires whatever was underneath, which IS the
-       fall-back — so this branch no longer writes one of its own. */
-    if(h8.tv&&h8.tv.release){try{h8.tv.release(AC.currentTime);}catch(_){}
-      dirty=true; return 'went';}
     /* LETTING GO OF THE TOP NOTE FALLS BACK TO THE ONE UNDERNEATH (Gad,
        2026-08-18: "letting go of key 2 should return to previously held key
        1"). One head means one pitch, so a chord of pitch keys is a STACK, not
@@ -21052,9 +21048,7 @@ function endAudHold(c){
     if(AUD.hold===hj9)AUD.hold=null;
     if(gsh){try{gsh.release(AC.currentTime);}catch(_){}
       engine._ctrlPut('grn',pi,0,'pos',undefined);}
-    /* the rack handle ends the same way a pitch key's does: releasing it pops
-       monoTrigger's stack, which re-fires the cue underneath if one is held */
-    if(hj9&&hj9.tv&&hj9.tv.release){try{hj9.tv.release(AC.currentTime);}catch(_){}}
+
     /* this key's cursor only — the others are still held. The loop comes back
        when the last finger leaves, which is what a grab has always meant. */
     if(tid)engine.audOff(pi,tid);
