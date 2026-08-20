@@ -781,20 +781,32 @@ async function probeRoundTrip() {
                       engine.comp.connect(AC.destination); } } catch (_) {}
   }
 
+  /* PITCH MODE CANNOT BE PAIRED THIS WAY, and reading it as if it could cost a
+     false "not fixed" in a commit message. A release and a step whose interval
+     happens to be 0 semitones BOTH call audPitch(pi, 0), so nearest-match
+     pairing has nothing to tell them apart, and live legitimately makes calls
+     the replay does not need (its own first and last release). nReplay against
+     the event count is the number that means something here; medOff/worstOff/
+     cueMiss are reported as n/a rather than as a wrong answer. */
+  const pitchMode = (p.au.kmode | 0) === 1;
   const offs = live.map(L => { let b = 9, v = null;
     for (const R of rep) { const d = Math.abs(R[0] - L[0]); if (d < b) { b = d; v = R[1]; } }
     return { off: +b.toFixed(3), same: v === L[1] }; });
   const srt = offs.map(o => o.off).sort((a, b) => a - b);
   if (!live.length) notes.push('no live moves — the keys never reached the head; run keypath first');
+  if (pitchMode)
+    notes.push('pitch mode: compare nReplay with the event count — a release and a 0-semitone '
+             + 'step are the same call, so the offsets cannot be paired. Onsets in the audio '
+             + 'are the ground truth if the timing is what is in question.');
   if (rep.length > live.length)
     notes.push('replay makes MORE moves than the hands did: something is writing the lane twice '
              + '(the held key on top of the generator is the usual one)');
   return { cols: ['nLive', 'nReplay', 'recorded', 'medOff', 'worstOff', 'cueMiss', 'cfg'],
     rows: [{ nLive: live.length, nReplay: rep.length,
       recorded: Object.entries(recd).map(([k, n]) => k + ' x' + n).join(' ') || '(empty)',
-      medOff: srt.length ? srt[srt.length >> 1] : '',
-      worstOff: srt.length ? srt[srt.length - 1] : '',
-      cueMiss: offs.filter(o => !o.same).length,
+      medOff: pitchMode ? 'n/a' : (srt.length ? srt[srt.length >> 1] : ''),
+      worstOff: pitchMode ? 'n/a' : (srt.length ? srt[srt.length - 1] : ''),
+      cueMiss: pitchMode ? 'n/a' : offs.filter(o => !o.same).length,
       cfg: 'kmode=' + p.au.kmode + ' auto=' + p.au.auto + ' cmode=' + (p.au.cmode | 0)
          + ' q=' + (CFG.qOn | 0) + ' div=' + div + ' len=' + lane.len }] };
 }

@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-20.1507';
+const BUILD='2026-08-20.1542';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -5758,10 +5758,23 @@ function scheduleRange(from,to){
                  A 1/16 run has a gap of 15% of a step and stays legato; two
                  separate stabs a beat apart both release. Modulo the loop, so a
                  run that carries over the seam is still one line. */
+              /* AND THE SEAM IS NOT ALWAYS LEGATO. With the loop ON the take
+                 runs continuously and a phrase that fills the bar is one line,
+                 so the lookahead wraps. With it OFF the take is a ONE-SHOT —
+                 nothing reads it until an event plays it — and wrapping made a
+                 loop-filling phrase infinitely legato: nothing ever released
+                 the cursor, so nothing ever re-struck the take and the replay
+                 rode whatever cursor happened to be alive from before. It
+                 sounded, which is why it took a count to see: 4 events, 0
+                 audPlay, an attack you never hear again after the first. So
+                 with auto off the last step of the cycle releases and the
+                 first attacks, the way your finger does. */
+              const auto3=autoCur(S.presets[li]), tm3=fmod(t,L3);
               let gap3=Infinity;
               for(const e3 of lane.events){
                 if(e3===ev||e3.pk===undefined)continue;
-                const d3=fmod(e3.t-(t+dur3),L3);
+                let d3=e3.t-(tm3+dur3);
+                if(d3<-1e-6){ if(!auto3)continue; d3+=L3; }
                 if(d3<gap3)gap3=d3;
               }
               if(gap3<=dur3+1e-6)return;              // the next step is the release
