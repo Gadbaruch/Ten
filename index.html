@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-20.1823';
+const BUILD='2026-08-20.1950';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -10525,7 +10525,23 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
       }
       const gl=Number.isFinite(glR)?glR
         :(vm===2?Math.max(0.01,(S.presets[pi].vox||{}).glide||0.08):0);
-      this.audMove(pi,cue.frac,gl,1);
+      /* AT THE TIME IT WAS GIVEN, NOT THE INSTANT IT WAS ASKED (Gad,
+         2026-08-20: "cue position playing isnt live quantized as it should").
+         The poly branch below always scheduled its cursor for `at`; this one
+         moved the head the moment the handler ran and ignored it, which nobody
+         saw while every poly-saved channel took the other branch. Two things
+         fall out of that:
+           - live quantize does nothing on a cue key. The note is deferred to
+             the grid line, the JUMP is not, so you hear the head move under
+             your finger and the grid arrive later.
+           - the arp collapses. It posts its steps up to a scheduler horizon
+             ahead (150ms), so every step inside the horizon jumped AT ONCE
+             instead of in time — an arp you can hear as a burst, not a figure.
+         Same shape the cloud branch in the key handler already uses: fire now
+         if it is due now, otherwise wait for it. */
+      const msM=Math.max(0,((at||0)-AC.currentTime)*1000);
+      const moveM=()=>this.audMove(pi,cue.frac,gl,1);
+      if(msM<2)moveM(); else setTimeout(moveM,msM);
       const shM={_cue:1,midi,released:false,killed:false,press:0,pressN:[],nodes:[],
         release(){this.released=true;},kill(){this.killed=true;this.released=true;},
         setPressure(){}};
@@ -10557,7 +10573,17 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     const E=this, semis=Math.round(midi)-KBBASE;
     const ms=Math.max(0,(at-AC.currentTime)*1000);
     this.audBendCur=this.audBendCur||[];
+    /* startAt, OR THE SWEEPER READS IT AS ANCIENT (Gad, 2026-08-20: "without
+       arp it plays the pitched for a second and then baseline comes back so i
+       cant hold a long pitching key"). sweepOrphanVoices ages a voice as
+       `now-(v.startAt||0)`, and this shim had only bornAt — so age was the
+       whole life of the AudioContext and it was reaped on the very next tick
+       while the finger was still down. The cloud shim hit this exact bug and
+       the comment in the sweeper still describes it. Measured: a key held 2.5s
+       went audPitch 2.00 at 82ms and audPitch 0.00 at 477ms, released by
+       sweepOrphanVoices, not by any key-up. */
     const sh={_bend:1,midi,semis,bornAt:AC.currentTime,
+      startAt:Math.max(AC.currentTime,at||0),
       released:false,killed:false,press:0,pressN:[],nodes:[],
       release(t){ if(this.released)return; this.released=true;
         const d=Math.max(0,((t??AC.currentTime)-AC.currentTime)*1000);
@@ -21624,6 +21650,13 @@ function sweepOrphanVoices(){
     if(h&&h.code)take(liveV[h.code]);}
   if(AUD&&AUD.hold)take(AUD.hold.gsh);
   for(const k9 in (AUD&&AUD.gk||{}))take(AUD.gk[k9].gsh);   // one hold per key
+  /* …AND A BEND THAT IS CURRENT IS HELD BY DEFINITION. The pitch key's hold
+     lives in AUD.gk as kind 'pmono' and carries no `gsh`, so the line above
+     could never see it: a held bend was unreferenced, and once its age was
+     honest it would still have died at the 1.5s mark with the key down.
+     audBendCur IS the ownership — the engine keeps exactly the one bend that
+     owns each channel there, and hands it to the next-newest key on release. */
+  for(const b9 of (engine.audBendCur||[]))take(b9);
   const now=AC.currentTime;
   for(let pi=0;pi<(engine.act||[]).length;pi++){
     for(const v of [...(engine.act[pi]||[])]){
