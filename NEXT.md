@@ -55,6 +55,40 @@ the first routing attempt hung a second note stack on the bend shim beside the
 one monoTrigger already keeps. The question to ask before writing any of it:
 **who already knows this?**
 
+- **THE ROUND TRIP IS THE MEASUREMENT** — `tools/probe.sh roundtrip ch=9
+  kmode=0 auto=1 arp=1 div=0.25 keys=KeyA,KeyS`. Every earlier check here read
+  the lane's CONTENTS and called it verified; what Gad hears is the lane
+  PLAYED, and three faults only appear there. It records a phrase, switches the
+  generator off, replays it, and compares what the playhead did in each pass.
+  Position keys, 1/16 arp, two keys held two beats:
+  **16 live moves → 18 recorded events each ~0.1 beat late, now 16 → 16,
+  median 0.019 beat, zero wrong cues.** Three separate causes:
+    - **groove applied twice.** `arpTick` recorded `b+grooveOff(...)` and the
+      replay adds `grooveOff` again. The hand recorder already says so in its
+      own comment — "qt stored straight (groove is a playback layer)" — the
+      generator was the odd one out. That is the ~0.1 beat.
+    - **the held key recorded itself on top of the generator's steps.** The
+      note recorder had the test (`arpOn`) and the audio cue and pitch releases
+      did not. One function now, `genOn`, asked by all three. 18 → 16.
+    - **replay was not legato.** A held arp is one mono line: live, a step's
+      release finds the other key still down and skips the return to baseline.
+      Replay gave every step its own release — 16 events made **33** audPitch
+      calls, a drop to baseline and back 0.019 beats later, sixteen times.
+      Same rule ported to the lane. **16 → 16.**
+- **Clearing a lane brings the head home.** It left an audio channel wherever
+  the last recorded cue had jumped it, with an empty lane and nothing left to
+  move it again — "clearing keys recording makes loop stuck in a wierd state".
+  `clearLane` drops that channel's finger state, returns the bend, relocks.
+- **The phase FM engine's operators all started at zero, whatever trig said.**
+  `tools/probe.sh trig` — two identical notes, correlation of the first 1500
+  samples: native rtrg **1.000** / free **-0.825** (correct), phase rtrg
+  **-0.952** / free **1.000**. Free reproducing itself exactly is the tell.
+  `ten-fmop` initialised every operator at `Math.random()*0.0001` and the
+  builder sent no phase at all. It sends one now — cfg carries 0.25 twice at
+  90°, 0.75 at 270°, and 0.45/0.3905 on free.
+  ⚠ **It is the NATIVE engine that works**, not the phase one; the report had
+  them the other way round.
+
 ## Landed this session — all measured unless it says otherwise
 
 - **Both key paths through the rack.** Route matrix, hand-played:
@@ -137,6 +171,15 @@ reasoning; test those first.
    He put this last himself.
 5. **Stretch arp** — may already be fixed by the routing; re-test before
    digging.
+6. **Pitch keys with autoloop OFF still round-trip badly** — measured, not
+   fixed: 24 live moves come back as 17, worst 0.112 beat. Position is clean
+   with auto off; it is the pitch column that is not.
+7. **A phase-engine note starts on the next 128-sample render block**, not the
+   sample it was asked for, so two notes begin up to 2.9ms apart — most of a
+   cycle at 261Hz — and rtrg cannot be sample-identical there even with the
+   phase provably right (audio correlates -0.82 while the cfg message carries
+   0.25 both times). Making it exact means scheduling the start inside the
+   worklet. Its own change, and nobody has asked for it.
 
 ## Still true, and worth keeping in view
 
