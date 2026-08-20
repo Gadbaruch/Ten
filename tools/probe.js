@@ -588,6 +588,105 @@ async function probeModMatrix() {
   return { cols, rows };
 }
 
+
+/* WHERE DOES A KEY PRESS ACTUALLY GO — the instrument three diagnoses lacked.
+   Every failed key measurement this week failed the same way: the probe
+   dispatched a KeyboardEvent, the app never saw it (or saw it and returned
+   somewhere unexpected), and the empty result read as "the feature is broken".
+   NEXT.md already says a probe driving synthetic events must assert they
+   ARRIVED; this asserts that and then says which door the key went through.
+
+   arrived  — the app called preventDefault, i.e. it CLAIMED the key. This is
+              the signal that was missing: without it a zero row cannot be told
+              apart from a key that never landed.
+   acted    — a state fingerprint moved (kbHeld / AUD.gk / liveV / flash), so
+              the handler did something rather than claiming and dropping it.
+   route    — the engine entry points it reached, in order. On an audio channel
+              this is the whole question: trigger means the PLAY rack saw it,
+              cueNote/audBendNote mean the key handled itself, audMove/audPitch
+              are the head actually moving.
+
+   tools/probe.sh keypath code=KeyA ch=9 kmode=0 auto=1 hold=400            */
+async function probeKeyPath() {
+  const code = str(P.code, 'KeyA');
+  const ch   = num(P.ch, CH);
+  const hold = num(P.hold, 400);
+  const mods = { shiftKey: !!num(P.shift, 0), altKey: !!num(P.alt, 0),
+                 ctrlKey: !!num(P.ctrl, 0), metaKey: !!num(P.meta, 0) };
+  pin(ch);
+  const p = S.presets[ch];
+  /* set the channel up only when asked, so the probe can also read a channel
+     exactly as it stands */
+  if (p && p.au) {
+    if (P.kmode !== undefined) p.au.kmode = num(P.kmode, 0);
+    if (P.auto  !== undefined) p.au.auto  = num(P.auto, 1);
+    if (P.cmode !== undefined) { p.au.cmode = num(P.cmode, 0);
+      if (typeof applyCmode === 'function') applyCmode(ch); }
+    if (P.arp !== undefined && p.ply) p.ply[0] = num(P.arp, 0)
+      ? { typ: PTYPES.indexOf('arp'), p1: num(P.div, 0.25), p2: 0, p3: 1, p4: 60, p5: 0, p6: 0, p7: 0, p8: 0 }
+      : (typeof mkPly === 'function' ? mkPly() : p.ply[0]);
+    if (typeof engine.granCfg === 'function') { try { engine.granCfg(ch); } catch (_) {} }
+    if (typeof engine.audLive === 'function') { try { engine.audLive(ch); } catch (_) {} }
+  }
+  /* every door a key can reach on the way to a sound, wrapped in one place */
+  const route = [], undo = [];
+  const spy = (obj, name, tag, argIdx) => {
+    const fn = obj[name]; if (typeof fn !== 'function') return;
+    obj[name] = function (...a) {
+      if (a[argIdx] === ch) route.push(tag + (a[argIdx + 1] !== undefined
+        ? ':' + (typeof a[argIdx + 1] === 'number' ? +a[argIdx + 1].toFixed(3) : a[argIdx + 1]) : ''));
+      return fn.apply(this, a);
+    };
+    undo.push(() => { obj[name] = fn; });
+  };
+  spy(engine, 'trigger', 'trigger', 1);
+  spy(engine, 'noteOn', 'noteOn', 1);
+  spy(engine, 'cueNote', 'cueNote', 1);
+  spy(engine, 'audBendNote', 'bend', 1);
+  spy(engine, 'granNote', 'granNote', 1);
+  spy(engine, 'audMove', 'audMove', 0);
+  spy(engine, 'audPitch', 'audPitch', 0);
+  spy(engine, 'audPlay', 'audPlay', 0);
+
+  const fp = () => [Object.keys((typeof kbHeld !== 'undefined' && kbHeld) || {}).length,
+                    Object.keys((typeof AUD !== 'undefined' && AUD.gk) || {}).length,
+                    (typeof liveV !== 'undefined' && liveV) ? Object.keys(liveV).length : 0,
+                    typeof flashMsg === 'undefined' ? '' : String(flashMsg || '')].join('|');
+  let rows = [];
+  try {
+    const before = fp();
+    const dn = new KeyboardEvent('keydown',
+      Object.assign({ code, key: code, bubbles: true, cancelable: true }, mods));
+    document.dispatchEvent(dn);
+    await sleep(Math.min(120, hold));
+    const heldFp = fp(), downRoute = route.slice();
+    await sleep(Math.max(0, hold - 120));
+    const up = new KeyboardEvent('keyup',
+      Object.assign({ code, key: code, bubbles: true, cancelable: true }, mods));
+    document.dispatchEvent(up);
+    await sleep(120);
+    const cfg = p && p.au
+      ? ['cat=' + p.cat, 'kmode=' + (p.au.kmode | 0), 'auto=' + (p.au.auto | 0),
+         'cmode=' + (p.au.cmode | 0), 'vox=' + ((p.vox && p.vox.mode) | 0),
+         'ply0=' + ((p.ply && p.ply[0] && p.ply[0].typ) | 0)].join(' ')
+      : 'ch ' + ch;
+    rows = [
+      { k: 'ch' + ch, arrived: dn.defaultPrevented ? 'yes' : 'NO — app never claimed it',
+        acted: heldFp !== before ? 'yes' : 'no', route: downRoute.join(' → ') || '(none)', cfg },
+      { k: 'on key-up', arrived: up.defaultPrevented ? 'yes' : 'no',
+        acted: fp() !== heldFp ? 'yes' : 'no',
+        route: route.slice(downRoute.length).join(' → ') || '(none)', cfg: '' }
+    ];
+    if (!dn.defaultPrevented)
+      notes.push('the app did not claim this key — check layer/curPreset, and that no earlier '
+               + 'branch returned. A zero route here says nothing about the feature.');
+    if (dn.defaultPrevented && !downRoute.length)
+      notes.push('claimed but reached no engine door: the handler consumed it and returned '
+               + 'before making a sound — that is the branch to find.');
+  } finally { for (const u of undo) u(); }
+  return { cols: ['arrived', 'acted', 'route', 'cfg'], rows };
+}
+
 const HELP = {
   cols: ['args'],
   rows: [
@@ -596,6 +695,7 @@ const HELP = {
     { k: 'cursor',   args: 'chs=9 — ping ten-grsyn: tv/g/tpos/cpos' },
     { k: 'preset',   args: 'names=SNR,S909 note=48 ch=8 — library name, played and measured' },
     { k: 'key',      args: 'code=KeyA hold=120 shift=0 alt=0 ctrl=0 meta=0' },
+    { k: 'keypath',  args: 'code=KeyA ch=9 kmode=0 auto=1 arp=0 hold=400 — did the app CLAIM the key, and which engine door did it reach' },
     { k: 'matrix',   args: 'ch=8 take=nylonlick cues=4 — the seven cases + the cue jumps' },
     { k: 'modmatrix',args: 'only=filt — every mod SOURCE x every DESTINATION: reaches/anchor/live/tweak' },
     { k: '(any)',    args: '--ab <url> runs the same probe on a second build and diffs it' },
@@ -608,7 +708,8 @@ try {
   if (AC.state !== 'running') { try { await AC.resume(); } catch (_) {} }
   if (AC.state !== 'running') notes.push('AudioContext is ' + AC.state + ' — every level will read 0');
   const PROBES = { level: probeLevel, spectrum: probeSpectrum, cursor: probeCursor,
-                   preset: probePreset, key: probeKey, matrix: probeMatrix,
+                   preset: probePreset, key: probeKey, keypath: probeKeyPath,
+                   matrix: probeMatrix,
                    modmatrix: probeModMatrix };
   const fn = PROBES[NAME];
   out = fn ? await fn() : (NAME === 'help' ? HELP : { cols: [], rows: [], err: 'no probe named ' + NAME });
