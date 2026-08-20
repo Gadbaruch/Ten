@@ -133,6 +133,41 @@ one monoTrigger already keeps. The question to ask before writing any of it:
   audio releases had the same hole — fmod against `lane.len`, which during a
   window is its temporary 64 bars — and now ask the same question.
 
+- **POLY WAS NEVER ONLY AN OPTION ON AN AUDIO CHANNEL.** "keys became
+  polyphonic, position creates new playheads instead of jumping". Real, not
+  from that day's work, and unreproducible for THREE rounds because the probe
+  set's ch9 is saved at `vox.mode 1` and his at `0`. One playhead has been the
+  model since audio-mono, but the FLOOR that enforces it was applied in the key
+  handler and nowhere else — `trigger` and `cueNote` both read vox.mode raw, so
+  a channel stored at 0 fell through to `audPlay` and spawned a cursor per key
+  while the SAME channel's own key handler moved one head. That is why it read
+  as a broken engine rather than a stored value. It took the arp with it: the
+  arp fires its cues through that same door.
+  His set, imported: **three position keys took the tape 1 → 2 → 3 → 4 cursors,
+  doors `audPlay audPlay audPlay`; after, 1 → 1 → 1 → 1, `audMove` ×4, zero
+  audPlay.** Poly is now GONE rather than floored in one more place (his call):
+  `voxOf(p)` is the one answer every reader asks, the dial walks mono↔legato
+  only, the readout cannot print it, and a set stored at 0 heals on load.
+- **Setting the ONE is not recording the key.** Recording an arp onto a FRESH
+  channel came back with `{midi}` events an audio lane cannot read — signature
+  `t=0, dur=<however long you held>`, which names the branch: "● the ONE is
+  set" forces `qt:0`, and it was the one branch that never asked whether a
+  generator is running. recPlayNote had the arp's steps right all along; these
+  were the fingers landing on top. **`cue x13 midi x1` → `cue x17`, no midi.**
+  The ONE still gets set and the listen window still opens; only the note
+  stands down.
+- **A cursor count falling to 0 was the PAGE, not the arp.** Traced from before
+  the transport started it read 0 with no arp and 0 while STOPPED — a page
+  stop/played through six configurations. ONE FRESH LOAD PER CONFIGURATION is
+  already the rule here and it was broken three times in one session.
+  Clean: **tv `play=1 k1=1 k2=1 k3=1 rel=1`, replay 19 audMove / 1 audPlay.**
+- **THE PROBE SET IS NOT HIS INSTRUMENT — ASK FOR THE EXPORT.** Four wrong
+  theories in one session (qlive, the global modifier, autoloop off, vox.mode
+  as a string) all came from measuring `_probe-set.json` and reporting it as
+  verified. CLAUDE.md already says his set travels as a file and that asking is
+  cheap. Every one of those cost him a round trip. The moment a report does not
+  reproduce in two tries, ask for `exportSet` — do not build a third theory.
+
 ## Landed this session — all measured unless it says otherwise
 
 - **Both key paths through the rack.** Route matrix, hand-played:
@@ -173,12 +208,18 @@ one monoTrigger already keeps. The question to ask before writing any of it:
 - **A deadline behind the playhead is a stop** — halving the loop no longer
   gaps it (alive 0.93 with a 280ms silence → 1.00, zero).
 
-## QA CHECKLIST — 2026-08-20.1620, ordered by what is most likely wrong
+## QA CHECKLIST — 2026-08-20.1823, ordered by what is most likely wrong
 
-Build 2026-08-20.1620 on localhost:3033. "not measured" means shipped on
+Build 2026-08-20.1823 on localhost:3033. "not measured" means shipped on
 reasoning; test those first.
 
- 0. **A FRESH channel, arp, recorded.** The one that was actually broken: take
+ 0. **Audio keys are one playhead again.** Hold two or three position keys on
+    an audio channel with the loop on: the take JUMPS between them, it does not
+    stack up voices. Poly is gone from audio channels entirely — the voice dial
+    walks mono↔legato only, and a set saved as poly heals when you load it.
+    Measured on his set: cursors 1→2→3→4 became 1→1→1→1, three audPlay became
+    zero.
+ 0b. **A FRESH channel, arp, recorded.** The one that was actually broken: take
     a channel whose loop length is still being listened for (never set), drop
     an arp on it, arm rec, hold cue keys. Then STOP and START. The phrase must
     still be there. It was going in as midi notes an audio lane cannot play —
