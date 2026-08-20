@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-20.0808';
+const BUILD='2026-08-20.0928';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -3648,9 +3648,19 @@ function loopOps(e,c,lp){
   if(c==='Backspace'&&shift){
     /* THE ONLY thing that clears a length you set. Everything else that
        removes notes leaves the shape alone — see the note on `auto` below. */
+    /* AND IT IS THE ONE THAT RESETS, so it uses the DEFAULT (Gad, 2026-08-18:
+       "tab+shift+del - reset loop settings to default"). It hard-coded 2 while
+       ⇧⌫'s second press used DEFLENS[CFG.defLen], so the instrument had two
+       answers to "reset the length" and they disagreed the moment he changed
+       the setting. One answer, and it is the one in settings. The whole loop
+       SHAPE goes back with it — unit, grid and the quantize strengths — since
+       this is the reset gesture rather than a length nudge. */
     pushUndo('reset loop');
-    lp.unit='B'; lp.count=2; if(S.layer===1)lp.auto=true;
-    flash('⟲ loop length cleared'+(S.layer===1?' — it follows what you play again':''));
+    lp.unit='B'; lp.count=DEFLENS[CFG.defLen]; lp.grid=0.25;
+    lp.qlive=1; lp.qpost=1;
+    if(S.layer===1)lp.auto=true;
+    flash('⟲ loop reset — '+DEFLENS[CFG.defLen]+' bar'+
+      (S.layer===1?', following what you play again':''));
     dirty=true; dirtySave=true; return true;
   }
   if(c==='Backspace'){
@@ -5772,9 +5782,21 @@ function scheduleRange(from,to){
                 engine.audMove(li,to7,gl7,1,1);
                 engine.busEnvFire(li,AC.currentTime);}catch(_){}},ms7);
               const te7=tt+dj2, ms8=Math.max(0,(timeAt(te7+a.anchor)-AC.currentTime)*1000);
+              /* DOES ANOTHER JUMP FOLLOW? (Gad, 2026-08-18: "arp recording is
+                 not playing back as performed… works well in midi but not in
+                 audio".) Live, each arp step MOVES the head and leaves it —
+                 the next step takes it from wherever it got to. The replay
+                 ended every gesture with audRelock, so between two steps the
+                 head snapped back to where the bar says before the next jump
+                 grabbed it again. Same events, a different phrase, and on a
+                 1/16 arp it happens fifteen times a bar. The hand-back is for
+                 the END of a run; inside one, the next jump is the hand-back.*/
+              const nxt7=lane.events.some(e2=>e2.cue!==undefined&&
+                fmod(e2.t-te7,L2)<Math.max(dj2,0.02)+1e-6);
               setTimeout(()=>{try{
                 if(AUD.hold&&AUD.hold.pi===li)return;   // a finger owns it now
                 engine.busEnvFire(li,AC.currentTime,true);
+                if(nxt7)return;                         // another jump is already coming
                 if(off7){engine.audStop(li);return;}    // no bar to hand it back to
                 engine.audRelock(li);                   // …back where the bar asks
               }catch(_){}},ms8);
@@ -9890,8 +9912,16 @@ class Engine{
     if(rpS&&durSec==null)                  // same double-apply guard
       midis=midis.map(m=>rpitApply(m,rpS,p));
     const rpPre=!!rpS;
-    if((chordPre||rpPre)&&durSec==null&&T.playing)   // live play: write every sounding note into the lane
-      for(const m of midis)recPlayNote(pi,posNow(),Math.round(m),vel,0.25);
+    /* RECORDED WHERE EACH NOTE ACTUALLY SOUNDS (Gad, 2026-08-18: "i tried
+       recording chords the chords were right but the recording timing was
+       wrong, it dident capture the strum, and positioned notes wierdly"). This
+       wrote every note of the chord at posNow() with a flat 0.25 — the CURRENT
+       beat rather than the note's own scheduled time, so quantize was thrown
+       away; one timestamp for all of them, so the strum could not survive; and
+       before the sort, so even the order was not the played one. The write
+       moved down to where the voices are made, which is the only place that
+       knows each note's real time. */
+    const recCh=(chordPre||rpPre)&&durSec==null&&T.playing;
     let pcHandle=null;
     if(isMaster){                       // this channel's held notes define the chord
       const pcs=[...new Set(midis.map(m=>pcOf(m)))];
@@ -9936,8 +9966,14 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     }
     const notes=midis.map((m,i)=>({m,pad:pads[i]})).sort((a,b)=>a.m-b.m);
     const nM=notes.length;   // negative strum rolls high -> low
+    const lnR=S.patterns[S.editPat]&&S.patterns[S.editPat].lanes[pi];
     const voices=notes.map((n2,i)=>{
-      const v=this.noteOn(at+(strum>=0?i*strum:(nM-1-i)*(-strum)),pi,n2.m,vel,n2.pad);
+      const off=(strum>=0?i*strum:(nM-1-i)*(-strum));
+      /* the same instant the voice is given, in beats — strum included, so a
+         roll comes back as a roll rather than a block */
+      if(recCh)recPlayNote(pi,beatsAt(at+off),Math.round(n2.m),vel,
+                           Math.max(0.05,lnR?gridOf(lnR):0.25));
+      const v=this.noteOn(at+off,pi,n2.m,vel,n2.pad);
       v.live=durSec==null; return v;
     });
     if(durSec!=null){for(const v of voices)v.release(at+durSec);return null;}
@@ -20303,7 +20339,16 @@ const onKeyDown=e=>{
                here. One playhead does not decide whether you asked for a
                glide; the voice mode does. */
             const vgP=clamp(Math.round((S.presets[pi].vox||{}).mode||0),0,2);
-            const glP=(vgP===2&&heldP)?Math.max(0.01,(S.presets[pi].vox||{}).glide||0.08):0;
+            /* THE RUNNING LOOP IS THE NOTE YOU GLIDE FROM (Gad, 2026-08-18:
+               "when autoloop is on, we need to concider the autoloop as the
+               first note played so glides will be relative to it"). With auto
+               on there is always a head sounding, so there is always something
+               to slide from and every press should slide. With auto OFF the
+               first press MAKES the head and has nothing behind it, so it
+               lands where you put it — otherwise it sweeps up from the base
+               rate, which is his "first note plays with glide from baseline". */
+            const glP=(vgP===2&&(heldP||autoCur(S.presets[pi])))
+              ?Math.max(0.01,(S.presets[pi].vox||{}).glide||0.08):0;
             engine.audPitch(pi,semP,glP);
             engine.busEnvFire(pi,AC.currentTime);    // the keystroke IS the note-on
           };
@@ -20438,7 +20483,10 @@ const onKeyDown=e=>{
            press lands where you put it; the slide is what happens when the
            next one arrives over it. */
         const heldC=Object.keys(AUD.gk||{}).some(k9=>k9!==c&&(AUD.gk[k9]||{}).pi===pi);
-        const gl9=(vm9===2&&heldC)?Math.max(0.01,(S.presets[pi].vox||{}).glide||0.08):0;
+        /* same rule for cues: a running loop is a head already reading, so it
+           is what the jump slides from */
+        const gl9=(vm9===2&&(heldC||autoCur(S.presets[pi])))
+          ?Math.max(0.01,(S.presets[pi].vox||{}).glide||0.08):0;
         const ms0=Math.max(0,(atP-AC.currentTime)*1000);
         const go=()=>{engine.audMove(pi,cutAt(pi,sl),gl9,1);
           engine.busEnvFire(pi,AC.currentTime);};
