@@ -110,6 +110,29 @@ one monoTrigger already keeps. The question to ask before writing any of it:
   **0 audPlay across a loop → 1 per cycle, on the first loop and the second**
   (rms 0.0197 both). Auto on untouched: still 16 → 16 on pitch and position.
 
+- **AN AUDIO LANE RECORDED MIDI NOTES WHILE IT WAS LISTENING FOR ITS LENGTH.**
+  "arp audio position still not recorded", and "reproduces, but then stopping
+  and starting playback again its gone" — one line:
+  `if(isAudioCh(pi)&&!lane._cap)return recAudEvent(...)`. With a listen window
+  open that guard sent an AUDIO lane down the generic capture path, which
+  writes `{midi}` events; an audio lane cannot play one, so the arp went in
+  complete and none of it came back — audible while the capture buffer held it,
+  dead the moment the window closed into a clip.
+  Identical script, both builds, ch9, fresh lane, 1/16 arp, two keys:
+  **1542 recorded `midi x16`, 0 moves on replay · 1620 recorded `cue x16`,
+  17 moves.**
+  ⚠ **THE PROBE SET IS NOT A FRESH CHANNEL, and it hid this for a day.**
+  `_probe-set.json` has its lengths already set, so no window ever opens and
+  five configurations all passed. A window is open exactly when the length is
+  still being LISTENED for, which is the state a fresh channel is in — so it
+  was the COMMON case that was broken and the measured one that worked. Any
+  recording measurement from now on runs once on a lane with
+  `initLane(lane); lane.auto=true` as well.
+  A window changes the CLOCK, not the vocabulary: `recAudEvent` takes its `t`
+  from the window when one is open and feeds `lastEnd`. The two hand-played
+  audio releases had the same hole — fmod against `lane.len`, which during a
+  window is its temporary 64 bars — and now ask the same question.
+
 ## Landed this session — all measured unless it says otherwise
 
 - **Both key paths through the rack.** Route matrix, hand-played:
@@ -150,11 +173,17 @@ one monoTrigger already keeps. The question to ask before writing any of it:
 - **A deadline behind the playhead is a stop** — halving the loop no longer
   gaps it (alive 0.93 with a 280ms silence → 1.00, zero).
 
-## QA CHECKLIST — 2026-08-20.1542, ordered by what is most likely wrong
+## QA CHECKLIST — 2026-08-20.1620, ordered by what is most likely wrong
 
-Build 2026-08-20.1542 on localhost:3033. "not measured" means shipped on
+Build 2026-08-20.1620 on localhost:3033. "not measured" means shipped on
 reasoning; test those first.
 
+ 0. **A FRESH channel, arp, recorded.** The one that was actually broken: take
+    a channel whose loop length is still being listened for (never set), drop
+    an arp on it, arm rec, hold cue keys. Then STOP and START. The phrase must
+    still be there. It was going in as midi notes an audio lane cannot play —
+    you heard it while recording and it was gone after. Measured `midi x16`
+    with 0 moves on replay → `cue x16` with 17.
  1. **Position arp, recorded.** ch9 tape, keys mode = position, autoloop on,
     arp 1/16, rec on, hold two cue keys for two beats. Stop recording and let
     it loop. It should chop in the same rhythm you just heard, not a beat-ish
