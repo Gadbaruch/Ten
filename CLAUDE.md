@@ -163,9 +163,13 @@ modifier of it.** Any new modifier in a scope gets asked that question.
 
 Rearranged 2026-08-15 (Gad). Each one now means exactly one thing:
 
-    ` (and ScrollLock/Pause/Insert)  LATCH — notes, scopes, rec, mute/solo.
-                                   `KM.sl`, and every reader of it is
-                                   unchanged: only who SETS it moved.
+    LEFT WIN (MetaLeft)            LATCH — notes, scopes, rec, mute/solo.
+                                   `KM.sl` / `LATCHKEY`, and every reader of it
+                                   is unchanged: only who SETS it moved.
+                                   Confirmed 2026-08-20: this file said
+                                   ` /ScrollLock/Pause/Insert and the code said
+                                   MetaLeft; Gad's call is the LEFT WIN KEY, so
+                                   the code was right and this line was stale.
     left shift   `KM.shl`          GLOBAL — and it SILENCES the keyboard while
                                    it is down, the way ⌃ and ⌘ do, because
                                    every letter under it is a candidate for an

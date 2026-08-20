@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-20.2114';
+const BUILD='2026-08-20.2126';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -19200,19 +19200,21 @@ const onKeyDown=e=>{
           audPlace(noteCh,rec2,gridNow()-beats,'mic');}
         else flash('mic ring is empty — hold ctrl a moment first');
       }
-      else if(S.layer>=1&&isAudioCh(noteCh)&&!engine.audRec
-              &&retroBuf[noteCh].some(n=>n.cue!==undefined||n.pk!==undefined||n.fz!==undefined)){
-        /* you were jamming the cue keys: tab takes the JAM, not a recording */
-        retroCapture();
-      }
-      else if(S.layer>=1&&isAudioCh(noteCh)){
-        /* TAB USED TO ARM A RECORDING HERE. On a channel with a sample in it
-           that is a trap: the mic opens, the room is quiet, and a loop of
-           silence lands on top of your take. Tab on an audio channel is for
-           capturing the JAM; recording sound is the mic's own gesture, and
-           says so. */
-        if(engine.audRec)engine.audRecStop();
-        else flash('nothing to capture yet — jam the keys, then tab. ⌃+tab records the mic');
+      /* THE RELEASE DECIDES, ON AN AUDIO CHANNEL TOO (Gad, 2026-08-20: three
+         ways to record, and momentary was dead here). This branch used to fire
+         retroCapture() on the key-DOWN, which settles the gesture before the
+         hand has finished making it — so tab could only ever be a TAP on an
+         audio channel and the arm four lines below was unreachable. Measured:
+         hold tab, play a 1/16 arp for 2.2s, the arp hands 24 steps to a
+         recorder that was never armed and the lane is EMPTY.
+         Three lines down this file already says how it is meant to work: "REC
+         arms on the way down whatever the gesture turns out to be — a tap is
+         just a hold that ended quickly, and the release decides which it was."
+         That is now true everywhere. Tab still does not open the mic here —
+         that trap is what the old comment guarded against and ⌃+tab is still
+         its own gesture; all that changed is WHEN the tap is recognised. */
+      else if(S.layer>=1&&isAudioCh(noteCh)&&engine.audRec){
+        engine.audRecStop();
       }
       /* REC arms on the way down whatever the gesture turns out to be — a tap
          is just a hold that ended quickly, and the release decides which it
@@ -21602,7 +21604,10 @@ const onKeyUp=e=>{
       if(pat4.state!=='rec')pat4.state='rec';
       flash('● REC latched'); dirty=true; dirtySave=true; return;
     }
-    if(!wasUsed&&held<TAPMS&&S.layer>=1&&!isAudioCh(S.layer>=2?S.editSnd:S.curPreset)){
+    /* …and the tap is a tap on an audio channel too. The exclusion here was
+       the other half of the key-down grab: retroCapture had already run, so
+       this had to skip them. It runs from here now, for every channel. */
+    if(!wasUsed&&held<TAPMS&&S.layer>=1){
       const pat3=S.patterns[S.editPat];
       if(!LATCH.on){
         pat3.state='on'; finalizeCaptures(true);
