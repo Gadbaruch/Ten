@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-20.1047';
+const BUILD='2026-08-20.1208';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -10031,13 +10031,23 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
       /* THE LENGTH THE CHORD WAS HELD, not the provisional step. Each note
          keeps its own start, so a strummed chord released together comes back
          as notes of slightly different lengths — which is what it was. */
-      if(recSpots.length&&lnR){
-        const endB=beatsAt(t==null?AC.currentTime:t);
+      /* THE FORWARD DISTANCE, and nothing cleverer. The first attempt spelled
+         the wrap out by hand and got it wrong either side of the loop line,
+         which is why notes came back longer than they were played. fmod IS the
+         forward distance once both ends are in lane time. */
+      if(recSpots.length&&lnR&&lnR.len>0){
+        const endL=fmod(beatsAt(t==null?AC.currentTime:t)-editAnchor(),lnR.len);
         for(const r of recSpots){
+          const d2=Math.max(0.05,Math.min(lnR.len,fmod(endL-r.t,lnR.len)));
           const e2=lnR.events.find(x=>x.midi===r.m&&Math.abs(x.t-r.t)<1e-6);
-          if(e2)e2.dur=Math.max(0.05,fmod(endB-editAnchor(),lnR.len)-r.t<0
-            ?lnR.len+(fmod(endB-editAnchor(),lnR.len)-r.t)
-            :fmod(endB-editAnchor(),lnR.len)-r.t);
+          if(e2)e2.dur=d2;
+          /* RETRO NEEDS THE SAME CORRECTION, or tab afterwards hands back the
+             provisional step — which is why a chord recalled that way came out
+             as a row of sixteenths instead of the chord you held. */
+          const rb=retroBuf[pi];
+          if(rb)for(let q=rb.length-1;q>=0&&q>rb.length-32;q--)
+            if(rb[q]&&rb[q].midi===r.m&&Math.abs(fmod(rb[q].t-editAnchor(),lnR.len)-r.t)<1e-6){
+              rb[q].dur=d2; break;}
         }
         dirtySave=true;
       }
@@ -13151,7 +13161,13 @@ const GRANF=[
  SP('dens','dens','lin',{min:0.5,max:120,step:0.5,
    fmt:(v,o)=>Math.round((o&&o.dsync)||0)===1?(+v.toFixed(2))+'/beat':v+'/s'}),
  SP('flow','flow','lin',{min:0,max:1,step:0.05,fmt:v=>v<0.02?'lock':Math.round(v*100)+'%'}),
- SP('gpitch','semis','lin',{min:-24,max:24,step:1,big:12,fmt:v=>v+'st'}),
+/* gpitch IS GONE (Gad, 2026-08-18: "rn we have 2 pitch params in grain mode,
+   the regular one, and gpitch, they do the same, maybe we can remove gpitch").
+   They did: the cloud's own semis and the channel's both ended up transposing
+   the grains, so the page carried two dials for one pitch. The remaining one is
+   the tape page's `pitch`, and in grain mode it writes the CLOUD's semis — the
+   family applyCmode already converts to and from, so one dial means "the pitch
+   of this channel" in all three modes and the mode switch keeps it. */
  SP('jit','jit','lin',{min:0,max:12,step:0.5,fmt:v=>'\u00b1'+v+'st'}),
  SP('shape','shape','lin',{min:0,max:1,step:0.05}),
  SP('rev','rev','lin',{min:0,max:1,step:0.05,fmt:v=>Math.round(v*100)+'%'}),
@@ -13235,6 +13251,12 @@ const spdToSemis=s=>clamp(Math.round(12*Math.log2(Math.max(0.25,Math.abs(s)))),-
    object does not know its own channel, so it is found by identity; ten
    presets is a cheaper scan than caching a derived number that would then have
    to be invalidated by the take, the crop, the loop length and the tempo. */
+/* the gr object that belongs beside this au — the same identity scan audFitR
+   uses, because an au does not know its own channel */
+const cloudOf=au=>{
+  for(const i of CHANS())if(S.presets[i]&&S.presets[i].au===au)return S.presets[i].gr;
+  return null;
+};
 const audFitR=au=>{
   if(!au||!Math.round(au.fit||0))return 1;
   let pi=-1; for(const i of CHANS())if(S.presets[i]&&S.presets[i].au===au){pi=i;break;}
@@ -13350,9 +13372,15 @@ const AUDTAKE=[
       The reach is what it is: speed is ±0.25..4, so a fit further out than two
       octaves cannot be cancelled and the dial clamps. That is honest — sync in
       tape IS varispeed, and a take eight times the bar has to come out high. */
-   get:o=>Math.round(o.cmode??0)===0?spdToSemis(audFitR(o)*audSpd(o))
+   /* …AND IN GRAIN IT IS THE CLOUD'S. The grains read their own semis, so the
+      channel dial has to write that one there or it would move nothing and the
+      page would carry two pitches again — which is the pair gpitch and this
+      were. cloudOf finds the gr object beside this au. */
+   get:o=>Math.round(o.cmode??0)===2?clamp(Math.round((cloudOf(o)||{}).semis??0),-24,24)
+         :Math.round(o.cmode??0)===0?spdToSemis(audFitR(o)*audSpd(o))
                                     :clamp(Math.round(o.semis??0),-24,24),
    set:(o,v)=>{
+     if(Math.round(o.cmode??0)===2){const g=cloudOf(o); if(g)g.semis=clamp(Math.round(v),-24,24); return;}
      if(Math.round(o.cmode??0)===0){
        /* the speed that LANDS that pitch once the fit has had its say */
        const f=audFitR(o)||1, sgn=audSpd(o)<0?-1:1;
