@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-20.1408';
+const BUILD='2026-08-20.1501';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -5718,7 +5718,8 @@ function scheduleRange(from,to){
           lane.occur(s0-a.anchor,s1-a.anchor,(t,ev)=>{
             if(ev.pk!==undefined){
               const ms1=Math.max(0,(timeAt(t+a.anchor)-AC.currentTime)*1000);
-              const ms2=Math.max(0,(timeAt(t+Math.min(ev.dur||0.25,L3)+a.anchor)-AC.currentTime)*1000);
+              const dur3=Math.min(ev.dur||0.25,L3);
+              const ms2=Math.max(0,(timeAt(t+dur3+a.anchor)-AC.currentTime)*1000);
               setTimeout(()=>{try{
                 /* …and so does a recorded bend: with the loop off there is
                    nothing to bend until the replay makes it */
@@ -5737,6 +5738,27 @@ function scheduleRange(from,to){
                  walked beside it, rather than the bar mapped across the crop.
                  Stretch never left the clock, so audBendMovedClock still says
                  no there and nothing is spliced. */
+              /* …UNLESS THE NEXT STEP IS ALREADY TAKING OVER (Gad, 2026-08-20:
+                 "pitch arp recording is not accurate"). A held arp is one mono
+                 line — live it never returns to baseline between steps, it just
+                 re-pitches, and the measurement says so: 16 steps made 17
+                 audPitch calls, the 17th being the release when the hands came
+                 off. Replay gave every step its own release, so the same 16
+                 events made 33 calls — a drop to baseline and back 0.019 beats
+                 later, sixteen times, which is the stutter he heard.
+                 So a step releases only when nothing follows it closely. The
+                 test scales with the phrase instead of guessing a threshold:
+                 the next onset lands within one note-length of this one ending.
+                 A 1/16 run has a gap of 15% of a step and stays legato; two
+                 separate stabs a beat apart both release. Modulo the loop, so a
+                 run that carries over the seam is still one line. */
+              let gap3=Infinity;
+              for(const e3 of lane.events){
+                if(e3===ev||e3.pk===undefined)continue;
+                const d3=fmod(e3.t-(t+dur3),L3);
+                if(d3<gap3)gap3=d3;
+              }
+              if(gap3<=dur3+1e-6)return;              // the next step is the release
               setTimeout(()=>{try{if(!(AUD.hold&&AUD.hold.pi===li)){
                 engine.audPitch(li,0);
                 if(!autoCur(S.presets[li])){engine.audStop(li);return;}
@@ -10203,7 +10225,13 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
             en.heard=true;
             const v=this.noteOn(gridTime(bg),pi,en.midi,en.vel,en.pad??en.midi);
             v.release(gridTime(bg+div*0.85));
-            recPlayNote(pi,bg,en.midi,en.vel,div*0.85);
+            /* the RAW beat, not the grooved one — "qt stored straight (groove
+               is a playback layer)" is the convention the hand-played
+               recorder already follows, and the replay adds groove again on
+               its way out. Storing bg here meant every arp step was recorded
+               with groove baked in and then grooved a second time, which is a
+               steady offset between what you played and what came back. */
+            recPlayNote(pi,b,en.midi,en.vel,div*0.85);
           }
         }
         const nw=gridNow();
@@ -10256,7 +10284,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
         for(const m of hits){
           const v=this.noteOn(gridTime(bg),pi,rpA?rpitApply(m,rpA,S.presets[pi]):m,pick.vel,pick.pad??m);
           v.release(gridTime(bg+div*0.85));
-          recPlayNote(pi,bg,m,pick.vel,div*0.85);   // the recorder captures the arp OUTPUT
+          recPlayNote(pi,b,m,pick.vel,div*0.85);   // …the RAW beat: groove is a playback layer
         }
         }
       }
@@ -20761,7 +20789,7 @@ const onKeyDown=e=>{
         if(S.layer>=1)rPend[c]={pi,ts:tr,midi,vel:hitVel,press:AC.currentTime};   // retro memory hears everything
         /* an active arp generates the notes — record ITS output (recPlayNote), not the held note */
         const plyOf=isKit(S.presets[pi])?(kitSlot(S.presets[pi],midi)||{ply:[]}).ply:S.presets[pi].ply;
-        const arpOn=T.playing&&plyOf.some(sl=>(sl.typ===2||sl.typ===1||sl.typ===13)&&!sl.off);
+        const arpOn=genOn(pi,midi);
         if(recording&&arpOn&&lane.auto&&!lane._cap&&!lane.events.length){   // arp: still start the listen window
           if(CFG.listen)startCapture(lane,tr);
           else{lane.unit='B';lane.count=DEFLENS[CFG.defLen];lane.auto=false;}
@@ -20945,7 +20973,8 @@ function endAudHold(c){
         :Math.max(0.05,h8.press!=null?(AC.currentTime-h8.press)/spb():0.25);
       retroBuf[h8.pi].push({t:h8.tr,pk:h8.pk,dur:dur8});
       if(retroBuf[h8.pi].length>512)retroBuf[h8.pi].shift();
-      if(S.patterns[S.editPat].state==='rec'){
+      /* same rule on the pitch side: the arp's steps are the performance */
+      if(S.patterns[S.editPat].state==='rec'&&!genOn(h8.pi)){
         const qt8=fmod(h8.tr-editAnchor(),L8);
         lane8.clear(ev=>ev.pk===h8.pk&&Math.abs(ev.t-qt8)<1e-6);
         lane8.events.push({t:qt8,pk:h8.pk,dur:dur8,born:performance.now()});
@@ -21136,7 +21165,12 @@ function endAudHold(c){
     if(sl!=null&&tr!=null){
       retroBuf[pi].push({t:tr,cue:sl,dur:durB});
       if(retroBuf[pi].length>512)retroBuf[pi].shift();
-      if(S.patterns[S.editPat].state==='rec'){
+      /* NOT WHILE A GENERATOR IS RUNNING. With an arp the notes you heard were
+         its steps, and recPlayNote has already written every one of them —
+         writing the HELD key on top adds a jump nobody played. Measured: 16
+         live moves came back as 18 recorded events, the two extra being the
+         two keys held. Same test the note recorder and retro already use. */
+      if(S.patterns[S.editPat].state==='rec'&&!genOn(pi)){
         const qt=fmod(tr-editAnchor(),L);
         lane.clear(ev=>ev.cue===sl&&Math.abs(ev.t-qt)<1e-6);
         lane.events.push({t:qt,cue:sl,dur:durB,born:performance.now()});
@@ -22428,6 +22462,17 @@ function initLane(l){
   l.unit='B'; l.count=DEFLENS[CFG.defLen]; l.auto=true; l.state='on'; l.grid=0.25;
   l.qlive=1; l.qpost=1;
 }
+/* IS A GENERATOR MAKING THE NOTES RIGHT NOW — the one test, in one place.
+   arp / chord / flam produce the notes you hear, so recPlayNote writes THEIR
+   output and every hand-held key must stand down. Three recorders asked this
+   and only the note one knew how; the audio cue and pitch releases wrote the
+   held key on top, which is why a 16-move arp came back as 18 events. */
+function genOn(pi,midi){
+  if(!T.playing)return false;
+  const pre=S.presets[pi]; if(!pre)return false;
+  const rack=isKit(pre)?((kitSlot(pre,midi)||{ply:[]}).ply):pre.ply;
+  return (rack||[]).some(sl=>(sl.typ===2||sl.typ===1||sl.typ===13)&&!sl.off);
+}
 function clearLane(pi){
   const l=S.patterns[S.editPat].lanes[pi];
   if(!l)return;
@@ -22445,7 +22490,23 @@ function clearLane(pi){
      tab+⇧⌫ still resets the length on its own, at any time, for when the notes
      are not in the way. */
   const had9=l.events.length;
-  if(had9){ l.clear(); delete l._cap; delete l._rec; }
+  if(had9){ l.clear(); delete l._cap; delete l._rec;
+    /* AND THE HEAD COMES HOME (Gad, 2026-08-20: "clearing keys recording makes
+       loop stuck in a weird state"). Taking the events away does not undo what
+       the last one DID: on an audio channel the playhead is left wherever the
+       final recorded cue jumped it, any bend is still bent, and with an empty
+       lane nothing will ever move it again — the loop runs on from a position
+       nothing in the set can explain. So drop the finger state for this
+       channel, splice the bend back onto the base, and relock the head to the
+       loop's own phase, which is what every other length/position change here
+       already goes through. */
+    if(isAudioCh(pi)){
+      for(const k9 of Object.keys(AUD.gk||{}))
+        if((AUD.gk[k9]||{}).pi===pi)delete AUD.gk[k9];
+      if(AUD.hold&&AUD.hold.pi===pi)AUD.hold=null;
+      try{engine.audReturn(pi); engine.audRelock(pi);}catch(_){}
+    }
+  }
   else{
     initLane(l);
     /* …AND AN AUDIO CHANNEL GOES BACK TO ITS OWN INITIAL STATE, keeping the

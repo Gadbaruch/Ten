@@ -695,6 +695,110 @@ async function probeKeyPath() {
   return { cols: ['arrived', 'acted', 'route', 'cfg'], rows };
 }
 
+/* ROUND TRIP — the only question that matters about recording, and the one
+   every earlier check here got wrong. Reading the lane tells you what was
+   WRITTEN; it does not tell you whether playing it back does what your hands
+   did. So: record a phrase, then play it with the generator switched off, and
+   compare what the PLAYHEAD did in each pass.
+     nLive / nReplay   moves made, live and on replay. Equal is the goal; more
+                       on replay means something wrote twice.
+     recorded          what actually landed in the lane, by kind. With an arp
+                       running this must be the arp's steps (many); `cue x2`
+                       for a two-key phrase means the held keys were recorded
+                       and the arp's output was not.
+     medOff/worstOff   how far each live move sits from the nearest replay
+                       move, in BEATS. Groove applied twice showed as ~0.1.
+     cueMiss           replay moves that went somewhere else entirely.
+   THE TRANSPORT RUNS, so this one is audible at 5% — a silent tab has its
+   timers clamped to 1/s and the scheduler misses by up to 800ms (CLAUDE.md).
+
+   tools/probe.sh roundtrip ch=9 kmode=0 auto=1 div=0.25 keys=KeyA,KeyS      */
+async function probeRoundTrip() {
+  const ch    = num(P.ch, CH);
+  const keys  = list(P.keys, ['KeyA', 'KeyS']);
+  const div   = num(P.div, 0.25);
+  const holdB = num(P.holdb, 2);            // beats to hold the keys
+  pin(ch);
+  const p = S.presets[ch], lane = S.patterns[S.editPat].lanes[ch];
+  if (!p || !p.au) return { cols: ['err'], rows: [{ err: 'ch ' + ch + ' is not an audio channel' }] };
+  p.au.kmode = num(P.kmode, 0);
+  p.au.auto  = num(P.auto, 1);
+  if (P.cmode !== undefined) { p.au.cmode = num(P.cmode, 0); try { applyCmode(ch); } catch (_) {} }
+  if (P.q !== undefined) CFG.qOn = num(P.q, 1);
+  try { engine.granCfg(ch); engine.audLive(ch); } catch (_) {}
+  p.ply[0] = num(P.arp, 1)
+    ? { typ: PTYPES.indexOf('arp'), p1: div, p2: 0, p3: 1, p4: 60, p5: 0, p6: 0, p7: 0, p8: 0 }
+    : mkPly();
+
+  /* audible at 5%: see above */
+  let trim = null;
+  try { trim = AC.createGain(); trim.gain.value = 0.05;
+        engine.comp.disconnect(AC.destination); engine.comp.connect(trim);
+        trim.connect(AC.destination); } catch (_) {}
+
+  const moves = [], undo = [];
+  const at = () => +fmod(posNow() - editAnchor(), lane.len).toFixed(3);
+  const spy = (name, val) => { const fn = engine[name]; if (typeof fn !== 'function') return;
+    engine[name] = function (pi, ...a) { if (pi === ch) moves.push([at(), val(a)]); return fn.call(this, pi, ...a); };
+    undo.push(() => { engine[name] = fn; }); };
+  spy('audMove',  a => +(+a[0]).toFixed(3));
+  spy('audPitch', a => 'p' + (+(+a[0]).toFixed(2)));
+
+  const wb = async x => { let g = 0; while (gridNow() < x && g++ < 4000) await sleep(5); };
+  const ev = (ty, code) => document.dispatchEvent(
+    new KeyboardEvent(ty, { code, key: code, bubbles: true, cancelable: true }));
+
+  let live = [], rep = [], recd = {};
+  try {
+    S.patterns[S.editPat].state = 'rec';
+    lane.events = [];
+    if (!T.playing) play();
+    await wb(Math.ceil(gridNow()) + 2);
+    const t0 = Math.ceil(gridNow()) + 1;
+    await wb(t0);
+    moves.length = 0;
+    keys.forEach(k => ev('keydown', k));
+    await wb(t0 + holdB);
+    keys.forEach(k => ev('keyup', k));
+    await sleep(120);
+    live = moves.slice();
+
+    for (const e of lane.events) {
+      const k = e.cue !== undefined ? 'cue' : e.pk !== undefined ? 'pk'
+              : e.midi !== undefined ? 'midi' : e.fz !== undefined ? 'fz' : '?';
+      recd[k] = (recd[k] || 0) + 1;
+    }
+    S.patterns[S.editPat].state = 'on';
+    p.ply[0] = mkPly();                       // generator OFF: the lane is on its own now
+    await wb(Math.ceil(gridNow() / lane.len) * lane.len + lane.len);
+    moves.length = 0;
+    await wb(gridNow() + lane.len);
+    rep = moves.slice();
+  } finally {
+    for (const u of undo) u();
+    try { stop(); } catch (_) {}
+    try { if (trim) { engine.comp.disconnect(trim); trim.disconnect();
+                      engine.comp.connect(AC.destination); } } catch (_) {}
+  }
+
+  const offs = live.map(L => { let b = 9, v = null;
+    for (const R of rep) { const d = Math.abs(R[0] - L[0]); if (d < b) { b = d; v = R[1]; } }
+    return { off: +b.toFixed(3), same: v === L[1] }; });
+  const srt = offs.map(o => o.off).sort((a, b) => a - b);
+  if (!live.length) notes.push('no live moves — the keys never reached the head; run keypath first');
+  if (rep.length > live.length)
+    notes.push('replay makes MORE moves than the hands did: something is writing the lane twice '
+             + '(the held key on top of the generator is the usual one)');
+  return { cols: ['nLive', 'nReplay', 'recorded', 'medOff', 'worstOff', 'cueMiss', 'cfg'],
+    rows: [{ nLive: live.length, nReplay: rep.length,
+      recorded: Object.entries(recd).map(([k, n]) => k + ' x' + n).join(' ') || '(empty)',
+      medOff: srt.length ? srt[srt.length >> 1] : '',
+      worstOff: srt.length ? srt[srt.length - 1] : '',
+      cueMiss: offs.filter(o => !o.same).length,
+      cfg: 'kmode=' + p.au.kmode + ' auto=' + p.au.auto + ' cmode=' + (p.au.cmode | 0)
+         + ' q=' + (CFG.qOn | 0) + ' div=' + div + ' len=' + lane.len }] };
+}
+
 const HELP = {
   cols: ['args'],
   rows: [
@@ -704,6 +808,7 @@ const HELP = {
     { k: 'preset',   args: 'names=SNR,S909 note=48 ch=8 — library name, played and measured' },
     { k: 'key',      args: 'code=KeyA hold=120 shift=0 alt=0 ctrl=0 meta=0' },
     { k: 'keypath',  args: 'code=KeyA ch=9 kmode=0 auto=1 arp=0 hold=400 — did the app CLAIM the key, and which engine door did it reach' },
+    { k: 'roundtrip',args: 'ch=9 kmode=0 auto=1 arp=1 div=0.25 keys=KeyA,KeyS — record a phrase and replay it: did the head do the same thing twice' },
     { k: 'matrix',   args: 'ch=8 take=nylonlick cues=4 — the seven cases + the cue jumps' },
     { k: 'modmatrix',args: 'only=filt — every mod SOURCE x every DESTINATION: reaches/anchor/live/tweak' },
     { k: '(any)',    args: '--ab <url> runs the same probe on a second build and diffs it' },
@@ -717,6 +822,7 @@ try {
   if (AC.state !== 'running') notes.push('AudioContext is ' + AC.state + ' — every level will read 0');
   const PROBES = { level: probeLevel, spectrum: probeSpectrum, cursor: probeCursor,
                    preset: probePreset, key: probeKey, keypath: probeKeyPath,
+                   roundtrip: probeRoundTrip,
                    matrix: probeMatrix,
                    modmatrix: probeModMatrix };
   const fn = PROBES[NAME];
