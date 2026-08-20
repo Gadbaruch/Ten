@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-20.1620';
+const BUILD='2026-08-20.1631';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -19552,7 +19552,17 @@ const onKeyDown=e=>{
   /* THE ACTION IS THE PRESS. Waiting for the keyup to decide tap-vs-hold made
      the click land late; now the toggle fires the moment the key goes down and
      the scope opens anyway — arrows after it still set the tempo. */
-  if(c==='KeyM'&&toolsOf(e)&&!HOLD.q){
+  /* THE GLOBAL LAYER WAS DEFINED AND NEVER CALLED (Gad, 2026-08-20: "live
+     quantization is dead rn"). `gblOf` — left shift, the instrument-wide
+     modifier this file documents — had ZERO call sites, so every one of the
+     five settings it is supposed to carry could only be reached through the
+     TOOLS layer: a ⇧q that does nothing looks exactly like a quantize that
+     does nothing. The four below take either modifier now, so the documented
+     gesture works without taking away the one that already did. (⌥j stays
+     tools-only on purpose — the file says the patch-as-JSON moved off shift.)
+     ⇧esc for settings is the fifth and is NOT wired here; it lives in the
+     escape handler, which is timing-based, and it has not been checked. */
+  if(c==='KeyM'&&(toolsOf(e)||gblOf(e))&&!HOLD.q){
     if(!e.repeat){HOLD.m=true; HOLD.mUsed=false;
       S.metro=!S.metro; flash('click '+(S.metro?'on':'off')); dirty=true;}
     return;}
@@ -19561,12 +19571,12 @@ const onKeyDown=e=>{
      utility, so it sits with the other things left shift carries. */
   /* the patch as JSON moves off shift with everything else — ⌥j for json */
   if(c==='KeyJ'&&toolsOf(e)&&!e.repeat){e.preventDefault(); copyPatch(); return;}
-  if(c==='KeyO'&&toolsOf(e)&&!e.repeat){               // ⌃o — how recording meets what is there
+  if(c==='KeyO'&&(toolsOf(e)||gblOf(e))&&!e.repeat){   // ⇧o — how recording meets what is there
     CFG.overdub=CFG.overdub?0:1; saveCfg();
     flash(CFG.overdub?'OVERDUB — recording adds to what is there'
                      :'OVERWRITE — recording replaces what the playhead passes');
     dirty=true; return;}
-  if(c==='KeyB'&&toolsOf(e)&&!e.repeat){               // tap tempo, on repeated taps
+  if(c==='KeyB'&&(toolsOf(e)||gblOf(e))&&!e.repeat){   // tap tempo, on repeated taps
     const n2=performance.now();
     taps=taps.filter(t2=>n2-t2<3000); taps.push(n2);
     if(taps.length>=2){
@@ -19617,14 +19627,14 @@ const onKeyDown=e=>{
             :'already on the '+gridName(g0)+' grid · ch '+tg.join(' '));
     dirty=true; dirtySave=true; return;
   }
-  if(c==='KeyQ'&&toolsOf(e)&&!e.repeat&&S.layer>=1&&!HOLD.q){
+  if(c==='KeyQ'&&(toolsOf(e)||gblOf(e))&&!e.repeat&&S.layer>=1&&!HOLD.q){
     e.preventDefault(); HOLD.q=true; HOLD.qUsed=false;
     /* the toggle moved to the RELEASE: reaching for q+s (post-rec snap) or
        q+digit (grid) used to flip live-Q on the way in, every time. Tap =
        toggle; hold-and-use = the scope, with Q left exactly as it was. */
     flash('Q — tap toggles live quantize · s snaps recorded notes · digits set the grid');
     dirty=true; return;}
-  if(c==='KeyQ'&&toolsOf(e)&&!e.repeat&&!HOLD.q){  // ⌃q = live-quantize toggle, everywhere
+  if(c==='KeyQ'&&(toolsOf(e)||gblOf(e))&&!e.repeat&&!HOLD.q){  // ⇧q = live-quantize toggle, everywhere
     CFG.qOn=CFG.qOn?0:1; saveCfg();
     flash('live quantize '+(CFG.qOn?'ON':'OFF')+' · grid '+gridName(gridOf())+' — digits change it, s snaps');
     dirty=true; return;}
