@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-20.1208';
+const BUILD='2026-08-20.1258';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -10022,7 +10022,8 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
            it was actually held — written immediately with a provisional step so
            a latched chord is already in the lane, then corrected on the key-up,
            which is the same two-stage the single-note recorder uses */
-        recSpots.push({t:fmod(beatsAt(at+off)-editAnchor(),lnR?lnR.len:4),m:Math.round(n2.m)});}
+        recSpots.push({t:fmod(beatsAt(at+off)-editAnchor(),lnR?lnR.len:4),
+                       b0:beatsAt(at+off),m:Math.round(n2.m)});}
       const v=this.noteOn(at+off,pi,n2.m,vel,n2.pad);
       v.live=durSec==null; return v;
     });
@@ -10031,14 +10032,31 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
       /* THE LENGTH THE CHORD WAS HELD, not the provisional step. Each note
          keeps its own start, so a strummed chord released together comes back
          as notes of slightly different lengths — which is what it was. */
-      /* THE FORWARD DISTANCE, and nothing cleverer. The first attempt spelled
-         the wrap out by hand and got it wrong either side of the loop line,
-         which is why notes came back longer than they were played. fmod IS the
-         forward distance once both ends are in lane time. */
+      /* HOW LONG IT WAS HELD IS A SUBTRACTION, not a wrap (Gad, 2026-08-18:
+         "when strum is on and the note off is recieved before the note on of
+         the late coming notes, that causes no note off message to come… why
+         are you just not recording those events as they are?"). He is right,
+         and the wrap was the whole bug: with a strum, a short tap's release
+         can arrive BEFORE a late note's start, so the held length is NEGATIVE
+         — and fmod turned that into nearly a whole bar, which is the note that
+         ran over the loop line.
+         Each note keeps the absolute beat it was given, so the length is
+         end minus start on one clock. A note released before it sounded was
+         never played, so it leaves the lane rather than being clamped into a
+         note nobody performed. */
       if(recSpots.length&&lnR&&lnR.len>0){
-        const endL=fmod(beatsAt(t==null?AC.currentTime:t)-editAnchor(),lnR.len);
+        const endB=beatsAt(t==null?AC.currentTime:t);
         for(const r of recSpots){
-          const d2=Math.max(0.05,Math.min(lnR.len,fmod(endL-r.t,lnR.len)));
+          const held=endB-r.b0;
+          if(held<=1e-6){                       // the off beat its own on
+            const q=lnR.events.findIndex(x=>x.midi===r.m&&Math.abs(x.t-r.t)<1e-6);
+            if(q>=0)lnR.events.splice(q,1);
+            const rb0=retroBuf[pi];
+            if(rb0)for(let z=rb0.length-1;z>=0&&z>rb0.length-32;z--)
+              if(rb0[z]&&rb0[z].midi===r.m&&Math.abs(rb0[z].t-r.b0)<1e-6){rb0.splice(z,1);break;}
+            continue;
+          }
+          const d2=Math.max(0.05,Math.min(lnR.len,held));
           const e2=lnR.events.find(x=>x.midi===r.m&&Math.abs(x.t-r.t)<1e-6);
           if(e2)e2.dur=d2;
           /* RETRO NEEDS THE SAME CORRECTION, or tab afterwards hands back the
@@ -10046,8 +10064,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
              as a row of sixteenths instead of the chord you held. */
           const rb=retroBuf[pi];
           if(rb)for(let q=rb.length-1;q>=0&&q>rb.length-32;q--)
-            if(rb[q]&&rb[q].midi===r.m&&Math.abs(fmod(rb[q].t-editAnchor(),lnR.len)-r.t)<1e-6){
-              rb[q].dur=d2; break;}
+            if(rb[q]&&rb[q].midi===r.m&&Math.abs(rb[q].t-r.b0)<1e-6){rb[q].dur=d2; break;}
         }
         dirtySave=true;
       }
@@ -10482,28 +10499,16 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     this.audBendCur=this.audBendCur||[];
     const sh={_bend:1,midi,semis,bornAt:AC.currentTime,
       released:false,killed:false,press:0,pressN:[],nodes:[],
-      /* A FINGER OUTRANKS A STEAL. This channel's voice mode is mono, so
-         trigger releases the previous voice on every new note — and on a bend
-         shim that arrived as "clear the head" one block after setting it,
-         which is the 0 that appeared after every keypress. A rack-generated
-         step has nobody holding it and is released normally; a shim a KEY owns
-         may only be released by the key-up that owns it. */
-      release(t){ if(this.released||this.keyHeld)return; this.released=true;
+      release(t){ if(this.released)return; this.released=true;
         const d=Math.max(0,((t??AC.currentTime)-AC.currentTime)*1000);
         const off=()=>{ if(E.audBendCur[pi]!==sh)return;   // something newer owns it
           E.audBendCur[pi]=null;
-          /* LEGATO LIVES ON THE SHIM NOW, because the shim is what owns the
-             sound once a pitch key goes through the rack. One head means one
-             pitch, so a chord of them is a STACK: the newest press holds the
-             bend and a release hands it to the newest one still down. Newest
-             by BIRTH, not by array order — the rack can spawn several inside
-             one block and their order in act is the order they were made, not
-             the order a finger arrived. */
-          let back=null;
-          for(const o of (E.act[pi]||[]))
-            if(o&&o._bend&&o!==sh&&!o.released&&!o.killed&&
-               (!back||(o.bornAt||0)>(back.bornAt||0)))back=o;
-          if(back){E.audBendCur[pi]=back; E.audPitch(pi,back.semis); return;}
+          /* NO NOTE STACK HERE. monoTrigger already keeps one — push on the
+             way in, pop on the way out, and re-fire the note underneath — and
+             a second stack living on the shim is what made the first attempt
+             at this fight itself. For ONE playhead every note is a retune, so
+             the shim's whole job is: bend on the way in, clear on the way out,
+             and let the pop decide what comes back. */
           E.audPitch(pi,0); E.busEnvFire(pi,AC.currentTime,true);
           if(!autoCur(S.presets[pi])){E.audStop(pi);return;}
           if(E.audBendMovedClock(pi)){E.audReturn(pi);
@@ -20435,6 +20440,15 @@ const onKeyDown=e=>{
              audio, instead of clearing the bend behind its back. */
           const firep=()=>{
             if(AUD.gk[c]!==hp)return;                // let go before it landed
+            /* THROUGH THE RACK (Gad: "yes pitch keys should go through the play
+               rack", and "arp isnt working at all" on pitch). trigger is the
+               door every other note uses: it feeds the arp pool, applies chance
+               and nudge, and keeps the mono note stack. noteOn hands an audio
+               pitch channel to audBendNote, so a generated step reaches the head
+               exactly as a finger does — and the recorder writes what the rack
+               produced, which is the whole of "always record the output". */
+            hp.tv=engine.trigger(AC.currentTime+0.004,pi,KBBASE+semP,hitVel);
+            return;
             /* GLIDE IS WHAT HAPPENS WHEN A NOTE LANDS ON A HELD ONE, and
                nothing else. A first press is instant — the head is where you
                put it — and only the second slides, which is what legato means
@@ -20903,6 +20917,11 @@ function endAudHold(c){
         dirtySave=true;
       }
     }
+    /* THE HANDLE OWNS THE END. trigger gave us a mono handle; releasing it
+       pops the note stack and re-fires whatever was underneath, which IS the
+       fall-back — so this branch no longer writes one of its own. */
+    if(h8.tv&&h8.tv.release){try{h8.tv.release(AC.currentTime);}catch(_){}
+      dirty=true; return 'went';}
     /* LETTING GO OF THE TOP NOTE FALLS BACK TO THE ONE UNDERNEATH (Gad,
        2026-08-18: "letting go of key 2 should return to previously held key
        1"). One head means one pitch, so a chord of pitch keys is a STACK, not
