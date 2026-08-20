@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-18.2055';
+const BUILD='2026-08-20.0808';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -3464,21 +3464,18 @@ function optSet(key,on){
    silence until the next one came round — the channel appeared to come back a
    bar late. Anything spanning the playhead is retriggered for the time it has
    left, including a note whose tail has wrapped past the loop point. */
-function reviveLane(n){
-  if(!T.playing)return;
-  const lane=S.patterns[S.editPat].lanes[n];
-  if(!lane||!lane.events.length||lane.len<=0||(isAudioCh(n)&&!isGranCh(n)))return;
-  const L=lane.len, t=fmod(posNow()-editAnchor(),L);
-  for(const e of lane.events){
-    if(e.t>=L-1e-9)continue;
-    const dur=Math.max(0,e.dur||0.25);
-    /* how far into this note the playhead is, measured forward from its start
-       so a note that began before the loop point still counts */
-    const into=fmod(t-e.t,L);
-    if(into<=1e-9||into>=dur)continue;
-    engine.trigger(AC.currentTime+0.005,n,e.midi,e.vel??0.9,(dur-into)*spb());
-  }
-}
+/* MUTE CUTS, IT DOES NOT PLAY (Gad, 2026-08-18: "muting and unmuting in any
+   channel can cause unwanted new note on messages in all channels", and after
+   ruling the keyboard out himself, "we worked a few days ago on a feature that
+   when i mute/unmute a channel that has a long note it will mute/unmute it
+   during play. i guess that was a mistake"). It was reviveLane, and the damage
+   was wider than the channel you touched: the toggle walks ALL ten and revived
+   every audible one, so muting channel 3 re-struck whatever mid-note channels
+   1, 2, 4 and 5 happened to be inside. That is the note-on burst.
+   His call between the two fixes, and it is the right one: a mute is a cut.
+   Silence is still immediate — chokeSeq stays — and coming back is simply the
+   next note arriving on time. A held pad does not reappear halfway through
+   itself, which is what you would want from a drop anyway. */
 function msApply(n,kind){
   const l=S.patterns[S.editPat].lanes[n]; if(!l)return;
   const other=kind==='solo'?'mute':'solo';
@@ -3492,7 +3489,7 @@ function msApply(n,kind){
   for(const i of CHANS()){
     const li=S.patterns[S.editPat].lanes[i];
     const audible=soloing?li.solo:!li.mute;
-    if(!audible)engine.chokeSeq(i); else reviveLane(i);
+    if(!audible)engine.chokeSeq(i);
   }
   flash('ch '+n+' '+S.presets[n].name+' '+kind.toUpperCase()+(l[kind]?'':' off'));
   dirty=true; dirtySave=true;
@@ -4591,7 +4588,7 @@ let fxwReady=false;
                only rate that is not one. */
             if(Number.isFinite(m.rate)&&m.rate!==0){
               v.sTgt=m.rate; v.base=Number.isFinite(m.base)&&m.base!==0?m.base:m.rate;}
-            if(Number.isFinite(m.sh)&&m.sh>0)v.shift=m.sh;
+            if(Number.isFinite(m.sh)&&m.sh>0){v.shift=m.sh; v.shTgt=null;}
             if(Number.isFinite(m.end)&&m.end>0)v.end=m.end;
             /* START, LIVE. The end was re-aimed and the floor was not, so the
                wrap kept the low edge the cursor was born with: moving start
@@ -4671,7 +4668,16 @@ let fxwReady=false;
           for(const [id,v] of this.tv){
             v.sK=k9;
             if(v.free)v.sTgt=Math.max(0.01,v.base*f9);
-            else v.shift=(v.shc||1)*f9;}}
+            else{
+              /* STRETCH GLIDES TOO (Gad: "the glide effect only works in tape
+                 and should work also in stretch"). Tape bends the RATE and the
+                 rate has always slewed; stretch bends the SHIFTER and that was
+                 written straight to shift, so it stepped however long a glide
+                 was asked for. It gets a target now and walks to it on the same
+                 constant, so one glide dial means one thing in both modes. */
+              const tg9=(v.shc||1)*f9;
+              if(k9)v.shTgt=tg9; else {v.shift=tg9; v.shTgt=null;}
+            }}}
         /* THE TAPE'S WINDOW AND SPEED, so a key can obey them. a and far are
            unsorted sample positions — far<a is the reversed crop — and rate
            is the tape's own step before the key's note ratio. on is 0 in
@@ -4814,6 +4820,10 @@ let fxwReady=false;
             amp=c.env*c.gain;
           }
           if(c.step!==c.sTgt)c.step+=(c.sTgt-c.step)*(c.sK||sT);   // a bend glides, it does not step
+          if(c.shTgt!=null&&c.shift!==c.shTgt){                    // …and so does the shifter
+            c.shift+=(c.shTgt-c.shift)*(c.sK||sT);
+            if(Math.abs(c.shTgt-c.shift)<1e-5){c.shift=c.shTgt; c.shTgt=null;}
+          }
           if(c.gTo!=null){                                 // …and so does a move
             c.ph+=(c.gTo-c.ph)*c.gK;
             if(Math.abs(c.gTo-c.ph)<2)c.gTo=null;
@@ -20285,7 +20295,15 @@ const onKeyDown=e=>{
                FROM. */
             const heldP=Object.keys(AUD.gk||{}).some(k9=>k9!==c&&(AUD.gk[k9]||{}).kind==='pmono'
                                                      &&(AUD.gk[k9]||{}).pi===pi);
-            const glP=(vmP===2&&heldP)?Math.max(0.01,(S.presets[pi].vox||{}).glide||0.08):0;
+            /* vmP IS FORCED TO 1 BY AUDMONO, so testing it for legato could
+               never be true — which is why only the RETURN glided and going TO
+               a new note was always instant (Gad: "glide only affects the
+               return of pitch to previously held note"). The fall-back path
+               reads vox.mode directly, which is how it worked there and not
+               here. One playhead does not decide whether you asked for a
+               glide; the voice mode does. */
+            const vgP=clamp(Math.round((S.presets[pi].vox||{}).mode||0),0,2);
+            const glP=(vgP===2&&heldP)?Math.max(0.01,(S.presets[pi].vox||{}).glide||0.08):0;
             engine.audPitch(pi,semP,glP);
             engine.busEnvFire(pi,AC.currentTime);    // the keystroke IS the note-on
           };
