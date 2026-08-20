@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-20.1631';
+const BUILD='2026-08-20.1646';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -21393,7 +21393,20 @@ const onKeyUp=e=>{
     /* a scope riding on the modifier ends with it, exactly as it did on ⌥ */
     for(const k of [...ALTSUS]){ALTSUS.delete(k);
       document.dispatchEvent(new KeyboardEvent('keyup',{code:k,bubbles:true}));}}
-  if(TOOLKEY(c))disarmTools();   // TOOLKEY is left ⌥ alone now: a real hold, cleared on its own up
+  /* AND IT CLOSES THE SCOPES IT WAS HOLDING (Gad, 2026-08-20: "quantize button
+     is sticky, when i turn it on and then let go of tools modifier, pressing
+     the numbers changes the q rate"). Releasing q while the tools key is still
+     down parks the scope in ALTSUS — that is the ride-on-the-modifier rule and
+     it is right — but ALTSUS was drained in exactly two places, the SCOPE key
+     and right shift. Tools was not one of them, so HOLD.q was left true with
+     nothing able to take it out, and every digit afterwards went to the q grid
+     instead of doing its own job. Same care right shift takes: only close the
+     ones no OTHER modifier is still holding, or reaching across for the scope
+     key would drop what it is holding. */
+  if(TOOLKEY(c)){disarmTools();   // TOOLKEY is left ⌥ alone now: a real hold, cleared on its own up
+    if(!MODS.ctrl&&!e.ctrlKey&&!(KM.sr&&(MODS.shift||e.shiftKey)))
+      for(const k of [...ALTSUS]){ALTSUS.delete(k);
+        document.dispatchEvent(new KeyboardEvent('keyup',{code:k,bubbles:true}));}}
   if(c==='BracketLeft')BRK.l=false;
   if(c==='BracketRight')BRK.r=false;
   if(c==='Comma')OCT.l=false;
