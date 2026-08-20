@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-20.1501';
+const BUILD='2026-08-20.1507';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -5460,7 +5460,13 @@ let fxwReady=false;
             var s=d.ops[i];
             /* the band limit is fixed HERE, from the nominal frequency, and is
                never revisited — that is the whole point of this processor */
-            this.o.push({ph:Math.random()*0.0001,inc:s.f/sampleRate,amp:s.amp,
+            /* THE START PHASE, WHICH THIS ENGINE NEVER HAD. Every operator
+               began at ~0 regardless of the slot's trig setting, so rtrg and
+               free sounded identical here and the dialled phase never arrived
+               — measured as two identical notes correlating 1.000 on FREE,
+               which free must never do. The builder sends it now; 0..1. */
+            this.o.push({ph:Number.isFinite(s.ph)?s.ph:Math.random()*0.0001,
+                         inc:s.f/sampleRate,amp:s.amp,
                          dep:s.dep,tgt:s.tgt,mode:s.mode,
                          tbl:fmTable(s.key,s.harm||[1],s.harm?s.harm.length:1),
                          pm:0,ramt:s.ramt||0,rgv:1,incT:0});
@@ -6707,8 +6713,12 @@ class Voice{
           const hw=fmHarm(E,b.o,b.f);
           /* op0's gain is amt in the native builder; only ops 1-9 additive get
              the 0.9. Applying it to op0 too made the phase engine 0.9x quiet. */
+          /* rtrg starts where you dialled, free starts anywhere — the same
+             question the native builder asks of ops[0], asked here of every
+             operator, because in this engine they are all accumulators. */
+          const ph0=b.o.phm===1?Math.random():((b.o.ph||0)/360);
           return {f:b.f, amp:md===0?(b.i===0?a0:a0*0.9):1, wav:Math.round(b.o.wav||0),
-                  key:hw.key, harm:hw.harm,
+                  key:hw.key, harm:hw.harm, ph:ph0-Math.floor(ph0),
                   mode:wm, tgt:md===0?-1:tgtIx(b),
                   dep:ix/(2*Math.PI), ramt:md===2?a0:0};
         });

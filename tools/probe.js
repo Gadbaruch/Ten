@@ -799,6 +799,66 @@ async function probeRoundTrip() {
          + ' q=' + (CFG.qOn | 0) + ' div=' + div + ' len=' + lane.len }] };
 }
 
+/* TRIG — does an operator's rtrg/free actually reach the sound, in BOTH
+   engines. rtrg means "start at the phase you dialled, every note", so two
+   identical notes must come out sample-identical; free means "don't", so they
+   must not. One number says which: the correlation between the first
+   milliseconds of two identical notes.
+     same=1.000  the two notes start identically -> rtrg behaviour
+     same<1      they start differently          -> free behaviour
+   A row where rtrg and free give the SAME correlation is a toggle that does
+   nothing in that engine.
+
+   ONE CONFOUND, and it only bites the phase engine: a worklet voice starts on
+   the next 128-sample render block, not at the sample you asked for, so two
+   notes begin up to 2.9ms apart on the sample grid — most of a cycle at 261Hz.
+   That shows here as a strong ANTI-correlation on rows that are otherwise
+   fine, so read `same=1.000` as the reliable signal (nothing but a genuinely
+   identical start produces it) and treat a negative number in the phase rows
+   as "not identical", not as "random phase". Measured 2026-08-20: with `ph`
+   plumbed through, the cfg message carries 0.25 twice at 90 degrees and 0.75
+   at 270, while the audio still correlates -0.82 — the phase is right and the
+   ONSET is what moved.
+
+   tools/probe.sh trig ch=1 note=60 ph=90                                    */
+async function probeTrig() {
+  const ch = num(P.ch, CH), note = num(P.note, NOTE), ph = num(P.ph, 90);
+  const keep = stash(ch);
+  const p = S.presets[ch];
+  const rows = [];
+  try {
+    const VX = modHolder(p, 'vox').vox || (p.vox = {});
+    const grab = async () => {
+      engine.allOff(); await sleep(60);
+      const bus = busOf(ch); if (!bus) return null;
+      const t = tap(bus); await sleep(20);
+      engine.noteOn(AC.currentTime + 0.02, ch, note, 0.9);
+      await sleep(160);
+      const [L] = t.stop();
+      engine.allOff();
+      const w = windowOf(L, L);
+      return L.slice(w.o, w.o + 1500);
+    };
+    const corr = (a, b) => { if (!a || !b) return null;
+      let n = 0, d1 = 0, d2 = 0, m = Math.min(a.length, b.length);
+      for (let i = 0; i < m; i++) { n += a[i] * b[i]; d1 += a[i] * a[i]; d2 += b[i] * b[i]; }
+      return +(n / Math.max(1e-12, Math.sqrt(d1 * d2))).toFixed(3); };
+    for (const eng of [0, 1]) {
+      VX.fmw = eng;
+      for (const phm of [0, 1]) {
+        (modHolder(p, 'osc').osc || []).forEach(o => { if (o) { o.phm = phm; o.ph = ph; } });
+        const A = await grab(), B = await grab();
+        rows.push({ k: (eng ? 'phase' : 'native') + ' / ' + (phm ? 'free' : 'rtrg'),
+          same: corr(A, B),
+          peak: A ? +Math.max.apply(null, Array.from(A, Math.abs)).toFixed(4) : 0 });
+      }
+    }
+  } finally { unstash(ch, keep); }
+  if (rows.every(r => !r.peak)) notes.push('no sound on ch ' + ch + ' — is a preset loaded there?');
+  notes.push('rtrg and free showing the same correlation in one engine = the toggle is dead there');
+  return { cols: ['same', 'peak'], rows };
+}
+
 const HELP = {
   cols: ['args'],
   rows: [
@@ -809,6 +869,7 @@ const HELP = {
     { k: 'key',      args: 'code=KeyA hold=120 shift=0 alt=0 ctrl=0 meta=0' },
     { k: 'keypath',  args: 'code=KeyA ch=9 kmode=0 auto=1 arp=0 hold=400 — did the app CLAIM the key, and which engine door did it reach' },
     { k: 'roundtrip',args: 'ch=9 kmode=0 auto=1 arp=1 div=0.25 keys=KeyA,KeyS — record a phrase and replay it: did the head do the same thing twice' },
+    { k: 'trig',     args: 'ch=1 note=60 ph=90 — does an operator rtrg/free reach the sound, in both fm engines' },
     { k: 'matrix',   args: 'ch=8 take=nylonlick cues=4 — the seven cases + the cue jumps' },
     { k: 'modmatrix',args: 'only=filt — every mod SOURCE x every DESTINATION: reaches/anchor/live/tweak' },
     { k: '(any)',    args: '--ab <url> runs the same probe on a second build and diffs it' },
@@ -823,6 +884,7 @@ try {
   const PROBES = { level: probeLevel, spectrum: probeSpectrum, cursor: probeCursor,
                    preset: probePreset, key: probeKey, keypath: probeKeyPath,
                    roundtrip: probeRoundTrip,
+                   trig: probeTrig,
                    matrix: probeMatrix,
                    modmatrix: probeModMatrix };
   const fn = PROBES[NAME];
