@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-20.0928';
+const BUILD='2026-08-20.1008';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -3489,10 +3489,28 @@ function msApply(n,kind){
   for(const i of CHANS()){
     const li=S.patterns[S.editPat].lanes[i];
     const audible=soloing?li.solo:!li.mute;
-    if(!audible)engine.chokeSeq(i);
+    /* an audio channel is silenced on its fader and keeps rolling; choking it
+       would throw away the very position the mute is supposed to preserve */
+    if(isAudioCh(i))engine.refresh(i);
+    else if(!audible)engine.chokeSeq(i);
   }
   flash('ch '+n+' '+S.presets[n].name+' '+kind.toUpperCase()+(l[kind]?'':' off'));
   dirty=true; dirtySave=true;
+}
+/* AN AUDIO CHANNEL IS MUTED AT THE OUTPUT, NOT AT THE NOTES (Gad, 2026-08-18:
+   "can we make that audio channels get their output muted instead of the
+   notes"). A midi lane muted at the scheduler is right — the notes simply do
+   not happen, and there is nothing running to fall out of step. A TAPE is a
+   playhead: stop scheduling it and the loop stops dead, so unmuting restarts
+   it wherever the bar happens to be rather than dropping you back into the
+   phrase. Muting the bus instead leaves the take rolling silently and
+   unmuting lands exactly where the music already is, which is what a mute on
+   a desk has always meant. */
+function laneSilenced(i){
+  const P=S.patterns[S.editPat]; if(!P)return false;
+  const l=P.lanes[i]; if(!l)return false;
+  const soloing=CHANS().some(j=>P.lanes[j]&&P.lanes[j].solo);
+  return (soloing?!l.solo:!!l.mute)||!!(typeof muteHold!=='undefined'&&muteHold&&muteHold.lane===i);
 }
 const MSPEND={};                 // toggles waiting for the grid
 function msToggle(n,kind){
@@ -5679,7 +5697,9 @@ function scheduleRange(from,to){
     for(let li=1;li<10;li++){      // lane 0 is the master's own timeline
       const lane=pat.lanes[li];
       if(isAudioCh(li)){
-        if((anySolo?!lane.solo:lane.mute)||(muteHold&&muteHold.lane===li))continue;
+        /* NOT SKIPPED WHEN MUTED any more — the fader is doing the silencing,
+           so the take stays on the clock and unmuting drops you back into the
+           phrase instead of restarting it. */
         /* THE LOOP IS A CURSOR LIKE ANY OTHER, and now you can turn it off:
            with auto off nothing reads the take until you play it, which is
            the polyphonic sampler — every key its own cursor, from the same
@@ -8672,7 +8692,16 @@ class Engine{
   }
   refresh(pi){
     const p=S.presets[pi], b=this.buses[pi], n=AC.currentTime;
-    b.busG.gain.setTargetAtTime(p.mix.lvl,n,0.02);
+    /* the desk's mute rides the channel fader for a take, so the playhead
+       keeps its place while you drop it out */
+    /* GUARDED, BECAUSE refresh RUNS INSIDE THE CONSTRUCTOR and isAudioCh is a
+       const declared four thousand lines further down — reading it here is a
+       TDZ ReferenceError that kills the whole page before `engine` exists, and
+       a syntax check cannot see it. typeof does not help: on a const in its
+       temporal dead zone typeof throws too. During construction the honest
+       answer is "nothing is muted yet". */
+    let sil=false; try{sil=isAudioCh(pi)&&laneSilenced(pi);}catch(_){}
+    b.busG.gain.setTargetAtTime(sil?0:p.mix.lvl,n,0.02);
     /* PAN IS NOT WRITTEN HERE WHILE SOMETHING IS DRIVING IT. This used to be
        the only implementation of pan modulation, and it had two faults that
        between them made the destination look dead: it read `m.routes` raw
@@ -19560,7 +19589,11 @@ const onKeyDown=e=>{
     if(S.layer===0){pushUndo('timeline clear');lp.clear();flash('timeline cleared');}
     else if(S.layer===1){
       if(rs(e))clearLane(focusCh());   // notes and length both, back to listening
-      else if(T.playing){muteHold={lane:S.curPreset};engine.chokeSeq(S.curPreset);
+      else if(T.playing){muteHold={lane:S.curPreset};
+        /* momentary mute, same rule: a take drops out on its fader and keeps
+           its place; a midi lane is choked because there is nothing running */
+        if(isAudioCh(S.curPreset))engine.refresh(S.curPreset);
+        else engine.chokeSeq(S.curPreset);
         flash('holding '+S.presets[S.curPreset].name+' silent — ⇧⌫ clears');return;}
       else{flash('⇧⌫ clears the lane');return;}
     }
@@ -20815,7 +20848,16 @@ function endAudHold(c){
       }
     }
     if(!Object.keys(AUD.gk).some(k8=>(AUD.gk[k8]||{}).kind==='pmono')){
-      engine.audPitch(h8.pi,0);
+      /* AND THE WAY BACK GLIDES TOO (Gad, 2026-08-18: "go to note works,
+         return to autoloop isnt gliding"). Letting the last key go is landing
+         on the loop, and the loop is the note underneath — the same thing the
+         fall-back to another key already slides onto. It only slides when
+         there IS a loop to slide onto; with auto off the last key-up ends the
+         head, and sliding something to a stop is not a glide. */
+      const vg8=clamp(Math.round((S.presets[h8.pi].vox||{}).mode||0),0,2);
+      engine.audPitch(h8.pi,0,
+        (vg8===2&&autoCur(S.presets[h8.pi]))
+          ?Math.max(0.01,(S.presets[h8.pi].vox||{}).glide||0.08):0);
       engine.busEnvFire(h8.pi,AC.currentTime,true);   // …and the key-up releases it
       /* AUTO OFF: the last finger takes the head with it. With the loop off a
          pitch key MAKES the one cursor, so it also has to end it — otherwise
@@ -21202,7 +21244,12 @@ const onKeyUp=e=>{
   }
   if(c==='Backspace'){
     if(eraseHold)spanUnmark(S.patterns[S.editPat].lanes[focusCh()]);
-    eraseHold=null;muteHold=null;BRK.l=false;BRK.r=false;OCT.l=false;OCT.r=false;
+    eraseHold=null;
+    /* the fader has to come back with it, or a take stays silent after the
+       finger leaves — the momentary mute is the one that ends without a toggle */
+    if(muteHold&&isAudioCh(muteHold.lane)){const mh=muteHold.lane; muteHold=null;
+      try{engine.refresh(mh);}catch(_){}}
+    muteHold=null;BRK.l=false;BRK.r=false;OCT.l=false;OCT.r=false;
     HOLD.a=false;KM.shl=false;
     if(ESCH){clearTimeout(ESCH.timer); ESCH=null;}
     clearTimeout(delHoldTimer);}
