@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-20.1345';
+const BUILD='2026-08-20.1408';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -9754,7 +9754,7 @@ class Engine{
        nudge, humanize and the rest reach it exactly as they reach a cue, and
        recPlayNote already writes the pk events that come back. A real cloud
        channel is untouched: it is the audio+pitch pair that is redirected. */
-    if(AUDMONO&&p.cat==='audio'&&kmodeOf(p)===1)return this.audBendNote(at,pi,midi,vel);
+    if(AUDMONO&&p.cat==='audio'&&kmodeOf(p)===1)return this.audBendNote(at,pi,midi,vel,this._glide);
     if(engineGranP(p))return this.granNote(at,pi,midi,vel,null);
     /* A CUE IS A NOTE. Position keys used to fire from the key handler and
        return, which meant the whole PLAY rack — chords, the arp, everything
@@ -9880,7 +9880,7 @@ class Engine{
     return v;
   }
   /* PLAY rack: chord fanout + arp pool. Sequencer & live both come through here. */
-  trigger(at,pi,midi,vel,durSec){
+  trigger(at,pi,midi,vel,durSec,glide){
     const chan=S.presets[pi];
     /* control-rate envelopes need a note to start from — the audio-rate ones
        get theirs from the voice, but an fx mix is a channel-level thing and
@@ -9906,6 +9906,7 @@ class Engine{
     const plyE=this.ovRack(pi,'ply',p0.ply);
     const p=plyE===p0.ply?p0:{...p0,ply:plyE};
     const isMaster=isChordMaster(p);
+    this._glide=glide||0;               // handed to audBendNote one call down
     /* global scaling: snap non-drum channels to the held chord (from a chord-
        master channel) or to the global scale. masters define, they don't follow */
     /* A RECORDED LANE IS FIXED ONCE PLAYED (Gad, 2026-08-18: "Chord quality
@@ -10458,6 +10459,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     const lane=S.patterns[S.editPat].lanes[pi], L=lane.len||4;
     const vm=clamp(Math.round((S.presets[pi].vox||{}).mode||0),0,2);
     if(vm>0){                       // mono/legato: move the head, do not add one
+      const glR=this._glide;          // the key worked it out; the rack carried it
       /* …BUT THERE HAS TO BE A HEAD TO MOVE (Gad, 2026-08-18: "autoloop off arp
          doesnt work, not on pitch or position"). audMove sends the cursor that
          is already reading somewhere else, and with the loop off there is no
@@ -10470,7 +10472,8 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
         const l8=S.patterns[S.editPat]&&S.patterns[S.editPat].lanes[pi];
         if(l8)this.audPlay(pi,Math.max(at,AC.currentTime+0.004),l8.len,0);
       }
-      const gl=vm===2?Math.max(0.01,(S.presets[pi].vox||{}).glide||0.08):0;
+      const gl=Number.isFinite(glR)?glR
+        :(vm===2?Math.max(0.01,(S.presets[pi].vox||{}).glide||0.08):0);
       this.audMove(pi,cue.frac,gl,1);
       const shM={_cue:1,midi,released:false,killed:false,press:0,pressN:[],nodes:[],
         release(){this.released=true;},kill(){this.killed=true;this.released=true;},
@@ -10499,7 +10502,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
      thing rather than a voice, so the last one to land owns it: a release only
      clears the head if this shim is still the one in force, or an arp step's
      note-off would cancel the step that had already replaced it. */
-  audBendNote(at,pi,midi,vel){
+  audBendNote(at,pi,midi,vel,glide){
     const E=this, semis=Math.round(midi)-KBBASE;
     const ms=Math.max(0,(at-AC.currentTime)*1000);
     this.audBendCur=this.audBendCur||[];
@@ -10531,7 +10534,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
         if(l9)E.audPlay(pi,AC.currentTime+0.005,l9.len,0);
       }
       E.audBendCur[pi]=sh;
-      E.audPitch(pi,semis); E.busEnvFire(pi,AC.currentTime); };
+      E.audPitch(pi,semis,glide||0); E.busEnvFire(pi,AC.currentTime); };
     if(ms<2)go(); else setTimeout(go,ms);
     this.act[pi].push(sh);
     /* swept only once it is RELEASED — a held key can outlast any timer, and a
@@ -20485,7 +20488,15 @@ const onKeyDown=e=>{
                rate, which is his "first note plays with glide from baseline". */
             const glP=(vgP===2&&(heldP||autoCur(S.presets[pi])))
               ?Math.max(0.01,(S.presets[pi].vox||{}).glide||0.08):0;
-            engine.audPitch(pi,semP,glP);      // …here, with everything it needs
+            /* THROUGH THE RACK, on the third attempt and this time with an
+               instrument. trigger is the door every other note uses: it feeds
+               the arp pool, applies chance and nudge, and keeps the ONE note
+               stack (monoTrigger's). noteOn hands an audio pitch channel to
+               audBendNote, so a generated step reaches the head exactly as a
+               finger does and the recorder writes what the rack produced.
+               The glide still travels with the bend — audBendNote passes it on
+               — so legato is unchanged by the move. */
+            hp.tv=engine.trigger(AC.currentTime+0.004,pi,KBBASE+semP,hitVel,undefined,glP);
             engine.busEnvFire(pi,AC.currentTime);    // the keystroke IS the note-on
           };
           if(msp<2)firep(); else setTimeout(firep,msp);
@@ -20631,10 +20642,16 @@ const onKeyDown=e=>{
            goes back to moving the head itself until the reason is found rather
            than guessed at. The pitch side is reverted with it for the same
            reason: he could not test either one. */
-        const ms0=Math.max(0,(atP-AC.currentTime)*1000);
-        const go=()=>{engine.audMove(pi,cutAt(pi,sl),gl9,1);
-          engine.busEnvFire(pi,AC.currentTime);};
-        if(ms0<2)go(); else setTimeout(go,ms0);
+        /* THROUGH THE RACK, the same door the pitch key now uses. A cue slot
+           travels as note 60+slot; cueNote turns it back into a place, moves
+           the one head and hands back a note-shaped handle. The glide rides
+           along so a jump onto a held cue still slides. */
+        /* S.presets[pi], NOT p9 — p9 belongs to the PITCH branch's scope and
+           reading it here is a ReferenceError thrown straight out of the
+           keydown handler, which is why the position key went silent both
+           times this routing was tried. Everything else in this branch spells
+           it out the long way for the same reason. */
+        hj.tv=engine.trigger(atP,pi,60+sl+trSemis(S.presets[pi]),vel9,undefined,gl9);
         flash('cue '+(sl+1)+'/'+nS+' · '+(vm9===2?'glide':'moved'));
         dirty=true; return;
       }
@@ -20958,6 +20975,10 @@ function endAudHold(c){
         dirty=true; return 'went';
       }
     }
+    /* the rack handle ends it: releasing pops monoTrigger's stack, which
+       re-fires the note underneath — that IS the legato fall-back */
+    if(h8.tv&&h8.tv.release){try{h8.tv.release(AC.currentTime);}catch(_){}
+      dirty=true; return 'went';}
     if(!Object.keys(AUD.gk).some(k8=>(AUD.gk[k8]||{}).kind==='pmono')){
       /* AND THE WAY BACK GLIDES TOO (Gad, 2026-08-18: "go to note works,
          return to autoloop isnt gliding"). Letting the last key go is landing
@@ -21053,6 +21074,8 @@ function endAudHold(c){
     if(AUD.hold===hj9)AUD.hold=null;
     if(gsh){try{gsh.release(AC.currentTime);}catch(_){}
       engine._ctrlPut('grn',pi,0,'pos',undefined);}
+    /* the rack handle ends the same way the pitch key's does */
+    if(hj9&&hj9.tv&&hj9.tv.release){try{hj9.tv.release(AC.currentTime);}catch(_){}}
 
     /* this key's cursor only — the others are still held. The loop comes back
        when the last finger leaves, which is what a grab has always meant. */
