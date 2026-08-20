@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-20.1329';
+const BUILD='2026-08-20.1345';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -20451,9 +20451,14 @@ const onKeyDown=e=>{
             /* REVERTED with the cue side — see the note there. The arp reached
                a hand-played pitch key through this door (28 bends, 17 events,
                15 distinct times) and plain playing stopped working with the
-               loop off, which is the trade nobody wants. */
-            engine.audPitch(pi,semP,glP);
-            engine.busEnvFire(pi,AC.currentTime);
+               loop off, which is the trade nobody wants.
+               THE BEND IS FIRED AT THE BOTTOM, after the glide is worked out.
+               Putting it here is what broke every pitch key: glP is a const
+               declared twenty lines below, so calling it from above is a TDZ
+               ReferenceError — thrown inside a setTimeout, where nothing
+               reports it, so the key simply made no sound and the handler
+               looked innocent. `tools/probe.sh keypath` is what found it:
+               claimed the key, reached no engine door. */
             /* GLIDE IS WHAT HAPPENS WHEN A NOTE LANDS ON A HELD ONE, and
                nothing else. A first press is instant — the head is where you
                put it — and only the second slides, which is what legato means
@@ -20480,7 +20485,7 @@ const onKeyDown=e=>{
                rate, which is his "first note plays with glide from baseline". */
             const glP=(vgP===2&&(heldP||autoCur(S.presets[pi])))
               ?Math.max(0.01,(S.presets[pi].vox||{}).glide||0.08):0;
-            engine.audPitch(pi,semP,glP);
+            engine.audPitch(pi,semP,glP);      // …here, with everything it needs
             engine.busEnvFire(pi,AC.currentTime);    // the keystroke IS the note-on
           };
           if(msp<2)firep(); else setTimeout(firep,msp);

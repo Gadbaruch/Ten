@@ -673,10 +673,18 @@ async function probeKeyPath() {
     rows = [
       { k: 'ch' + ch, arrived: dn.defaultPrevented ? 'yes' : 'NO — app never claimed it',
         acted: heldFp !== before ? 'yes' : 'no', route: downRoute.join(' → ') || '(none)', cfg },
-      { k: 'on key-up', arrived: up.defaultPrevented ? 'yes' : 'no',
+      /* KEY-UP DOES NOT HAVE TO CLAIM. Most key-up handlers here do their work
+         without preventDefault, so 'no' in this row is normal and says nothing
+         — `acted` and `route` are what to read. It cost a false "stale hold"
+         diagnosis before this note existed. */
+      { k: 'on key-up', arrived: up.defaultPrevented ? 'yes' : 'n/a',
         acted: fp() !== heldFp ? 'yes' : 'no',
         route: route.slice(downRoute.length).join(' → ') || '(none)', cfg: '' }
     ];
+    /* AND A ROUTE CAN ARRIVE LATE. Quantize defers the sound to the next grid
+       line, so a door reached after the key-up shows in the SECOND row, not
+       the first — reading only row one is how a working quantized key looked
+       dead. */
     if (!dn.defaultPrevented)
       notes.push('the app did not claim this key — check layer/curPreset, and that no earlier '
                + 'branch returned. A zero route here says nothing about the feature.');
