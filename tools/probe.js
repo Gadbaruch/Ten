@@ -871,6 +871,58 @@ async function probeTrig() {
   return { cols: ['same', 'peak'], rows };
 }
 
+/* MONO — one playhead per audio channel, which is the whole model. Two keys
+   down with the loop on must leave ONE cursor and reach audMove, never
+   audPlay: a cue JUMPS the head, it does not add one. And a pitch key must
+   pitch and STAY pitched while it is held — a second audPitch straight after
+   the first is the head returning to baseline under your finger.
+     cursors   worklet cursor count after key 1, after key 2, after release
+     doors     every engine door the two keys reached, in order
+   audPlay in the list with auto on, or cursors going 1 -> 2, is the bug.
+
+   tools/probe.sh mono ch=9 kmode=0                                          */
+async function probeMono() {
+  const ch = num(P.ch, CH), kmode = num(P.kmode, 0);
+  pin(ch);
+  const p = S.presets[ch], lane = S.patterns[S.editPat].lanes[ch];
+  if (!p || !p.au) return { cols: ['err'], rows: [{ err: 'ch ' + ch + ' is not audio' }] };
+  p.au.kmode = kmode; p.au.auto = num(P.auto, 1);
+  try { engine.granCfg(ch); engine.audLive(ch); } catch (_) {}
+  (p.ply || []).forEach((_, i) => p.ply[i] = mkPly());
+  S.patterns[S.editPat].state = 'on'; lane.events = [];
+  if (P.q !== undefined) CFG.qOn = num(P.q, 0); else CFG.qOn = 0;
+  let trim = null;
+  try { trim = AC.createGain(); trim.gain.value = 0.05;
+        engine.comp.disconnect(AC.destination); engine.comp.connect(trim);
+        trim.connect(AC.destination); } catch (_) {}
+  if (!T.playing) play();
+  await sleep(900);
+  const doors = [], undo = [];
+  for (const nm of ['audPlay', 'audMove', 'audPitch', 'audStop', 'cueNote', 'audBendNote']) {
+    const fn = engine[nm]; if (typeof fn !== 'function') continue;
+    engine[nm] = function (...a) { if (a[0] === ch) doors.push(nm); return fn.apply(this, a); };
+    undo.push(() => { engine[nm] = fn; });
+  }
+  const cur = () => { try { const st = engine.gn[ch] && engine.gn[ch].stat; return st ? (st.tv | 0) : -1; }
+                      catch (_) { return -1; } };
+  const K = (t, c) => document.dispatchEvent(
+    new KeyboardEvent(t, { code: c, key: c, bubbles: true, cancelable: true }));
+  K('keydown', 'KeyA'); await sleep(180); const c1 = cur();
+  K('keydown', 'KeyS'); await sleep(180); const c2 = cur();
+  K('keyup', 'KeyA'); K('keyup', 'KeyS'); await sleep(320); const c3 = cur();
+  for (const u of undo) u();
+  try { stop(); } catch (_) {}
+  try { if (trim) { engine.comp.disconnect(trim); trim.disconnect();
+                    engine.comp.connect(AC.destination); } } catch (_) {}
+  const bad = doors.indexOf('audPlay') >= 0 || c2 > 1;
+  if (bad) notes.push('POLYPHONIC: a second cursor or an audPlay with the loop on — '
+                    + 'a cue must move the one head, not make another');
+  return { cols: ['cursors', 'doors', 'verdict'],
+    rows: [{ k: (kmode ? 'pitch' : 'position') + ' ch' + ch,
+      cursors: c1 + ' / ' + c2 + ' / ' + c3, doors: doors.join(' ') || '(none)',
+      verdict: bad ? 'POLY — bug' : 'mono' }] };
+}
+
 const HELP = {
   cols: ['args'],
   rows: [
@@ -881,6 +933,7 @@ const HELP = {
     { k: 'key',      args: 'code=KeyA hold=120 shift=0 alt=0 ctrl=0 meta=0' },
     { k: 'keypath',  args: 'code=KeyA ch=9 kmode=0 auto=1 arp=0 hold=400 — did the app CLAIM the key, and which engine door did it reach' },
     { k: 'roundtrip',args: 'ch=9 kmode=0 auto=1 arp=1 div=0.25 keys=KeyA,KeyS — record a phrase and replay it: did the head do the same thing twice' },
+    { k: 'mono',     args: 'ch=9 kmode=0 auto=1 — one playhead? a cue must MOVE the head, never add one' },
     { k: 'trig',     args: 'ch=1 note=60 ph=90 — does an operator rtrg/free reach the sound, in both fm engines' },
     { k: 'matrix',   args: 'ch=8 take=nylonlick cues=4 — the seven cases + the cue jumps' },
     { k: 'modmatrix',args: 'only=filt — every mod SOURCE x every DESTINATION: reaches/anchor/live/tweak' },
@@ -896,6 +949,7 @@ try {
   const PROBES = { level: probeLevel, spectrum: probeSpectrum, cursor: probeCursor,
                    preset: probePreset, key: probeKey, keypath: probeKeyPath,
                    roundtrip: probeRoundTrip,
+                   mono: probeMono,
                    trig: probeTrig,
                    matrix: probeMatrix,
                    modmatrix: probeModMatrix };
