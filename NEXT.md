@@ -168,6 +168,36 @@ one monoTrigger already keeps. The question to ask before writing any of it:
   cheap. Every one of those cost him a round trip. The moment a report does not
   reproduce in two tries, ask for `exportSet` — do not build a third theory.
 
+- **THREE WAYS TO RECORD, AND ONLY ONE OF THEM EXISTED ON AN AUDIO CHANNEL.**
+  Gad named them and the naming is what found the bug: retro (tap tab, take the
+  last bars), momentary (hold tab while you play), latch (LEFT WIN + tab).
+  Every probe in this session armed rec by setting `pat.state` directly — the
+  MOMENTARY path — reported clean numbers four times, and never touched retro.
+    - **Retro wrote the arp as midi notes an audio lane cannot play.**
+      `recPlayNote` feeds `retroBuf` and pushed a raw `{t,midi,vel,dur}`. A
+      hand-played cue or pitch key puts a real cue/pk in that buffer, so retro
+      worked BY HAND and died on the rack's output. And the guard above both
+      commits — refuse an audio channel with no cue/pk/fz — did NOT fire,
+      because the two hand entries satisfied it, so retro reported success and
+      wrote 23 dead events. **`midi-only x23, pk x2` → `pk x25`.**
+      Same lesson as the listen window: the clock changes, the vocabulary
+      does not.
+    - **Tab could only ever be a TAP here.** The key-down chain fired
+      `retroCapture()` immediately, settling the gesture before the hand had
+      finished making it, so the arm four lines below was unreachable. Hold tab
+      and play a 1/16 arp for 2.2s: **24 steps handed to a recorder that was
+      never armed, lane EMPTY.** The file three lines down already said how it
+      should work — "REC arms on the way down… the release decides which it
+      was" — and that is now true everywhere; the key-up's `!isAudioCh`
+      exclusion went with it.
+      **retro 25→pk x22 · momentary 24→pk x21 (was 0) · latch 25→pk x21.**
+  ⚠ **ASK WHICH GESTURE, NOT WHETHER IT WORKS.** Four rounds of "I measured it,
+  it works" were all the same untested-by-hand path. The question that cracked
+  it was his: "do you know this?"
+- **The latch key is the LEFT WIN key (MetaLeft).** This file said
+  `` ` ``/ScrollLock/Pause/Insert and the code said MetaLeft; Gad's call is left
+  win, so the code was right and CLAUDE.md was stale. Fixed there.
+
 ## Landed this session — all measured unless it says otherwise
 
 - **Both key paths through the rack.** Route matrix, hand-played:
@@ -208,12 +238,18 @@ one monoTrigger already keeps. The question to ask before writing any of it:
 - **A deadline behind the playhead is a stop** — halving the loop no longer
   gaps it (alive 0.93 with a 280ms silence → 1.00, zero).
 
-## QA CHECKLIST — 2026-08-20.1823, ordered by what is most likely wrong
+## QA CHECKLIST — 2026-08-20.2126, ordered by what is most likely wrong
 
-Build 2026-08-20.1823 on localhost:3033. "not measured" means shipped on
+Build 2026-08-20.2126 on localhost:3033. "not measured" means shipped on
 reasoning; test those first.
 
- 0. **Audio keys are one playhead again.** Hold two or three position keys on
+ 0. **All three ways to record, on an audio channel with an arp.** Play the
+    arp, then: (a) TAP tab — retro takes the last bars; (b) HOLD tab while you
+    play — momentary; (c) LEFT WIN + tab to latch, play, tap tab to unlatch.
+    All three must come back as the arp's figure, not one long note and not
+    silence. Momentary recorded NOTHING before this build. Measured
+    25→22 / 24→21 / 25→21 events.
+ 0a. **Audio keys are one playhead again.** Hold two or three position keys on
     an audio channel with the loop on: the take JUMPS between them, it does not
     stack up voices. Poly is gone from audio channels entirely — the voice dial
     walks mono↔legato only, and a set saved as poly heals when you load it.
