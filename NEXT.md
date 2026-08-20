@@ -1,146 +1,152 @@
-# WHERE THE AUDIO CHANNEL STANDS — 2026-08-18, main
+# WHERE THE AUDIO CHANNEL STANDS — 2026-08-20, main
 
-`audio-mono` is MERGED into main and Gad is testing on plain localhost:3033
-again. One playhead is the model now: a cue MOVES the head, it does not add
-one, and poly is gone from this channel type by his own call ("i'm feeling safe
-with our removal of poly mode from this channel type, it feels very good").
+`audio-mono` is merged; everything below is on main and Gad tests on plain
+localhost:3033. One playhead is the model: a cue MOVES the head, it does not add
+one, and poly is gone from this channel type by his own call.
 
-## Landed this session, newest first — all measured unless it says otherwise
+**BOTH AUDIO KEY PATHS NOW GO THROUGH THE PLAY RACK.** That was the session's
+main structural change and it took three attempts; the third worked because it
+had an instrument. A pitch key and a position key both travel through
+`engine.trigger` — the door every other note uses — so the arp, chance, nudge
+and the rest exist on an audio channel, and `recPlayNote` writes what the rack
+produced rather than what the finger did.
 
-- **Pitch survives a mode switch**, both ways and through the fit: stretch +3
-  → tape → grain → stretch reads 523.3 / 523.3 / 522.4 / 523.3 where the last
-  hop used to come home at 440. Time is what gives instead, deliberately.
-- **The cloud's read position no longer slews.** `pos` was in the same slew as
-  size, gain and width — right for anything rendered THROUGH a grain, wrong for
-  the address it is spawned at, which cannot click. Indicative only, the
-  estimator was noisy: the address arrives inside one 46ms sample where it used
-  to take ~134ms with fade at 0.25.
-- **The loop length is a row above the meters** — every lane at once, and a
-  lane still listening shows a dot rather than the length it will not keep.
-- **Auto off replays, and pitch keys fall back.** A recorded lane replayed into
-  silence with the loop off, because the replay MOVES a head and there was none
-  to move (alive 0 → 0.4 of the loop, which is the two gestures' own length).
-  And a pitch key release did nothing while another key was held, so the head
-  stayed on the note you had just let go: bends read 0, 2, then 2. It hands
-  back to the newest key still down now — 0, 2, then 0.
-- **The stretched read never folded** — rdCur returned before the wrap and tRd
-  CLAMPS, so a stretched cursor sat on its last sample until the bar re-fired
-  it. NOT A/B'd: the failure mode is DC, not silence, and the probe asked the
-  wrong question. Write the zero-crossing probe before trusting it.
-- **The rack has a door into a pitch-mode audio channel** (`audBendNote`), so
-  generated notes bend the head instead of building granular voices. HALF DONE
-  — a hand-played pitch key still short-circuits past the rack, see below.
-- **The arp recorded {midi} onto audio lanes**, which their replay never reads:
-  it sang and the lane came back silent. `recAudEvent` writes cue/pk now.
-- **Quantize never reached the pitch keys** — one channel had two feels. Both
-  paths use the same clock and the same length rule now (1.13 → 1.25).
-- **⇧⌫ keeps the loop length**; a second press resets it, tab+⇧⌫ still does it
-  outright. The audio lane dims the tail the loop never reaches.
-- **The relock's map knew the loop but not the speed** — exact at x1, wrong by
-  the speed factor everywhere else, always forward under x1. Every doubling,
-  every tempo change and every cue release landed by that map.
-- **Sync is a transposition and the pitch dial reported half the rate.**
-- **A deadline, not a duration**, for the carrier's life; and a relock on the
-  bar line no longer resurrects the carrier that is leaving.
+## THE INSTRUMENT THIS SESSION BUILT — read this before touching a key path
 
-## QA CHECKLIST — the batch of 2026-08-18, ordered by what is most likely wrong
+`tools/probe.sh keypath code=KeyA ch=9 kmode=0 auto=1 arp=0 hold=400`
 
-Build 2026-08-18.1526 on localhost:3033. "not measured" means shipped on
+    arrived  the app called preventDefault — it CLAIMED the key. Without this
+             a zero row cannot be told from a key that never landed, which is
+             how three diagnoses went wrong before it existed.
+    acted    a state fingerprint moved (kbHeld / AUD.gk / liveV / flash)
+    route    the engine doors it reached, in order. trigger means the rack saw
+             it; cueNote/bend mean the key handled itself; audMove/audPitch are
+             the head actually moving.
+    cfg      the channel as it stood, so a row explains itself a week later
+
+Two things it must be read correctly or it lies:
+- **A quantized route arrives in the SECOND row.** The sound is deferred to the
+  grid line, so reading only row one is how a working key looks dead.
+- **`arrived: n/a` on key-up is normal** — most key-up handlers here do their
+  work without preventDefault. It is not a stale hold.
+
+## THE METHOD LESSON, and it cost four false findings
+
+**ONE CONFIGURATION PER PAGE LOAD.** Setting `kmode`/`auto`/`cmode` and pressing
+keys in a loop is what breaks a measurement: the channel keeps worklet state,
+`audCar`, held entries and pooled arp notes across the switch, so run two reads
+the leftovers of run one. Four times this session a "bug" was that and nothing
+else — the last one was reported in a commit message as a gap in the position
+arp recording, and two fresh loads then showed 19 events at 17 distinct times.
+The keypath probe reloads nothing; it inherits whatever the last call left.
+
+**A THROW INSIDE A TIMER IS INVISIBLE.** Two separate bugs this session were a
+ReferenceError in a deferred callback — `glP` used above its own `const` (TDZ),
+and `trSemis(p9)` in the cue branch where `p9` belongs to the pitch branch's
+scope. Both made a key silent while the handler looked innocent, and neither
+showed in a syntax check or the console. A route that stops early is the only
+thing that sees them.
+
+**AND THE ONE GAD NAMED, which is the root of both:** "why are you just not
+recording those events as they are? it looks like you are trying to reproduce
+it with some calculation and building double logic". He was right twice — the
+chord length was re-derived with an fmod that turned a negative into a bar, and
+the first routing attempt hung a second note stack on the bend shim beside the
+one monoTrigger already keeps. The question to ask before writing any of it:
+**who already knows this?**
+
+## Landed this session — all measured unless it says otherwise
+
+- **Both key paths through the rack.** Route matrix, hand-played:
+  `pos plain` trigger→noteOn→cueNote→audMove · `pos auto off` audPlay first ·
+  `pos WITH arp` the chain then a step each · `pitch plain`
+  trigger→noteOn→bend→audPitch:2 · `pitch WITH arp` the chain then a step each.
+  Recording: pitch 53 events / 16 times; position 19 events / 17 times, cues
+  7/8/9, none dead, retro carries them.
+- **The pitch key never bent** — TDZ throw, see above. Every press was silent.
+- **Mute cuts, it does not play.** `reviveLane` re-struck mid-notes on EVERY
+  audible channel when any channel was toggled: muting ch5 fired 3 retriggers
+  on ch1/2/3. Gone, his call. Silence is still immediate.
+- **An audio channel mutes at the FADER**, so the take keeps its place: muted
+  rms 0.0000 with cursors alive 1, unmuted lands back in the phrase.
+- **A recorded lane stops arguing with the key.** trigger snapped every note
+  including replays, so a recorded major third came home minor. The scale is an
+  INPUT aid now; `durSec!=null` is the scheduler's own signature. Chord masters
+  still drive the global scale — that path is separate and untouched.
+- **The chord records as played.** Strum 30ms: 5 notes at 5 distinct times, the
+  first on the grid, steps of 30ms. Lengths are end minus start on one clock —
+  1.486/1.454/1.422/1.390/1.358 for a ~1.5 beat hold, falling by the strum. A
+  note released before its own start still sounds, so it still records.
+- **Retro hears the rack, not the fingers** — the arp's output, and the key's
+  own push stands down while a generator is running.
+- **Glide is legato-only and reaches both modes.** Only onto a held note, and
+  the running loop counts as one. Stretch glides too — the shifter takes a
+  target instead of stepping. NOT MEASURED.
+- **Density can ride the clock** — `dsync`: grains per second, or per BEAT so 4
+  is sixteenths at any tempo. A tempo change re-sends it. NOT MEASURED.
+- **gpitch is gone**; one `pitch` dial writes the cloud's semis in grain mode.
+- **Pitch survives a mode switch** — 523.3 / 523.3 / 522.4 / 523.3 across
+  stretch → tape → grain → stretch, where the last hop used to return 440.
+- **`tab+⇧⌫` resets to the settings default**, and resets unit/grid/quantize
+  with it. `⇧⌫` keeps the length; a second press resets it.
+- **The loop length is a row above the meters.**
+- **The cloud's read position no longer slews**, and the head travels with the
+  crop's start (0.029 → 0.584 within 35ms).
+- **A deadline behind the playhead is a stop** — halving the loop no longer
+  gaps it (alive 0.93 with a 280ms silence → 1.00, zero).
+
+## QA CHECKLIST — 2026-08-20, ordered by what is most likely wrong
+
+Build 2026-08-20.1408 on localhost:3033. "not measured" means shipped on
 reasoning; test those first.
 
- 1. Let go of a cue or pitch key at the very END of a loop — should play on
-    into the next bar. Was: a cycle of silence. NOT REPRODUCED synthetically.
- 2. Stretch, speed larger than the loop length — sample should keep looping.
-    Was: stopped, retriggered at the bar. NOT A/B'd (failure mode is DC, not
-    silence; the probe asked the wrong question).
- 3. Grain, move the start position while it plays, fade turned up — should
-    follow at once. ~134ms -> inside one 46ms sample, but the estimator was
-    NOISY; trust ears over the number.
- 4. tab+-/= to halve or double the loop under a running take — no gap. Was
-    alive 0.93 with a 280ms silence; now 1.00, zero.
- 5. Autoloop OFF: hold a key across a bar (cue and pitch) — sounds throughout
-    (0.37 -> 1.00). Let go — stops. Play again — sounds. Replay a recorded
-    lane — sounds (0.00 -> 0.40).
- 6. Hold key 1, add key 2, release 2 — falls back to key 1 (bends 0,2 -> 0).
- 7. Bend and release at speed x0.25 — lands where it would have been. Was 4.1s
-    forward in a 9.6s take; now -0.05s. Same for -12st.
- 8. tape -> stretch -> grain -> tape — pitch does not move (523.3/523.3/522.4/
-    523.3; the last hop used to come home at 440). Speed and TIME do change.
- 9. Pitch dial with sync on and a take that does not fill the bar — reads the
-    transposition you hear (0.85 take reads -3st). Was 0. Clamps past two
-    octaves of fit, which is honest.
-10. ⇧⌫ with notes — notes go, LENGTH STAYS. Again on the empty lane — resets
-    to 1 bar, listening. tab+⇧⌫ resets outright. (The two resets disagree: 1
-    bar vs 2. Gad's call.)
-11. ⇧⌫ with the STRIP up, cursor on the `sample` field — clears the lane, keeps
-    the take. Was: emptied the channel and left the performance.
-12. The `Loop` row above the meters — every lane, a dot for one still
-    listening.
-13. Audio lane, sync on, speed not x1 — the part the loop never reaches is
-    dimmed.
-14. Double/halve with sync on — playhead lands right (was +1.99s at x0.25,
-    -2.66s at x2; now 0 at every speed including reverse).
-15. Off-grid cue and pitch with quantize on — both land on the grid and record
-    where they sounded (pitch was 1.13 against the cue's 0.25).
-16. Arp on an audio channel in CUE mode with rec — the lane holds the arp's
-    output, not midi notes. In PITCH mode it still records at one time: that
-    is the open routing below.
-17. `stage` (pre/post) is gone from the play rack — output is always what
-    records, midi and audio alike. Sweep normal synth channels for fallout.
-18. `pos` and `scan` are gone from the grain page. Freeze still works; stored
-    mod/automation aimed at them now points at nothing.
+ 1. Arp on POSITION keys — sounds as an arpeggio of chops and comes back
+    recorded. Arp on PITCH keys — same, recorded as pk.
+ 2. Plain position and pitch keys: autoloop on and off, quantize on and off.
+    First build where every column works.
+ 3. Legato: hold one pitch key, add a second, release the second — back to the
+    first, not to the loop. NEITHER of us has confirmed this.
+ 4. Glide: only onto a held note; with the loop running every press slides;
+    with auto off the first press lands instantly. Stretch as well as tape.
+    NOT MEASURED.
+ 5. Mute/unmute during a long note — no phantom notes on any channel. An audio
+    channel drops out on its fader and lands back in sync when unmuted.
+ 6. A chord with strum, recorded and played back — a roll comes back a roll, on
+    the grid, and a very short tap still records the whole strum.
+ 7. A recorded chord keeps its quality when the key changes; a chord-master
+    channel still sets the global scale.
+ 8. Grain density with `dsync` on — 4 is sixteenths, and it follows the tempo.
+    NOT MEASURED.
+ 9. One pitch dial in grain mode, and it survives a mode switch.
+10. `tab+⇧⌫` resets to the settings default length.
 
 ## Open, in the order Gad asked for them
 
-1. **PRE/POST IS GONE — finish the job.** The switch is removed and the rack's
-   output is what records, on midi and audio alike (his call). The double-apply
-   guards are unconditional now: on REPLAY (`durSec != null`) a generator does
-   not run again, because its output is already in the events. The arp reaches
-   a pitch-mode audio channel and steps properly — distinct times 1 → 15 for
-   three keys held two beats.
-   **THERE WAS NO ROGUE WRITER — that hunt is closed.** The mixed
-   `[midi, cue]` lanes were a PROBE ARTEFACT: three channels tested in one page
-   load without a reload. Re-run fresh with a trap on the lane's own push, both
-   modes come back with zero events outside the vocabulary. The "distinct times
-   1 → 15" in that commit message came from the same bad run and is WRONG —
-   fresh, it is still 1.
-   The generic keyboard recorder DOES write a raw {midi} event and would have
-   been that writer the moment a pitch key went through the rack; it speaks
-   recAudEvent now, so the door is safe before anything walks through it.
-   **THE ROUTING WAS BUILT, MEASURED AND REVERTED — read this before rebuilding
-   it.** Sending the keydown through `engine.trigger` WORKS for the rack: an arp
-   on a hand-played pitch key recorded 21 events across 16 distinct times, all
-   pk, none dead, and the legato fall-back survived the move onto the shim.
-   What did not survive is ownership of the END, in three seams, each found by
-   fixing the one before:
-     1. This channel's voice mode is MONO, so trigger STEALS — it releases the
-        previous voice on every new note, and on a bend shim that arrives as
-        "clear the head" one block after setting it. Every keypress read
-        `[pitch, 0]`. A `keyHeld` flag (only the key-up that owns a shim may
-        release it) fixed that.
-     2. The LAST key-up then left the head bent: the steal had already popped
-        that voice out of trigger's own mono list, so the wrapper's release
-        reached nothing. Releasing the shim by name fixed that.
-     3. A bend STILL survived — one shim left unreleased in `act`, and a bend
-        arriving after the clear.
-   The failure mode is a stuck bend on the most-used key in the instrument, so
-   it came out. Rebuild it by designing the mono steal and the shim lifetime
-   TOGETHER rather than patching them apart, and write a probe that logs every
-   bend edge from a fresh page before touching the key path — the readings that
-   matter are the ones after the last release.
-   Retro rec is a third writer worth checking with it (`retroBuf` → the retro
-   block writes `midi:` on every event plus cue/pk when present).
-4. **Grain: quantize the density.**
-5. **Grain: the cloud should follow `pos` more tightly** — it moves with a lag,
-   and that lag is the slew every cloud dial goes through.
-6. **Grain: pitch on the FEEDBACK repeats only** — each repetition up by a set
-   number of semitones.
-7. Still unreproduced: **"let go near the end of the loop and it stops until
-   next round"**. The broadcast that caused it is gone (endIt hands the head
-   back instead of stopping everything), but a synthetic release 100ms before
-   the line reads clean on BOTH builds, so the probe never exercised the path.
-   Needs his hands or a better probe.
-8. **⇧⌫ resets to 1 bar, tab+⇧⌫ to 2.** Two answers to "reset the length".
+1. **Performers out of the play rack, onto the LANE.** His idea and the right
+   shape: generators (chord, arp, euclid, random-pitch, ratchet — he called
+   ratchet a generator) belong to the INSTRUMENT and their output is recorded;
+   performers (reverse, random position, chance, nudge, humanize) do not create
+   notes, they re-read a lane, so they belong to the CHANNEL and never touch the
+   recording. It also gives the master channel vel/pitch/position/nudge, which
+   it has never had, and stops a preset carrying decisions about one take. Own
+   run: moving slots out of `ply`, a home on the channel, a save migration.
+2. **Changing samples** — start in the right position, keep the recordings.
+3. **Grain: pitch on the FEEDBACK repeats only**, each repetition up by a set
+   number of semitones. Needs the feedback path to know which repeat it is on.
+4. **Glide with autoloop off** — the first press still sweeps from baseline.
+   He put this last himself.
+5. **Stretch arp** — may already be fixed by the routing; re-test before
+   digging.
+
+## Still true, and worth keeping in view
+
+- **The grain cloud's `pos`/`scan` dials are gone from the page** (they did
+  nothing while a carrier runs). The params stay for freeze; stored mod or
+  automation aimed at them now points at nothing.
+- **`pre`/`post` is gone from the play rack.** The rack's output is always what
+  records, midi and audio alike.
+- **Audio vs midi timing** — Gad dropped it ("forget it"). Both paths schedule
+  from the identical timeAt(beat); any offset is downstream.
 
 # BRANCH `audio-mono` — the five it opened with, for reference
 
