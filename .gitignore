@@ -4,3 +4,4 @@ node_modules/
 *.log
 .gstack/
 _gad-set.json
+_gad-arp.json
