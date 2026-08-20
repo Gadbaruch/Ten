@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-20.1542';
+const BUILD='2026-08-20.1620';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -18027,7 +18027,19 @@ const qnext=(v,g)=>Math.ceil(v/g-1e-6)*g;   // live quantize: NEXT grid point
    the cue a finger would have landed on. */
 function recAudEvent(pi,tBeat,midi,vel,durBeats){
   const pat=S.patterns[S.editPat], lane=pat.lanes[pi], p=S.presets[pi];
-  const L=lane.len, t=fmod(tBeat-editAnchor(),L), dur=durBeats||0.25;
+  /* A LISTEN WINDOW CHANGES THE CLOCK, NOT THE VOCABULARY (Gad, 2026-08-20:
+     "arp audio position still not recorded" — and "reproduces, but then
+     stopping and starting playback again its gone"). recPlayNote handed an
+     audio lane to the generic capture path whenever a window was open, and
+     that path writes `{midi}` events. An audio lane cannot play a midi event,
+     so the whole arp went in and none of it came back — audible while the
+     buffer still held it, gone the moment the capture closed into a clip.
+     A window is open on a lane whose length is still being LISTENED for, which
+     is exactly the state a fresh channel is in, so this was the common case
+     and the reason five configurations here all passed: `_probe-set.json` has
+     lengths already set, so no window ever opened. */
+  const cap=lane._cap, dur=durBeats||0.25;
+  const t=cap?Math.max(0,tBeat-cap.t0):fmod(tBeat-editAnchor(),lane.len);
   if(kmodeOf(p)===1){
     const pk=Math.round(midi)-KBBASE;
     lane.clear(ev=>ev.pk===pk&&Math.abs(ev.t-t)<1e-6);
@@ -18038,6 +18050,8 @@ function recAudEvent(pi,tBeat,midi,vel,durBeats){
     lane.clear(ev=>ev.cue===cue&&Math.abs(ev.t-t)<1e-6);
     lane.events.push({t,cue,dur,vel:vel||0.9,born:performance.now()});
   }
+  /* the window sizes the loop off what it heard, so it has to hear this one */
+  if(cap)cap.lastEnd=Math.max(cap.lastEnd,t+dur);
   dirty=true; dirtySave=true;
 }
 function recPlayNote(pi,tBeat,midi,vel,durBeats){
@@ -18061,7 +18075,7 @@ function recPlayNote(pi,tBeat,midi,vel,durBeats){
   const lane=pat.lanes[pi];
   /* the capture path builds a clip out of raw notes and is not an audio lane's
      business; everything else goes down in the channel's own vocabulary */
-  if(isAudioCh(pi)&&!lane._cap)return recAudEvent(pi,tBeat,midi,vel,durBeats);
+  if(isAudioCh(pi))return recAudEvent(pi,tBeat,midi,vel,durBeats);
   if(lane._cap){
     const t=Math.max(0,tBeat-lane._cap.t0);
     lane.events.push({t,midi,vel:vel||0.9,dur:durBeats||0.2,born:performance.now()});
@@ -20998,9 +21012,11 @@ function endAudHold(c){
       if(retroBuf[h8.pi].length>512)retroBuf[h8.pi].shift();
       /* same rule on the pitch side: the arp's steps are the performance */
       if(S.patterns[S.editPat].state==='rec'&&!genOn(h8.pi)){
-        const qt8=fmod(h8.tr-editAnchor(),L8);
+        const cp8=lane8._cap;
+        const qt8=cp8?Math.max(0,h8.tr-cp8.t0):fmod(h8.tr-editAnchor(),L8);
         lane8.clear(ev=>ev.pk===h8.pk&&Math.abs(ev.t-qt8)<1e-6);
         lane8.events.push({t:qt8,pk:h8.pk,dur:dur8,born:performance.now()});
+        if(cp8)cp8.lastEnd=Math.max(cp8.lastEnd,qt8+dur8);
         dirtySave=true;
       }
     }
@@ -21194,9 +21210,15 @@ function endAudHold(c){
          live moves came back as 18 recorded events, the two extra being the
          two keys held. Same test the note recorder and retro already use. */
       if(S.patterns[S.editPat].state==='rec'&&!genOn(pi)){
-        const qt=fmod(tr-editAnchor(),L);
+        /* the listen window's clock, when one is open — same reason as in
+           recAudEvent: while a length is being listened for, `L` is the
+           window's temporary 64 bars and fmod against it is not a bar
+           position at all. */
+        const cp9=lane._cap;
+        const qt=cp9?Math.max(0,tr-cp9.t0):fmod(tr-editAnchor(),L);
         lane.clear(ev=>ev.cue===sl&&Math.abs(ev.t-qt)<1e-6);
         lane.events.push({t:qt,cue:sl,dur:durB,born:performance.now()});
+        if(cp9)cp9.lastEnd=Math.max(cp9.lastEnd,qt+durB);
         dirtySave=true;
       }
     }
