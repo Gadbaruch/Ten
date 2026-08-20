@@ -129,30 +129,39 @@ one monoTrigger already keeps. The question to ask before writing any of it:
 - **A deadline behind the playhead is a stop** — halving the loop no longer
   gaps it (alive 0.93 with a 280ms silence → 1.00, zero).
 
-## QA CHECKLIST — 2026-08-20, ordered by what is most likely wrong
+## QA CHECKLIST — 2026-08-20.1507, ordered by what is most likely wrong
 
-Build 2026-08-20.1408 on localhost:3033. "not measured" means shipped on
+Build 2026-08-20.1507 on localhost:3033. "not measured" means shipped on
 reasoning; test those first.
 
- 1. Arp on POSITION keys — sounds as an arpeggio of chops and comes back
-    recorded. Arp on PITCH keys — same, recorded as pk.
- 2. Plain position and pitch keys: autoloop on and off, quantize on and off.
-    First build where every column works.
- 3. Legato: hold one pitch key, add a second, release the second — back to the
-    first, not to the loop. NEITHER of us has confirmed this.
- 4. Glide: only onto a held note; with the loop running every press slides;
-    with auto off the first press lands instantly. Stretch as well as tape.
-    NOT MEASURED.
- 5. Mute/unmute during a long note — no phantom notes on any channel. An audio
-    channel drops out on its fader and lands back in sync when unmuted.
- 6. A chord with strum, recorded and played back — a roll comes back a roll, on
-    the grid, and a very short tap still records the whole strum.
- 7. A recorded chord keeps its quality when the key changes; a chord-master
-    channel still sets the global scale.
- 8. Grain density with `dsync` on — 4 is sixteenths, and it follows the tempo.
-    NOT MEASURED.
- 9. One pitch dial in grain mode, and it survives a mode switch.
-10. `tab+⇧⌫` resets to the settings default length.
+ 1. **Position arp, recorded.** ch9 tape, keys mode = position, autoloop on,
+    arp 1/16, rec on, hold two cue keys for two beats. Stop recording and let
+    it loop. It should chop in the same rhythm you just heard, not a beat-ish
+    behind and not with two extra jumps piled at the loop start. Measured 16
+    live moves → 16 recorded, median 0.019 beat off, zero wrong cues; it was
+    18 events each ~0.1 beat late.
+ 2. **Pitch arp, recorded.** Same but keys mode = pitch. It should be one
+    running line of pitches; the bug was a stutter — every step dropping back
+    to baseline and re-pitching 0.019 beats later. Measured 16 events → 16
+    pitch calls, was 33.
+ 3. **Neither one records your fingers.** With an arp running, the lane should
+    hold the arp's STEPS (a dozen-plus events), never just the two keys you
+    held. Nothing extra sitting at the very start of the loop.
+ 4. **Clearing a lane doesn't strand the loop.** Record some cue jumps on an
+    audio channel, then clear the lane while it plays. The take goes back to
+    running the loop from its own position — it used to stay parked wherever
+    the last recorded jump left it with nothing able to move it again.
+ 5. **op trig, phase engine.** vox → fm eng = `phase`, an op slot's `trig` on
+    `free`: two identical notes should not start the same way. On `rtrg` with a
+    phase dialled, the dial should audibly matter. Measured at the message —
+    rtrg sends 0.25 twice at 90°, 0.75 at 270°, free sends 0.45 then 0.3905.
+    ⚠ **rtrg still is not sample-identical in this engine** and that is not
+    fixed — see open item 7. Native was already correct (1.000 / -0.825), so
+    if you saw native failing, say what you did, because it does not reproduce.
+ 6. **Pitch keys with autoloop OFF** — expected still wrong, listed open.
+    Position with auto off is clean.
+ 7. Everything from the previous batch still standing: legato fall-back, glide
+    rule, density sync — NOT MEASURED by either of us, still worth a pass.
 
 ## Open, in the order Gad asked for them
 
