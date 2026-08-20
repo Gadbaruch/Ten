@@ -89,6 +89,27 @@ one monoTrigger already keeps. The question to ask before writing any of it:
   ⚠ **It is the NATIVE engine that works**, not the phase one; the report had
   them the other way round.
 
+- **With the loop off, a phrase that filled the bar never struck the take
+  again.** Two findings, and the first is that "24 live moves -> 17 replay,
+  worst 0.112 beat" — shipped that morning as the evidence for this bug — was
+  the COMPARATOR, not the instrument. Live legitimately makes calls the replay
+  does not need (its own first and last release, an audPlay/audStop per
+  strike), and nearest-match pairing cannot tell a release from a step whose
+  interval is 0 semitones: `audPitch(pi,0)` either way. The probe reports n/a
+  for those columns in pitch mode now and says why.
+  Recording and playback were accurate all along — four stabs, quantize off,
+  pitch mode, loop off: **recorded 0.009 pk0 / 0.502 pk2 / 1.003 pk4 /
+  1.505 pk5, lengths ~0.20; live attacks at 0.32 0.64 0.94 0.96s, replayed at
+  0.02 0.32 0.64 0.94 0.96s, peak 0.1303 vs 0.1302.**
+  What WAS wrong was the legato lookahead added the same morning: it wraps the
+  loop seam, which is right with the loop ON (the take runs continuously) and
+  wrong with it OFF, where the take is a one-shot. A loop-filling phrase became
+  infinitely legato — nothing released the cursor, nothing re-struck the take,
+  and the replay rode whatever cursor was alive from the recording pass. It
+  still made sound, so only a COUNT showed it:
+  **0 audPlay across a loop → 1 per cycle, on the first loop and the second**
+  (rms 0.0197 both). Auto on untouched: still 16 → 16 on pitch and position.
+
 ## Landed this session — all measured unless it says otherwise
 
 - **Both key paths through the rack.** Route matrix, hand-played:
@@ -129,9 +150,9 @@ one monoTrigger already keeps. The question to ask before writing any of it:
 - **A deadline behind the playhead is a stop** — halving the loop no longer
   gaps it (alive 0.93 with a 280ms silence → 1.00, zero).
 
-## QA CHECKLIST — 2026-08-20.1507, ordered by what is most likely wrong
+## QA CHECKLIST — 2026-08-20.1542, ordered by what is most likely wrong
 
-Build 2026-08-20.1507 on localhost:3033. "not measured" means shipped on
+Build 2026-08-20.1542 on localhost:3033. "not measured" means shipped on
 reasoning; test those first.
 
  1. **Position arp, recorded.** ch9 tape, keys mode = position, autoloop on,
@@ -158,8 +179,11 @@ reasoning; test those first.
     ⚠ **rtrg still is not sample-identical in this engine** and that is not
     fixed — see open item 7. Native was already correct (1.000 / -0.825), so
     if you saw native failing, say what you did, because it does not reproduce.
- 6. **Pitch keys with autoloop OFF** — expected still wrong, listed open.
-    Position with auto off is clean.
+ 6. **Pitch keys with autoloop OFF.** Record a few pitch stabs with the loop
+    off, then let it run for several cycles. Every cycle should re-strike the
+    take — you hear the attack each time round, not once and then a tail that
+    never restarts. Measured 0 audPlay per loop → 1, on the first cycle and the
+    second.
  7. Everything from the previous batch still standing: legato fall-back, glide
     rule, density sync — NOT MEASURED by either of us, still worth a pass.
 
@@ -180,9 +204,6 @@ reasoning; test those first.
    He put this last himself.
 5. **Stretch arp** — may already be fixed by the routing; re-test before
    digging.
-6. **Pitch keys with autoloop OFF still round-trip badly** — measured, not
-   fixed: 24 live moves come back as 17, worst 0.112 beat. Position is clean
-   with auto off; it is the pitch column that is not.
 7. **A phase-engine note starts on the next 128-sample render block**, not the
    sample it was asked for, so two notes begin up to 2.9ms apart — most of a
    cycle at 261Hz — and rtrg cannot be sample-identical there even with the
