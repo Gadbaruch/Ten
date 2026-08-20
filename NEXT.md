@@ -295,6 +295,36 @@ reasoning; test those first.
 
 ## Open, in the order Gad asked for them
 
+0. **THE ARP NEVER STOPS, AND IT IS THE ROOT OF THE OTHERS.** ⚠ NOT FIXED.
+   Gad: "i want exactly what i played" — chasing that found something bigger.
+   The pool entry's `until` stays **Infinity** after the keys come up, so the
+   arp keeps generating forever, and its emission stalls then floods:
+
+     during a 1.45s hold        0 notes emitted
+     after the keys came up     0 → 0 → 328 → 333 → 339 → 344 and climbing
+     pool                       until = INF
+
+   That one fault explains everything that looked like three:
+     - **"dedup at the loop seam" is not dedup.** All 23 handed steps were
+       DISTINCT, zero duplicates; the four "missing" ones were at 7.5, 7.75, 0,
+       0.25 — the arp still running a beat past the release, refused by
+       recPlayNote because rec had disarmed. Correctly refused: they are not
+       notes he played.
+     - **"in pitch mode arp is stuck"** — this, literally.
+     - **the erratic counts** through the whole session (0, 14, 15, 22, 151,
+       328 for the same gesture) are the stall-then-catch-up.
+   `trigger` returns a handle whose `release` sets `en.until`, and the audio
+   key-ups DO call it (`h8.tv.release` at the pmono path, `hj9.tv.release` for
+   cue). So either the handle on `AUD.gk[c]` is not the one `trigger` returned,
+   or the release runs and the entry it closes is not the one in the pool.
+   **Start there — do not re-measure the recorder, it is exonerated:** every
+   time the arp emits N steps, exactly N land (13→13, 15→15, 14→14, 37→17
+   distinct→17 in lane, 0 missing 0 extra), with the right beats and notes.
+   A wrong fix was tried and reverted: stamping how far the scheduler had got
+   at disarm (`_recEndB`) so the tail would still record. It is wrong because
+   those notes should not be recorded at all — the arp should not have made
+   them.
+
 1. **Performers out of the play rack, onto the LANE.** His idea and the right
    shape: generators (chord, arp, euclid, random-pitch, ratchet — he called
    ratchet a generator) belong to the INSTRUMENT and their output is recorded;
