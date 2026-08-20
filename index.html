@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-20.1008';
+const BUILD='2026-08-20.1047';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -5593,6 +5593,10 @@ function setBpm(v){
      it dying early, one gap per cycle, for the same reason a stretched loop
      did. Same rule, same call. */
   engine.audRelockAll();
+  /* a cloud whose density is per BEAT is defined against the tempo, so moving
+     the tempo has to move it now — same rule as the fitted take above */
+  for(const i of CHANS()){const p9=S.presets[i];
+    if(p9&&p9.gr&&Math.round(p9.gr.dsync||0)===1){try{engine.granCfg(i);}catch(_){}}}
   dirty=true; dirtySave=true;
 }
 function play(){
@@ -9904,7 +9908,18 @@ class Engine{
     const isMaster=isChordMaster(p);
     /* global scaling: snap non-drum channels to the held chord (from a chord-
        master channel) or to the global scale. masters define, they don't follow */
-    if(CFG.scaleOn&&!isDrumCat(p.cat)&&!isMaster)midi=snapToPCs(midi,pcsNow());
+    /* A RECORDED LANE IS FIXED ONCE PLAYED (Gad, 2026-08-18: "Chord quality
+       should be fixed once recorded… recorded lane should be fixed once
+       played, dont follow the key"). The snap ran on EVERY note, including the
+       ones the scheduler hands back, so a recorded major third was re-snapped
+       into the key on the way out and came home minor — the chord you played
+       and the chord you heard back were different chords.
+       The scale belongs at the INPUT, where it is a playing aid: what you press
+       is bent into the key. Once a note is in a lane the decision has been
+       made, and re-making it every bar is the instrument arguing with the take.
+       durSec!=null is the scheduler's own signature — it is how this function
+       has always told a replay from a finger. */
+    if(CFG.scaleOn&&durSec==null&&!isDrumCat(p.cat)&&!isMaster)midi=snapToPCs(midi,pcsNow());
     this.lastMidi[pi]=midi;
     /* LIVE playing gets the note-level PLAY effects too (the sequencer applies its
        own copies to recorded notes; durSec!=null means it came from the scheduler) */
@@ -9996,17 +10011,37 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     const notes=midis.map((m,i)=>({m,pad:pads[i]})).sort((a,b)=>a.m-b.m);
     const nM=notes.length;   // negative strum rolls high -> low
     const lnR=S.patterns[S.editPat]&&S.patterns[S.editPat].lanes[pi];
+    const recSpots=[];
     const voices=notes.map((n2,i)=>{
       const off=(strum>=0?i*strum:(nM-1-i)*(-strum));
       /* the same instant the voice is given, in beats — strum included, so a
          roll comes back as a roll rather than a block */
-      if(recCh)recPlayNote(pi,beatsAt(at+off),Math.round(n2.m),vel,
+      if(recCh){recPlayNote(pi,beatsAt(at+off),Math.round(n2.m),vel,
                            Math.max(0.05,lnR?gridOf(lnR):0.25));
+        /* remember WHERE each note went so the release can give it the length
+           it was actually held — written immediately with a provisional step so
+           a latched chord is already in the lane, then corrected on the key-up,
+           which is the same two-stage the single-note recorder uses */
+        recSpots.push({t:fmod(beatsAt(at+off)-editAnchor(),lnR?lnR.len:4),m:Math.round(n2.m)});}
       const v=this.noteOn(at+off,pi,n2.m,vel,n2.pad);
       v.live=durSec==null; return v;
     });
     if(durSec!=null){for(const v of voices)v.release(at+durSec);return null;}
-    return {voices,release:t=>{if(pcHandle){pcHandle();pcHandle=null;}voices.forEach(v=>v.release(t));}};
+    return {voices,release:t=>{if(pcHandle){pcHandle();pcHandle=null;}
+      /* THE LENGTH THE CHORD WAS HELD, not the provisional step. Each note
+         keeps its own start, so a strummed chord released together comes back
+         as notes of slightly different lengths — which is what it was. */
+      if(recSpots.length&&lnR){
+        const endB=beatsAt(t==null?AC.currentTime:t);
+        for(const r of recSpots){
+          const e2=lnR.events.find(x=>x.midi===r.m&&Math.abs(x.t-r.t)<1e-6);
+          if(e2)e2.dur=Math.max(0.05,fmod(endB-editAnchor(),lnR.len)-r.t<0
+            ?lnR.len+(fmod(endB-editAnchor(),lnR.len)-r.t)
+            :fmod(endB-editAnchor(),lnR.len)-r.t);
+        }
+        dirtySave=true;
+      }
+      voices.forEach(v=>v.release(t));}};
   }
   arpTick(from,to){
     for(let pi=0;pi<10;pi++){
@@ -10894,7 +10929,11 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     const gr=S.presets[pi].gr||{};
     e.node.port.postMessage({t:'p',p:{
       pos:clamp(gr.pos??0,0,1), spray:clamp(gr.spray??0.05,0,1),
-      size:clamp(gr.size??0.12,0.005,1), dens:clamp(gr.dens??20,0.5,120),
+      size:clamp(gr.size??0.12,0.005,1),
+      /* per BEAT becomes per second here, so the worklet keeps one unit and the
+         tempo reaches the cloud without it knowing what a beat is */
+      dens:clamp(Math.round(gr.dsync||0)===1
+        ?(gr.dens??4)/Math.max(1e-6,spb()) : (gr.dens??20),0.5,120),
       semis:clamp(gr.semis??0,-24,24), jit:clamp(gr.jit??0,0,12),
       shape:clamp(gr.shape??0.5,0,1), rev:clamp(gr.rev??0.1,0,1),
       width:clamp(gr.width??0.5,0,1), scan:clamp(gr.scan??1,-4,4),
@@ -13098,7 +13137,19 @@ const GRANF=[
     usual multipliers on top. */
  SP('size','size','lin',{min:0.005,max:1,step:0.025,
    fmt:v=>v>=0.999?'\u221e tape':Math.round(v*1000)+'ms'}),
- SP('dens','dens','lin',{min:0.5,max:120,step:0.5,fmt:v=>v+'/s'}),
+ /* DENSITY ON THE CLOCK (Gad, 2026-08-18: "i want to have the option in grain
+    to quantize the density somehow" → "sync turns density to grains per beat or
+    bar maybe"). Free, it is grains per SECOND and has nothing to do with the
+    tempo — which is right for a texture and wrong for a rhythm. Synced, the
+    same dial is grains per BEAT, so 4 is sixteenths at any tempo and the cloud
+    stays with the music when you move the bpm. The stored number does not
+    change meaning: `dsync` says which unit to read it in, and granCfg converts
+    to the per-second the worklet has always wanted, so nothing about a saved
+    cloud moves until you turn it on. */
+ SP('dsync','dsync','enum',{opts:['free','sync'],
+   get:o=>Math.round(o.dsync||0),set:(o,v)=>o.dsync=Math.round(v)}),
+ SP('dens','dens','lin',{min:0.5,max:120,step:0.5,
+   fmt:(v,o)=>Math.round((o&&o.dsync)||0)===1?(+v.toFixed(2))+'/beat':v+'/s'}),
  SP('flow','flow','lin',{min:0,max:1,step:0.05,fmt:v=>v<0.02?'lock':Math.round(v*100)+'%'}),
  SP('gpitch','semis','lin',{min:-24,max:24,step:1,big:12,fmt:v=>v+'st'}),
  SP('jit','jit','lin',{min:0,max:12,step:0.5,fmt:v=>'\u00b1'+v+'st'}),
