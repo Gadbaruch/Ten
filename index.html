@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-21.1321';
+const BUILD='2026-08-21.1332';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -5726,7 +5726,9 @@ function scheduleRange(from,to){
               const ms1=Math.max(0,(timeAt(t+a.anchor)-AC.currentTime)*1000);
               const dur3=Math.min(ev.dur||0.25,L3);
               const ms2=Math.max(0,(timeAt(t+dur3+a.anchor)-AC.currentTime)*1000);
+              const genP=lane._gen|0;
               setTimeout(()=>{try{
+                if((lane._gen|0)!==genP)return;        // cleared while this was queued
                 /* …and so does a recorded bend: with the loop off there is
                    nothing to bend until the replay makes it */
                 if(!autoCur(S.presets[li])&&!engine.audRolling(li)){
@@ -5857,7 +5859,9 @@ function scheduleRange(from,to){
                  the same, and end it at the close of the gesture for the same
                  reason: with no loop underneath, the jump IS the sound. */
               const off7=!autoCur(S.presets[li]);
+              const gen7=lane._gen|0;                  // …and the lane it belongs to
               setTimeout(()=>{try{
+                if((lane._gen|0)!==gen7)return;        // cleared while this was queued
                 if(off7&&!engine.audRolling(li))
                   engine.audPlay(li,AC.currentTime+0.005,L2,0);
                 engine.audMove(li,to7,gl7,1,1);
@@ -10597,7 +10601,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
       setPressure(){}};
     sh._drop=()=>setTimeout(()=>{const a=E.act[pi],i=a.indexOf(sh); if(i>=0)a.splice(i,1);},1200);
     this.act[pi].push(sh);
-    if(this.act[pi].length>24){const old9=this.act[pi].shift(); old9&&old9.kill&&old9.kill();}
+    if(this.act[pi].length>24*POLYX){const old9=this.act[pi].shift(); old9&&old9.kill&&old9.kill();}
     return sh;
   }
   /* ONE BEND, NOTE-SHAPED — a handle the rack can release, steal or choke,
@@ -11174,7 +11178,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     sh._later=()=>{clearTimeout(sh._dt); sh._dt=setTimeout(drop,1500);};
     sh._dt=setTimeout(drop,60000);
     this.act[pi].push(sh);
-    if(this.act[pi].length>24){const old=this.act[pi].shift(); old&&old.kill&&old.kill(AC.currentTime);}
+    if(this.act[pi].length>24*POLYX){const old=this.act[pi].shift(); old&&old.kill&&old.kill(AC.currentTime);}
     return sh;
   }
   audRecStart(pi){
@@ -22701,6 +22705,15 @@ function clearLane(pi){
      it twice and you are back at a lane with nothing decided about it.
      tab+⇧⌫ still resets the length on its own, at any time, for when the notes
      are not in the way. */
+  /* A QUEUED JUMP MUST KNOW ITS EVENT IS GONE (Gad, 2026-08-21: "first
+     shift+del clears the loop, thats where the bug of loop keeps playing").
+     The replay schedules its gestures up to the scheduler's horizon AHEAD of
+     the playhead, as setTimeouts. Clearing the lane empties `events` but does
+     nothing about the ones already queued — and with autoloop OFF each of
+     those SPAWNS a cursor (`if(off7&&!audRolling) audPlay`) for an event that
+     no longer exists. Measured: tv 0 at the clear, 1 about 1.8s later, auto
+     still 0. One counter answers it for every deferred body. */
+  l._gen=(l._gen|0)+1;
   const had9=l.events.length;
   if(had9){ l.clear(); delete l._cap; delete l._rec;
     /* AND THE HEAD COMES HOME (Gad, 2026-08-20: "clearing keys recording makes
