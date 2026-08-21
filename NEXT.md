@@ -307,7 +307,38 @@ are here only as a regression net.
    those notes should not be recorded at all — the arp should not have made
    them.
 
-0b. **A PITCH KEY GETS STUCK.** ⚠ NOT FIXED. Hold key 1, add key 2, release 2
+0a. **POLYPHONY WAS NEVER THE LIMIT — THE MASTER COMPRESSOR IS.** ⚠ NOT FIXED,
+   needs Gad's call because it changes how everything sounds. He raised the
+   caps and "didnt feel the difference"; the caps were never binding. On his
+   BES1 supersaw (ch7, `uni:7`, four saw ops), keys held one at a time:
+
+     n1  bus 0.312 / peak 0.933   master 0.253 / 0.741   live=4
+     n8  bus 0.803 / peak 3.068   master 0.234 / 0.732   live=28
+
+   Voices climb 4 → 28 exactly as they should: **nothing is stolen and nothing
+   is capped.** The bus peaks at THREE TIMES full scale and the master
+   DynamicsCompressor flattens it to a constant ~0.73 peak. Measured directly:
+   **a six-note chord is 1.04–1.09x louder than one note.** That is "it caps
+   out after a few notes / the audio drops".
+   The compressor is on Web Audio's DEFAULTS — **threshold -24dB, ratio 12:1,
+   knee 30dB** — so with a 30dB knee compression starts near -39dB and 12:1
+   catches the entire musical range. Nobody chose that.
+   Unison is NOT the culprit: it already scales 1/sqrt(uni) (constant power),
+   and dropping `mix.lvl` to 0.35 barely moved the bus, so per-patch level is
+   not the lever either. The lever is the master: something like threshold -6,
+   ratio 4, knee 6 turns it back into a peak catcher. Gad's call.
+0b. **CLEARING TWICE FORCES AUTOLOOP BACK ON.** ⚠ NOT FIXED, needs his call.
+   "when autoloop is off, after clearing a recording the audio is being looped
+   as if auto is on." The FIRST press is now correct (it ends the take, tv 0).
+   The SECOND press — the documented "nothing decided about this lane yet"
+   reset — runs `Object.assign(au9,AUDDEF,{kmode:0,auto:1})`, which is
+   deliberate (a fresh tape channel comes up with the loop running) but
+   silently overrides a channel-level preference he had set:
+
+     CLEAR 1  n=0 auto=0 tv=0        correct
+     CLEAR 2  n=0 auto=1 → tv=1      the take starts looping
+
+0c. **A PITCH KEY GETS STUCK.** ⚠ NOT FIXED. Hold key 1, add key 2, release 2
    then 1 — key 1 never comes home. Both autoloop on and off. Traced:
 
      k2 up   gk: KeyS   bendCur=sh2   (sh2 never released)
@@ -321,7 +352,7 @@ are here only as a regression net.
    reverted. The hand-over belongs to the bend shim's own release, which
    already knows how to find the next-newest held bend; that is where to look,
    not in the key handler.
-0c. **Autoloop-on recording accuracy.** ⚠ NOT FIXED. Gad's read, worth keeping
+0d. **Autoloop-on recording accuracy.** ⚠ NOT FIXED. Gad's read, worth keeping
    in his words: "in live play the autoloop isnt factored in as the incoming
    notes, and after recording the recording gets interrupted by the autoloop."
 1. **Performers out of the play rack, onto the LANE.** His idea and the right
