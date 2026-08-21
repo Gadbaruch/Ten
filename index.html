@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-21.2027';
+const BUILD='2026-08-21.2120';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -10624,6 +10624,21 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
       durSec:(cue&&Number.isFinite(cue.life))?cue.life
         :(cue||rate<0||!Math.round(au.fit||0)||!autoCur(S.presets[pi]))?1e6
         :Math.max(0.05,loopSec-skipSec)});
+    /* THE SPAWN LEDGER, SYNCHRONOUS (Gad, 2026-08-21: "looks like poly
+       playheads are still not removed... look at the architecture"). He was
+       right about where to look: audRolling's own comment warns that the stat
+       is a frame stale and audCar covers only the LOOP carrier — audPlay
+       itself never recorded that it had just spawned. So any two spawn-guarded
+       callers landing in one tick — two quantized keys deferred to the same
+       grid line, two replay timers for stacked events — both read "no cursor"
+       and both made one. Every caller was racing; the ledger closes the race
+       at the one door they all use. `until` bounds it so a cursor that dies in
+       the worklet (life spent) cannot leave the flag stuck reading "rolling"
+       forever, which would be worse than the race: silence. */
+    const lifeS9=(cue&&Number.isFinite(cue.life))?cue.life
+        :(cue||rate<0||!Math.round(au.fit||0)||!autoCur(S.presets[pi]))?1e6
+        :Math.max(0.05,loopSec-skipSec);
+    (this.audSpawn=this.audSpawn||[])[pi]={until:Math.max(at,AC.currentTime)+lifeS9};
     return this._lastTid;
   }
   /* a fade-out then the stop, so a released cue does not click on the way out */
@@ -10913,6 +10928,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     at=at??AC.currentTime+0.002;
     (this.audCar=this.audCar||[])[pi]=null;   // the carrier goes with everything else
     (this.audCarAt=this.audCarAt||[])[pi]=null;   // …and so does when it started
+    (this.audSpawn=this.audSpawn||[])[pi]=null;   // …and the spawn ledger: stopped is not rolling
     const e9=this.gn&&this.gn[pi];
     if(e9&&e9.node){try{e9.node.port.postMessage(
       {t:'tclr',frame:Math.round(at*AC.sampleRate)});}catch(_){}}
@@ -11139,6 +11155,8 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
        one, which is the very thing one-playhead exists to prevent. The stat is
        the fallback for a cursor this engine did not spawn itself. */
     if((this.audCar||[])[pi])return true;
+    const sp9=(this.audSpawn||[])[pi];
+    if(sp9&&AC.currentTime<sp9.until)return true;   // spawned this tick counts — see audPlay
     const st=(this.gn&&this.gn[pi]&&this.gn[pi].stat)||null;
     return !!(st&&(st.tv|0)>0);
   }
@@ -11343,7 +11361,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
        all-notes-off with nothing in the app able to end them */
     for(const k9 in (this.gn||{})){const e9=this.gn[k9];
       if(e9&&e9.node){try{e9.node.port.postMessage({t:'panic'});}catch(_){}}}
-    this.audCar=[]; this.audCarAt=[];   // a panic takes the carriers with it
+    this.audCar=[]; this.audCarAt=[]; this.audSpawn=[];   // a panic takes the carriers with it
     this.arpPool.forEach(p=>p.length=0);}
   click(at,accent){
     const o=AC.createOscillator(),g=AC.createGain();
@@ -21265,6 +21283,38 @@ const scopeHeldOn=c=>
    the note recorder already keeps for midi — "a 40ms tap is a 40ms note
    wherever on the grid it lands" — and 60ms is enough for a cue to speak. */
 const AUDMINMS=60;
+/* A SUPERSEDED HOLD STILL WRITES ITSELF DOWN (Gad, 2026-08-21: "some notes
+   arent recorded"). A fast same-key double-tap around a grid line: press 1
+   releases before its grid, so its end is DEFERRED; press 2's keydown then
+   replaces AUD.gk[c]; press 1's fire bails ("let go before it landed") and its
+   deferred retry used to bail too — the tap vanished, no sound and no record.
+   The sound belongs to press 2 now, fine; the RECORD of press 1 does not. This
+   is the record half of endAudHold, callable for a hold that no longer owns
+   its key. */
+function lateAudWrite(h){
+  try{
+    if(!h||h.tr==null||h._wrote)return; h._wrote=1;
+    const lane=S.patterns[S.editPat].lanes[h.pi]; if(!lane)return;
+    const held=h.press!=null?((((h._relAt)??AC.currentTime)-h.press)/spb()):0.25;
+    const dur=Math.max(0.05,held);
+    const ent={t:h.tr,dur};
+    if(h.kind==='pmono'&&h.pk!==undefined)ent.pk=h.pk;
+    else if(h.sl!=null)ent.cue=h.sl;
+    else return;
+    retroBuf[h.pi].push(Object.assign({},ent));
+    if(retroBuf[h.pi].length>512)retroBuf[h.pi].shift();
+    if(S.patterns[S.editPat].state==='rec'&&!genOn(h.pi)){
+      const cp=lane._cap;
+      const qt=cp?Math.max(0,h.tr-cp.t0):fmod(h.tr-editAnchor(),lane.len);
+      lane.clear(ev=>((ent.cue!==undefined&&ev.cue===ent.cue)||
+                      (ent.pk!==undefined&&ev.pk===ent.pk))&&Math.abs(ev.t-qt)<1e-6);
+      lane.events.push(Object.assign({t:qt,dur,born:performance.now()},
+        ent.cue!==undefined?{cue:ent.cue}:{pk:ent.pk}));
+      if(cp)cp.lastEnd=Math.max(cp.lastEnd,qt+dur);
+      dirtySave=true;
+    }
+  }catch(_){}
+}
 function endAudHold(c){
   /* THE NOTE ON IS QUANTIZED; THE KEY-UP MUST WAIT FOR IT (Gad, 2026-08-21:
      "key pressing live too quickly results in no sound when live quantize is
@@ -21282,7 +21332,10 @@ function endAudHold(c){
     hW._late=1;                                  // once only; the retry ends it for real
     hW._relAt=AC.currentTime;                    // when the finger ACTUALLY left — the length is this, not the retry
     const wait=Math.max(0,(gridTime(hW.tr)-AC.currentTime)*1000)+AUDMINMS;
-    setTimeout(()=>{try{if(AUD.gk&&AUD.gk[c]===hW)endAudHold(c);}catch(_){}},wait);
+    setTimeout(()=>{try{
+      if(AUD.gk&&AUD.gk[c]===hW)endAudHold(c);
+      else lateAudWrite(hW);              // superseded by a re-press: record it anyway
+    }catch(_){}},wait);
     return 'went';
   }
   /* the two kinds of hold live in the same map and end differently: a pitch
