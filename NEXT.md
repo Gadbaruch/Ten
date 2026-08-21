@@ -278,6 +278,17 @@ one monoTrigger already keeps. The question to ask before writing any of it:
       the grid; only the recorded number changed.
 
 ## Landed this session — all measured unless it says otherwise
+- **[branch] THE REPLAY IS A PLAYBACK NOW, NOT A RE-PERFORMANCE.** His
+  question named it: "if live notes play a certain way, why cant you just
+  record that?" The lane was always faithful; the replay applied every
+  move/bend at message-ARRIVAL (setTimeout jitter, re-rolled each pass,
+  flipping spawn-vs-move and takeover-vs-stop decisions audibly). cmov/tpb
+  carry a FRAME now; the worklet queues and lands them sample-exact (drained
+  in process, re-dispatched through the one message handler; tclr/panic flush
+  the queue). All replay sites and the live quantized paths pass their exact
+  `at`. **Three loops: dPos 0 on every note; onset spread 2-30ms = the
+  analyser's own 12ms poll; twoHeads 0.**
+
 - **[branch] ONE CLOCK FOR THE FINGER, THE EAR AND THE LANE.** The week of
   both-signs length complaints had one root: the audible off snapped to
   qnext(now) while the lane recorded raw held time — fast tap: live long/lane
