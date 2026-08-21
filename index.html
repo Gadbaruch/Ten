@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-21.1727';
+const BUILD='2026-08-21.1801';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -6776,7 +6776,19 @@ class Voice{
            nodes, same order, so the two engines spread identically. */
         let outN2=nd;
         if(uniN>1){
-          const pn=ac.createStereoPanner(); pn.pan.value=off*(VX.wide||0);
+          /* WIDE FANS, IT DOES NOT JUST SPREAD (Gad, 2026-08-21: "i want more
+             extreme wide parameter… max value should be pushing voices more to
+             the sides than the center"). `off` walks the unison voices
+             linearly from -1 to 1, so at seven voices three of them sit within
+             a third of centre and the image stays narrow however far the dial
+             goes. Curving it pushes the inner voices outward as the dial
+             opens: at 0 it is the plain linear spread, at 1 it is a square
+             root, which moves the -0.33 voice out to -0.58 and leaves the
+             edges where they are. The centre voice of an odd unison stays
+             centred, which is what holds the sound together. */
+          const wdU=clamp(VX.wide||0,0,1);
+          const fanU=Math.sign(off)*Math.pow(Math.abs(off),1-0.5*wdU);
+          const pn=ac.createStereoPanner(); pn.pan.value=fanU*wdU;
           nd.connect(pn); outN2=pn;
           const dsec=(VX.slop||0)*Math.abs(off);
           if(dsec>0.0005){const dl=ac.createDelay(0.06); dl.delayTime.value=dsec;
@@ -9883,7 +9895,30 @@ class Engine{
        Steal the OLDEST already-released voice first, then the oldest of any —
        a note you have let go of is the right thing to lose. Killed with the
        fast fade, so it is gone before the new attack rather than clicking. */
-    const CAP=24*POLYX;
+    /* THE CAP IS IN VOICES; A VOICE IS NOT ALWAYS THE SAME PRICE (Gad,
+       2026-08-21: "voice stealing now works on native synth engine but not yet
+       on phase! Native goes easy over 30v and audio still runs even when cpu
+       in the task manager is on 90"). Stealing was never missing on the phase
+       engine — measured, 70 notes fired at ch7 capped at act=24 on BOTH
+       engines. What differs is the load behind each voice: the phase engine
+       builds one `ten-fmop` WORKLET per unison voice, so 24 voices carried
+       **168 live worklet nodes** where native carried 0 and used ordinary
+       oscillators. Twenty-four phase voices is a hundred and sixty-eight
+       processors on the audio thread, and that is the drop.
+       So the ceiling is on the COST now, not the count: a phase voice is
+       charged its unison, and the channel gets as many voices as that budget
+       allows — roughly 24 native, roughly 7 at unison 7. Lower `uni` and the
+       voice count rises again, which is the honest trade and the lever worth
+       reaching for. */
+    const VXc=modHolder(p,'vox').vox||{};
+    const fmwOn=Math.round(VXc.fmw||0)===1;
+    const uniC=fmwOn?clamp(Math.round(VXc.uni||1),1,7):1;
+    /* The budget is in WORKLET NODES, not a divisor: 56 is a third of the 168
+       that dropped, and it keeps the phase engine playable as a chord — eight
+       voices at unison 7, eighteen at unison 3, and the ordinary voice ceiling
+       once unison is off. Native is unchanged; it never spends this. */
+    const FMWNODES=56;
+    const CAP=fmwOn?clamp(Math.round(FMWNODES/uniC),4,24*POLYX):24*POLYX;
     if(this.act[pi].length>=CAP){
       const live=this.act[pi];
       const pick=()=>{
@@ -20617,22 +20652,9 @@ const onKeyDown=e=>{
            off there is no cursor to bend yet, so the key makes the one and
            every key after it moves that. */
         const vmP=AUDMONO?1:clamp(Math.round((p9.vox||{}).mode||0),0,2);
-        if(AUDMONO&&!autoCur(p9)&&!engine.audRolling(pi)){
-          /* …AT THE PITCH THE KEY IS ASKING FOR (Gad, 2026-08-21: "in pitch
-             mode this sounds like a very quick glide from baseline pitch to
-             the key pressed pitch"). The head was made at the channel's own
-             rate and bent AFTER, so with the loop off every note began wrong
-             and slid into place. Born at the right rate, there is nothing to
-             slide. It never showed on playback because a replayed lane
-             normally has a cursor already — the spawn is skipped there and
-             only the bend happens, which is why he heard it live only. */
-          /* the semitones INLINE, not semP — that const is declared twenty
-             lines below this and reading it here is a TDZ throw inside a live
-             key handler, which is silent and kills the press. This file has
-             already lost an afternoon to exactly that (`glP`). */
-          engine.audPlay(pi,AC.currentTime+0.005,lane.len,0,
-            {semis:(noteOf(c,pi)??0)+S.oct*12+trSemis(p9)});
-        }
+        /* …and the pitch side had the same pair: audBendNote's own `go()`
+           makes the head at the right rate now, so a second one here is a
+           second voice. */
         if(vmP>0&&(autoCur(p9)||AUDMONO)){
           /* THE SCALE APPLIES HERE TOO (Gad, 2026-08-17). `chrom` was passed
              true, which is the KIT exemption — a kit is twelve pads and a
@@ -20855,22 +20877,17 @@ const onKeyDown=e=>{
          that is a shape worth keeping even with one head. */
       const vm9=AUDMONO?Math.max(1,clamp(Math.round((S.presets[pi].vox||{}).mode||0),0,2))
                        :clamp(Math.round((S.presets[pi].vox||{}).mode||0),0,2);
-      if(AUDMONO&&!autoCur(S.presets[pi])&&!engine.audRolling(pi)){
-        /* MADE WHERE IT IS GOING (Gad, 2026-08-21: "when autoloop is off…
-           in pos mode the start pos is played very briefly and then jumps to
-           the cue point", and in pitch mode "a very quick glide from baseline
-           pitch to the key pressed pitch"). With the loop off the key makes
-           its own head — and it made one at the top of the crop, at the
-           channel's own pitch, and only THEN moved and bent it. Two steps you
-           can hear. The cue this key is about is already in scope; handing it
-           to audPlay means the head is born in the right place and the move
-           that follows is a move to where it already is.
-           Why it never showed on playback, which is the part that named it: a
-           replayed lane almost always has a cursor rolling already, so the
-           spawn is skipped and only the move happens. */
-        engine.audPlay(pi,AC.currentTime+0.005,L,0,
-          Object.assign({},cue,{frac:cutAt(pi,sl)}));
-      }
+      /* NO SPAWN HERE ANY MORE (Gad, 2026-08-21: "with autoloop off and pos
+         mode - playing live notes im getting double notes sounds like both
+         quantized and unquantized notes are played"). This made the head and
+         so does cueNote, three calls down the same keypress — and the guard
+         that was supposed to stop the second one asks `audRolling`, which
+         reads `audCar`, which a CUE-spawned cursor does not set. So the moment
+         this one started passing a cue (to stop the audible jump from the top
+         of the crop) it became invisible to that guard and both fired: two
+         heads, two notes, one of them on the grid and one under the finger.
+         cueNote now spawns AT the cue itself, so this was doing nothing the
+         door below it does not do better. */
       if(vm9>0&&(autoCur(S.presets[pi])||!first9||AUDMONO)){
         /* …AND A CUE ONLY GLIDES ONTO A HELD ONE. It used to glide whenever the
            voice mode said legato, so with the loop off every jump slid up from
