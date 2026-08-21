@@ -943,6 +943,144 @@ async function probeMono() {
       verdict: bad ? 'POLY — bug' : (p.au.auto ? 'mono' : 'auto off — per-key cursors expected') }] };
 }
 
+/* SWEEP — Gad's idea, verbatim: "test with a sin sweep so you can measure and
+   know exactly which pitch to expect when". A 4s sine sweep, 200->2000Hz
+   linear in POSITION, becomes the take — so at speed x1 the dominant frequency
+   of the bus IS the playhead position: pos = (f-200)/1800. A 6ms notch every
+   250ms gives detectCuts real onsets, so the position keys get real cues.
+   The probe then plays scripted quantized taps, records them, replays the
+   lane, and compares WHAT SOUNDED both times — not what was written, not
+   which calls fired: the audible position trajectory, decoded from pitch.
+     live/replay rows: one per sounded note — startB (mod loop), pos (0..1),
+                       length in beats
+     match:            live note k vs its replay twin — pos diff, len ratio
+     twoHeads:         windows where a SECOND spectral peak sits within 12dB
+                       of the first, >=150Hz away — two simultaneous sweep
+                       pitches is two playheads, heard, not inferred.
+   tools/probe.sh sweep ch=9 taps=6                                          */
+async function probeSweep() {
+  const ch = num(P.ch, CH), taps = clampN(num(P.taps, 6), 2, 10);
+  function clampN(v, a, b) { return v < a ? a : v > b ? b : v; }
+  pin(ch);
+  const p = S.presets[ch];
+  if (!p || !p.au) return { cols: ['err'], rows: [{ err: 'ch ' + ch + ' is not audio' }] };
+  /* the sweep take */
+  const sr = AC.sampleRate, N = Math.round(sr * 4), pcm = new Float32Array(N);
+  let ph = 0;
+  for (let i = 0; i < N; i++) {
+    const f = 200 + 1800 * (i / N);
+    ph += 2 * Math.PI * f / sr;
+    const inNotch = ((i / sr) % 0.25) < 0.006;
+    pcm[i] = inNotch ? 0 : Math.sin(ph) * 0.6;
+  }
+  audPlace(ch, pcm, 0, 'sweep');
+  await sleep(400);
+  /* known ground: tape, position keys, autoloop off, no cloud, no sync, x1 */
+  p.au.kmode = 0; p.au.auto = 0; p.au.cmode = 0; p.au.pmode = 0;
+  p.au.spd = 1; p.au.semis = 0; p.au.st = 0; p.au.en = 1;
+  if (p.gr) p.gr.size = 1;
+  (p.ply || []).forEach((_, i) => p.ply[i] = mkPly());
+  try { applyCmode(ch); } catch (_) {}
+  try { engine.granCfg(ch); engine.audLive(ch); } catch (_) {}
+  const cuts = engine.audCuts(ch) || [];
+  if (cuts.length < 4) return { cols: ['err'], rows: [{ err: 'only ' + cuts.length + ' cues detected on the sweep' }] };
+  const lane = S.patterns[S.editPat].lanes[ch];
+  S.patterns[S.editPat].lanes.forEach(l => { l.events = []; });
+  lane.auto = false; lane.unit = 'B'; lane.count = 1; lane.grid = 0.25;
+  CFG.qOn = 1;
+  /* quiet but not silent — the scheduler must keep its clock */
+  let trim = null;
+  try { trim = AC.createGain(); trim.gain.value = 0.05;
+        engine.comp.disconnect(AC.destination); engine.comp.connect(trim);
+        trim.connect(AC.destination); } catch (_) {}
+  /* the ear: an analyser on the channel bus, polled */
+  const an = AC.createAnalyser(); an.fftSize = 4096; an.smoothingTimeConstant = 0;
+  engine.buses[ch].pan.connect(an);
+  const bins = new Float32Array(an.frequencyBinCount);
+  const hz = i => i * sr / an.fftSize;
+  const lo = Math.ceil(150 / (sr / an.fftSize)), hi = Math.floor(2300 / (sr / an.fftSize));
+  const samples = [];
+  let polling = null;
+  const poll = () => {
+    an.getFloatFrequencyData(bins);
+    let b1 = -1, v1 = -Infinity;
+    for (let i = lo; i <= hi; i++) if (bins[i] > v1) { v1 = bins[i]; b1 = i; }
+    if (v1 < -58) { samples.push({ b: gridNow(), f: 0 }); return; }
+    let v2 = -Infinity;
+    for (let i = lo; i <= hi; i++) {
+      if (Math.abs(hz(i) - hz(b1)) < 150) continue;
+      /* a local peak, not a skirt: taller than both neighbours */
+      if (bins[i] > v2 && bins[i] >= bins[i - 1] && bins[i] >= bins[i + 1]) v2 = bins[i];
+    }
+    samples.push({ b: gridNow(), f: hz(b1), two: (v1 - v2) < 12 });
+  };
+  const K = (t, c) => document.dispatchEvent(new KeyboardEvent(t, { code: c, key: c, bubbles: true, cancelable: true }));
+  const wb = async x => { let g = 0; while (gridNow() < x && g++ < 8000) await sleep(5); };
+  const KEYS = ['KeyA', 'KeyS', 'KeyD', 'KeyF', 'KeyG', 'KeyH', 'KeyJ', 'KeyK', 'KeyL', 'Semicolon'];
+  /* live pass, recorded */
+  if (!T.playing) play();
+  await sleep(900);
+  S.patterns[S.editPat].state = 'rec';
+  await wb(Math.ceil(gridNow()) + 1);
+  const t0 = Math.ceil(gridNow()) + 1;
+  polling = setInterval(poll, 15);
+  for (let k = 0; k < taps; k++) {
+    await wb(t0 + k * 0.5 - 0.1);
+    K('keydown', KEYS[k]); await sleep(170); K('keyup', KEYS[k]);
+  }
+  await wb(t0 + taps * 0.5 + 0.6);
+  clearInterval(polling);
+  const live = samples.splice(0);
+  await sleep(300);
+  S.patterns[S.editPat].state = 'on';
+  const nEv = lane.events.length;
+  /* replay, two loops */
+  await wb(Math.ceil(gridNow() / lane.len) * lane.len + lane.len);
+  polling = setInterval(poll, 15);
+  await wb(gridNow() + lane.len * 2);
+  clearInterval(polling);
+  const rep = samples.splice(0);
+  try { stop(); } catch (_) {}
+  try { engine.buses[ch].pan.disconnect(an); } catch (_) {}
+  try { if (trim) { engine.comp.disconnect(trim); trim.disconnect();
+                    engine.comp.connect(AC.destination); } } catch (_) {}
+  /* trajectories -> notes */
+  const L = lane.len;
+  const notes = A => {
+    const out = []; let cur = null;
+    for (const s of A) {
+      if (s.f > 0) {
+        if (!cur) cur = { b0: s.b, bN: s.b, fs: [s.f], two: s.two ? 1 : 0, n: 1 };
+        else { cur.bN = s.b; cur.fs.push(s.f); cur.n++; if (s.two) cur.two++; }
+      } else if (cur) { out.push(cur); cur = null; }
+    }
+    if (cur) out.push(cur);
+    return out.filter(x => x.n >= 2).map(x => {
+      const fs = x.fs.slice().sort((a, b) => a - b);
+      return { startB: +fmod(x.b0, L).toFixed(2),
+               pos: +(((fs[fs.length >> 1]) - 200) / 1800).toFixed(3),
+               lenB: +(x.bN - x.b0).toFixed(2),
+               twoFrac: +(x.two / x.n).toFixed(2) };
+    });
+  };
+  const ln = notes(live), rn = notes(rep);
+  /* match each live note to replay notes at the same loop phase */
+  const match = ln.map(a => {
+    const twins = rn.filter(b => Math.abs(fmod(b.startB - a.startB + L / 2, L) - L / 2) < 0.15);
+    if (!twins.length) return { at: a.startB, live: a.pos, replay: 'MISSING', dPos: '-', dLen: '-' };
+    const b = twins[0];
+    return { at: a.startB, live: a.pos, replay: b.pos,
+             dPos: +(Math.abs(b.pos - a.pos)).toFixed(3),
+             dLen: +(b.lenB - a.lenB).toFixed(2) };
+  });
+  const twoLive = ln.reduce((m, x) => Math.max(m, x.twoFrac), 0);
+  const twoRep = rn.reduce((m, x) => Math.max(m, x.twoFrac), 0);
+  return { cols: ['at', 'live', 'replay', 'dPos', 'dLen'],
+    rows: match.concat([{ at: '—', live: 'liveNotes ' + ln.length + ' recEvents ' + nEv,
+      replay: 'replayNotes ' + rn.length + ' (2 loops)',
+      dPos: 'twoHeads live ' + twoLive, dLen: 'twoHeads rep ' + twoRep }]) };
+}
+
 const HELP = {
   cols: ['args'],
   rows: [
@@ -953,6 +1091,7 @@ const HELP = {
     { k: 'key',      args: 'code=KeyA hold=120 shift=0 alt=0 ctrl=0 meta=0' },
     { k: 'keypath',  args: 'code=KeyA ch=9 kmode=0 auto=1 arp=0 hold=400 — did the app CLAIM the key, and which engine door did it reach' },
     { k: 'roundtrip',args: 'ch=9 kmode=0 auto=1 arp=1 div=0.25 keys=KeyA,KeyS — record a phrase and replay it: did the head do the same thing twice' },
+    { k: 'sweep',    args: 'ch=9 taps=6 — sine-sweep take: pitch IS position; record, replay, compare what SOUNDED' },
     { k: 'mono',     args: 'ch=9 kmode=0 auto=1 — one playhead? a cue must MOVE the head, never add one' },
     { k: 'trig',     args: 'ch=1 note=60 ph=90 — does an operator rtrg/free reach the sound, in both fm engines' },
     { k: 'matrix',   args: 'ch=8 take=nylonlick cues=4 — the seven cases + the cue jumps' },
@@ -969,6 +1108,7 @@ try {
   const PROBES = { level: probeLevel, spectrum: probeSpectrum, cursor: probeCursor,
                    preset: probePreset, key: probeKey, keypath: probeKeyPath,
                    roundtrip: probeRoundTrip,
+                   sweep: probeSweep,
                    mono: probeMono,
                    trig: probeTrig,
                    matrix: probeMatrix,

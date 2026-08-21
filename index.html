@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-21.1954';
+const BUILD='2026-08-21.2203';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -4480,7 +4480,18 @@ let fxwReady=false;
       const mk=n=>({d:new Float32Array(n),i:0});
       this.apL=[126,180,269,444].map(mk);
       this.apR=[151,205,245,405].map(mk);
-      this.port.onmessage=e=>{const m=e.data||{};
+      this.port.onmessage=this._msg=e=>{const m=e.data||{};
+        /* SAME LANE, SAME SOUND, EVERY LOOP (Gad, 2026-08-21: "now rec i made
+           plays slightly differently every time"). A move or a bend used to
+           apply the moment its message ARRIVED — main-thread setTimeout
+           jitter, re-rolled every pass, worse under load. With a frame stamped
+           on it the op waits here and lands on its exact sample; the replay
+           stops being a re-performance. Drained at the top of process and
+           re-dispatched through this same handler, so there is ONE copy of the
+           op bodies. tclr and panic flush the queue: a stop cancels every
+           queued gesture. */
+        if((m.t==='cmov'||m.t==='tpb')&&Number.isFinite(m.frame)&&m.frame>currentFrame+64){
+          (this.opq=this.opq||[]).push(m); return;}
         if(m.t==='buf'){this.L=m.l; this.R=m.r||m.l; this.len=m.l.length;
           this.cx=this.cx.filter(c9=>c9.bus!==0); this.ng=0;}   // in-flight phases belong to the OLD buffer
         else if(m.t==='p'){
@@ -4683,6 +4694,7 @@ let fxwReady=false;
            walks this path, but the ratchet branch and every live grab still do,
            and a cue cursor's life is 1e6 seconds — nothing else ends it. */
         else if(m.t==='tclr'){const fa=m.frame||0;
+          if(this.opq)this.opq.length=0;
           for(const [id,v] of this.tv){
             if(fa>currentFrame+1)v.relAt=v.relAt?Math.min(v.relAt,fa):fa;
             else v.rel=1;}}
@@ -4740,7 +4752,8 @@ let fxwReady=false;
           }}
         else if(m.t==='wnd'){const ms=Math.max(5,Math.min(300,+m.ms||50));
           this.pW=Math.round(sampleRate*ms/1000);}
-        else if(m.t==='panic'){this.vs.clear(); this.cx.length=0; this.ng=0; this.tv.clear();}
+        else if(m.t==='panic'){this.vs.clear(); this.cx.length=0; this.ng=0; this.tv.clear();
+          if(this.opq)this.opq.length=0;}
         else if(m.t==='ping'){const L9=(this.p.live>0.5?this.ring.length:this.len)||1;
           this.port.postMessage({t:'stat',g:this.ng,v:this.vs.size,tv:this.tv.size,spawned:this.stat,
             /* every cursor's place in the take, for the playheads on the waveform */
@@ -4948,6 +4961,12 @@ let fxwReady=false;
       return x;
     }
     process(I,O){
+      if(this.opq&&this.opq.length){
+        const lim=currentFrame+192;
+        const due=this.opq.filter(q=>q.frame<=lim);
+        if(due.length){this.opq=this.opq.filter(q=>q.frame>lim);
+          for(const q of due)this._msg({data:q});}
+      }
       const out=O[0]; if(!out||!out[0])return true;
       const N=out[0].length, oL=out[0], oR=out[1]||out[0];
       oL.fill(0); if(out[1])oR.fill(0);
@@ -5619,6 +5638,18 @@ function setBpm(v){
 }
 function play(){
   AC.resume();
+  /* THE RETRO BUFFER'S TIME DIES WITH THE CLOCK (Gad, 2026-08-21: third retro
+     take in a row and "all hell broke loose... polyphonic multy playheads AND
+     longer notes than i played"). play() restarts the beat clock at 0, and the
+     buffer — deliberately never consumed, so tab+N can re-reveal — carried
+     presses from PREVIOUS runs whose beat numbers collide with the new run's.
+     His lane showed the collision plainly: two events on one instant (two
+     heads), one figure present twice shifted (grid-adjacent chains that hand
+     over end to end and sound like one long note). A press "at beat 2" of a
+     dead clock has no home on a new one. Cleared at the START of a run, so
+     the stop-then-tab flow (take the jam of the run that just ended) still
+     works — that reads the buffer before the next play. */
+  for(let i9=0;i9<retroBuf.length;i9++)retroBuf[i9].length=0;
   T.startTime=AC.currentTime+0.06; T.startBeat=0; T.schedBeat=0; T.playing=true;
   acts=[{pat:S.curPat,start:-1e9,anchor:0}];
   dirty=true;
@@ -5739,8 +5770,10 @@ function scheduleRange(from,to){
               const dur3=Math.min(ev.dur||0.25,L3);
               const ms2=Math.max(0,(timeAt(t+dur3+a.anchor)-AC.currentTime)*1000);
               const genP=lane._gen|0;
+              const atP1=timeAt(t+a.anchor);
               setTimeout(()=>{try{
                 if((lane._gen|0)!==genP)return;        // cleared while this was queued
+                if(!T.playing)return;                  // stopped is stopped — see the cue twin
                 /* …and so does a recorded bend: with the loop off there is
                    nothing to bend until the replay makes it */
                 if(!autoCur(S.presets[li])&&!engine.audRolling(li)){
@@ -5752,9 +5785,9 @@ function scheduleRange(from,to){
                      bare and bent it a call later, which with the loop off is
                      an audible slide up from baseline on every recorded
                      stroke. Same one-word fix as the live side. */
-                  if(l7)engine.audPlay(li,AC.currentTime+0.005,l7.len,0,{semis:ev.pk});
+                  if(l7)engine.audPlay(li,Math.max(atP1,AC.currentTime+0.003),l7.len,0,{semis:ev.pk});
                 }
-                engine.audPitch(li,ev.pk);}catch(_){}},ms1);
+                engine.audPitch(li,ev.pk,0,atP1);}catch(_){}},ms1);
               /* AND THE RECORDED BEND COMES BACK IN TIME TOO. The live one got
                  its relock on the key-up; this one had none, so every replay
                  of a stored bend left the take a little further out of phase
@@ -5879,11 +5912,16 @@ function scheduleRange(from,to){
                  reason: with no loop underneath, the jump IS the sound. */
               const off7=!autoCur(S.presets[li]);
               const gen7=lane._gen|0;                  // …and the lane it belongs to
+              const at7=timeAt(tt+a.anchor);           // the event's own sample, not the timer's
               setTimeout(()=>{try{
                 if((lane._gen|0)!==gen7)return;        // cleared while this was queued
+                if(!T.playing)return;                  // …and stopped is stopped: a queued jump
+                                                       // spawning after stop() is the head that
+                                                       // "doesnt stop" — allOff killed everything
+                                                       // alive, this one was born after it
                 if(off7&&!engine.audRolling(li))
-                  engine.audPlay(li,AC.currentTime+0.005,L2,0,cu);   // born at the cue, not the crop start
-                engine.audMove(li,to7,gl7,1,1);
+                  engine.audPlay(li,Math.max(at7,AC.currentTime+0.003),L2,0,cu);   // born at the cue, on its sample
+                engine.audMove(li,to7,gl7,1,1,at7);
                 engine.busEnvFire(li,AC.currentTime);}catch(_){}},ms7);
               const te7=tt+dj2, ms8=Math.max(0,(timeAt(te7+a.anchor)-AC.currentTime)*1000);
               /* DOES ANOTHER JUMP FOLLOW? (Gad, 2026-08-18: "arp recording is
@@ -5895,13 +5933,31 @@ function scheduleRange(from,to){
                  grabbed it again. Same events, a different phrase, and on a
                  1/16 arp it happens fifteen times a bar. The hand-back is for
                  the END of a run; inside one, the next jump is the hand-back.*/
-              const nxt7=lane.events.some(e2=>e2.cue!==undefined&&
-                fmod(e2.t-te7,L2)<Math.max(dj2,0.02)+1e-6);
+              /* A RUN IS NEARLY TOUCHING, NOT MERELY NEXT (Gad, 2026-08-21:
+                 "i recorded a few hits all the same length, the last one or 2
+                 are connected and longer then i played" — and his export shows
+                 the lane is PERFECT: five events, every dur 0.25. The window
+                 here was max(dur,0.02) AFTER the gesture end, so two hits half
+                 a beat apart with one-grid lengths read as a run — his t=2.5
+                 ended at 2.75, t=3.0 started exactly dur later, stop skipped,
+                 the take ran on. Same disease as the pitch side's "legato is
+                 an overlap, not an adjacency".
+                 What the window is FOR is a recorded arp, whose steps are
+                 div*0.85 long with a 0.15*div breath — so the takeover now
+                 reaches only 20% of the gesture past its end, plus true
+                 overlaps (an onset inside the window must suppress the stop or
+                 the stop would cut the successor). Quantized hand-played hits
+                 always sit a full grid or more apart and always stop. */
+              const nxt7=lane.events.some(e2=>{
+                if(e2===ev||e2.cue===undefined)return false;
+                const d7=fmod(e2.t-tt,L2);
+                return d7>1e-6&&d7<dj2+Math.max(0.02,dj2*0.2)+1e-6;});
+              const atE7=timeAt(te7+a.anchor);
               setTimeout(()=>{try{
                 if(AUD.hold&&AUD.hold.pi===li)return;   // a finger owns it now
                 engine.busEnvFire(li,AC.currentTime,true);
                 if(nxt7)return;                         // another jump is already coming
-                if(off7){engine.audStop(li);return;}    // no bar to hand it back to
+                if(off7){engine.audStop(li,Math.max(atE7,AC.currentTime+0.003));return;}    // no bar to hand it back to
                 engine.audRelock(li);                   // …back where the bar asks
               }catch(_){}},ms8);
               return;
@@ -10590,6 +10646,21 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
       durSec:(cue&&Number.isFinite(cue.life))?cue.life
         :(cue||rate<0||!Math.round(au.fit||0)||!autoCur(S.presets[pi]))?1e6
         :Math.max(0.05,loopSec-skipSec)});
+    /* THE SPAWN LEDGER, SYNCHRONOUS (Gad, 2026-08-21: "looks like poly
+       playheads are still not removed... look at the architecture"). He was
+       right about where to look: audRolling's own comment warns that the stat
+       is a frame stale and audCar covers only the LOOP carrier — audPlay
+       itself never recorded that it had just spawned. So any two spawn-guarded
+       callers landing in one tick — two quantized keys deferred to the same
+       grid line, two replay timers for stacked events — both read "no cursor"
+       and both made one. Every caller was racing; the ledger closes the race
+       at the one door they all use. `until` bounds it so a cursor that dies in
+       the worklet (life spent) cannot leave the flag stuck reading "rolling"
+       forever, which would be worse than the race: silence. */
+    const lifeS9=(cue&&Number.isFinite(cue.life))?cue.life
+        :(cue||rate<0||!Math.round(au.fit||0)||!autoCur(S.presets[pi]))?1e6
+        :Math.max(0.05,loopSec-skipSec);
+    (this.audSpawn=this.audSpawn||[])[pi]={until:Math.max(at,AC.currentTime)+lifeS9};
     return this._lastTid;
   }
   /* a fade-out then the stop, so a released cue does not click on the way out */
@@ -10655,9 +10726,10 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
              instead of in time — an arp you can hear as a burst, not a figure.
          Same shape the cloud branch in the key handler already uses: fire now
          if it is due now, otherwise wait for it. */
-      const msM=Math.max(0,((at||0)-AC.currentTime)*1000);
-      const moveM=()=>this.audMove(pi,cue.frac,gl,1);
-      if(msM<2)moveM(); else setTimeout(moveM,msM);
+      /* …and the timing lives in the WORKLET now: the frame stamp on cmov
+         lands the jump on its exact sample, so the setTimeout wrapper that
+         used to approximate this is gone with its jitter. */
+      this.audMove(pi,cue.frac,gl,1,0,at);
       const shM={_cue:1,midi,released:false,killed:false,press:0,pressN:[],nodes:[],
         release(){this.released=true;},kill(){this.killed=true;this.released=true;},
         setPressure(){}};
@@ -10731,7 +10803,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
         if(l9)E.audPlay(pi,AC.currentTime+0.005,l9.len,0,{semis});
       }
       E.audBendCur[pi]=sh;
-      E.audPitch(pi,semis,glide||0); E.busEnvFire(pi,AC.currentTime); };
+      E.audPitch(pi,semis,glide||0,at); E.busEnvFire(pi,AC.currentTime); };
     if(ms<2)go(); else setTimeout(go,ms);
     this.act[pi].push(sh);
     /* swept only once it is RELEASED — a held key can outlast any timer, and a
@@ -10769,10 +10841,11 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     try{e9.node.port.postMessage({t:'cret'});}catch(_){}
   }
   /* mono/legato: send the cursors that are already reading somewhere else */
-  audMove(pi,frac,glideSec,bus,onlyCar){
+  audMove(pi,frac,glideSec,bus,onlyCar,at){
     const e9=this.gn&&this.gn[pi]; if(!e9||!e9.node)return;
     try{e9.node.port.postMessage({t:'cmov',pos:frac,gl:glideSec||0,bus:bus|0,
-      car:onlyCar?1:0});}catch(_){}
+      car:onlyCar?1:0,
+      frame:(Number.isFinite(at)&&at>AC.currentTime)?Math.round(at*AC.sampleRate):undefined});}catch(_){}
   }
   /* A LENGTH CHANGE IS NOT A STOP — the rule, and this is where it is kept for
      the loop. Stretching or cropping under a running take used to reach it
@@ -10879,6 +10952,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     at=at??AC.currentTime+0.002;
     (this.audCar=this.audCar||[])[pi]=null;   // the carrier goes with everything else
     (this.audCarAt=this.audCarAt||[])[pi]=null;   // …and so does when it started
+    (this.audSpawn=this.audSpawn||[])[pi]=null;   // …and the spawn ledger: stopped is not rolling
     const e9=this.gn&&this.gn[pi];
     if(e9&&e9.node){try{e9.node.port.postMessage(
       {t:'tclr',frame:Math.round(at*AC.sampleRate)});}catch(_){}}
@@ -11105,6 +11179,8 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
        one, which is the very thing one-playhead exists to prevent. The stat is
        the fallback for a cursor this engine did not spawn itself. */
     if((this.audCar||[])[pi])return true;
+    const sp9=(this.audSpawn||[])[pi];
+    if(sp9&&AC.currentTime<sp9.until)return true;   // spawned this tick counts — see audPlay
     const st=(this.gn&&this.gn[pi]&&this.gn[pi].stat)||null;
     return !!(st&&(st.tv|0)>0);
   }
@@ -11114,12 +11190,13 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
      So the time is passed per BEND rather than read off the preset here: the
      first note lands instantly, and only a note arriving over a held one
      slides. Nothing is a glide by default. */
-  audPitch(pi,semis,glideSec){
+  audPitch(pi,semis,glideSec,at){
     this.audPB=this.audPB||{}; this.audPB[pi]=semis||0;
     const au=S.presets[pi].au||{};
     const e9=this.gn&&this.gn[pi];
     if(e9&&e9.node){try{e9.node.port.postMessage(
-      {t:'tpb',semis:(au.semis??0)+(semis||0),gl:glideSec>0?glideSec:0});}catch(_){}}
+      {t:'tpb',semis:(au.semis??0)+(semis||0),gl:glideSec>0?glideSec:0,
+       frame:(Number.isFinite(at)&&at>AC.currentTime)?Math.round(at*AC.sampleRate):undefined});}catch(_){}}
   }
   /* the granular channel: one worklet node per channel, notes over the port */
   granNode(pi){
@@ -11309,7 +11386,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
        all-notes-off with nothing in the app able to end them */
     for(const k9 in (this.gn||{})){const e9=this.gn[k9];
       if(e9&&e9.node){try{e9.node.port.postMessage({t:'panic'});}catch(_){}}}
-    this.audCar=[]; this.audCarAt=[];   // a panic takes the carriers with it
+    this.audCar=[]; this.audCarAt=[]; this.audSpawn=[];   // a panic takes the carriers with it
     this.arpPool.forEach(p=>p.length=0);}
   click(at,accent){
     const o=AC.createOscillator(),g=AC.createGain();
@@ -18116,6 +18193,8 @@ function retroCapture(){
       ...(n.cue!==undefined?{cue:n.cue}:{}),
       ...(n.pk!==undefined?{pk:n.pk}:{}),
       ...(n.fz!==undefined?{fz:n.fz}:{})});
+    if(n.cue!==undefined||n.pk!==undefined||n.fz!==undefined)
+      audOverwrite(lane,t,n.dur||0.25,lane.events[lane.events.length-1]);
   }
   markRecorded(lane);
   flash('◉ retro: last '+fmtLen(lane)+' · '+seg.length+' notes — tab+digits widens the window');
@@ -18233,11 +18312,13 @@ function recAudEvent(pi,tBeat,midi,vel,durBeats){
     const pk=Math.round(midi)-KBBASE;
     lane.clear(ev=>ev.pk===pk&&Math.abs(ev.t-t)<1e-6);
     lane.events.push({t,pk,dur,born:performance.now()});
+    audOverwrite(lane,t,dur,lane.events[lane.events.length-1]);
   }else{
     const cuts=(engine.audCuts(pi)||[]).length; if(!cuts)return;
     const cue=((Math.round(midi)-60-trSemis(p))%cuts+cuts)%cuts;
     lane.clear(ev=>ev.cue===cue&&Math.abs(ev.t-t)<1e-6);
     lane.events.push({t,cue,dur,vel:vel||0.9,born:performance.now()});
+    audOverwrite(lane,t,dur,lane.events[lane.events.length-1]);
   }
   /* the window sizes the loop off what it heard, so it has to hear this one */
   if(cap)cap.lastEnd=Math.max(cap.lastEnd,t+dur);
@@ -21231,6 +21312,39 @@ const scopeHeldOn=c=>
    the note recorder already keeps for midi — "a 40ms tap is a 40ms note
    wherever on the grid it lands" — and 60ms is enough for a cue to speak. */
 const AUDMINMS=60;
+/* A SUPERSEDED HOLD STILL WRITES ITSELF DOWN (Gad, 2026-08-21: "some notes
+   arent recorded"). A fast same-key double-tap around a grid line: press 1
+   releases before its grid, so its end is DEFERRED; press 2's keydown then
+   replaces AUD.gk[c]; press 1's fire bails ("let go before it landed") and its
+   deferred retry used to bail too — the tap vanished, no sound and no record.
+   The sound belongs to press 2 now, fine; the RECORD of press 1 does not. This
+   is the record half of endAudHold, callable for a hold that no longer owns
+   its key. */
+function lateAudWrite(h){
+  try{
+    if(!h||h.tr==null||h._wrote)return; h._wrote=1;
+    const lane=S.patterns[S.editPat].lanes[h.pi]; if(!lane)return;
+    const held=h.press!=null?((((h._relAt)??AC.currentTime)-h.press)/spb()):0.25;
+    const dur=Math.max(0.05,held);
+    const ent={t:h.tr,dur};
+    if(h.kind==='pmono'&&h.pk!==undefined)ent.pk=h.pk;
+    else if(h.sl!=null)ent.cue=h.sl;
+    else return;
+    retroBuf[h.pi].push(Object.assign({},ent));
+    if(retroBuf[h.pi].length>512)retroBuf[h.pi].shift();
+    if(S.patterns[S.editPat].state==='rec'&&!genOn(h.pi)){
+      const cp=lane._cap;
+      const qt=cp?Math.max(0,h.tr-cp.t0):fmod(h.tr-editAnchor(),lane.len);
+      lane.clear(ev=>((ent.cue!==undefined&&ev.cue===ent.cue)||
+                      (ent.pk!==undefined&&ev.pk===ent.pk))&&Math.abs(ev.t-qt)<1e-6);
+      lane.events.push(Object.assign({t:qt,dur,born:performance.now()},
+        ent.cue!==undefined?{cue:ent.cue}:{pk:ent.pk}));
+      audOverwrite(lane,qt,dur,lane.events[lane.events.length-1]);
+      if(cp)cp.lastEnd=Math.max(cp.lastEnd,qt+dur);
+      dirtySave=true;
+    }
+  }catch(_){}
+}
 function endAudHold(c){
   /* THE NOTE ON IS QUANTIZED; THE KEY-UP MUST WAIT FOR IT (Gad, 2026-08-21:
      "key pressing live too quickly results in no sound when live quantize is
@@ -21248,7 +21362,10 @@ function endAudHold(c){
     hW._late=1;                                  // once only; the retry ends it for real
     hW._relAt=AC.currentTime;                    // when the finger ACTUALLY left — the length is this, not the retry
     const wait=Math.max(0,(gridTime(hW.tr)-AC.currentTime)*1000)+AUDMINMS;
-    setTimeout(()=>{try{if(AUD.gk&&AUD.gk[c]===hW)endAudHold(c);}catch(_){}},wait);
+    setTimeout(()=>{try{
+      if(AUD.gk&&AUD.gk[c]===hW)endAudHold(c);
+      else lateAudWrite(hW);              // superseded by a re-press: record it anyway
+    }catch(_){}},wait);
     return 'went';
   }
   /* the two kinds of hold live in the same map and end differently: a pitch
@@ -21269,10 +21386,11 @@ function endAudHold(c){
          ending just before a grid point leave a hole. A pitch bend is a
          gesture with a length like any other. The ear and the lane read the
          same number — the off sounds where it is written. */
-      const gq8=gridOf(lane8), off8=CFG.qOn?qnext(gridNow(),gq8):gridNow();
-      const dur8=CFG.qOn
-        ?Math.max(gq8,Math.round((off8-h8.tr)/gq8)*gq8)
-        :Math.max(0.05,h8.press!=null?(AC.currentTime-h8.press)/spb():0.25);
+      /* nearest grid, same experiment as the cue release above */
+      /* the midi rule, on the sound as well as the lane — see the cue release */
+      const held8=h8.press!=null?((((h8._relAt)??AC.currentTime)-h8.press)/spb()):0.25;
+      const dur8=Math.max(0.05,AUDMINMS/1000/spb(),held8);
+      h8._durB=dur8;   // the release below is outside this block's scope
       retroBuf[h8.pi].push({t:h8.tr,pk:h8.pk,dur:dur8});
       if(retroBuf[h8.pi].length>512)retroBuf[h8.pi].shift();
       /* same rule on the pitch side: the arp's steps are the performance */
@@ -21281,6 +21399,7 @@ function endAudHold(c){
         const qt8=cp8?Math.max(0,h8.tr-cp8.t0):fmod(h8.tr-editAnchor(),L8);
         lane8.clear(ev=>ev.pk===h8.pk&&Math.abs(ev.t-qt8)<1e-6);
         lane8.events.push({t:qt8,pk:h8.pk,dur:dur8,born:performance.now()});
+        audOverwrite(lane8,qt8,dur8,lane8.events[lane8.events.length-1]);
         if(cp8)cp8.lastEnd=Math.max(cp8.lastEnd,qt8+dur8);
         dirtySave=true;
       }
@@ -21309,8 +21428,13 @@ function endAudHold(c){
       }
     }
     /* the rack handle ends it: releasing pops monoTrigger's stack, which
-       re-fires the note underneath — that IS the legato fall-back */
-    if(h8.tv&&h8.tv.release){try{h8.tv.release(AC.currentTime);}catch(_){}
+       re-fires the note underneath — that IS the legato fall-back. HELD TO
+       tr+dur8, midi's rule: the bend shim's release already takes a time and
+       its off() already knows who owns the channel, so the ear gets exactly
+       the number the lane just wrote. */
+    const rel8T=(T.playing&&CFG.qOn&&h8.tr!=null&&h8._durB!=null)
+      ?gridTime(h8.tr)+h8._durB*spb():AC.currentTime;
+    if(h8.tv&&h8.tv.release){try{h8.tv.release(Math.max(AC.currentTime,rel8T));}catch(_){}
       dirty=true; return 'went';}
     if(!Object.keys(AUD.gk).some(k8=>(AUD.gk[k8]||{}).kind==='pmono')){
       /* AND THE WAY BACK GLIDES TOO (Gad, 2026-08-18: "go to note works,
@@ -21424,8 +21548,21 @@ function endAudHold(c){
        a whole number of steps, which is what a chop IS.
        The RECORDED length is quantized with it — the ear and the lane have to
        agree, or a jam that sounded clean comes back ragged. */
+    /* THE OFF LANDS AT start+held — MIDI'S RULE, ON THE SOUND AS WELL AS THE
+       LANE (Gad, 2026-08-21: "recording cues are shorter then live played" /
+       "rec is super short notes shorter then live play" — and earlier, the
+       opposite sign). Both signs came from live and the lane measuring length
+       on DIFFERENT clocks: the audible off used to snap to qnext(now) — a
+       fast tap rang to the next grid line, a full grid — while the lane
+       recorded the raw held time. Short tap: live long, lane short. Long
+       pre-grid press: lane counted the waiting time, live did not. Midi's
+       monitored note is held to gridTime(start+dur) and records dur — ONE
+       number for the ear and the lane. Same here now: the off is scheduled at
+       tr+durB, and durB is what the lane writes. */
     const gq9=gridOf(lane), nowB9=gridNow();
-    const offB9=CFG.qOn?qnext(nowB9,gq9):nowB9;
+    const relB9=Math.max(0.05,AUDMINMS/1000/spb(),
+      press!=null?((((hj9&&hj9._relAt)??AC.currentTime)-press)/spb()):0.25);
+    const offB9=(CFG.qOn&&tr!=null)?tr+relB9:nowB9;
     const wait9=Math.max(0,(gridTime(offB9)-AC.currentTime)*1000);
     const endIt=()=>{
       /* …unless a finger arrived in the meantime: the grab it started owns the
@@ -21466,9 +21603,30 @@ function endAudHold(c){
        on main: Gad, testing it — "nop, all over the place, was better
        before". A nearest-grid variant is on the fix branch for him to judge;
        main keeps the behavior he knows. */
-    const durB=CFG.qOn&&tr!=null
-      ?Math.max(gq9,Math.round((offB9-tr)/gq9)*gq9)
-      :Math.max(0.05,press!=null?(AC.currentTime-press)/spb():0.25);
+    /* BRANCH EXPERIMENT — NEAREST grid, not next. The original bug ("note
+       length sometimes is longer then i had it, every 5 or so key strikes")
+       was qnext rounding the release UP: a hold of 1.1 grids recorded 2. The
+       raw-held rule fixed that and introduced raggedness ("all over the
+       place"). This keeps lengths ON the grid — uniform, like he is used to —
+       but rounds the HELD time to the NEAREST grid, so 1.1 grids records 1
+       and 1.6 records 2. _relAt keeps a deferred fast tap honest. */
+    /* …AND A TAP KEEPS ITS LENGTH (Gad, 2026-08-21: retro, second take, "the
+       second was longer then the length i pressed" — and his export shows the
+       recorder wrote dur=0.25, a full grid, for a tap held far shorter: the
+       one-grid FLOOR was rounding every sub-grid stab up. Audible on a
+       sustained slice, invisible on a percussive one, which is why the first
+       take sounded fine). His own rule decides it: "a 40ms tap is a 40ms note
+       wherever on the grid it lands." Under half a grid the held length is
+       recorded as-is; past that it snaps to the NEAREST grid. */
+    /* THE MIDI RULE, PURE (settled 2026-08-21 after three variants): the
+       start is quantized, the LENGTH IS EXACTLY WHAT THE HANDS DID, min 0.05.
+       The grid-rounded variants were chasing a symptom whose real cause was
+       the replay's takeover window — max(dur,0.02) connected notes with
+       varied lengths semi-randomly, which is what "all over the place"
+       actually was. That window is fixed (20% + overlaps), so the lengths can
+       be honest: "a 40ms tap is a 40ms note wherever on the grid it lands",
+       and a tap into a sustained slice no longer grows to a full grid. */
+    const durB=relB9;   // the same number the audible off was scheduled with
     if(sl!=null&&tr!=null){
       retroBuf[pi].push({t:tr,cue:sl,dur:durB});
       if(retroBuf[pi].length>512)retroBuf[pi].shift();
@@ -21486,6 +21644,7 @@ function endAudHold(c){
         const qt=cp9?Math.max(0,tr-cp9.t0):fmod(tr-editAnchor(),L);
         lane.clear(ev=>ev.cue===sl&&Math.abs(ev.t-qt)<1e-6);
         lane.events.push({t:qt,cue:sl,dur:durB,born:performance.now()});
+        audOverwrite(lane,qt,durB,lane.events[lane.events.length-1]);
         if(cp9)cp9.lastEnd=Math.max(cp9.lastEnd,qt+durB);
         dirtySave=true;
       }
@@ -22808,6 +22967,29 @@ function initLane(l){
    output and every hand-held key must stand down. Three recorders asked this
    and only the note one knew how; the audio cue and pitch releases wrote the
    held key on top, which is why a 16-move arp came back as 18 events. */
+/* OVERWRITE IS GESTURE-SCOPED ON AUDIO TOO (Gad, 2026-08-22: "when i play a
+   long press on top of short ones it should clear what is under the newly
+   added notes… every time new keys are added, they need to replace the
+   sections that they play over - this is overwrite mode"). Midi's overwrite
+   replaces what the playhead passes; the audio writers only ever replaced the
+   exact same spot, so layered takes ACCUMULATED under new playing. Now every
+   audio write clears what its span covers: events whose onset falls inside
+   [qt, qt+dur) go, and an event whose tail crosses into the span is truncated
+   at the new onset. Overdub (⇧o) keeps layering, as it says. */
+function audOverwrite(lane,qt,dur,keep){
+  if(CFG.overdub||!(dur>0))return;
+  const L=lane.len||4;
+  lane.clear(ev=>ev!==keep&&(ev.cue!==undefined||ev.pk!==undefined||ev.fz!==undefined)
+    &&(()=>{const d=fmod(ev.t-qt,L);return d>1e-6&&d<dur-1e-6;})());
+  /* strictly AFTER the onset: two keys pressed together are a chord of jumps,
+     not one overwriting the other — the same-spot-same-cue replace above
+     already handles true duplicates */
+  for(const ev of lane.events){
+    if(ev===keep||!(ev.cue!==undefined||ev.pk!==undefined||ev.fz!==undefined))continue;
+    const gap=fmod(qt-ev.t,L);
+    if(gap>1e-6&&gap<(ev.dur||0)-1e-6)ev.dur=gap;   // its tail ran under the new note
+  }
+}
 function genOn(pi,midi){
   if(!T.playing)return false;
   const pre=S.presets[pi]; if(!pre)return false;

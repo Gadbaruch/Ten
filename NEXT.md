@@ -1,5 +1,24 @@
 # WHERE THE AUDIO CHANNEL STANDS — 2026-08-20, main
 
+## THE BRANCH PROTOCOL — from 2026-08-21 evening, Gad's call
+
+"maybe make a branch and keep fixing things so we dont pollute master."
+
+- **main** is the FLOOR: the state Gad can always fall back to. Right now that
+  is 2026-08-21.1954 — grid-locked lengths (the behavior he knows), replay
+  spawns on target (confirmed good: "they dont slide from baseline"), the
+  supersaw sound both engines confirmed good. LIVE serves main.
+- **audio-fixes** is where every further fix goes. It is checked out in this
+  directory, so BOTH ports serve it — Gad tests the branch on 3033. Falling
+  back is `git checkout main`, run on his word, instant.
+- **Nothing merges to main without his explicit ok.** When a batch on the
+  branch survives his testing, it lands as one merge and live follows.
+- The raw-held length rule was tried on main and rolled back the same hour —
+  "nop, all over the place". First branch commit is the NEAREST-grid variant:
+  lengths stay on the grid (uniform, familiar) but a 1.1-grid hold records 1,
+  not 2. Measured: held 1.1/1.6/0.6/0.15 grids → recorded 1/2/1/1.
+  He judges it; main's rule is untouched either way.
+
 `audio-mono` is merged; everything below is on main and Gad tests on plain
 localhost:3033. One playhead is the model: a cue MOVES the head, it does not add
 one, and poly is gone from this channel type by his own call.
@@ -259,6 +278,81 @@ one monoTrigger already keeps. The question to ask before writing any of it:
       the grid; only the recorded number changed.
 
 ## Landed this session — all measured unless it says otherwise
+- **[branch] OVERWRITE IS GESTURE-SCOPED, LIKE MIDI.** His spec verbatim: new
+  keys replace the sections they play over; overdub (⇧o) layers. Every audio
+  writer now calls `audOverwrite` — clears audio events whose onset falls
+  strictly inside the new span (mod loop), truncates tails that run under the
+  new onset; strictly-after so simultaneous presses stay a chord. **Measured:
+  short under a 1.6-beat press cleared, outside kept, chord of two records
+  both.** Deliberate edge: an old note at exactly the new onset survives —
+  fixing that needs a pass-id on events, not a smarter time rule.
+
+- **[branch] THE REPLAY IS A PLAYBACK NOW, NOT A RE-PERFORMANCE.** His
+  question named it: "if live notes play a certain way, why cant you just
+  record that?" The lane was always faithful; the replay applied every
+  move/bend at message-ARRIVAL (setTimeout jitter, re-rolled each pass,
+  flipping spawn-vs-move and takeover-vs-stop decisions audibly). cmov/tpb
+  carry a FRAME now; the worklet queues and lands them sample-exact (drained
+  in process, re-dispatched through the one message handler; tclr/panic flush
+  the queue). All replay sites and the live quantized paths pass their exact
+  `at`. **Three loops: dPos 0 on every note; onset spread 2-30ms = the
+  analyser's own 12ms poll; twoHeads 0.**
+
+- **[branch] ONE CLOCK FOR THE FINGER, THE EAR AND THE LANE.** The week of
+  both-signs length complaints had one root: the audible off snapped to
+  qnext(now) while the lane recorded raw held time — fast tap: live long/lane
+  short; early press: lane long/live short. Midi's rule, applied to the sound
+  as well: the off lands at tr+dur and dur is what the lane writes. Pitch rides
+  the bend shim's own deferred release. (One glP-shaped scope trap caught:
+  dur8 dies at its block edge; hoisted via h8._durB.)
+  **Sweep verdict: dLen +0.09..+0.11 & one −0.43 → −0.06..+0.01; dPos ≤0.006;
+  twoHeads 0; 6 rec → 6 replayed.**
+
+- **[branch] THE SPAWN LEDGER, AND THE SWEEP INSTRUMENT.** His two calls in one
+  message, both right: "look at the architecture" — audPlay never recorded that
+  it spawned, audCar covers only the loop carrier, the stat is a frame stale,
+  so every spawn-guarded caller raced and same-tick pairs each made a head.
+  `audSpawn[pi]={until}` closes it at the one door all callers use.
+  A superseded fast tap (re-press before its deferred grid) now still records
+  (`lateAudWrite`). And "test with a sin sweep so you can measure" is
+  `tools/probe.sh sweep`: pitch IS position (pos=(f-200)/1800), a second
+  spectral peak within 12dB is a second head HEARD. First reading: **dPos
+  0.006-0.012, twoHeads 0, 6 recorded → 6 replayed.** Open, with numbers:
+  replay ~+0.09 beats long systematically; one note cut 0.43 short by its
+  successor; one of six taps silent live (recorded and replays fine).
+
+- **[branch] THE RETRO BUFFER'S TIME DIES WITH THE CLOCK.** Third-take "all
+  hell broke loose": play() restarts the beat clock at 0, retroBuf survives
+  stop/start (by design, for the reveal), so presses from dead runs collided
+  with the new run's beats — the third tab scooped three runs into one bar:
+  simultaneous events (two heads), one figure twice shifted (grid-adjacent
+  chains = one long note). Buffer now empties at the START of a run;
+  stop-then-tab still works (reads the ended run's buffer before any play()).
+  **2ev → 4ev → 6ev across three stop/start takes, no phantoms.**
+  And the immortal heads after stop: replay timers queued past the horizon
+  spawned AFTER stop()'s panic — both onset timers bail on !T.playing now.
+  **tv=0 900ms after a mid-replay stop.**
+
+- **[branch] LENGTHS SETTLED — THE MIDI RULE, PURE.** Three variants in one
+  day, and the hindsight that ends it: round-UP was the original +1-grid bug;
+  raw-held felt "all over the place" only because the OLD takeover window
+  (max(dur,0.02)) connected varied durs semi-randomly — the chaos was the
+  CONNECTING; nearest-grid then grew his sub-grid taps to a full grid ("the
+  second was longer then the length i pressed", export showed dur=0.25 for a
+  short stab). With the window fixed (20%+overlaps), lengths are honest:
+  quantized START, held LENGTH, min 0.05, Q on or off, cue and pitch.
+  **held 0.133/0.276/0.401/0.171 → rec 0.154/0.292/0.408/0.176.**
+
+- **[branch] THE CONNECTED TAIL WAS THE REPLAY, NOT THE RECORDER.** His export
+  proved the lane perfect (five events, every dur 0.25); the takeover window —
+  skip a gesture's stop when another jump "follows" — reached max(dur,0.02)
+  past the gesture END, so hits half a beat apart with one-grid lengths read
+  as a run. Now 20% of the gesture past its end, plus true overlaps. **His
+  take: t=2.5 sounded 0.50 → 0.24-0.25, all five gestures, two loops. The arp
+  shape survives: 8 hand-laid steps (div 0.25, dur 0.2125) = one spawn, one
+  stop at 1.974, the run's end.** Lengths themselves: nearest-grid on the
+  branch (1.1 grids → 1, not 2), grid-uniform as before.
+
 
 - **Both key paths through the rack.** Route matrix, hand-played:
   `pos plain` trigger→noteOn→cueNote→audMove · `pos auto off` audPlay first ·
