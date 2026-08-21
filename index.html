@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-21.1827';
+const BUILD='2026-08-21.1851';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -5465,7 +5465,18 @@ let fxwReady=false;
                free sounded identical here and the dialled phase never arrived
                — measured as two identical notes correlating 1.000 on FREE,
                which free must never do. The builder sends it now; 0..1. */
+            /* pix: WHICH PARAM PAIR THIS OP LISTENS TO. One node now holds
+               every unison copy of the stack, and a copy is the same operator
+               at a different frequency — so all copies of operator 3 read d3
+               and g3. Eight pairs exist and that is exactly how many operators
+               there are; before, position in this.o WAS the pair, which only
+               worked while a node held one copy.
+               pl/pr: equal-power pan, precomputed. The unison pan used to be a
+               StereoPanner per node; with one node it has to live per op. */
+            var pa=Number.isFinite(s.pan)?s.pan:0;
             this.o.push({ph:Number.isFinite(s.ph)?s.ph:Math.random()*0.0001,
+                         pix:(s.pix|0),
+                         pl:Math.cos((pa+1)*Math.PI/4),pr:Math.sin((pa+1)*Math.PI/4),
                          inc:s.f/sampleRate,amp:s.amp,
                          dep:s.dep,tgt:s.tgt,mode:s.mode,
                          tbl:fmTable(s.key,s.harm||[1],s.harm?s.harm.length:1),
@@ -5514,7 +5525,7 @@ let fxwReady=false;
          a length-1 array and an a-rate one as a full block, so each is read
          with its own index rather than assuming either */
       var dP=this.dP||(this.dP=[]), gP=this.gP||(this.gP=[]);
-      for(i=0;i<this.N;i++){dP[i]=P['d'+i]; gP[i]=P['g'+i];}
+      for(i=0;i<8;i++){dP[i]=P['d'+i]; gP[i]=P['g'+i];}   // eight pairs, read by pix
       if(this.glk){                                  // a retune in flight
         var still=true;
         for(i=0;i<this.N;i++){
@@ -5528,14 +5539,15 @@ let fxwReady=false;
       }
       for(k=0;k<n;k++){
         this.g+=(this.tg-this.g)*0.002;          // a short fade so it cannot click
-        var sum=0;
+        var sL=0,sR=0;
         for(i=this.N-1;i>=0;i--){
           var o=this.o[i];
+          var pxi=o.pix;
           /* DETUNE IN CENTS, summed by the mod rack exactly as an oscillator's
              would be — this is what makes an env or LFO on an operator's pitch
              work in here at all */
-          var dv=dP[i], cents=dv?(dv.length>1?dv[k]:dv[0]):0;
-          var gv=gP[i], lvl=gv?(gv.length>1?gv[k]:gv[0]):1;
+          var dv=dP[pxi], cents=dv?(dv.length>1?dv[k]:dv[0]):0;
+          var gv=gP[pxi], lvl=gv?(gv.length>1?gv[k]:gv[0]):1;
           var inc=cents?o.inc*Math.pow(2,cents/1200):o.inc;
           var ph=o.ph+o.pm; ph-=Math.floor(ph);
           var fi=ph*FMTL, i0=fi|0, fr=fi-i0, tb=o.tbl;
@@ -5548,14 +5560,13 @@ let fxwReady=false;
           if(o.rgv!==1){v*=o.rgv; o.rgv=1;}
           o.pm=0;
           o.ph+=inc; o.ph-=Math.floor(o.ph);
-          if(o.mode===0)sum+=v;
+          if(o.mode===0){sL+=v*o.pl; sR+=v*o.pr;}
           else if(o.tgt>=0&&o.tgt<this.N){
             if(o.mode===2)this.o[o.tgt].rgv*=(1-o.ramt+o.ramt*v);
             else this.o[o.tgt].pm+=v*o.dep;
           }
         }
-        var y=sum*this.g;
-        L[k]=y; if(R)R[k]=y;
+        L[k]=sL*this.g; if(R)R[k]=sR*this.g;
       }
       return true;
     }
@@ -6695,8 +6706,25 @@ class Voice{
       ops.every((o,i)=>!o||o.off||(i>0&&o.amt<=0.001)||
         (o.wav<4||o.wav===5||o.wav===6||o.wav===7||o.wav===8)&&o.mode!==3&&o.mode!==5);
     if(FMW){
+      /* ONE NODE FOR THE WHOLE UNISON (Gad, 2026-08-21: "you are making the
+         voice cap worse and worse… you fixed native which had the same exact
+         issue as phase does now"). He is right, and the honest answer was never
+         a smaller cap. This loop built a whole `ten-fmop` WORKLET per unison
+         voice, so a seven-voice unison cost seven processors on the audio
+         thread for ONE note — 24 voices measured 168 live worklet nodes where
+         native measured 0. Capping that away just billed him for it.
+         A copy is the same operator stack at a different frequency, so all the
+         copies fit in ONE node: the cfg carries them end to end, each entry
+         says which operator it IS (pix, so every copy of op3 still listens to
+         d3/g3 — eight pairs, eight operators) and where it sits in the field
+         (pan, equal-power, applied per carrier inside the render loop, which
+         is what the per-node StereoPanner used to do). Seven nodes become one
+         and the unison costs what it always should have: some arithmetic. */
+      const cfgAll=[], listAll=[];
+      let firstOff=0;
       for(let u=0;u<uniN;u++){
         const off=uniN===1?0:(u/(uniN-1))*2-1;
+        if(u===0)firstOff=off;
         this.uniOff.push(off);
         const tgt=baseTarget*Math.pow(2,(VX.sprd||0)*off/1200);
         /* the same graph the native path builds, described rather than wired:
@@ -6759,7 +6787,23 @@ class Voice{
            A StereoPanner attenuates a MONO input by 0.707 at centre and passes a
            STEREO one straight through, so a 2-channel worklet output made the
            phase engine sqrt(2) louder than native for no musical reason. */
-        const nd=new AudioWorkletNode(ac,'ten-fmop',{numberOfInputs:0,outputChannelCount:[1]});
+        /* this copy's pan, and the fan he asked for: linear at wide 0, square
+           root at wide 1, so the inner voices push out and the centre of an
+           odd unison stays centred */
+        const wdU=clamp(VX.wide||0,0,1);
+        const panU=Math.sign(off)*Math.pow(Math.abs(off),1-0.5*wdU)*wdU;
+        /* tgt is an INDEX into this node's op list, so every copy after the
+           first has to be shifted by however many are already in it */
+        const base9=cfgAll.length;
+        for(const c of cfg)cfgAll.push(Object.assign({},c,
+          {pan:c.mode===0?panU:0,pix:cfgAll.length-base9,
+           tgt:c.tgt<0?-1:c.tgt+base9}));
+        for(const b of list)listAll.push(b);
+        continue;
+      }
+      {
+        const off=firstOff, cfg=cfgAll, list=listAll;
+        const nd=new AudioWorkletNode(ac,'ten-fmop',{numberOfInputs:0,outputChannelCount:[2]});
         nd._f=cfg.map(c=>c.f);
         nd._ix=list.map(b=>b.i);
         /* the unison base WITHOUT op0's rat/fine, so a LIVE edit of either can
@@ -6769,31 +6813,17 @@ class Voice{
         nd._b0=list.map(b=>clamp(b.o.amt,0,1));   // built amounts: `g` owns amt
         nd.port.postMessage({t:'cfg',ops:cfg});
         nd.port.postMessage({t:'on'});
-        /* UNISON IS NOT ONLY DETUNE. The native path also PANS each voice
-           across the field by `wide` and offsets it in time by `slop`, and
-           without them three detuned copies land dead centre and sample-aligned
-           — which is most of what "it lost its unison spread" means. Same two
-           nodes, same order, so the two engines spread identically. */
+        /* THE PAN IS INSIDE THE NODE NOW, per carrier, equal power — see the
+           cfg above. The StereoPanner that used to sit here existed because
+           each unison copy was its own mono node; one stereo node needs none,
+           and the node is already 2-channel so nothing attenuates it.
+           SLOP IS THE ONE CASUALTY and it is worth naming: it was a DelayNode
+           per copy, and a single node cannot delay one of its own operators.
+           A unison copy is detuned, so its phase walks away from the others
+           within a cycle regardless — which is most of what slop bought — but
+           if the smear turns out to matter it comes back as a per-op phase
+           offset in the worklet, not as seven delay nodes. */
         let outN2=nd;
-        if(uniN>1){
-          /* WIDE FANS, IT DOES NOT JUST SPREAD (Gad, 2026-08-21: "i want more
-             extreme wide parameter… max value should be pushing voices more to
-             the sides than the center"). `off` walks the unison voices
-             linearly from -1 to 1, so at seven voices three of them sit within
-             a third of centre and the image stays narrow however far the dial
-             goes. Curving it pushes the inner voices outward as the dial
-             opens: at 0 it is the plain linear spread, at 1 it is a square
-             root, which moves the -0.33 voice out to -0.58 and leaves the
-             edges where they are. The centre voice of an odd unison stays
-             centred, which is what holds the sound together. */
-          const wdU=clamp(VX.wide||0,0,1);
-          const fanU=Math.sign(off)*Math.pow(Math.abs(off),1-0.5*wdU);
-          const pn=ac.createStereoPanner(); pn.pan.value=fanU*wdU;
-          nd.connect(pn); outN2=pn;
-          const dsec=(VX.slop||0)*Math.abs(off);
-          if(dsec>0.0005){const dl=ac.createDelay(0.06); dl.delayTime.value=dsec;
-            outN2.connect(dl); outN2=dl;}
-        }
         outN2.connect(merge);
         this.nodes.push(nd);
         this._fmw=this._fmw||[]; this._fmw.push(nd);
@@ -6803,8 +6833,13 @@ class Voice{
            every env, LFO, vel and pressure route reach an operator in here
            without the rack knowing it is talking to a worklet. opPitch takes
            the same param so oscRefresh can retune it on a legato move. */
+        /* ONE REGISTRATION PER OPERATOR. `list` holds every unison copy now,
+           and all copies of operator 3 read the same d3/g3 — so only the first
+           copy's entries are registered, or the rack would write the same
+           param several times over. */
+        const nPer9=Math.max(1,Math.round(list.length/Math.max(1,uniN)));
         list.forEach((b,k2)=>{
-          if(k2>7)return;                       // 8 param pairs exist
+          if(k2>7||k2>=nPer9)return;            // 8 param pairs exist
           const dPar=nd.parameters.get('d'+k2), gPar=nd.parameters.get('g'+k2);
           if(!dPar||!gPar)return;
           (this.opDet[b.i]=this.opDet[b.i]||[]).push({pm:dPar,sc:200});
@@ -9895,30 +9930,13 @@ class Engine{
        Steal the OLDEST already-released voice first, then the oldest of any —
        a note you have let go of is the right thing to lose. Killed with the
        fast fade, so it is gone before the new attack rather than clicking. */
-    /* THE CAP IS IN VOICES; A VOICE IS NOT ALWAYS THE SAME PRICE (Gad,
-       2026-08-21: "voice stealing now works on native synth engine but not yet
-       on phase! Native goes easy over 30v and audio still runs even when cpu
-       in the task manager is on 90"). Stealing was never missing on the phase
-       engine — measured, 70 notes fired at ch7 capped at act=24 on BOTH
-       engines. What differs is the load behind each voice: the phase engine
-       builds one `ten-fmop` WORKLET per unison voice, so 24 voices carried
-       **168 live worklet nodes** where native carried 0 and used ordinary
-       oscillators. Twenty-four phase voices is a hundred and sixty-eight
-       processors on the audio thread, and that is the drop.
-       So the ceiling is on the COST now, not the count: a phase voice is
-       charged its unison, and the channel gets as many voices as that budget
-       allows — roughly 24 native, roughly 7 at unison 7. Lower `uni` and the
-       voice count rises again, which is the honest trade and the lever worth
-       reaching for. */
-    const VXc=modHolder(p,'vox').vox||{};
-    const fmwOn=Math.round(VXc.fmw||0)===1;
-    const uniC=fmwOn?clamp(Math.round(VXc.uni||1),1,7):1;
-    /* The budget is in WORKLET NODES, not a divisor: 56 is a third of the 168
-       that dropped, and it keeps the phase engine playable as a chord — eight
-       voices at unison 7, eighteen at unison 3, and the ordinary voice ceiling
-       once unison is off. Native is unchanged; it never spends this. */
-    const FMWNODES=56;
-    const CAP=fmwOn?clamp(Math.round(FMWNODES/uniC),4,24*POLYX):24*POLYX;
+    /* A NODE BUDGET WAS TRIED HERE AND REVERTED (2026-08-21). Charging a
+       phase voice its unison capped ch7 at eight voices, which is worse than
+       the problem: before it he had 24 and lost audio near 20, after it he had
+       a hard wall at 9. Fewer voices is not a fix, it is the bill. The real
+       cost is one `ten-fmop` WORKLET per unison voice — seven processors for
+       one note — and that is fixed in the builder, not here. */
+    const CAP=24*POLYX;
     /* THE DEAD DO NOT HOLD A SEAT (Gad, 2026-08-21: "audio drops at passing
        20v and continues to climb up to 70v"). The steal loop below KILLS but
        never splices, so a killed voice stayed in `act` for good: measured,
