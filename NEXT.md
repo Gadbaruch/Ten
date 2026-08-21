@@ -198,6 +198,29 @@ one monoTrigger already keeps. The question to ask before writing any of it:
   `` ` ``/ScrollLock/Pause/Insert and the code said MetaLeft; Gad's call is left
   win, so the code was right and CLAUDE.md was stale. Fixed there.
 
+- **THE PHASE ENGINE COSTS ONE PROCESSOR PER VOICE NOW.** The arc, because it
+  held three lessons: (1) A node-budget cap (8 voices at uni 7) shipped and was
+  REVERTED — "you are making the voice cap worse and worse" was right; fewer
+  voices is the bill, not the fix. (2) Take one of one-node-unison FLANGED
+  ("massive flanger on it") because it deleted slop: with rtrg all seven copies
+  start at the same dialled phase, and sample-aligned detuned saws beating
+  coherently is a flanger. (3) Take two ships: slop is a TIME shift and a time
+  shift of a periodic voice is a PHASE offset — slopSec*f cycles per op per
+  copy, inside one stereo node, pan per carrier (`pix` maps every copy of op N
+  to dN/gN — eight pairs, eight operators). Per-entry spread (`_sm`) keeps a
+  legato retune from collapsing the unison, which take one silently broke.
+  **Measured against the sound it must not change** — baseline ripple 7.7dB /
+  width 0.553 / rms 0.2528, take two 8.6 / 0.535 / 0.2378 — and the cost:
+  **7 worklet nodes per voice → 1; nine keys held = 16 live nodes, 0 quiet
+  blocks.**
+  On "you did NOT have note stealing on phase": measured, 490 worklet births
+  in a 70-note burst drew 385 kill messages mid-steal — stealing always
+  reached phase; what phase lacked was native's PRICE. Now equal.
+  Master compressor release 120ms → 250ms, knee 12: the retune was the only
+  thing between native and the speakers that changed, and the fast release was
+  the pumping half of "native sounds like shit on super saw". The phrase
+  "compressor stock" reverts it to the browser default on request.
+
 ## Landed this session — all measured unless it says otherwise
 
 - **Both key paths through the rack.** Route matrix, hand-played:
