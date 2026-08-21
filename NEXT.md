@@ -278,6 +278,16 @@ one monoTrigger already keeps. The question to ask before writing any of it:
       the grid; only the recorded number changed.
 
 ## Landed this session — all measured unless it says otherwise
+- **[branch] LENGTHS SETTLED — THE MIDI RULE, PURE.** Three variants in one
+  day, and the hindsight that ends it: round-UP was the original +1-grid bug;
+  raw-held felt "all over the place" only because the OLD takeover window
+  (max(dur,0.02)) connected varied durs semi-randomly — the chaos was the
+  CONNECTING; nearest-grid then grew his sub-grid taps to a full grid ("the
+  second was longer then the length i pressed", export showed dur=0.25 for a
+  short stab). With the window fixed (20%+overlaps), lengths are honest:
+  quantized START, held LENGTH, min 0.05, Q on or off, cue and pitch.
+  **held 0.133/0.276/0.401/0.171 → rec 0.154/0.292/0.408/0.176.**
+
 - **[branch] THE CONNECTED TAIL WAS THE REPLAY, NOT THE RECORDER.** His export
   proved the lane perfect (five events, every dur 0.25); the takeover window —
   skip a gesture's stop when another jump "follows" — reached max(dur,0.02)
