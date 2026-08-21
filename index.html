@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-21.1914';
+const BUILD='2026-08-21.1933';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -5472,7 +5472,8 @@ let fxwReady=false;
                pl/pr: equal-power pan per carrier, precomputed — the per-copy
                StereoPanner this replaces. */
             var pa=Number.isFinite(s.pan)?s.pan:0;
-            this.o.push({ph:Number.isFinite(s.ph)?s.ph:Math.random()*0.0001,
+            this.o.push({wt:Math.max(0,Math.round((s.wt||0)*sampleRate)),
+                         ph:Number.isFinite(s.ph)?s.ph:Math.random()*0.0001,
                          pix:(s.pix|0),
                          pl:Math.cos((pa+1)*Math.PI/4),pr:Math.sin((pa+1)*Math.PI/4),
                          inc:s.f/sampleRate,amp:s.amp,
@@ -5540,6 +5541,7 @@ let fxwReady=false;
         var sL=0,sR=0;
         for(i=this.N-1;i>=0;i--){
           var o=this.o[i];
+          if(o.wt>0){o.wt--;o.pm=0;continue;}   // slop: this copy has not entered yet
           var pxi=o.pix||0;
           /* DETUNE IN CENTS, summed by the mod rack exactly as an oscillator's
              would be — this is what makes an env or LFO on an operator's pitch
@@ -6789,13 +6791,20 @@ class Voice{
            a steady tone, without a node */
         const wdU=clamp(VX.wide||0,0,1);
         const panU=Math.sign(off)*Math.pow(Math.abs(off),1-0.5*wdU)*wdU;
+        /* slop is a WAIT, not a phase add (Gad, 2026-08-21: "i still feel the
+           super saw sounded way better this morning" — and the A/B agreed: the
+           morning attack ramps 0.17→0.42 over ~70ms, the phase-offset version
+           starts at 0.33 in the first 10ms bin, steady state identical). The
+           DelayNode staggered each copy's ONSET, which is the bloom; a phase
+           offset reproduces only the steady tone. Holding the copy silent for
+           slopSec inside the worklet is the exact delay: the stagger and the
+           steady-state phase shift both fall out of it. */
         const slopSec=(VX.slop||0)*Math.abs(off);
         const sm9=Math.pow(2,(VX.sprd||0)*off/1200);
         const base9=cfgAll.length;
         cfg.forEach((c,k9)=>{
-          const ph9=(c.ph||0)+slopSec*c.f;
           cfgAll.push(Object.assign({},c,
-            {ph:ph9-Math.floor(ph9),
+            {wt:slopSec,
              pan:c.mode===0?panU:0,pix:k9,
              tgt:c.tgt<0?-1:c.tgt+base9}));
           smAll.push(sm9);
@@ -7783,34 +7792,17 @@ class Engine{
        nothing you can hear. */
     this.setMaster=()=>{try{this.master.gain.setTargetAtTime(
       clamp(S.mLvl??0.8,0,1),AC.currentTime,0.02);}catch(_){}};
-    /* THE MASTER WAS RUNNING WEB AUDIO'S DEFAULTS, WHICH ARE A WALL (Gad,
-       2026-08-21: "still audio drops at over 30v on channel 7", after raising
-       the voice caps changed nothing). The defaults are threshold -24dB, ratio
-       12:1, knee 30dB — and a 30dB knee means compression starts near -39dB,
-       so 12:1 was catching the entire musical range rather than the peaks.
-       Measured on his BES1 supersaw (uni 7, four saw ops), keys held one at a
-       time: voices climbed 4 -> 28 with NOTHING stolen and nothing capped, the
-       bus peaked at 3.068 — three times full scale — and the master came out
-       flat at ~0.73 peak the whole way. **A six-note chord was 1.04-1.09x
-       louder than one note.** That is "it caps out after a few notes": not
-       polyphony, not voice stealing, the compressor eating the dynamics.
-       Peak catcher now: it should only move when something is actually about
-       to clip. Unison is untouched — it already scales 1/sqrt(uni). */
+    /* STOCK, AND DELIBERATELY SO (2026-08-21). A retune (-6/4:1, then softer)
+       went in here chasing "it caps out after a few notes", measured as NOT
+       fixing that (the bus has no headroom before the compressor — that is a
+       level problem, not a compressor problem), and was left in anyway. Gad:
+       "i never approved a master retune… you did it cause you thought it was
+       the origin of the audio drop bug and just left it for no reason" — and
+       "i still feel the super saw sounded way better this morning". The
+       morning sound had the browser defaults; they are back. Any future master
+       shaping is a musical decision he makes on purpose, not a debugging
+       leftover. */
     this.comp=ac.createDynamicsCompressor();
-    try{
-      /* softened 2026-08-21 after "native also sounds like shit now when i do
-         super saw": this retune is the ONLY thing between native and the
-         speakers that changed, and the 120ms release was the pumping half of
-         it — a supersaw slams the threshold continuously, and a fast release
-         turns that into audible motion. Stock release, wider knee; still a
-         peak catcher, not the old -24dB/12:1 wall. If it still sounds wrong,
-         the word "compressor stock" puts the browser default back. */
-      this.comp.threshold.value=-6;
-      this.comp.ratio.value=4;
-      this.comp.knee.value=12;
-      this.comp.attack.value=0.003;
-      this.comp.release.value=0.25;
-    }catch(_){}
     this.master.connect(this.comp); this.comp.connect(ac.destination);
     this.mSum=ac.createGain();                       // channel sum -> master insert chain
     this.sendIns=Array.from({length:10},()=>ac.createGain());
