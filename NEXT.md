@@ -1,5 +1,24 @@
 # WHERE THE AUDIO CHANNEL STANDS — 2026-08-20, main
 
+## THE BRANCH PROTOCOL — from 2026-08-21 evening, Gad's call
+
+"maybe make a branch and keep fixing things so we dont pollute master."
+
+- **main** is the FLOOR: the state Gad can always fall back to. Right now that
+  is 2026-08-21.1954 — grid-locked lengths (the behavior he knows), replay
+  spawns on target (confirmed good: "they dont slide from baseline"), the
+  supersaw sound both engines confirmed good. LIVE serves main.
+- **audio-fixes** is where every further fix goes. It is checked out in this
+  directory, so BOTH ports serve it — Gad tests the branch on 3033. Falling
+  back is `git checkout main`, run on his word, instant.
+- **Nothing merges to main without his explicit ok.** When a batch on the
+  branch survives his testing, it lands as one merge and live follows.
+- The raw-held length rule was tried on main and rolled back the same hour —
+  "nop, all over the place". First branch commit is the NEAREST-grid variant:
+  lengths stay on the grid (uniform, familiar) but a 1.1-grid hold records 1,
+  not 2. Measured: held 1.1/1.6/0.6/0.15 grids → recorded 1/2/1/1.
+  He judges it; main's rule is untouched either way.
+
 `audio-mono` is merged; everything below is on main and Gad tests on plain
 localhost:3033. One playhead is the model: a cue MOVES the head, it does not add
 one, and poly is gone from this channel type by his own call.
