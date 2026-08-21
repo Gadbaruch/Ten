@@ -278,6 +278,16 @@ one monoTrigger already keeps. The question to ask before writing any of it:
       the grid; only the recorded number changed.
 
 ## Landed this session — all measured unless it says otherwise
+- **[branch] ONE CLOCK FOR THE FINGER, THE EAR AND THE LANE.** The week of
+  both-signs length complaints had one root: the audible off snapped to
+  qnext(now) while the lane recorded raw held time — fast tap: live long/lane
+  short; early press: lane long/live short. Midi's rule, applied to the sound
+  as well: the off lands at tr+dur and dur is what the lane writes. Pitch rides
+  the bend shim's own deferred release. (One glP-shaped scope trap caught:
+  dur8 dies at its block edge; hoisted via h8._durB.)
+  **Sweep verdict: dLen +0.09..+0.11 & one −0.43 → −0.06..+0.01; dPos ≤0.006;
+  twoHeads 0; 6 rec → 6 replayed.**
+
 - **[branch] THE SPAWN LEDGER, AND THE SWEEP INSTRUMENT.** His two calls in one
   message, both right: "look at the architecture" — audPlay never recorded that
   it spawned, audCar covers only the loop carrier, the stat is a frame stale,
