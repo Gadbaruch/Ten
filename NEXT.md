@@ -278,6 +278,19 @@ one monoTrigger already keeps. The question to ask before writing any of it:
       the grid; only the recorded number changed.
 
 ## Landed this session — all measured unless it says otherwise
+- **[branch] THE SPAWN LEDGER, AND THE SWEEP INSTRUMENT.** His two calls in one
+  message, both right: "look at the architecture" — audPlay never recorded that
+  it spawned, audCar covers only the loop carrier, the stat is a frame stale,
+  so every spawn-guarded caller raced and same-tick pairs each made a head.
+  `audSpawn[pi]={until}` closes it at the one door all callers use.
+  A superseded fast tap (re-press before its deferred grid) now still records
+  (`lateAudWrite`). And "test with a sin sweep so you can measure" is
+  `tools/probe.sh sweep`: pitch IS position (pos=(f-200)/1800), a second
+  spectral peak within 12dB is a second head HEARD. First reading: **dPos
+  0.006-0.012, twoHeads 0, 6 recorded → 6 replayed.** Open, with numbers:
+  replay ~+0.09 beats long systematically; one note cut 0.43 short by its
+  successor; one of six taps silent live (recorded and replays fine).
+
 - **[branch] THE RETRO BUFFER'S TIME DIES WITH THE CLOCK.** Third-take "all
   hell broke loose": play() restarts the beat clock at 0, retroBuf survives
   stop/start (by design, for the reveal), so presses from dead runs collided
