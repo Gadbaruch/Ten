@@ -221,6 +221,27 @@ one monoTrigger already keeps. The question to ask before writing any of it:
   the pumping half of "native sounds like shit on super saw". The phrase
   "compressor stock" reverts it to the browser default on request.
 
+- **COMPRESSOR TO STOCK, SLOP AS A TRUE ONSET WAIT, MORNING A/B'D.** The
+  master retune was a debugging leftover ("i never approved a master retune" —
+  it chased "caps out", measurably did not fix it, and stayed). Stock now; any
+  master shaping is Gad's musical call, made on purpose.
+  The supersaw A/B against the morning build (served as a COPY,
+  `_ab-morning.html`, so the audio-channel fixes were never touched): steady
+  rms/ripple match, and the audible loss was the ATTACK — morning blooms
+  0.17→0.42 over ~70ms because slop's DelayNode staggered each copy's ONSET;
+  the phase-offset version started flat at 0.33. **Slop is a wait in the
+  worklet now** (each copy silent for slopSec — the exact delay; stagger and
+  steady phase shift fall out of one counter). Bloom back: 0.28→0.41 over
+  40ms. Remaining deltas (width 0.562 vs 0.487, first bin hotter) are the
+  wide-fan he asked for. If his ear still prefers the morning, the fan is the
+  one deliberate difference left — lower `wide`, or revert the fan on request.
+- **THE HEADER'S `17v` IS THE METER TURNING HONEST.** `nv` sums `act` lengths;
+  before the corpse compaction it counted killed voices and read 30-70. Live
+  voices never exceeded the cap (24). Both engines read the same because they
+  share it. ⚠ The "phase drops at 17v" report was almost certainly measured on
+  the 1909 revert build (7 processors per phase voice); on ≥1933 a phase voice
+  is 1. Needs his retest before believing anything about phase load.
+
 ## Landed this session — all measured unless it says otherwise
 
 - **Both key paths through the rack.** Route matrix, hand-played:
