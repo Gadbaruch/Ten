@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-21.1241';
+const BUILD='2026-08-21.1321';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -5777,7 +5777,23 @@ function scheduleRange(from,to){
                 if(d3<-1e-6){ if(!auto3)continue; d3+=L3; }
                 if(d3<gap3)gap3=d3;
               }
-              if(gap3<=dur3+1e-6)return;              // the next step is the release
+              /* LEGATO IS AN OVERLAP, NOT AN ADJACENCY (Gad, 2026-08-21: "in
+                 pitch its even worse my recorded notes are sticky and never
+                 stop… tapping staccato in live play makes short notes but in
+                 recorded playback they are sustained until sample end").
+                 This read `gap<=dur` — "the next onset is within one
+                 note-length" — which quantized playing satisfies BY
+                 CONSTRUCTION: a note on the grid is one grid long and the next
+                 one starts exactly one grid later, so gap is 0 and EVERY
+                 release was suppressed. Measured, four staccato taps recorded
+                 perfectly as t2/t2.5/t3/t3.5 d0.25, replayed as
+                 2.0 -> 4.0 -> 5.0 -> 7.0 -> 0.0: **one note-off for four
+                 notes**, the pitch never coming home until the last.
+                 A note is legato with the next one when the next one starts
+                 BEFORE it ends. Abutting is not overlapping. An arp's steps
+                 are div*0.85 with a real gap, so they release; a phrase played
+                 legato overlaps, so it does not. */
+              if(gap3<-1e-6)return;                   // the next step overlaps this one
               setTimeout(()=>{try{if(!(AUD.hold&&AUD.hold.pi===li)){
                 engine.audPitch(li,0);
                 if(!autoCur(S.presets[li])){engine.audStop(li);return;}
@@ -7719,7 +7735,27 @@ class Engine{
        nothing you can hear. */
     this.setMaster=()=>{try{this.master.gain.setTargetAtTime(
       clamp(S.mLvl??0.8,0,1),AC.currentTime,0.02);}catch(_){}};
+    /* THE MASTER WAS RUNNING WEB AUDIO'S DEFAULTS, WHICH ARE A WALL (Gad,
+       2026-08-21: "still audio drops at over 30v on channel 7", after raising
+       the voice caps changed nothing). The defaults are threshold -24dB, ratio
+       12:1, knee 30dB — and a 30dB knee means compression starts near -39dB,
+       so 12:1 was catching the entire musical range rather than the peaks.
+       Measured on his BES1 supersaw (uni 7, four saw ops), keys held one at a
+       time: voices climbed 4 -> 28 with NOTHING stolen and nothing capped, the
+       bus peaked at 3.068 — three times full scale — and the master came out
+       flat at ~0.73 peak the whole way. **A six-note chord was 1.04-1.09x
+       louder than one note.** That is "it caps out after a few notes": not
+       polyphony, not voice stealing, the compressor eating the dynamics.
+       Peak catcher now: it should only move when something is actually about
+       to clip. Unison is untouched — it already scales 1/sqrt(uni). */
     this.comp=ac.createDynamicsCompressor();
+    try{
+      this.comp.threshold.value=-6;
+      this.comp.ratio.value=4;
+      this.comp.knee.value=6;
+      this.comp.attack.value=0.004;
+      this.comp.release.value=0.12;
+    }catch(_){}
     this.master.connect(this.comp); this.comp.connect(ac.destination);
     this.mSum=ac.createGain();                       // channel sum -> master insert chain
     this.sendIns=Array.from({length:10},()=>ac.createGain());
@@ -22710,7 +22746,15 @@ function clearLane(pi){
          tape channel is position keys with the loop running, which is what a
          fresh one comes up as. */
       const au9=S.presets[pi].au||(S.presets[pi].au={});
-      Object.assign(au9,AUDDEF,{kmode:0,auto:1});
+      /* …BUT IT KEEPS AUTOLOOP (Gad, 2026-08-21: "make the reset keep auto").
+         Everything else here is a decision about the TAKE and init is the
+         right answer for it, but whether the loop runs is a decision about how
+         you are PLAYING the channel, and clearing a lane silently turned it
+         back on: CLEAR 1 left auto 0 correctly, CLEAR 2 set auto 1 and the
+         take started looping again. Same for kmode — which keys you are on is
+         a way of playing, not a property of the recording. */
+      const keepAuto9=au9.auto, keepK9=au9.kmode;
+      Object.assign(au9,AUDDEF,{kmode:keepK9??0,auto:keepAuto9??1});
       delete au9._mode0;
       audDefaults(S.presets[pi]);
       applyCmode(pi); engine.audLive(pi); engine.audTwin(pi);
