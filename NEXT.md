@@ -242,6 +242,22 @@ one monoTrigger already keeps. The question to ask before writing any of it:
   the 1909 revert build (7 processors per phase voice); on ≥1933 a phase voice
   is 1. Needs his retest before believing anything about phase load.
 
+- **RECORDED STROKES BORN ON TARGET, LENGTH IS THE HELD GESTURE.** The last
+  two open audio-channel recording items, both autoloop off:
+    - Replay's two spawn paths made the head bare and moved it a call later —
+      the baseline slide he heard "only on the recorded strokes not live
+      play". Both carry their target now (`{semis:ev.pk}` / `cu`). Measured:
+      two loops each, pitch spawns semis=2/4, position spawns frac=0.255/0.311,
+      **zero bare spawns**.
+    - The quantized note-off used qnext, which rounds the release UP — any
+      hold slightly past a grid multiple recorded a full step longer ("every 5
+      or so key strikes" = the dice roll of where the finger lands). Both
+      audio releases now record the MIDI rule — quantized START, held LENGTH,
+      `_relAt` stamped by the deferred fast-tap key-up so the quantize wait
+      cannot inflate a tap. **held 0.325→rec 0.353 (was 0.50) · 0.60→0.607
+      (was 0.75) · 40ms tap→0.077 (was 0.25).** The audible off still lands on
+      the grid; only the recorded number changed.
+
 ## Landed this session — all measured unless it says otherwise
 
 - **Both key paths through the rack.** Route matrix, hand-played:
