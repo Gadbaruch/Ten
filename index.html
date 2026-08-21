@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-21.1332';
+const BUILD='2026-08-21.1727';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -10561,7 +10561,19 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
          third door and it was the one still shut. */
       if(!autoCur(S.presets[pi])&&!this.audRolling(pi)){
         const l8=S.patterns[S.editPat]&&S.patterns[S.editPat].lanes[pi];
-        if(l8)this.audPlay(pi,Math.max(at,AC.currentTime+0.004),l8.len,0);
+        /* SPAWNED WHERE IT IS GOING, NOT AT THE START (Gad, 2026-08-21:
+           "when autoloop is off… in pos mode the start pos is played very
+           briefly and then jumps to the cue point"). With the loop off the key
+           has to make its own head, and this made one at the top of the crop
+           and THEN moved it — so you hear the start of the take for a few
+           milliseconds before every cue. audPlay already takes the cue and the
+           poly branch below has always passed it; only this one spawned bare.
+           The audMove that follows is then a move to where it already is.
+           It never showed on playback because a replayed lane almost always
+           has a cursor rolling already, so the spawn is skipped and only the
+           move happens — which is exactly why he heard it live and not in the
+           recording. */
+        if(l8)this.audPlay(pi,Math.max(at,AC.currentTime+0.004),l8.len,0,cue);
       }
       const gl=Number.isFinite(glR)?glR
         :(vm===2?Math.max(0.01,(S.presets[pi].vox||{}).glide||0.08):0);
@@ -10648,7 +10660,11 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
       /* with the loop off there is no head to bend, so the note makes the one */
       if(!autoCur(S.presets[pi])&&!E.audRolling(pi)){
         const l9=S.patterns[S.editPat]&&S.patterns[S.editPat].lanes[pi];
-        if(l9)E.audPlay(pi,AC.currentTime+0.005,l9.len,0);
+        /* …AND AT ITS PITCH, for the same reason: "in pitch mode this sounds
+           like a very quick glide from baseline pitch to the key pressed
+           pitch". The head was made at the channel's own rate and the bend
+           applied after, so every note began at the wrong pitch and slid. */
+        if(l9)E.audPlay(pi,AC.currentTime+0.005,l9.len,0,{semis});
       }
       E.audBendCur[pi]=sh;
       E.audPitch(pi,semis,glide||0); E.busEnvFire(pi,AC.currentTime); };
@@ -17705,8 +17721,21 @@ PROCPRE.kick=[
    READ THE COMMENT ON CAP BEFORE RAISING THIS FURTHER: each native voice is
    about twenty nodes, and the cap exists because a fast roll with quantize off
    was putting a thousand nodes into the graph in a second and a half — that
-   was a hang, not a preference. Doubling doubles that worst case. */
-const POLYX=2;
+   was a hang, not a preference. Doubling doubles that worst case.
+
+   TRIED AT 2 AND PUT BACK (2026-08-21). Gad: "i dont feel the difference",
+   then "audio drops still there the same". The measurement says why doubling
+   could not have helped: stealing was never broken — 70 notes fired at ch7
+   left live=48, EXACTLY the cap, with 52 killed. What he was watching climb to
+   50-60 is RELEASED voices still ringing, which hold their slots until the
+   tails finish; twenty quick taps of ONE key took act to 76 with live=0 and
+   released=48.
+   And the cap is not in notes, it is in act entries: `uni:7` costs FOUR act
+   entries per note, so 24 was six real notes and 48 is twelve. Doubling bought
+   twice the ringing tails on a machine that was already out of audio thread —
+   the wrong direction. The lever for more NOTES at less cost is unison, not
+   this. */
+const POLYX=1;
 const PROCMAXV={
   bell:12, kalimba:12, xylophone:12, marimba:14, vibraphone:14,
   steeldrum:14, woodblock:16, string:14, bowed:14,
@@ -20589,9 +20618,20 @@ const onKeyDown=e=>{
            every key after it moves that. */
         const vmP=AUDMONO?1:clamp(Math.round((p9.vox||{}).mode||0),0,2);
         if(AUDMONO&&!autoCur(p9)&&!engine.audRolling(pi)){
-          /* no cursor on this channel yet: give it its one, from the crop, and
-             let the key bend it like any other */
-          engine.audPlay(pi,AC.currentTime+0.005,lane.len,0);
+          /* …AT THE PITCH THE KEY IS ASKING FOR (Gad, 2026-08-21: "in pitch
+             mode this sounds like a very quick glide from baseline pitch to
+             the key pressed pitch"). The head was made at the channel's own
+             rate and bent AFTER, so with the loop off every note began wrong
+             and slid into place. Born at the right rate, there is nothing to
+             slide. It never showed on playback because a replayed lane
+             normally has a cursor already — the spawn is skipped there and
+             only the bend happens, which is why he heard it live only. */
+          /* the semitones INLINE, not semP — that const is declared twenty
+             lines below this and reading it here is a TDZ throw inside a live
+             key handler, which is silent and kills the press. This file has
+             already lost an afternoon to exactly that (`glP`). */
+          engine.audPlay(pi,AC.currentTime+0.005,lane.len,0,
+            {semis:(noteOf(c,pi)??0)+S.oct*12+trSemis(p9)});
         }
         if(vmP>0&&(autoCur(p9)||AUDMONO)){
           /* THE SCALE APPLIES HERE TOO (Gad, 2026-08-17). `chrom` was passed
@@ -20816,7 +20856,20 @@ const onKeyDown=e=>{
       const vm9=AUDMONO?Math.max(1,clamp(Math.round((S.presets[pi].vox||{}).mode||0),0,2))
                        :clamp(Math.round((S.presets[pi].vox||{}).mode||0),0,2);
       if(AUDMONO&&!autoCur(S.presets[pi])&&!engine.audRolling(pi)){
-        engine.audPlay(pi,AC.currentTime+0.005,L,0);   // no cursor yet: make the one
+        /* MADE WHERE IT IS GOING (Gad, 2026-08-21: "when autoloop is off…
+           in pos mode the start pos is played very briefly and then jumps to
+           the cue point", and in pitch mode "a very quick glide from baseline
+           pitch to the key pressed pitch"). With the loop off the key makes
+           its own head — and it made one at the top of the crop, at the
+           channel's own pitch, and only THEN moved and bent it. Two steps you
+           can hear. The cue this key is about is already in scope; handing it
+           to audPlay means the head is born in the right place and the move
+           that follows is a move to where it already is.
+           Why it never showed on playback, which is the part that named it: a
+           replayed lane almost always has a cursor rolling already, so the
+           spawn is skipped and only the move happens. */
+        engine.audPlay(pi,AC.currentTime+0.005,L,0,
+          Object.assign({},cue,{frac:cutAt(pi,sl)}));
       }
       if(vm9>0&&(autoCur(S.presets[pi])||!first9||AUDMONO)){
         /* …AND A CUE ONLY GLIDES ONTO A HELD ONE. It used to glide whenever the
