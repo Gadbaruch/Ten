@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-20.2126';
+const BUILD='2026-08-21.1237';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -22667,7 +22667,18 @@ function clearLane(pi){
       for(const k9 of Object.keys(AUD.gk||{}))
         if((AUD.gk[k9]||{}).pi===pi)delete AUD.gk[k9];
       if(AUD.hold&&AUD.hold.pi===pi)AUD.hold=null;
-      try{engine.audReturn(pi); engine.audRelock(pi);}catch(_){}
+      /* …BUT ONLY IF SOMETHING IS SUPPOSED TO BE READING IT (Gad, 2026-08-20:
+         "when autoloop is off, after clearing a recording the audio is being
+         looped as if auto is on, until i stop and start"). audRelock re-seats
+         the loop through audLive, which starts the tape carrier — right when
+         the loop owns the head, wrong when nothing does. With auto off the
+         model is that nothing reads the take until a key plays it, so a clear
+         ENDS it. Measured: tv 0 before the clear, 1 after and still 1 three
+         seconds later, with au.auto still 0. */
+      try{engine.audReturn(pi);
+        if(autoCur(S.presets[pi]))engine.audRelock(pi);
+        else engine.audStop(pi);
+      }catch(_){}
     }
   }
   else{
