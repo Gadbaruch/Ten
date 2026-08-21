@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-21.1909';
+const BUILD='2026-08-21.1914';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -5465,7 +5465,16 @@ let fxwReady=false;
                free sounded identical here and the dialled phase never arrived
                — measured as two identical notes correlating 1.000 on FREE,
                which free must never do. The builder sends it now; 0..1. */
+            /* pix: which PARAM PAIR this op listens to. One node holds every
+               unison copy of the stack now, and a copy is the same operator at
+               a different frequency — all copies of op3 read d3/g3. Eight
+               pairs exist and eight operators exist, which is why this fits.
+               pl/pr: equal-power pan per carrier, precomputed — the per-copy
+               StereoPanner this replaces. */
+            var pa=Number.isFinite(s.pan)?s.pan:0;
             this.o.push({ph:Number.isFinite(s.ph)?s.ph:Math.random()*0.0001,
+                         pix:(s.pix|0),
+                         pl:Math.cos((pa+1)*Math.PI/4),pr:Math.sin((pa+1)*Math.PI/4),
                          inc:s.f/sampleRate,amp:s.amp,
                          dep:s.dep,tgt:s.tgt,mode:s.mode,
                          tbl:fmTable(s.key,s.harm||[1],s.harm?s.harm.length:1),
@@ -5514,7 +5523,7 @@ let fxwReady=false;
          a length-1 array and an a-rate one as a full block, so each is read
          with its own index rather than assuming either */
       var dP=this.dP||(this.dP=[]), gP=this.gP||(this.gP=[]);
-      for(i=0;i<this.N;i++){dP[i]=P['d'+i]; gP[i]=P['g'+i];}
+      for(i=0;i<8;i++){dP[i]=P['d'+i]; gP[i]=P['g'+i];}   // eight pairs, read by pix
       if(this.glk){                                  // a retune in flight
         var still=true;
         for(i=0;i<this.N;i++){
@@ -5528,14 +5537,15 @@ let fxwReady=false;
       }
       for(k=0;k<n;k++){
         this.g+=(this.tg-this.g)*0.002;          // a short fade so it cannot click
-        var sum=0;
+        var sL=0,sR=0;
         for(i=this.N-1;i>=0;i--){
           var o=this.o[i];
+          var pxi=o.pix||0;
           /* DETUNE IN CENTS, summed by the mod rack exactly as an oscillator's
              would be — this is what makes an env or LFO on an operator's pitch
              work in here at all */
-          var dv=dP[i], cents=dv?(dv.length>1?dv[k]:dv[0]):0;
-          var gv=gP[i], lvl=gv?(gv.length>1?gv[k]:gv[0]):1;
+          var dv=dP[pxi], cents=dv?(dv.length>1?dv[k]:dv[0]):0;
+          var gv=gP[pxi], lvl=gv?(gv.length>1?gv[k]:gv[0]):1;
           var inc=cents?o.inc*Math.pow(2,cents/1200):o.inc;
           var ph=o.ph+o.pm; ph-=Math.floor(ph);
           var fi=ph*FMTL, i0=fi|0, fr=fi-i0, tb=o.tbl;
@@ -5548,14 +5558,14 @@ let fxwReady=false;
           if(o.rgv!==1){v*=o.rgv; o.rgv=1;}
           o.pm=0;
           o.ph+=inc; o.ph-=Math.floor(o.ph);
-          if(o.mode===0)sum+=v;
+          if(o.mode===0){sL+=v*(o.pl===undefined?0.7071:o.pl);
+                         sR+=v*(o.pr===undefined?0.7071:o.pr);}
           else if(o.tgt>=0&&o.tgt<this.N){
             if(o.mode===2)this.o[o.tgt].rgv*=(1-o.ramt+o.ramt*v);
             else this.o[o.tgt].pm+=v*o.dep;
           }
         }
-        var y=sum*this.g;
-        L[k]=y; if(R)R[k]=y;
+        L[k]=sL*this.g; if(R)R[k]=sR*this.g;
       }
       return true;
     }
@@ -6300,9 +6310,9 @@ class Voice{
            not match the retrigger. Same expression the builder uses. */
         const o0=ops[0]||{};
         const bt2=nd._ub*pr*(o0.rat||1)*Math.pow(2,(o0.fine||0)/1200);
-        const f2=nd._ix.map(ix=>{
-          const o2=ops[ix]||{};
-          return ix===0?bt2:bt2*(o2.rat||1)*Math.pow(2,(o2.fine||0)/1200);
+        const f2=nd._ix.map((ix,k9)=>{
+          const o2=ops[ix]||{}, sm9=(nd._sm&&nd._sm[k9])||1;
+          return ix===0?bt2*sm9:bt2*sm9*(o2.rat||1)*Math.pow(2,(o2.fine||0)/1200);
         });
         /* depths re-derived from the BUILT amounts, never the current ones —
            the `g` param already carries a live amount change, and recomputing
@@ -6695,6 +6705,20 @@ class Voice{
       ops.every((o,i)=>!o||o.off||(i>0&&o.amt<=0.001)||
         (o.wav<4||o.wav===5||o.wav===6||o.wav===7||o.wav===8)&&o.mode!==3&&o.mode!==5);
     if(FMW){
+      /* ONE NODE FOR THE WHOLE UNISON, take two (Gad, 2026-08-21: "you did NOT
+         have note stealing on phase engine… you fixed native but forgot
+         phase"). Measured: stealing DOES reach phase — 490 worklet births in a
+         70-note burst drew 385 kill messages while it was still stealing — but
+         each voice was SEVEN processors, so a capped 24 voices still meant
+         ~170 on the audio thread, and that is the drop native does not have.
+         Take one folded the copies into one node and FLANGED, because it
+         deleted slop: with trig on rtrg every copy started at the same dialled
+         phase, and seven sample-aligned detuned saws beating coherently is a
+         flanger. The lesson is not "keep seven nodes", it is that slop is a
+         TIME shift and a time shift of a periodic voice IS a phase offset:
+         slopSec*f cycles, op by op, per copy. Baseline to match, per-copy
+         build, rtrg, uni7 wide1: ripple 7.7dB, width 0.553, rms 0.2528. */
+      const cfgAll=[], listAll=[], smAll=[];
       for(let u=0;u<uniN;u++){
         const off=uniN===1?0:(u/(uniN-1))*2-1;
         this.uniOff.push(off);
@@ -6759,41 +6783,45 @@ class Voice{
            A StereoPanner attenuates a MONO input by 0.707 at centre and passes a
            STEREO one straight through, so a 2-channel worklet output made the
            phase engine sqrt(2) louder than native for no musical reason. */
-        const nd=new AudioWorkletNode(ac,'ten-fmop',{numberOfInputs:0,outputChannelCount:[1]});
+        /* this copy's pan (the fan he asked for: linear at wide 0, square
+           root at wide 1, centre of an odd unison stays centred) and its slop
+           as a per-op start phase — exactly what the per-copy DelayNode did to
+           a steady tone, without a node */
+        const wdU=clamp(VX.wide||0,0,1);
+        const panU=Math.sign(off)*Math.pow(Math.abs(off),1-0.5*wdU)*wdU;
+        const slopSec=(VX.slop||0)*Math.abs(off);
+        const sm9=Math.pow(2,(VX.sprd||0)*off/1200);
+        const base9=cfgAll.length;
+        cfg.forEach((c,k9)=>{
+          const ph9=(c.ph||0)+slopSec*c.f;
+          cfgAll.push(Object.assign({},c,
+            {ph:ph9-Math.floor(ph9),
+             pan:c.mode===0?panU:0,pix:k9,
+             tgt:c.tgt<0?-1:c.tgt+base9}));
+          smAll.push(sm9);
+        });
+        for(const b of list)listAll.push(b);
+        continue;
+      }
+      if(cfgAll.length){
+        const cfg=cfgAll, list=listAll;
+        const nd=new AudioWorkletNode(ac,'ten-fmop',{numberOfInputs:0,outputChannelCount:[2]});
         nd._f=cfg.map(c=>c.f);
         nd._ix=list.map(b=>b.i);
-        /* the unison base WITHOUT op0's rat/fine, so a LIVE edit of either can
-           be re-derived rather than frozen at whatever they were at note-on */
-        nd._ub=this.rootFreq*Math.pow(2,(VX.sprd||0)*off/1200);
+        /* the unison base WITHOUT op0's rat/fine OR the spread — the spread is
+           per entry now (_sm), so a legato retune keeps every copy detuned
+           instead of collapsing the unison onto one pitch */
+        nd._ub=this.rootFreq;
+        nd._sm=smAll;
         nd._tg=cfg.map(c=>c.tgt); nd._dep=cfg.map(c=>c.dep);
         nd._b0=list.map(b=>clamp(b.o.amt,0,1));   // built amounts: `g` owns amt
         nd.port.postMessage({t:'cfg',ops:cfg});
         nd.port.postMessage({t:'on'});
-        /* UNISON IS NOT ONLY DETUNE. The native path also PANS each voice
-           across the field by `wide` and offsets it in time by `slop`, and
-           without them three detuned copies land dead centre and sample-aligned
-           — which is most of what "it lost its unison spread" means. Same two
-           nodes, same order, so the two engines spread identically. */
+        /* pan and slop are INSIDE the node now — per-carrier equal power and
+           per-copy start phase; see the cfg above. The node is stereo, so the
+           mono-through-StereoPanner 0.707 case this chain compensated for is
+           gone with it. */
         let outN2=nd;
-        if(uniN>1){
-          /* WIDE FANS, IT DOES NOT JUST SPREAD (Gad, 2026-08-21: "i want more
-             extreme wide parameter… max value should be pushing voices more to
-             the sides than the center"). `off` walks the unison voices
-             linearly from -1 to 1, so at seven voices three of them sit within
-             a third of centre and the image stays narrow however far the dial
-             goes. Curving it pushes the inner voices outward as the dial
-             opens: at 0 it is the plain linear spread, at 1 it is a square
-             root, which moves the -0.33 voice out to -0.58 and leaves the
-             edges where they are. The centre voice of an odd unison stays
-             centred, which is what holds the sound together. */
-          const wdU=clamp(VX.wide||0,0,1);
-          const fanU=Math.sign(off)*Math.pow(Math.abs(off),1-0.5*wdU);
-          const pn=ac.createStereoPanner(); pn.pan.value=fanU*wdU;
-          nd.connect(pn); outN2=pn;
-          const dsec=(VX.slop||0)*Math.abs(off);
-          if(dsec>0.0005){const dl=ac.createDelay(0.06); dl.delayTime.value=dsec;
-            outN2.connect(dl); outN2=dl;}
-        }
         outN2.connect(merge);
         this.nodes.push(nd);
         this._fmw=this._fmw||[]; this._fmw.push(nd);
@@ -6803,8 +6831,12 @@ class Voice{
            every env, LFO, vel and pressure route reach an operator in here
            without the rack knowing it is talking to a worklet. opPitch takes
            the same param so oscRefresh can retune it on a legato move. */
+        /* one registration per OPERATOR: `list` holds every unison copy and
+           all copies of an operator share a pair, so only the first copy's
+           entries register or the rack would write each param uniN times */
+        const nPer9=Math.max(1,Math.round(list.length/Math.max(1,uniN)));
         list.forEach((b,k2)=>{
-          if(k2>7)return;                       // 8 param pairs exist
+          if(k2>7||k2>=nPer9)return;            // 8 param pairs exist
           const dPar=nd.parameters.get('d'+k2), gPar=nd.parameters.get('g'+k2);
           if(!dPar||!gPar)return;
           (this.opDet[b.i]=this.opDet[b.i]||[]).push({pm:dPar,sc:200});
@@ -7766,11 +7798,18 @@ class Engine{
        to clip. Unison is untouched — it already scales 1/sqrt(uni). */
     this.comp=ac.createDynamicsCompressor();
     try{
+      /* softened 2026-08-21 after "native also sounds like shit now when i do
+         super saw": this retune is the ONLY thing between native and the
+         speakers that changed, and the 120ms release was the pumping half of
+         it — a supersaw slams the threshold continuously, and a fast release
+         turns that into audible motion. Stock release, wider knee; still a
+         peak catcher, not the old -24dB/12:1 wall. If it still sounds wrong,
+         the word "compressor stock" puts the browser default back. */
       this.comp.threshold.value=-6;
       this.comp.ratio.value=4;
-      this.comp.knee.value=6;
-      this.comp.attack.value=0.004;
-      this.comp.release.value=0.12;
+      this.comp.knee.value=12;
+      this.comp.attack.value=0.003;
+      this.comp.release.value=0.25;
     }catch(_){}
     this.master.connect(this.comp); this.comp.connect(ac.destination);
     this.mSum=ac.createGain();                       // channel sum -> master insert chain
