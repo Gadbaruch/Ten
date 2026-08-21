@@ -238,60 +238,42 @@ one monoTrigger already keeps. The question to ask before writing any of it:
 - **A deadline behind the playhead is a stop** — halving the loop no longer
   gaps it (alive 0.93 with a 280ms silence → 1.00, zero).
 
-## QA CHECKLIST — 2026-08-20.2126, ordered by what is most likely wrong
+## QA CHECKLIST — 2026-08-21.1241, ordered by what is most likely wrong
 
-Build 2026-08-20.2126 on localhost:3033. "not measured" means shipped on
-reasoning; test those first.
+Build 2026-08-21.1241 on localhost:3033. "not measured" means shipped on
+reasoning; test those first. Items Gad has already confirmed are marked ✓ and
+are here only as a regression net.
 
- 0. **All three ways to record, on an audio channel with an arp.** Play the
-    arp, then: (a) TAP tab — retro takes the last bars; (b) HOLD tab while you
-    play — momentary; (c) LEFT WIN + tab to latch, play, tap tab to unlatch.
-    All three must come back as the arp's figure, not one long note and not
-    silence. Momentary recorded NOTHING before this build. Measured
-    25→22 / 24→21 / 25→21 events.
- 0a. **Audio keys are one playhead again.** Hold two or three position keys on
-    an audio channel with the loop on: the take JUMPS between them, it does not
-    stack up voices. Poly is gone from audio channels entirely — the voice dial
-    walks mono↔legato only, and a set saved as poly heals when you load it.
-    Measured on his set: cursors 1→2→3→4 became 1→1→1→1, three audPlay became
-    zero.
- 0b. **A FRESH channel, arp, recorded.** The one that was actually broken: take
-    a channel whose loop length is still being listened for (never set), drop
-    an arp on it, arm rec, hold cue keys. Then STOP and START. The phrase must
-    still be there. It was going in as midi notes an audio lane cannot play —
-    you heard it while recording and it was gone after. Measured `midi x16`
-    with 0 moves on replay → `cue x16` with 17.
- 1. **Position arp, recorded.** ch9 tape, keys mode = position, autoloop on,
-    arp 1/16, rec on, hold two cue keys for two beats. Stop recording and let
-    it loop. It should chop in the same rhythm you just heard, not a beat-ish
-    behind and not with two extra jumps piled at the loop start. Measured 16
-    live moves → 16 recorded, median 0.019 beat off, zero wrong cues; it was
-    18 events each ~0.1 beat late.
- 2. **Pitch arp, recorded.** Same but keys mode = pitch. It should be one
-    running line of pitches; the bug was a stutter — every step dropping back
-    to baseline and re-pitching 0.019 beats later. Measured 16 events → 16
-    pitch calls, was 33.
- 3. **Neither one records your fingers.** With an arp running, the lane should
-    hold the arp's STEPS (a dozen-plus events), never just the two keys you
-    held. Nothing extra sitting at the very start of the loop.
- 4. **Clearing a lane doesn't strand the loop.** Record some cue jumps on an
-    audio channel, then clear the lane while it plays. The take goes back to
-    running the loop from its own position — it used to stay parked wherever
-    the last recorded jump left it with nothing able to move it again.
- 5. **op trig, phase engine.** vox → fm eng = `phase`, an op slot's `trig` on
-    `free`: two identical notes should not start the same way. On `rtrg` with a
-    phase dialled, the dial should audibly matter. Measured at the message —
-    rtrg sends 0.25 twice at 90°, 0.75 at 270°, free sends 0.45 then 0.3905.
-    ⚠ **rtrg still is not sample-identical in this engine** and that is not
-    fixed — see open item 7. Native was already correct (1.000 / -0.825), so
-    if you saw native failing, say what you did, because it does not reproduce.
- 6. **Pitch keys with autoloop OFF.** Record a few pitch stabs with the loop
-    off, then let it run for several cycles. Every cycle should re-strike the
-    take — you hear the attack each time round, not once and then a tail that
-    never restarts. Measured 0 audPlay per loop → 1, on the first cycle and the
-    second.
- 7. Everything from the previous batch still standing: legato fall-back, glide
-    rule, density sync — NOT MEASURED by either of us, still worth a pass.
+ 1. **POLYPHONY IS DOUBLED — play hard and listen for trouble.** CAP 24→48,
+    procMaxV 20→40, one constant `POLYX` undoes it. The thing to listen for is
+    the failure the cap existed to prevent: a fast roll with live quantize OFF
+    stuttering, crackling, or the page locking up. Measured 220 notes in 2.5s
+    with q off — scheduler median 25ms, max 27ms, zero ticks over 100ms — but
+    that was ONE machine and one patch. If anything gets worse, `POLYX=1`.
+ 2. **Clearing a lane with autoloop OFF.** Record some keys, clear the lane
+    while it plays. The take must go SILENT, not start looping. It used to
+    start the loop and keep it until you stopped and started the transport.
+    Measured: cursors 1 after the clear → 0.
+ 3. **All three ways to record, audio channel + arp** ✓ (his: "work!"). Left as
+    a regression net: TAP tab (retro) · HOLD tab (momentary) · LEFT WIN + tab
+    (latch), then tap tab to unlatch. 25→22 / 24→21 / 25→21.
+ 4. **Audio keys are one playhead** ✓ · **hold a pitch key for seconds** ✓ ·
+    **cue keys land on the grid with live-Q** ✓ · **q scope not sticky** ✓ ·
+    **op trig in the phase engine** ✓.
+ 5. **Pitch keys with autoloop off** — the attack every cycle. He reports this
+    works, WITH a caveat still open: the first key always travels from the
+    baseline pitch (open item 4).
+
+### Known broken — do not spend time testing these
+
+ - **The arp never stops** (open 0). Root of the erratic counts and "stuck".
+ - **A pitch key gets stuck**: hold 1, add 2, release 2 then 1. Traced to key
+   2's shim never being released; a fix was written and REVERTED because it
+   added an audible dip (2,4,0,2 where it should be 2,4,2). Open 0b.
+ - **Autoloop-on recording accuracy** — his read: the autoloop is not factored
+   in as incoming notes live, and after recording the autoloop interrupts the
+   recording. Open 0c.
+ - **`tab+⇧⌫` / clear-to-default** — "not really fixed but closer".
 
 ## Open, in the order Gad asked for them
 
@@ -325,6 +307,23 @@ reasoning; test those first.
    those notes should not be recorded at all — the arp should not have made
    them.
 
+0b. **A PITCH KEY GETS STUCK.** ⚠ NOT FIXED. Hold key 1, add key 2, release 2
+   then 1 — key 1 never comes home. Both autoloop on and off. Traced:
+
+     k2 up   gk: KeyS   bendCur=sh2   (sh2 never released)
+     k1 up   gk: empty  bendCur=sh2   sh1 RELEASE -> bails on
+                                      `if(E.audBendCur[pi]!==sh)return;`
+
+   The fall-back branch in `endAudHold` pitches back to the held note and
+   RETURNS without releasing key 2's handle. Releasing it there closes the leak
+   (bendCur true→false, unreleased shims 2→0) but makes the key-up dip to
+   baseline first — **2,4,0,2 where it should read 2,4,2** — so it was
+   reverted. The hand-over belongs to the bend shim's own release, which
+   already knows how to find the next-newest held bend; that is where to look,
+   not in the key handler.
+0c. **Autoloop-on recording accuracy.** ⚠ NOT FIXED. Gad's read, worth keeping
+   in his words: "in live play the autoloop isnt factored in as the incoming
+   notes, and after recording the recording gets interrupted by the autoloop."
 1. **Performers out of the play rack, onto the LANE.** His idea and the right
    shape: generators (chord, arp, euclid, random-pitch, ratchet — he called
    ratchet a generator) belong to the INSTRUMENT and their output is recorded;
