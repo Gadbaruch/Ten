@@ -278,6 +278,16 @@ one monoTrigger already keeps. The question to ask before writing any of it:
       the grid; only the recorded number changed.
 
 ## Landed this session — all measured unless it says otherwise
+- **[branch] THE CONNECTED TAIL WAS THE REPLAY, NOT THE RECORDER.** His export
+  proved the lane perfect (five events, every dur 0.25); the takeover window —
+  skip a gesture's stop when another jump "follows" — reached max(dur,0.02)
+  past the gesture END, so hits half a beat apart with one-grid lengths read
+  as a run. Now 20% of the gesture past its end, plus true overlaps. **His
+  take: t=2.5 sounded 0.50 → 0.24-0.25, all five gestures, two loops. The arp
+  shape survives: 8 hand-laid steps (div 0.25, dur 0.2125) = one spawn, one
+  stop at 1.974, the run's end.** Lengths themselves: nearest-grid on the
+  branch (1.1 grids → 1, not 2), grid-uniform as before.
+
 
 - **Both key paths through the rack.** Route matrix, hand-played:
   `pos plain` trigger→noteOn→cueNote→audMove · `pos auto off` audPlay first ·
