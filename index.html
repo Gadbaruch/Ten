@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-21.1933';
+const BUILD='2026-08-21.1942';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -5745,7 +5745,14 @@ function scheduleRange(from,to){
                    nothing to bend until the replay makes it */
                 if(!autoCur(S.presets[li])&&!engine.audRolling(li)){
                   const l7=S.patterns[S.editPat]&&S.patterns[S.editPat].lanes[li];
-                  if(l7)engine.audPlay(li,AC.currentTime+0.005,l7.len,0);
+                  /* BORN AT THE PITCH (Gad, 2026-08-21: "notes get pitched from
+                     baseline pitch but only on the recorded strokes not live
+                     play"). The live key got this fix already — its spawn
+                     carries {semis} — and this replay path still made the head
+                     bare and bent it a call later, which with the loop off is
+                     an audible slide up from baseline on every recorded
+                     stroke. Same one-word fix as the live side. */
+                  if(l7)engine.audPlay(li,AC.currentTime+0.005,l7.len,0,{semis:ev.pk});
                 }
                 engine.audPitch(li,ev.pk);}catch(_){}},ms1);
               /* AND THE RECORDED BEND COMES BACK IN TIME TOO. The live one got
@@ -5875,7 +5882,7 @@ function scheduleRange(from,to){
               setTimeout(()=>{try{
                 if((lane._gen|0)!==gen7)return;        // cleared while this was queued
                 if(off7&&!engine.audRolling(li))
-                  engine.audPlay(li,AC.currentTime+0.005,L2,0);
+                  engine.audPlay(li,AC.currentTime+0.005,L2,0,cu);   // born at the cue, not the crop start
                 engine.audMove(li,to7,gl7,1,1);
                 engine.busEnvFire(li,AC.currentTime);}catch(_){}},ms7);
               const te7=tt+dj2, ms8=Math.max(0,(timeAt(te7+a.anchor)-AC.currentTime)*1000);
@@ -21239,6 +21246,7 @@ function endAudHold(c){
   const hW=AUD.gk&&AUD.gk[c];
   if(hW&&!hW._late&&Number.isFinite(hW.tr)&&T.playing&&hW.tr>gridNow()+1e-9){
     hW._late=1;                                  // once only; the retry ends it for real
+    hW._relAt=AC.currentTime;                    // when the finger ACTUALLY left — the length is this, not the retry
     const wait=Math.max(0,(gridTime(hW.tr)-AC.currentTime)*1000)+AUDMINMS;
     setTimeout(()=>{try{if(AUD.gk&&AUD.gk[c]===hW)endAudHold(c);}catch(_){}},wait);
     return 'went';
@@ -21261,10 +21269,10 @@ function endAudHold(c){
          ending just before a grid point leave a hole. A pitch bend is a
          gesture with a length like any other. The ear and the lane read the
          same number — the off sounds where it is written. */
-      const gq8=gridOf(lane8), off8=CFG.qOn?qnext(gridNow(),gq8):gridNow();
-      const dur8=CFG.qOn
-        ?Math.max(gq8,Math.round((off8-h8.tr)/gq8)*gq8)
-        :Math.max(0.05,h8.press!=null?(AC.currentTime-h8.press)/spb():0.25);
+      /* the midi rule here too — see the cue release: quantized START, held
+         LENGTH, _relAt for the deferred fast tap */
+      const dur8=Math.max(0.05,h8.press!=null
+        ?(((h8._relAt)??AC.currentTime)-h8.press)/spb():0.25);
       retroBuf[h8.pi].push({t:h8.tr,pk:h8.pk,dur:dur8});
       if(retroBuf[h8.pi].length>512)retroBuf[h8.pi].shift();
       /* same rule on the pitch side: the arp's steps are the performance */
@@ -21453,11 +21461,18 @@ function endAudHold(c){
       if(T.playing)engine.audRelock(pi);
     };
     if(!others9){ if(wait9<2)endIt(); else setTimeout(endIt,wait9); }
-    /* the jump's length is the held gesture, like a note's — ON THE GRID when
-       quantize is on, measured from the same clock the off lands on */
-    const durB=CFG.qOn&&tr!=null
-      ?Math.max(gq9,Math.round((offB9-tr)/gq9)*gq9)
-      :Math.max(0.05,press!=null?(AC.currentTime-press)/spb():0.25);
+    /* THE LENGTH IS THE HELD GESTURE, THE MIDI RULE, QUANTIZE OR NOT (Gad,
+       2026-08-21: "note length sometimes is longer then i had it, every 5 or
+       so key strikes"). The grid-locked off used qnext, which rounds the
+       release UP — so any hold that slightly crossed a grid multiple came
+       back a whole step longer than played, and how often that happens is
+       exactly a dice roll on where the finger lands. Midi has had the answer
+       all along: "a 40ms tap is a 40ms note wherever on the grid it lands" —
+       the START is quantized, the LENGTH is yours. _relAt is the moment the
+       finger actually left, stamped by the deferred key-up so a fast tap's
+       wait does not inflate its own length. */
+    const durB=Math.max(0.05,press!=null
+      ?(((hj9&&hj9._relAt)??AC.currentTime)-press)/spb():0.25);
     if(sl!=null&&tr!=null){
       retroBuf[pi].push({t:tr,cue:sl,dur:durB});
       if(retroBuf[pi].length>512)retroBuf[pi].shift();
