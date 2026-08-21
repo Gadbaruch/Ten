@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-21.2004';
+const BUILD='2026-08-21.2016';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -21287,11 +21287,9 @@ function endAudHold(c){
          gesture with a length like any other. The ear and the lane read the
          same number — the off sounds where it is written. */
       /* nearest grid, same experiment as the cue release above */
-      const gq8=gridOf(lane8);
-      const held8=h8.press!=null?((((h8._relAt)??AC.currentTime)-h8.press)/spb()):gq8;
-      const dur8=CFG.qOn
-        ?Math.max(gq8,Math.round(held8/gq8)*gq8)
-        :Math.max(0.05,held8);
+      /* the midi rule, pure — see the cue release */
+      const held8=h8.press!=null?((((h8._relAt)??AC.currentTime)-h8.press)/spb()):0.25;
+      const dur8=Math.max(0.05,held8);
       retroBuf[h8.pi].push({t:h8.tr,pk:h8.pk,dur:dur8});
       if(retroBuf[h8.pi].length>512)retroBuf[h8.pi].shift();
       /* same rule on the pitch side: the arp's steps are the performance */
@@ -21492,10 +21490,24 @@ function endAudHold(c){
        place"). This keeps lengths ON the grid — uniform, like he is used to —
        but rounds the HELD time to the NEAREST grid, so 1.1 grids records 1
        and 1.6 records 2. _relAt keeps a deferred fast tap honest. */
-    const heldB9=press!=null?((((hj9&&hj9._relAt)??AC.currentTime)-press)/spb()):gq9;
-    const durB=CFG.qOn&&tr!=null
-      ?Math.max(gq9,Math.round(heldB9/gq9)*gq9)
-      :Math.max(0.05,heldB9);
+    /* …AND A TAP KEEPS ITS LENGTH (Gad, 2026-08-21: retro, second take, "the
+       second was longer then the length i pressed" — and his export shows the
+       recorder wrote dur=0.25, a full grid, for a tap held far shorter: the
+       one-grid FLOOR was rounding every sub-grid stab up. Audible on a
+       sustained slice, invisible on a percussive one, which is why the first
+       take sounded fine). His own rule decides it: "a 40ms tap is a 40ms note
+       wherever on the grid it lands." Under half a grid the held length is
+       recorded as-is; past that it snaps to the NEAREST grid. */
+    /* THE MIDI RULE, PURE (settled 2026-08-21 after three variants): the
+       start is quantized, the LENGTH IS EXACTLY WHAT THE HANDS DID, min 0.05.
+       The grid-rounded variants were chasing a symptom whose real cause was
+       the replay's takeover window — max(dur,0.02) connected notes with
+       varied lengths semi-randomly, which is what "all over the place"
+       actually was. That window is fixed (20% + overlaps), so the lengths can
+       be honest: "a 40ms tap is a 40ms note wherever on the grid it lands",
+       and a tap into a sustained slice no longer grows to a full grid. */
+    const heldB9=press!=null?((((hj9&&hj9._relAt)??AC.currentTime)-press)/spb()):0.25;
+    const durB=Math.max(0.05,heldB9);
     if(sl!=null&&tr!=null){
       retroBuf[pi].push({t:tr,cue:sl,dur:durB});
       if(retroBuf[pi].length>512)retroBuf[pi].shift();
