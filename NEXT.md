@@ -278,6 +278,18 @@ one monoTrigger already keeps. The question to ask before writing any of it:
       the grid; only the recorded number changed.
 
 ## Landed this session — all measured unless it says otherwise
+- **[branch] THE RETRO BUFFER'S TIME DIES WITH THE CLOCK.** Third-take "all
+  hell broke loose": play() restarts the beat clock at 0, retroBuf survives
+  stop/start (by design, for the reveal), so presses from dead runs collided
+  with the new run's beats — the third tab scooped three runs into one bar:
+  simultaneous events (two heads), one figure twice shifted (grid-adjacent
+  chains = one long note). Buffer now empties at the START of a run;
+  stop-then-tab still works (reads the ended run's buffer before any play()).
+  **2ev → 4ev → 6ev across three stop/start takes, no phantoms.**
+  And the immortal heads after stop: replay timers queued past the horizon
+  spawned AFTER stop()'s panic — both onset timers bail on !T.playing now.
+  **tv=0 900ms after a mid-replay stop.**
+
 - **[branch] LENGTHS SETTLED — THE MIDI RULE, PURE.** Three variants in one
   day, and the hindsight that ends it: round-UP was the original +1-grid bug;
   raw-held felt "all over the place" only because the OLD takeover window
