@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-21.1237';
+const BUILD='2026-08-21.1241';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -9843,7 +9843,7 @@ class Engine{
        Steal the OLDEST already-released voice first, then the oldest of any —
        a note you have let go of is the right thing to lose. Killed with the
        fast fade, so it is gone before the new attack rather than clicking. */
-    const CAP=24;
+    const CAP=24*POLYX;
     if(this.act[pi].length>=CAP){
       const live=this.act[pi];
       const pick=()=>{
@@ -17654,6 +17654,19 @@ PROCPRE.kick=[
      steeldrum 18 · woodblock 18 · string 15 · bowed 12 · clarinet 12
      flute/harmonica/accordion/saxophone/skindrum/e-piano 9
      hammond/tine/trumpet 6 · hihat/shaker/clap/kick 3 */
+/* POLYPHONY, DOUBLED — an experiment, and one number to undo it (Gad,
+   2026-08-21: "can we just raise max polyphony by double and see what
+   happens?"). Two ceilings move together because they are the same ceiling
+   seen from two sides: CAP bounds NATIVE Web Audio voices per channel, and
+   procMaxV feeds `cfg.maxv` to the procedural worklet — the worklet's own
+   `let MAXV` default never applies, because that message is always sent.
+   PROCMAXV keeps its per-model SHAPE (a bell is not a hihat); only the scale
+   moves. Set back to 1 to undo.
+   READ THE COMMENT ON CAP BEFORE RAISING THIS FURTHER: each native voice is
+   about twenty nodes, and the cap exists because a fast roll with quantize off
+   was putting a thousand nodes into the graph in a second and a half — that
+   was a hang, not a preference. Doubling doubles that worst case. */
+const POLYX=2;
 const PROCMAXV={
   bell:12, kalimba:12, xylophone:12, marimba:14, vibraphone:14,
   steeldrum:14, woodblock:16, string:14, bowed:14,
@@ -17661,7 +17674,7 @@ const PROCMAXV={
   skindrum:20, 'e-piano':16, hammond:16, tine:16, trumpet:16,
   hihat:28, shaker:28, clap:28, kick:28,
 };
-const procMaxV=p=>PROCMAXV[resolveModel(p&&p.pmodel)]||20;
+const procMaxV=p=>(PROCMAXV[resolveModel(p&&p.pmodel)]||20)*POLYX;
 const PROCNAMES = Object.keys(PROCLIB);
 /* Sensible starting rack for a procedural channel. The amp envelope sits at
    sustain 1 with a long decay, so while a key is held it does nothing at all —
