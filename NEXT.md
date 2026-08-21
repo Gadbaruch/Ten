@@ -278,6 +278,20 @@ one monoTrigger already keeps. The question to ask before writing any of it:
       the grid; only the recorded number changed.
 
 ## Landed this session — all measured unless it says otherwise
+- **[branch] THE ARP STOPS AND THE KEY COMES HOME — ONE EARLY RETURN WAS
+  BOTH.** One held key always released cleanly (until 4.62, emission frozen at
+  11) — the leak needed a SECOND key: the prev8 fall-back handled the audible
+  hand-over and returned without releasing the departing key's rack handle.
+  Arp: that pool entry stayed until=Infinity forever. Stuck key: the same skip
+  left audBendCur owned by the departed shim. The fall-back releases the
+  handle first now, and the LAST finger runs the baseline tail itself at
+  rel8T (the stack had already spent every shim, so the final tv.release was
+  a no-op and no audPitch(0) ever came). Pitch parity for determinism in the
+  same commit: pk return/stop/relock frame-stamped, cret takes a frame, the
+  shim's off lands on its given time.
+  **plain: 2,4,[0→2 same block],0 · arp: 0 emitted after release, 0 INF, final
+  pitch 0.** Open items 0 and 0c both close.
+
 - **[branch] OVERWRITE IS GESTURE-SCOPED, LIKE MIDI.** His spec verbatim: new
   keys replace the sections they play over; overdub (⇧o) layers. Every audio
   writer now calls `audOverwrite` — clears audio events whose onset falls
@@ -431,7 +445,7 @@ are here only as a regression net.
 
 ## Open, in the order Gad asked for them
 
-0. **THE ARP NEVER STOPS, AND IT IS THE ROOT OF THE OTHERS.** ⚠ NOT FIXED.
+0. **THE ARP NEVER STOPS** — ✅ FIXED on the branch (see the landed entry: the prev8 early return).
    Gad: "i want exactly what i played" — chasing that found something bigger.
    The pool entry's `until` stays **Infinity** after the keys come up, so the
    arp keeps generating forever, and its emission stalls then floods:
@@ -492,7 +506,7 @@ are here only as a regression net.
      CLEAR 1  n=0 auto=0 tv=0        correct
      CLEAR 2  n=0 auto=1 → tv=1      the take starts looping
 
-0c. **A PITCH KEY GETS STUCK.** ⚠ NOT FIXED. Hold key 1, add key 2, release 2
+0c. **A PITCH KEY GETS STUCK** — ✅ FIXED on the branch (same early return as the arp leak). Hold key 1, add key 2, release 2
    then 1 — key 1 never comes home. Both autoloop on and off. Traced:
 
      k2 up   gk: KeyS   bendCur=sh2   (sh2 never released)
