@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-21.2155';
+const BUILD='2026-08-21.2203';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -18193,6 +18193,8 @@ function retroCapture(){
       ...(n.cue!==undefined?{cue:n.cue}:{}),
       ...(n.pk!==undefined?{pk:n.pk}:{}),
       ...(n.fz!==undefined?{fz:n.fz}:{})});
+    if(n.cue!==undefined||n.pk!==undefined||n.fz!==undefined)
+      audOverwrite(lane,t,n.dur||0.25,lane.events[lane.events.length-1]);
   }
   markRecorded(lane);
   flash('◉ retro: last '+fmtLen(lane)+' · '+seg.length+' notes — tab+digits widens the window');
@@ -18310,11 +18312,13 @@ function recAudEvent(pi,tBeat,midi,vel,durBeats){
     const pk=Math.round(midi)-KBBASE;
     lane.clear(ev=>ev.pk===pk&&Math.abs(ev.t-t)<1e-6);
     lane.events.push({t,pk,dur,born:performance.now()});
+    audOverwrite(lane,t,dur,lane.events[lane.events.length-1]);
   }else{
     const cuts=(engine.audCuts(pi)||[]).length; if(!cuts)return;
     const cue=((Math.round(midi)-60-trSemis(p))%cuts+cuts)%cuts;
     lane.clear(ev=>ev.cue===cue&&Math.abs(ev.t-t)<1e-6);
     lane.events.push({t,cue,dur,vel:vel||0.9,born:performance.now()});
+    audOverwrite(lane,t,dur,lane.events[lane.events.length-1]);
   }
   /* the window sizes the loop off what it heard, so it has to hear this one */
   if(cap)cap.lastEnd=Math.max(cap.lastEnd,t+dur);
@@ -21335,6 +21339,7 @@ function lateAudWrite(h){
                       (ent.pk!==undefined&&ev.pk===ent.pk))&&Math.abs(ev.t-qt)<1e-6);
       lane.events.push(Object.assign({t:qt,dur,born:performance.now()},
         ent.cue!==undefined?{cue:ent.cue}:{pk:ent.pk}));
+      audOverwrite(lane,qt,dur,lane.events[lane.events.length-1]);
       if(cp)cp.lastEnd=Math.max(cp.lastEnd,qt+dur);
       dirtySave=true;
     }
@@ -21394,6 +21399,7 @@ function endAudHold(c){
         const qt8=cp8?Math.max(0,h8.tr-cp8.t0):fmod(h8.tr-editAnchor(),L8);
         lane8.clear(ev=>ev.pk===h8.pk&&Math.abs(ev.t-qt8)<1e-6);
         lane8.events.push({t:qt8,pk:h8.pk,dur:dur8,born:performance.now()});
+        audOverwrite(lane8,qt8,dur8,lane8.events[lane8.events.length-1]);
         if(cp8)cp8.lastEnd=Math.max(cp8.lastEnd,qt8+dur8);
         dirtySave=true;
       }
@@ -21638,6 +21644,7 @@ function endAudHold(c){
         const qt=cp9?Math.max(0,tr-cp9.t0):fmod(tr-editAnchor(),L);
         lane.clear(ev=>ev.cue===sl&&Math.abs(ev.t-qt)<1e-6);
         lane.events.push({t:qt,cue:sl,dur:durB,born:performance.now()});
+        audOverwrite(lane,qt,durB,lane.events[lane.events.length-1]);
         if(cp9)cp9.lastEnd=Math.max(cp9.lastEnd,qt+durB);
         dirtySave=true;
       }
@@ -22960,6 +22967,29 @@ function initLane(l){
    output and every hand-held key must stand down. Three recorders asked this
    and only the note one knew how; the audio cue and pitch releases wrote the
    held key on top, which is why a 16-move arp came back as 18 events. */
+/* OVERWRITE IS GESTURE-SCOPED ON AUDIO TOO (Gad, 2026-08-22: "when i play a
+   long press on top of short ones it should clear what is under the newly
+   added notes… every time new keys are added, they need to replace the
+   sections that they play over - this is overwrite mode"). Midi's overwrite
+   replaces what the playhead passes; the audio writers only ever replaced the
+   exact same spot, so layered takes ACCUMULATED under new playing. Now every
+   audio write clears what its span covers: events whose onset falls inside
+   [qt, qt+dur) go, and an event whose tail crosses into the span is truncated
+   at the new onset. Overdub (⇧o) keeps layering, as it says. */
+function audOverwrite(lane,qt,dur,keep){
+  if(CFG.overdub||!(dur>0))return;
+  const L=lane.len||4;
+  lane.clear(ev=>ev!==keep&&(ev.cue!==undefined||ev.pk!==undefined||ev.fz!==undefined)
+    &&(()=>{const d=fmod(ev.t-qt,L);return d>1e-6&&d<dur-1e-6;})());
+  /* strictly AFTER the onset: two keys pressed together are a chord of jumps,
+     not one overwriting the other — the same-spot-same-cue replace above
+     already handles true duplicates */
+  for(const ev of lane.events){
+    if(ev===keep||!(ev.cue!==undefined||ev.pk!==undefined||ev.fz!==undefined))continue;
+    const gap=fmod(qt-ev.t,L);
+    if(gap>1e-6&&gap<(ev.dur||0)-1e-6)ev.dur=gap;   // its tail ran under the new note
+  }
+}
 function genOn(pi,midi){
   if(!T.playing)return false;
   const pre=S.presets[pi]; if(!pre)return false;
