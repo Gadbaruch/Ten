@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-21.1801';
+const BUILD='2026-08-21.1827';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -9919,6 +9919,16 @@ class Engine{
        once unison is off. Native is unchanged; it never spends this. */
     const FMWNODES=56;
     const CAP=fmwOn?clamp(Math.round(FMWNODES/uniC),4,24*POLYX):24*POLYX;
+    /* THE DEAD DO NOT HOLD A SEAT (Gad, 2026-08-21: "audio drops at passing
+       20v and continues to climb up to 70v"). The steal loop below KILLS but
+       never splices, so a killed voice stayed in `act` for good: measured,
+       twenty-four quick taps on ch7 took the array to 80 while the number
+       actually sounding never left 8 and the worklet count never left 56. The
+       cap was doing its job and the readout was counting corpses — and the
+       entry test reads the raw length, so once the array filled with them this
+       block ran on every single note. One compaction, before the test. */
+    for(let k9=this.act[pi].length-1;k9>=0;k9--)
+      if(!this.act[pi][k9]||this.act[pi][k9].killed)this.act[pi].splice(k9,1);
     if(this.act[pi].length>=CAP){
       const live=this.act[pi];
       const pick=()=>{
@@ -21198,7 +21208,29 @@ const scopeHeldOn=c=>
    is the hang where the channel goes silent and stays silent until a reload.
    Returns 'stop' when the key-up should go no further, 'went' when a hold
    ended but the rest of the key-up still applies, '' when there was none. */
+/* HOW SHORT A KEY IS ALLOWED TO BE ONCE IT LANDS ON THE GRID. The same idea
+   the note recorder already keeps for midi — "a 40ms tap is a 40ms note
+   wherever on the grid it lands" — and 60ms is enough for a cue to speak. */
+const AUDMINMS=60;
 function endAudHold(c){
+  /* THE NOTE ON IS QUANTIZED; THE KEY-UP MUST WAIT FOR IT (Gad, 2026-08-21:
+     "key pressing live too quickly results in no sound when live quantize is
+     on… please replicate the midi behavior there. issue is in pitch and
+     position"). With Q on the sound is deferred to the next grid line, and
+     three deferred fires begin `if(AUD.gk[c]!==h)return` — "let go before it
+     landed". A tap shorter than the distance to that grid line therefore
+     deleted its own hold before the sound existed, and the note simply never
+     happened. Midi solved this at the KEY-UP rather than at the fire, and so
+     does this: a hold that has not sounded yet keeps its entry until it does,
+     then ends AUDMINMS later. The lane write below is untouched and still
+     happens now, so the recording keeps the length you actually held. */
+  const hW=AUD.gk&&AUD.gk[c];
+  if(hW&&!hW._late&&Number.isFinite(hW.tr)&&T.playing&&hW.tr>gridNow()+1e-9){
+    hW._late=1;                                  // once only; the retry ends it for real
+    const wait=Math.max(0,(gridTime(hW.tr)-AC.currentTime)*1000)+AUDMINMS;
+    setTimeout(()=>{try{if(AUD.gk&&AUD.gk[c]===hW)endAudHold(c);}catch(_){}},wait);
+    return 'went';
+  }
   /* the two kinds of hold live in the same map and end differently: a pitch
      key lets its spawner go, a position key ends its own cursor and leaves
      the rest of the chord alone */
