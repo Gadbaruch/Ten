@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-21.1955';
+const BUILD='2026-08-21.2004';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -5895,8 +5895,25 @@ function scheduleRange(from,to){
                  grabbed it again. Same events, a different phrase, and on a
                  1/16 arp it happens fifteen times a bar. The hand-back is for
                  the END of a run; inside one, the next jump is the hand-back.*/
-              const nxt7=lane.events.some(e2=>e2.cue!==undefined&&
-                fmod(e2.t-te7,L2)<Math.max(dj2,0.02)+1e-6);
+              /* A RUN IS NEARLY TOUCHING, NOT MERELY NEXT (Gad, 2026-08-21:
+                 "i recorded a few hits all the same length, the last one or 2
+                 are connected and longer then i played" — and his export shows
+                 the lane is PERFECT: five events, every dur 0.25. The window
+                 here was max(dur,0.02) AFTER the gesture end, so two hits half
+                 a beat apart with one-grid lengths read as a run — his t=2.5
+                 ended at 2.75, t=3.0 started exactly dur later, stop skipped,
+                 the take ran on. Same disease as the pitch side's "legato is
+                 an overlap, not an adjacency".
+                 What the window is FOR is a recorded arp, whose steps are
+                 div*0.85 long with a 0.15*div breath — so the takeover now
+                 reaches only 20% of the gesture past its end, plus true
+                 overlaps (an onset inside the window must suppress the stop or
+                 the stop would cut the successor). Quantized hand-played hits
+                 always sit a full grid or more apart and always stop. */
+              const nxt7=lane.events.some(e2=>{
+                if(e2===ev||e2.cue===undefined)return false;
+                const d7=fmod(e2.t-tt,L2);
+                return d7>1e-6&&d7<dj2+Math.max(0.02,dj2*0.2)+1e-6;});
               setTimeout(()=>{try{
                 if(AUD.hold&&AUD.hold.pi===li)return;   // a finger owns it now
                 engine.busEnvFire(li,AC.currentTime,true);
