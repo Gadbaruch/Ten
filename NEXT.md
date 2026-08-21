@@ -278,6 +278,15 @@ one monoTrigger already keeps. The question to ask before writing any of it:
       the grid; only the recorded number changed.
 
 ## Landed this session — all measured unless it says otherwise
+- **[branch] OVERWRITE IS GESTURE-SCOPED, LIKE MIDI.** His spec verbatim: new
+  keys replace the sections they play over; overdub (⇧o) layers. Every audio
+  writer now calls `audOverwrite` — clears audio events whose onset falls
+  strictly inside the new span (mod loop), truncates tails that run under the
+  new onset; strictly-after so simultaneous presses stay a chord. **Measured:
+  short under a 1.6-beat press cleared, outside kept, chord of two records
+  both.** Deliberate edge: an old note at exactly the new onset survives —
+  fixing that needs a pass-id on events, not a smarter time rule.
+
 - **[branch] THE REPLAY IS A PLAYBACK NOW, NOT A RE-PERFORMANCE.** His
   question named it: "if live notes play a certain way, why cant you just
   record that?" The lane was always faithful; the replay applied every
