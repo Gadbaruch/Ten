@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-21.2016';
+const BUILD='2026-08-21.2027';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -5619,6 +5619,18 @@ function setBpm(v){
 }
 function play(){
   AC.resume();
+  /* THE RETRO BUFFER'S TIME DIES WITH THE CLOCK (Gad, 2026-08-21: third retro
+     take in a row and "all hell broke loose... polyphonic multy playheads AND
+     longer notes than i played"). play() restarts the beat clock at 0, and the
+     buffer — deliberately never consumed, so tab+N can re-reveal — carried
+     presses from PREVIOUS runs whose beat numbers collide with the new run's.
+     His lane showed the collision plainly: two events on one instant (two
+     heads), one figure present twice shifted (grid-adjacent chains that hand
+     over end to end and sound like one long note). A press "at beat 2" of a
+     dead clock has no home on a new one. Cleared at the START of a run, so
+     the stop-then-tab flow (take the jam of the run that just ended) still
+     works — that reads the buffer before the next play. */
+  for(let i9=0;i9<retroBuf.length;i9++)retroBuf[i9].length=0;
   T.startTime=AC.currentTime+0.06; T.startBeat=0; T.schedBeat=0; T.playing=true;
   acts=[{pat:S.curPat,start:-1e9,anchor:0}];
   dirty=true;
@@ -5741,6 +5753,7 @@ function scheduleRange(from,to){
               const genP=lane._gen|0;
               setTimeout(()=>{try{
                 if((lane._gen|0)!==genP)return;        // cleared while this was queued
+                if(!T.playing)return;                  // stopped is stopped — see the cue twin
                 /* …and so does a recorded bend: with the loop off there is
                    nothing to bend until the replay makes it */
                 if(!autoCur(S.presets[li])&&!engine.audRolling(li)){
@@ -5881,6 +5894,10 @@ function scheduleRange(from,to){
               const gen7=lane._gen|0;                  // …and the lane it belongs to
               setTimeout(()=>{try{
                 if((lane._gen|0)!==gen7)return;        // cleared while this was queued
+                if(!T.playing)return;                  // …and stopped is stopped: a queued jump
+                                                       // spawning after stop() is the head that
+                                                       // "doesnt stop" — allOff killed everything
+                                                       // alive, this one was born after it
                 if(off7&&!engine.audRolling(li))
                   engine.audPlay(li,AC.currentTime+0.005,L2,0,cu);   // born at the cue, not the crop start
                 engine.audMove(li,to7,gl7,1,1);
