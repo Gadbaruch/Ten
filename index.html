@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-21.2120';
+const BUILD='2026-08-21.2147';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -21357,9 +21357,10 @@ function endAudHold(c){
          gesture with a length like any other. The ear and the lane read the
          same number — the off sounds where it is written. */
       /* nearest grid, same experiment as the cue release above */
-      /* the midi rule, pure — see the cue release */
+      /* the midi rule, on the sound as well as the lane — see the cue release */
       const held8=h8.press!=null?((((h8._relAt)??AC.currentTime)-h8.press)/spb()):0.25;
-      const dur8=Math.max(0.05,held8);
+      const dur8=Math.max(0.05,AUDMINMS/1000/spb(),held8);
+      h8._durB=dur8;   // the release below is outside this block's scope
       retroBuf[h8.pi].push({t:h8.tr,pk:h8.pk,dur:dur8});
       if(retroBuf[h8.pi].length>512)retroBuf[h8.pi].shift();
       /* same rule on the pitch side: the arp's steps are the performance */
@@ -21396,8 +21397,13 @@ function endAudHold(c){
       }
     }
     /* the rack handle ends it: releasing pops monoTrigger's stack, which
-       re-fires the note underneath — that IS the legato fall-back */
-    if(h8.tv&&h8.tv.release){try{h8.tv.release(AC.currentTime);}catch(_){}
+       re-fires the note underneath — that IS the legato fall-back. HELD TO
+       tr+dur8, midi's rule: the bend shim's release already takes a time and
+       its off() already knows who owns the channel, so the ear gets exactly
+       the number the lane just wrote. */
+    const rel8T=(T.playing&&CFG.qOn&&h8.tr!=null&&h8._durB!=null)
+      ?gridTime(h8.tr)+h8._durB*spb():AC.currentTime;
+    if(h8.tv&&h8.tv.release){try{h8.tv.release(Math.max(AC.currentTime,rel8T));}catch(_){}
       dirty=true; return 'went';}
     if(!Object.keys(AUD.gk).some(k8=>(AUD.gk[k8]||{}).kind==='pmono')){
       /* AND THE WAY BACK GLIDES TOO (Gad, 2026-08-18: "go to note works,
@@ -21511,8 +21517,21 @@ function endAudHold(c){
        a whole number of steps, which is what a chop IS.
        The RECORDED length is quantized with it — the ear and the lane have to
        agree, or a jam that sounded clean comes back ragged. */
+    /* THE OFF LANDS AT start+held — MIDI'S RULE, ON THE SOUND AS WELL AS THE
+       LANE (Gad, 2026-08-21: "recording cues are shorter then live played" /
+       "rec is super short notes shorter then live play" — and earlier, the
+       opposite sign). Both signs came from live and the lane measuring length
+       on DIFFERENT clocks: the audible off used to snap to qnext(now) — a
+       fast tap rang to the next grid line, a full grid — while the lane
+       recorded the raw held time. Short tap: live long, lane short. Long
+       pre-grid press: lane counted the waiting time, live did not. Midi's
+       monitored note is held to gridTime(start+dur) and records dur — ONE
+       number for the ear and the lane. Same here now: the off is scheduled at
+       tr+durB, and durB is what the lane writes. */
     const gq9=gridOf(lane), nowB9=gridNow();
-    const offB9=CFG.qOn?qnext(nowB9,gq9):nowB9;
+    const relB9=Math.max(0.05,AUDMINMS/1000/spb(),
+      press!=null?((((hj9&&hj9._relAt)??AC.currentTime)-press)/spb()):0.25);
+    const offB9=(CFG.qOn&&tr!=null)?tr+relB9:nowB9;
     const wait9=Math.max(0,(gridTime(offB9)-AC.currentTime)*1000);
     const endIt=()=>{
       /* …unless a finger arrived in the meantime: the grab it started owns the
@@ -21576,8 +21595,7 @@ function endAudHold(c){
        actually was. That window is fixed (20% + overlaps), so the lengths can
        be honest: "a 40ms tap is a 40ms note wherever on the grid it lands",
        and a tap into a sustained slice no longer grows to a full grid. */
-    const heldB9=press!=null?((((hj9&&hj9._relAt)??AC.currentTime)-press)/spb()):0.25;
-    const durB=Math.max(0.05,heldB9);
+    const durB=relB9;   // the same number the audible off was scheduled with
     if(sl!=null&&tr!=null){
       retroBuf[pi].push({t:tr,cue:sl,dur:durB});
       if(retroBuf[pi].length>512)retroBuf[pi].shift();
