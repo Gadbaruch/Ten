@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-22.0834';
+const BUILD='2026-08-22.1207';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -5933,7 +5933,19 @@ function scheduleRange(from,to){
                                                        // alive, this one was born after it
                 if(off7&&!engine.audRolling(li))
                   engine.audPlay(li,Math.max(at7,AC.currentTime+0.003),L2,0,cu);   // born at the cue, on its sample
-                engine.audMove(li,to7,gl7,1,1,at7);
+                /* WITH THE LOOP OFF THE HEAD IS NOT A CARRIER (Gad, 2026-08-22:
+                   "arp still not being recorded" — his export shows all 13
+                   steps in the lane; what failed was the replay). This move was
+                   sent with onlyCar=1 — right when the loop's carrier is the
+                   head and a key's own grab must not be dragged along — but
+                   with autoloop off the head was spawned BY A CUE, car:0, and
+                   the worklet filtered every move out: the first step landed,
+                   the other twelve were dropped, and the take played straight
+                   through from the first cue. Measured on his lane: live 9
+                   chops, replay 5 — same doors, the moves simply not applied.
+                   Live cueNote passes onlyCar=0 and works; the replay now
+                   matches it when the loop is off. */
+                engine.audMove(li,to7,gl7,1,off7?0:1,at7);
                 engine.busEnvFire(li,AC.currentTime);}catch(_){}},ms7);
               const te7=tt+dj2, ms8=Math.max(0,(timeAt(te7+a.anchor)-AC.currentTime)*1000);
               /* DOES ANOTHER JUMP FOLLOW? (Gad, 2026-08-18: "arp recording is
