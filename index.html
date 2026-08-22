@@ -473,7 +473,7 @@ const MODTAPER=a=>{const x=clamp(a/100,-1,1); return Math.sign(x)*x*x;};
    be more extreme"). An op's pitch destination swings this instead of the
    shared MODCENTS, so an env or LFO on ratio can sweep octaves; the filter
    (also cents) keeps MODCENTS so its sweeps are unchanged. */
-const MODCENTS_PITCH=14400;
+const MODCENTS_PITCH=4800;   // pitch/ratio: 4 octaves at amt 100% (Gad, 2026-08-23). Linear env clamps at 2x → 8 oct at 200%.
 const MODCENTS=4800;                                   // a log param's full swing
 /* WIDE FANS HARD AT THE TOP (Gad, 2026-08-23: "max uni wide would be more
    wide less center"). off walks the unison voices -1..1; a linear pan leaves
@@ -1230,7 +1230,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-22.2201';
+const BUILD='2026-08-22.2239';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -7411,7 +7411,7 @@ class Voice{
     for(const pe of envs.filter(e2=>e2.dst===2)){
       const ix=clamp(Math.round(pe.idx??0),0,10);
       const keys=ix===0?Object.keys(this.opPitch):[String(ix-1)];
-      const cents=clamp(pe.amt/100*24*100,-9600,9600);
+      const cents=clamp(pe.amt/100*MODCENTS_PITCH,-2*MODCENTS_PITCH,2*MODCENTS_PITCH);  // 4 oct @100%, 8 oct @200%
       const a=Math.max(0.001,pe.a), R=Math.pow(2,cents/1200);
       for(const k of keys){
         const pl=this.opPitch[k]||[], dl=this.opDet[k]||[];
@@ -7425,7 +7425,7 @@ class Voice{
             else{pm.setValueAtTime(0,at);pm.linearRampToValueAtTime(cents,at+a);}
             pm.setTargetAtTime(cents*pe.s,at+Math.max(a,0.001),Math.max(0.005,pe.d/3));
             (this.modN=this.modN||[]).push({p:pm,mi:pe.mi,ri:pe.ri,kind:'env',
-                                            base:0,k:24,aT:a});
+                                            base:0,k:MODCENTS_PITCH/100,aT:a});
           }else{                                  // a sample: playbackRate is a ratio
             const tg=pl[j], peak=Math.max(tg.base*R,0.01);
             const sus=Math.max(tg.base*Math.pow(2,cents*pe.s/1200),0.01);

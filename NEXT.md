@@ -1,5 +1,34 @@
 # WHERE THE AUDIO CHANNEL STANDS — 2026-08-20, main
 
+## SYNTH-SHAPING — branch `synth-shaping`, build 2026-08-22.2239, NOT merged
+
+Three asks, in his words: (1) max-uni wide should be **wider, less centred**;
+(2) **pitch/ratio mod (env, lfo…) more extreme**; (3) **default op trig = free**.
+
+- **1 wide — GREEN by his ear.** `WIDEFAN(off,wide)` (near line 472) replaces the
+  linear `off*wide` in both the native pan and the phase pan: it pushes the
+  panning toward the edges as `wide` climbs, so max uni sits harder L/R and
+  emptier in the middle. He said "green".
+- **3 trig-free — GREEN.** `mkOsc` (line 688) now defaults `phm:1` (free trig)
+  instead of 0. New patches start free; `trig` still exists, just isn't the
+  default. He said "green". (Open question he left: whether to keep `trig` at
+  all — "not sure we need it but lets keep for now".)
+- **2 pitch mod — FIXED 2026-08-22.2239, HIS EAR NOT YET.** He said "i dont hear
+  a difference, im using env on ratio and on voice1 pitch". Root cause: a
+  note-driven FM voice applies env→pitch on **its own path**, never the
+  resolver/bus path the first attempt (.2201, 12 oct) raised — which is why he
+  heard nothing. Two spots, both hardcoded to a 2-octave (2400-cent) ceiling:
+  the direct contour at **7413** and the live re-aim's `k` pushed at 7428
+  (consumed at 8699). Both now scale off **`MODCENTS_PITCH` (line 476)**, the
+  same constant the LFO/resolver path uses, so ONE number governs all pitch mod.
+  **Ceiling: 12 oct was "too much" — set to his spec, 4 oct @100% / 8 @200%,
+  linear.** `MODCENTS_PITCH=4800` (= filter's MODCENTS = 4 oct = customary pitch
+  mod). The env is linear in amt so its clamp is widened to `±2×` = ±9600 to let
+  amt 200 (route max, line 1694) reach 8 oct; the LFO path is tapered so it
+  caps at 4 oct at 100%+. Measured on 3032: amt 100 → op0 detune **4797 cents ≈
+  4.00 oct**, amt 200 → **9594 ≈ 8.00 oct**, `modN.k=48`. (Was 2 oct before the
+  batch.)
+
 ## THE BRANCH PROTOCOL — from 2026-08-21 evening, Gad's call
 
 **MERGED 2026-08-22, FOUR TIMES.** The accuracy batch (.2203), the arp batch
