@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-22.2128';
+const BUILD='2026-08-22.2134';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -10044,7 +10044,19 @@ class Engine{
       if(o&&!o.off&&(i===0||(o.amt||0)>0.001))opsP++;}
     const uniP=Math.max(1,Math.round((modHolder(p,'vox').vox||{}).uni||1));
     const costP=Math.max(1,opsP*uniP);
-    const POLYBUDGET=588*POLYX;
+    /* PHASE GETS A SMALLER BUDGET (Gad, 2026-08-22: "can you do the same fix
+       for phase mode"). Native at 588 held his uni-7 patch at 12 voices and
+       stopped the cut. A phase voice is ONE ten-fmop WORKLET doing uni*ops FM
+       operators every sample in JS, where a native voice is uni*ops C++
+       OscillatorNodes — the worklet is dearer per operator, so the same
+       oscillator count costs more on the audio thread. Half the budget, so a
+       phase channel caps at half the voices of the identical native patch —
+       his uni-7 7-op phase patch lands at ~6 voices. Both are dials; if his
+       CPU wants more phase voices he raises POLYBUDGET_PHASE, if less he
+       lowers it. A voice's SOUND is untouched either way. */
+    const fmwCh=Math.round((modHolder(p,'vox').vox||{}).fmw||0)===1;
+    const POLYBUDGET_NATIVE=588, POLYBUDGET_PHASE=294;
+    const POLYBUDGET=(fmwCh?POLYBUDGET_PHASE:POLYBUDGET_NATIVE)*POLYX;
     const CAP=clamp(Math.round(POLYBUDGET/costP),4,24*POLYX);
     /* THE DEAD DO NOT HOLD A SEAT (Gad, 2026-08-21: "audio drops at passing
        20v and continues to climb up to 70v"). The steal loop below KILLS but
