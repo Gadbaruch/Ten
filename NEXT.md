@@ -284,6 +284,14 @@ one monoTrigger already keeps. The question to ask before writing any of it:
       the grid; only the recorded number changed.
 
 ## Landed this session — all measured unless it says otherwise
+- **[audio-voices branch] PHASE GETS HALF THE BUDGET.** A phase voice is a JS
+  ten-fmop worklet (uni*ops FM ops/sample); a native voice is C++ oscillators —
+  dearer per operator. POLYBUDGET_NATIVE=588, POLYBUDGET_PHASE=294. His uni-7
+  7-op phase patch: 24 nodes → 6 (native stays ~12, Gad-confirmed good). DSP
+  meter read 0 on my fast machine so no measured multiplier; halving is the
+  conservative call. Both are dials on 3033 — 6 phase voices ≈ 1.5 of his
+  4-note chords, tight; raise POLYBUDGET_PHASE if his CPU has room.
+
 - **[audio-voices branch] THE VOICE CAP IS AN OSCILLATOR BUDGET NOW.** His cut
   is CPU (confirmed: 130% stuck a second after), on BOTH engines at the same
   spot — so it is the oscillator COUNT, identical between engines. A voice
