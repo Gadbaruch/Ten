@@ -278,6 +278,13 @@ one monoTrigger already keeps. The question to ask before writing any of it:
       the grid; only the recorded number changed.
 
 ## Landed this session — all measured unless it says otherwise
+- **[branch] A REPLAYED ARP STEP FIRES THE ENVELOPE.** "fix arp recording to
+  match performance" — the lane was right; the SOUND of a step was not: live
+  steps fire the bus envelope in and out (the articulation), the pk replay
+  fired nothing and came back a drone of bends. Replay fires the same envelope
+  at the same sample now; pk events carry vel for future gain-per-step.
+  **9 recorded → replay 9 env fires (was 0), dips 14 vs live 12.**
+
 - **[branch] THE ARP STOPS AND THE KEY COMES HOME — ONE EARLY RETURN WAS
   BOTH.** One held key always released cleanly (until 4.62, emission frozen at
   11) — the leak needed a SECOND key: the prev8 fall-back handled the audible
