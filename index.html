@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-22.0821';
+const BUILD='2026-08-22.0834';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -10324,9 +10324,10 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
             if(!(en.until>b||(!en.heard&&(en.born??-1e9)<=b+1e-9)))continue;
             const k=Math.max(0,Math.round((b-(en.born??b))/step));
             en.heard=true;
-            const v=this.noteOn(gridTime(bg),pi,en.midi,
-              clamp(en.vel*(1-fade*(k%divs)/divs),0.05,1),en.pad??en.midi);
+            const vv2=clamp(en.vel*(1-fade*(k%divs)/divs),0.05,1);
+            const v=this.noteOn(gridTime(bg),pi,en.midi,vv2,en.pad??en.midi);
             v.release(gridTime(bg+step*0.85));
+            recPlayNote(pi,b,en.midi,vv2,step*0.85);   // the generator's output IS the take
           }
         }
         const nw2=gridNow();
@@ -10347,6 +10348,8 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
             en.heard=true;
             const v=this.noteOn(gridTime(en.born),pi,en.midi,en.vel,en.pad??en.midi);
             v&&v.release&&v.release(gridTime(Math.min(en.until,en.born+8)));
+            recPlayNote(pi,en.born,en.midi,en.vel,
+              Math.max(0.05,Math.min(en.until,en.born+8)-en.born));
           }
         }else if(ent.length>1){
           const offs=[0]; const gaps=[];
@@ -10368,6 +10371,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
               const bg=t+grooveOff(pi,t);
               const v=this.noteOn(gridTime(bg),pi,en.midi,en.vel,en.pad??en.midi);
               v&&v.release&&v.release(gridTime(bg+gp*gate));
+              recPlayNote(pi,t,en.midi,en.vel,Math.max(0.05,gp*gate));
             }
           }
         }
@@ -10402,6 +10406,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
             const vv=clamp(en.vel*(1-Math.abs(ric)*0.4*Math.min(1,k/24)),0.05,1);
             const v=this.noteOn(gridTime(bg),pi,m2,vv,en.pad??en.midi);
             v&&v.release&&v.release(gridTime(bg+Math.max(0.05,base*0.8)));
+            recPlayNote(pi,t,m2,vv,Math.max(0.05,base*0.8));
           }
         }
         const nwS=gridNow();
@@ -23031,7 +23036,16 @@ function genOn(pi,midi){
   if(!T.playing)return false;
   const pre=S.presets[pi]; if(!pre)return false;
   const rack=isKit(pre)?((kitSlot(pre,midi)||{ply:[]}).ply):pre.ply;
-  return (rack||[]).some(sl=>(sl.typ===2||sl.typ===1||sl.typ===13)&&!sl.off);
+  /* EVERY live generator the POOL knows, not just the arp (Gad, 2026-08-22:
+     "maybe you are recording the presses going in to the arp but not the
+     out"). With euclid, live ratchet, cycle or spray on the rack, this said
+     "no generator" — so the held key recorded itself and the generator's
+     output recorded nothing, which reads exactly as presses-in, nothing-out.
+     Same family the pool test names: arp/chord/flam plus euc, rtc (live only,
+     p1>=2), cyc, spry. */
+  return (rack||[]).some(sl=>!sl.off&&(
+    sl.typ===2||sl.typ===1||sl.typ===13||sl.typ===9||sl.typ===16||sl.typ===17||
+    (sl.typ===15&&Math.round(sl.p1??0)>=2)));
 }
 function clearLane(pi){
   const l=S.patterns[S.editPat].lanes[pi];
