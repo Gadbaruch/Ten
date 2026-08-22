@@ -1,9 +1,11 @@
 # WHERE THE AUDIO CHANNEL STANDS — 2026-08-20, main
 
-## SYNTH-SHAPING — branch `synth-shaping`, build 2026-08-22.2239, NOT merged
+## SYNTH-SHAPING — MERGED to main + LIVE 2026-08-22.2239
 
-Three asks, in his words: (1) max-uni wide should be **wider, less centred**;
-(2) **pitch/ratio mod (env, lfo…) more extreme**; (3) **default op trig = free**.
+The new floor. Three asks, in his words: (1) max-uni wide should be **wider,
+less centred**; (2) **pitch/ratio mod (env, lfo…) more extreme**; (3) **default
+op trig = free**. All landed as one merge; his ear passed #1 and #3 green, #2
+retuned to 4 oct @100% after "12 was too much" and he said "sounds good."
 
 - **1 wide — GREEN by his ear.** `WIDEFAN(off,wide)` (near line 472) replaces the
   linear `off*wide` in both the native pan and the phase pan: it pushes the
