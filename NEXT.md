@@ -278,6 +278,17 @@ one monoTrigger already keeps. The question to ask before writing any of it:
       the grid; only the recorded number changed.
 
 ## Landed this session — all measured unless it says otherwise
+- **[branch] WITH THE LOOP OFF, THE REPLAY'S MOVES NEVER REACHED THE HEAD.**
+  "arp still not being recorded" — his export: all 13 steps recorded (dur
+  0.212, cues 10/13/14). The replay sent audMove with onlyCar=1; with autoloop
+  OFF the head is cue-spawned (car:0) and the worklet's cmov filter dropped
+  every move — first step landed, twelve did nothing, the take played straight
+  through. Live cueNote passes onlyCar=0. Replay passes 0 when the loop is off.
+  The dip-meter on his sample could not see it (those cues sit in material
+  without level dips) — the SWEEP judged it: **live 21 jumps, replay 20,
+  identical position path 0.725/0.75/0.775…** Lesson, again: his channel runs
+  autoloop OFF; every arp probe before this ran it ON. Match his state.
+
 - **[branch] RETRO RECORDS THE ARP — two eaters, one misread.** Three-gesture
   matrix put the loss on retro alone. (1) The audio releases' RETRO pushes
   never had the genOn stand-down the lane write has had for days — the held
