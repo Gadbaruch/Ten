@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-22.1734';
+const BUILD='2026-08-22.2100';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -10095,7 +10095,21 @@ class Engine{
        They differ only when a PLAY effect (rpit) detunes without changing pads. */
     const pm=padMidi==null?midi:padMidi;
     this.applyBusPreps(pi,pm);
-    if(this.act[pi].length>=16)this.act[pi][0].kill(at,false,true);   // channel poly cap (whole note)
+    /* THE CEILING IS CAP, NOT A SECOND HARD 16 (Gad, 2026-08-22: "it used to
+       go up to 24v or 30v and didnt have audio cuts"; measured — pre-compaction
+       1801 held 24 live, current held 16). This crude backstop kills the
+       oldest at 16, and it was DORMANT for months: before the dead were
+       spliced (the compaction above), act[0] was always an already-killed
+       voice and killing it did nothing, so the real ceiling was the graceful
+       CAP=24 steal loop above. The compaction made act[0] a LIVE voice, so
+       this woke up and quietly halved the channel to 16 (to 8 sharing with a
+       loop). Same CAP now: the steal loop is the ceiling, this only ever fires
+       as a backstop at the same number, and it skips a voice already dead so
+       it takes a real one when it does. */
+    if(this.act[pi].length>=CAP){
+      let z=0; while(z<this.act[pi].length&&this.act[pi][z]&&this.act[pi][z].killed)z++;
+      if(this.act[pi][z])this.act[pi][z].kill(at,false,true);   // channel poly cap (whole note)
+    }
     /* kit channels: the pitch class picks a whole independent preset chain;
        octaves transpose it (C2/C3/C4 = the same instrument, different pitch) */
     const K=isKit(p)?kitSlot(p,pm):null;
