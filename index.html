@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-22.1715';
+const BUILD='2026-08-22.1734';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -10494,7 +10494,9 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
         }
         const rpA=rack.find(sl=>sl.typ===13&&!sl.off);
         for(const m of hits){
+          this._arpStep=1;
           const v=this.noteOn(gridTime(bg),pi,rpA?rpitApply(m,rpA,S.presets[pi]):m,pick.vel,pick.pad??m);
+          this._arpStep=0;
           v.release(gridTime(bg+div*0.85));
           recPlayNote(pi,b,m,pick.vel,div*0.85);   // …the RAW beat: groove is a playback layer
         }
@@ -10810,6 +10812,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
   audBendNote(at,pi,midi,vel,glide){
     const E=this, semis=Math.round(midi)-KBBASE;
     const ms=Math.max(0,(at-AC.currentTime)*1000);
+    const isArp=!!this._arpStep;
     this.audBendCur=this.audBendCur||[];
     /* startAt, OR THE SWEEPER READS IT AS ANCIENT (Gad, 2026-08-20: "without
        arp it plays the pitched for a second and then baseline comes back so i
@@ -10820,7 +10823,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
        the comment in the sweeper still describes it. Measured: a key held 2.5s
        went audPitch 2.00 at 82ms and audPitch 0.00 at 477ms, released by
        sweepOrphanVoices, not by any key-up. */
-    const sh={_bend:1,midi,semis,bornAt:AC.currentTime,
+    const sh={_bend:1,_arp:isArp,midi,semis,bornAt:AC.currentTime,
       startAt:Math.max(AC.currentTime,at||0),
       released:false,killed:false,press:0,pressN:[],nodes:[],
       release(t){ if(this.released)return; this.released=true;
@@ -10836,7 +10839,22 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
             if(o&&o._bend&&o!==sh&&!o.released&&!o.killed&&
                (!back||(o.bornAt||0)>(back.bornAt||0)))back=o;
           if(back){E.audBendCur[pi]=back; E.audPitch(pi,back.semis,0,tAt); return;}
-          E.audPitch(pi,0,0,tAt); E.busEnvFire(pi,AC.currentTime,true);
+          E.busEnvFire(pi,AC.currentTime,true);      // the articulation, always — that IS the chop
+          /* AN ARP STEP DOES NOT RETURN TO BASELINE BETWEEN STEPS (Gad,
+             2026-08-22: autoloop ON, "holding a first note goes between held
+             note pitch and baseline pitch as if its part of the arp"). A step
+             releases at 85% of its slot; the next step's noteOn is at 100%, so
+             the 15% gap used to play the loop at baseline — which with the
+             loop running is audible as a note. While the FINGER is still down
+             more steps are coming, so the step hands over silently: envelope
+             released (the chop), pitch left where it is for the next step to
+             overwrite. The key-up (endAudHold) does the real baseline return.
+             A plain key, or the last step after the finger has lifted, still
+             returns as before. */
+          const stillHeld=sh._arp&&autoCur(S.presets[pi])&&
+            Object.keys(AUD.gk||{}).some(k9=>(AUD.gk[k9]||{}).pi===pi&&(AUD.gk[k9]||{}).kind==='pmono');
+          if(stillHeld)return;
+          E.audPitch(pi,0,0,tAt);
           if(!autoCur(S.presets[pi])){E.audStop(pi,Math.max(tAt,AC.currentTime+0.003));return;}
           if(E.audBendMovedClock(pi)){E.audReturn(pi,tAt);
             setTimeout(()=>{try{E.audReturn(pi);}catch(_){}},80);} };
@@ -23064,13 +23082,21 @@ function initLane(l){
 function audOverwrite(lane,qt,dur,keep){
   if(CFG.overdub||!(dur>0))return;
   const L=lane.len||4;
+  /* CHORD vs OVERWRITE IS THE TAKE, NOT THE TIME (Gad, 2026-08-22: "test with
+     second and third recs added and try to overwrite - there is some
+     inacuracy there"). A note landing at exactly the same onset as an OLDER
+     one used to survive — the strictly-after rule read it as a chord. But two
+     keys pressed together are born in the same gesture microseconds apart,
+     while an overwrite lands on a note from a previous take: `born` tells them
+     apart. So the span now INCLUDES its own onset, and the only thing spared
+     there is a note born alongside `keep` — a genuine chord. */
+  const kb=(keep&&keep.born)||performance.now();
+  const sameGesture=ev=>Math.abs((ev.born||0)-kb)<60;
   lane.clear(ev=>ev!==keep&&(ev.cue!==undefined||ev.pk!==undefined||ev.fz!==undefined)
-    &&(()=>{const d=fmod(ev.t-qt,L);return d>1e-6&&d<dur-1e-6;})());
-  /* strictly AFTER the onset: two keys pressed together are a chord of jumps,
-     not one overwriting the other — the same-spot-same-cue replace above
-     already handles true duplicates */
+    &&!sameGesture(ev)
+    &&(()=>{const d=fmod(ev.t-qt,L);return d>-1e-6&&d<dur-1e-6;})());
   for(const ev of lane.events){
-    if(ev===keep||!(ev.cue!==undefined||ev.pk!==undefined||ev.fz!==undefined))continue;
+    if(ev===keep||sameGesture(ev)||!(ev.cue!==undefined||ev.pk!==undefined||ev.fz!==undefined))continue;
     const gap=fmod(qt-ev.t,L);
     if(gap>1e-6&&gap<(ev.dur||0)-1e-6)ev.dur=gap;   // its tail ran under the new note
   }
