@@ -284,6 +284,52 @@ one monoTrigger already keeps. The question to ask before writing any of it:
       the grid; only the recorded number changed.
 
 ## Landed this session — all measured unless it says otherwise
+- **[audio-voices branch] THE CUT WAS LEAKING WORKLET TAILS, NOT VOICE COUNT.**
+  Gad: capping voices didn't help, meter only hit 4v and still cut — "you're
+  fixing the wrong thing." Right: his dense 76-note loop makes phase worklets
+  faster than their ~1.4s release tails free them, so 4 LIVE voices sat under
+  **28-61 decaying ten-fmop nodes** = the 130% CPU, invisible to the act[]
+  voice cap. Fix: engine keeps a FIFO of live ten-fmop nodes; past FMWCEIL=18
+  it evicts the oldest RELEASED tail (quietest) via Voice.kill(fast) — clickless
+  fade, held notes protected (only an oldest held voice if all are held).
+  **Pinned at 18 through loop + held chord + 8-key storm; peak 0.88-0.94, zero
+  silence.** Phase budget back to 588; FMWCEIL is the dial. ⚠ his 3033 test.
+
+- **[audio-voices branch] PHASE GETS HALF THE BUDGET.** A phase voice is a JS
+  ten-fmop worklet (uni*ops FM ops/sample); a native voice is C++ oscillators —
+  dearer per operator. POLYBUDGET_NATIVE=588, POLYBUDGET_PHASE=294. His uni-7
+  7-op phase patch: 24 nodes → 6 (native stays ~12, Gad-confirmed good). DSP
+  meter read 0 on my fast machine so no measured multiplier; halving is the
+  conservative call. Both are dials on 3033 — 6 phase voices ≈ 1.5 of his
+  4-note chords, tight; raise POLYBUDGET_PHASE if his CPU has room.
+
+- **[audio-voices branch] THE VOICE CAP IS AN OSCILLATOR BUDGET NOW.** His cut
+  is CPU (confirmed: 130% stuck a second after), on BOTH engines at the same
+  spot — so it is the oscillator COUNT, identical between engines. A voice
+  costs uni x active-ops (his BES1: 7x7=49; a plain patch ~2), so a flat
+  24-voice cap meant 1176 osc on his patch and 48 on a light one. CAP is now
+  `clamp(POLYBUDGET/(ops*uni), 4, 24)`, POLYBUDGET=588: his uni-7 7-op patch
+  caps at 12 (worklet nodes 24→12), light patches stay 24. Graceful steal and
+  voice SOUND unchanged. 588 = under his ~784 (16v) death point; POLYBUDGET is
+  the dial. ⚠ Confirm on HIS 3033 — my machine never cut.
+
+- **[audio-voices branch] THE VOICE CEILING FELL FROM 24 TO 8 — A DORMANT CAP
+  WOKE UP.** Gad: "it used to go up to 24v or 30v and didnt have audio cuts."
+  Measured, his ch7 supersaw (native, uni 7): pre-compaction 1801 held 24 live,
+  current 1734 held 8 (16 with the loop stopped). noteOn has two poly caps —
+  the graceful CAP=24 steal loop and a crude `act.length>=16 → kill act[0]`.
+  The 16 one was dormant for months: before "the dead do not hold a seat"
+  (1827) spliced killed voices, act[0] was always already-dead, so killing it
+  did nothing. The compaction made act[0] a LIVE voice → the 16-cap woke and
+  halved the channel. Both caps are CAP now; sound unchanged. **23 live with
+  his loop + 16 keys, zero near-silent blocks, ctx running.** Stealing
+  confirmed = the CAP loop, oldest-released-first.
+  ⚠ NOT the same as the audio-thread choke on his hardware: my machine never
+  dropped in the preview OR the gstack browser (headless can't resume audio).
+  His 3033 test is the truth. If it still drops with 24 restored, THEN it is
+  CPU (49 osc/voice × loop × live) and the fix is fewer osc/voice (uni), not a
+  bigger cap.
+
 - **[branch] ARP HOLDS PITCH UNDER A HELD KEY (auto on); OVERWRITE TELLS CHORD
   FROM TAKE.** Standing #3's autoloop-ON half: an arp step released at 85%,
   next onset at 100%, and the 15% gap played the loop at baseline — an audible
