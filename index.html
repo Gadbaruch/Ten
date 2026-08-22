@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-22.2100';
+const BUILD='2026-08-22.2115';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -7688,7 +7688,16 @@ class Voice{
       lpp.pm.setTargetAtTime(lpp.base,at,Math.max(0.005,this.rel/3));
     }
     for(const fe of this.fEnvs)fe.node.setTargetAtTime(fe.base,at,Math.max(0.005,fe.r/3));
-    this._end(at+this.rel*4+0.1);
+    /* FREE A PHASE VOICE WHEN ITS TAIL IS INAUDIBLE, NOT LATER (Gad,
+       2026-08-22: the ch7 supersaw cut on the phase engine). The vca decays as
+       setTargetAtTime with timeConstant rel/3, so at rel*4 it is at -104dB and
+       at rel*3 it is -78dB — both silent, but a phase voice is a `ten-fmop`
+       WORKLET doing 7-op FM every sample, and holding it the extra rel past
+       inaudibility is pure CPU for silence. Measured: a note inaudible (-55dB)
+       by ~1.0s held its node until ~2.0s. Native oscillators are cheap and
+       keep the -104dB margin; only the worklet path tightens, and rel*3 is
+       still well below hearing so nothing is clipped. */
+    this._end(at+this.rel*(this._fmw?3:4)+0.1);
   }
   /* SLOT# 0 IS "ALL", AND THE FILTERS NEVER HONOURED IT. Pitch and amp both
      read it — `ix===0 ? everything : one` — but every filter route ran through
