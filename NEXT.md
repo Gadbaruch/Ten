@@ -283,6 +283,50 @@ one monoTrigger already keeps. The question to ask before writing any of it:
       the grid; only the recorded number changed.
 
 ## Landed this session — all measured unless it says otherwise
+- **[branch] WITH THE LOOP OFF, THE REPLAY'S MOVES NEVER REACHED THE HEAD.**
+  "arp still not being recorded" — his export: all 13 steps recorded (dur
+  0.212, cues 10/13/14). The replay sent audMove with onlyCar=1; with autoloop
+  OFF the head is cue-spawned (car:0) and the worklet's cmov filter dropped
+  every move — first step landed, twelve did nothing, the take played straight
+  through. Live cueNote passes onlyCar=0. Replay passes 0 when the loop is off.
+  The dip-meter on his sample could not see it (those cues sit in material
+  without level dips) — the SWEEP judged it: **live 21 jumps, replay 20,
+  identical position path 0.725/0.75/0.775…** Lesson, again: his channel runs
+  autoloop OFF; every arp probe before this ran it ON. Match his state.
+
+- **[branch] RETRO RECORDS THE ARP — two eaters, one misread.** Three-gesture
+  matrix put the loss on retro alone. (1) The audio releases' RETRO pushes
+  never had the genOn stand-down the lane write has had for days — the held
+  keys entered the buffer as ~1.9-beat entries and gesture-scoped overwrite
+  let them swallow every step under their span. Guarded now (cue, pk,
+  superseded-tap). (2) endB's round-to-nearest threw away steps past the bar
+  line — the window now extends to the cycle containing the newest note.
+  (3) The remaining "loss" is retro's definition: a 1-bar lane keeps the last
+  bar (x-ray: 17 steps over 4 beats, window (4,8], kept 10 = the last bar,
+  flash says so). tab+digits widens. **17→17 in buffer, last bar kept, every
+  time.**
+
+- **[branch] A REPLAYED ARP STEP FIRES THE ENVELOPE.** "fix arp recording to
+  match performance" — the lane was right; the SOUND of a step was not: live
+  steps fire the bus envelope in and out (the articulation), the pk replay
+  fired nothing and came back a drone of bends. Replay fires the same envelope
+  at the same sample now; pk events carry vel for future gain-per-step.
+  **9 recorded → replay 9 env fires (was 0), dips 14 vs live 12.**
+
+- **[branch] THE ARP STOPS AND THE KEY COMES HOME — ONE EARLY RETURN WAS
+  BOTH.** One held key always released cleanly (until 4.62, emission frozen at
+  11) — the leak needed a SECOND key: the prev8 fall-back handled the audible
+  hand-over and returned without releasing the departing key's rack handle.
+  Arp: that pool entry stayed until=Infinity forever. Stuck key: the same skip
+  left audBendCur owned by the departed shim. The fall-back releases the
+  handle first now, and the LAST finger runs the baseline tail itself at
+  rel8T (the stack had already spent every shim, so the final tv.release was
+  a no-op and no audPitch(0) ever came). Pitch parity for determinism in the
+  same commit: pk return/stop/relock frame-stamped, cret takes a frame, the
+  shim's off lands on its given time.
+  **plain: 2,4,[0→2 same block],0 · arp: 0 emitted after release, 0 INF, final
+  pitch 0.** Open items 0 and 0c both close.
+
 - **[branch] OVERWRITE IS GESTURE-SCOPED, LIKE MIDI.** His spec verbatim: new
   keys replace the sections they play over; overdub (⇧o) layers. Every audio
   writer now calls `audOverwrite` — clears audio events whose onset falls
@@ -436,7 +480,7 @@ are here only as a regression net.
 
 ## Open, in the order Gad asked for them
 
-0. **THE ARP NEVER STOPS, AND IT IS THE ROOT OF THE OTHERS.** ⚠ NOT FIXED.
+0. **THE ARP NEVER STOPS** — ✅ FIXED on the branch (see the landed entry: the prev8 early return).
    Gad: "i want exactly what i played" — chasing that found something bigger.
    The pool entry's `until` stays **Infinity** after the keys come up, so the
    arp keeps generating forever, and its emission stalls then floods:
@@ -497,7 +541,7 @@ are here only as a regression net.
      CLEAR 1  n=0 auto=0 tv=0        correct
      CLEAR 2  n=0 auto=1 → tv=1      the take starts looping
 
-0c. **A PITCH KEY GETS STUCK.** ⚠ NOT FIXED. Hold key 1, add key 2, release 2
+0c. **A PITCH KEY GETS STUCK** — ✅ FIXED on the branch (same early return as the arp leak). Hold key 1, add key 2, release 2
    then 1 — key 1 never comes home. Both autoloop on and off. Traced:
 
      k2 up   gk: KeyS   bendCur=sh2   (sh2 never released)

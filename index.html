@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-21.2203';
+const BUILD='2026-08-22.1207';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -4490,7 +4490,7 @@ let fxwReady=false;
            re-dispatched through this same handler, so there is ONE copy of the
            op bodies. tclr and panic flush the queue: a stop cancels every
            queued gesture. */
-        if((m.t==='cmov'||m.t==='tpb')&&Number.isFinite(m.frame)&&m.frame>currentFrame+64){
+        if((m.t==='cmov'||m.t==='tpb'||m.t==='cret')&&Number.isFinite(m.frame)&&m.frame>currentFrame+64){
           (this.opq=this.opq||[]).push(m); return;}
         if(m.t==='buf'){this.L=m.l; this.R=m.r||m.l; this.len=m.l.length;
           this.cx=this.cx.filter(c9=>c9.bus!==0); this.ng=0;}   // in-flight phases belong to the OLD buffer
@@ -5787,7 +5787,14 @@ function scheduleRange(from,to){
                      stroke. Same one-word fix as the live side. */
                   if(l7)engine.audPlay(li,Math.max(atP1,AC.currentTime+0.003),l7.len,0,{semis:ev.pk});
                 }
-                engine.audPitch(li,ev.pk,0,atP1);}catch(_){}},ms1);
+                engine.audPitch(li,ev.pk,0,atP1);
+                /* THE ENVELOPE IS THE ARTICULATION (Gad, 2026-08-22: "fix arp
+                   recording to match performance"). A live pitch step fires
+                   the bus envelope on the way in and releases it on the way
+                   out — that attack per step IS what an arp sounds like. The
+                   replay changed pitch and fired nothing, so a recorded arp
+                   came back as a drone of bends. Same fire, same sample. */
+                engine.busEnvFire(li,Math.max(atP1,AC.currentTime));}catch(_){}},ms1);
               /* AND THE RECORDED BEND COMES BACK IN TIME TOO. The live one got
                  its relock on the key-up; this one had none, so every replay
                  of a stored bend left the take a little further out of phase
@@ -5848,10 +5855,15 @@ function scheduleRange(from,to){
                  are div*0.85 with a real gap, so they release; a phrase played
                  legato overlaps, so it does not. */
               if(gap3<-1e-6)return;                   // the next step overlaps this one
+              /* pitch parity with the cue end (Gad, 2026-08-22: "do the same
+                 fixes for pitch mode"): the return, the stop and the relock
+                 ride the event's own sample, not the timer's arrival */
+              const atR3=timeAt(t+dur3+a.anchor);
               setTimeout(()=>{try{if(!(AUD.hold&&AUD.hold.pi===li)){
-                engine.audPitch(li,0);
-                if(!autoCur(S.presets[li])){engine.audStop(li);return;}
-                if(engine.audBendMovedClock(li)){engine.audReturn(li);
+                engine.busEnvFire(li,Math.max(atR3,AC.currentTime),true);
+                engine.audPitch(li,0,0,atR3);
+                if(!autoCur(S.presets[li])){engine.audStop(li,Math.max(atR3,AC.currentTime+0.003));return;}
+                if(engine.audBendMovedClock(li)){engine.audReturn(li,atR3);
                   setTimeout(()=>{try{engine.audReturn(li);}catch(_){}},80);}}}catch(_){}},ms2);
             }else if(ev.fz!==undefined){
               const ms1=Math.max(0,(timeAt(t+a.anchor)-AC.currentTime)*1000);
@@ -5921,7 +5933,19 @@ function scheduleRange(from,to){
                                                        // alive, this one was born after it
                 if(off7&&!engine.audRolling(li))
                   engine.audPlay(li,Math.max(at7,AC.currentTime+0.003),L2,0,cu);   // born at the cue, on its sample
-                engine.audMove(li,to7,gl7,1,1,at7);
+                /* WITH THE LOOP OFF THE HEAD IS NOT A CARRIER (Gad, 2026-08-22:
+                   "arp still not being recorded" — his export shows all 13
+                   steps in the lane; what failed was the replay). This move was
+                   sent with onlyCar=1 — right when the loop's carrier is the
+                   head and a key's own grab must not be dragged along — but
+                   with autoloop off the head was spawned BY A CUE, car:0, and
+                   the worklet filtered every move out: the first step landed,
+                   the other twelve were dropped, and the take played straight
+                   through from the first cue. Measured on his lane: live 9
+                   chops, replay 5 — same doors, the moves simply not applied.
+                   Live cueNote passes onlyCar=0 and works; the replay now
+                   matches it when the loop is off. */
+                engine.audMove(li,to7,gl7,1,off7?0:1,at7);
                 engine.busEnvFire(li,AC.currentTime);}catch(_){}},ms7);
               const te7=tt+dj2, ms8=Math.max(0,(timeAt(te7+a.anchor)-AC.currentTime)*1000);
               /* DOES ANOTHER JUMP FOLLOW? (Gad, 2026-08-18: "arp recording is
@@ -5955,7 +5979,7 @@ function scheduleRange(from,to){
               const atE7=timeAt(te7+a.anchor);
               setTimeout(()=>{try{
                 if(AUD.hold&&AUD.hold.pi===li)return;   // a finger owns it now
-                engine.busEnvFire(li,AC.currentTime,true);
+                engine.busEnvFire(li,Math.max(atE7,AC.currentTime),true);
                 if(nxt7)return;                         // another jump is already coming
                 if(off7){engine.audStop(li,Math.max(atE7,AC.currentTime+0.003));return;}    // no bar to hand it back to
                 engine.audRelock(li);                   // …back where the bar asks
@@ -10312,9 +10336,10 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
             if(!(en.until>b||(!en.heard&&(en.born??-1e9)<=b+1e-9)))continue;
             const k=Math.max(0,Math.round((b-(en.born??b))/step));
             en.heard=true;
-            const v=this.noteOn(gridTime(bg),pi,en.midi,
-              clamp(en.vel*(1-fade*(k%divs)/divs),0.05,1),en.pad??en.midi);
+            const vv2=clamp(en.vel*(1-fade*(k%divs)/divs),0.05,1);
+            const v=this.noteOn(gridTime(bg),pi,en.midi,vv2,en.pad??en.midi);
             v.release(gridTime(bg+step*0.85));
+            recPlayNote(pi,b,en.midi,vv2,step*0.85);   // the generator's output IS the take
           }
         }
         const nw2=gridNow();
@@ -10335,6 +10360,8 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
             en.heard=true;
             const v=this.noteOn(gridTime(en.born),pi,en.midi,en.vel,en.pad??en.midi);
             v&&v.release&&v.release(gridTime(Math.min(en.until,en.born+8)));
+            recPlayNote(pi,en.born,en.midi,en.vel,
+              Math.max(0.05,Math.min(en.until,en.born+8)-en.born));
           }
         }else if(ent.length>1){
           const offs=[0]; const gaps=[];
@@ -10356,6 +10383,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
               const bg=t+grooveOff(pi,t);
               const v=this.noteOn(gridTime(bg),pi,en.midi,en.vel,en.pad??en.midi);
               v&&v.release&&v.release(gridTime(bg+gp*gate));
+              recPlayNote(pi,t,en.midi,en.vel,Math.max(0.05,gp*gate));
             }
           }
         }
@@ -10390,6 +10418,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
             const vv=clamp(en.vel*(1-Math.abs(ric)*0.4*Math.min(1,k/24)),0.05,1);
             const v=this.noteOn(gridTime(bg),pi,m2,vv,en.pad??en.midi);
             v&&v.release&&v.release(gridTime(bg+Math.max(0.05,base*0.8)));
+            recPlayNote(pi,t,m2,vv,Math.max(0.05,base*0.8));
           }
         }
         const nwS=gridNow();
@@ -10774,7 +10803,8 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
       startAt:Math.max(AC.currentTime,at||0),
       released:false,killed:false,press:0,pressN:[],nodes:[],
       release(t){ if(this.released)return; this.released=true;
-        const d=Math.max(0,((t??AC.currentTime)-AC.currentTime)*1000);
+        const tAt=t??AC.currentTime;             // the off lands HERE, not at timer arrival
+        const d=Math.max(0,(tAt-AC.currentTime)*1000);
         const off=()=>{ if(E.audBendCur[pi]!==sh)return;   // something newer owns it
           E.audBendCur[pi]=null;
           /* the shim keeps note priority again while the rack door is closed:
@@ -10784,10 +10814,10 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
           for(const o of (E.act[pi]||[]))
             if(o&&o._bend&&o!==sh&&!o.released&&!o.killed&&
                (!back||(o.bornAt||0)>(back.bornAt||0)))back=o;
-          if(back){E.audBendCur[pi]=back; E.audPitch(pi,back.semis); return;}
-          E.audPitch(pi,0); E.busEnvFire(pi,AC.currentTime,true);
-          if(!autoCur(S.presets[pi])){E.audStop(pi);return;}
-          if(E.audBendMovedClock(pi)){E.audReturn(pi);
+          if(back){E.audBendCur[pi]=back; E.audPitch(pi,back.semis,0,tAt); return;}
+          E.audPitch(pi,0,0,tAt); E.busEnvFire(pi,AC.currentTime,true);
+          if(!autoCur(S.presets[pi])){E.audStop(pi,Math.max(tAt,AC.currentTime+0.003));return;}
+          if(E.audBendMovedClock(pi)){E.audReturn(pi,tAt);
             setTimeout(()=>{try{E.audReturn(pi);}catch(_){}},80);} };
         if(d<2)off(); else setTimeout(off,d); },
       kill(){this.killed=true;this.release();},
@@ -10836,9 +10866,10 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
      sync on AND speed x1. Every other speed is wrong by that factor. The
      worklet walks the unbent phase beside the real one, so the answer is a
      number it already has. */
-  audReturn(pi){
+  audReturn(pi,at){
     const e9=this.gn&&this.gn[pi]; if(!e9||!e9.node)return;
-    try{e9.node.port.postMessage({t:'cret'});}catch(_){}
+    try{e9.node.port.postMessage({t:'cret',
+      frame:(Number.isFinite(at)&&at>AC.currentTime)?Math.round(at*AC.sampleRate):undefined});}catch(_){}
   }
   /* mono/legato: send the cursors that are already reading somewhere else */
   audMove(pi,frac,glideSec,bus,onlyCar,at){
@@ -18181,7 +18212,20 @@ function retroCapture(){
      note played on beat 3 comes back on beat 3. The window end snaps to the
      nearest cycle line so a slightly-late tap still gets the cycle you played. */
   const snap=Math.min(4,L);
-  const endB=anc+Math.round((nowB-anc)/snap)*snap, from=endB-L;
+  /* …AND THE SNAP MUST NEVER THROW AWAY THE FRESHEST PLAYING (Gad,
+     2026-08-22: "arp live notes are just not being recorded" — the second
+     half, after the finger-entry fix). round() grabs the cycle BEHIND a
+     slightly-late tap, which is right when you finished on the line — but a
+     jam that ran past the bar left its newest steps beyond endB, and they
+     were simply dropped: 17 steps in the buffer, 10 in the lane, the missing
+     seven being the END of what he just played. If the buffer holds notes
+     newer than the rounded end, the window extends to the cycle that
+     contains them — the late-tap forgiveness now cuts both ways. */
+  let endB=anc+Math.round((nowB-anc)/snap)*snap;
+  let maxT9=-1e9;
+  for(const n of retroBuf[pi])if(n.t<=nowB+1e-6&&n.t>maxT9)maxT9=n.t;
+  if(maxT9>endB+1e-9)endB=anc+Math.ceil((maxT9-anc-1e-9)/snap)*snap;
+  const from=endB-L;
   RETRO.end[pi]=endB;
   const seg=retroBuf[pi].filter(n=>n.t>from-1e-9&&n.t<=endB+1e-9);
   if(!seg.length){flash('nothing played in the last '+fmtLen(lane)+
@@ -18311,7 +18355,7 @@ function recAudEvent(pi,tBeat,midi,vel,durBeats){
   if(kmodeOf(p)===1){
     const pk=Math.round(midi)-KBBASE;
     lane.clear(ev=>ev.pk===pk&&Math.abs(ev.t-t)<1e-6);
-    lane.events.push({t,pk,dur,born:performance.now()});
+    lane.events.push({t,pk,dur,vel:vel||0.9,born:performance.now()});
     audOverwrite(lane,t,dur,lane.events[lane.events.length-1]);
   }else{
     const cuts=(engine.audCuts(pi)||[]).length; if(!cuts)return;
@@ -21330,8 +21374,10 @@ function lateAudWrite(h){
     if(h.kind==='pmono'&&h.pk!==undefined)ent.pk=h.pk;
     else if(h.sl!=null)ent.cue=h.sl;
     else return;
-    retroBuf[h.pi].push(Object.assign({},ent));
-    if(retroBuf[h.pi].length>512)retroBuf[h.pi].shift();
+    if(!genOn(h.pi)){
+      retroBuf[h.pi].push(Object.assign({},ent));
+      if(retroBuf[h.pi].length>512)retroBuf[h.pi].shift();
+    }
     if(S.patterns[S.editPat].state==='rec'&&!genOn(h.pi)){
       const cp=lane._cap;
       const qt=cp?Math.max(0,h.tr-cp.t0):fmod(h.tr-editAnchor(),lane.len);
@@ -21391,8 +21437,10 @@ function endAudHold(c){
       const held8=h8.press!=null?((((h8._relAt)??AC.currentTime)-h8.press)/spb()):0.25;
       const dur8=Math.max(0.05,AUDMINMS/1000/spb(),held8);
       h8._durB=dur8;   // the release below is outside this block's scope
-      retroBuf[h8.pi].push({t:h8.tr,pk:h8.pk,dur:dur8});
-      if(retroBuf[h8.pi].length>512)retroBuf[h8.pi].shift();
+      if(!genOn(h8.pi)){   // the same stand-down as the pos release above
+        retroBuf[h8.pi].push({t:h8.tr,pk:h8.pk,dur:dur8});
+        if(retroBuf[h8.pi].length>512)retroBuf[h8.pi].shift();
+      }
       /* same rule on the pitch side: the arp's steps are the performance */
       if(S.patterns[S.editPat].state==='rec'&&!genOn(h8.pi)){
         const cp8=lane8._cap;
@@ -21419,6 +21467,19 @@ function endAudHold(c){
         if(!g8||g8.kind!=='pmono'||g8.pi!==h8.pi)continue;
         if(!prev8||(g8.press||0)>(prev8.press||0))prev8=g8;}
       if(prev8&&prev8.pk!==undefined){
+        /* THE DEPARTING KEY LETS GO OF ITS HANDLE FIRST (Gad, 2026-08-22: "go
+           ahead with the arp never stops fix" — and this same early return is
+           yesterday's stuck key). This branch handled the audible fall-back
+           and RETURNED, so the released key's rack handle was never released:
+           with an arp on, its pool entry kept until=Infinity and the arp
+           played that note forever — traced: one key releases clean
+           (until 4.6, emission stops at 11), the leak needs a second key and
+           this is the only path a second key takes. And the same leak left
+           the bend shim owning audBendCur, which is why the FIRST key could
+           never come home after (k1 up: sh1 RELEASE bails, bendCur=sh2).
+           The shim's own off() hands the bend to the newest bend still down,
+           so the explicit audPitch below remains as the glide shaper. */
+        if(h8.tv&&h8.tv.release){try{h8.tv.release(AC.currentTime);}catch(_){}}
         /* falling back IS landing on a held note, so it slides by the same
            rule that brought you here */
         const vm8=clamp(Math.round((S.presets[h8.pi].vox||{}).mode||0),0,2);
@@ -21434,67 +21495,49 @@ function endAudHold(c){
        the number the lane just wrote. */
     const rel8T=(T.playing&&CFG.qOn&&h8.tr!=null&&h8._durB!=null)
       ?gridTime(h8.tr)+h8._durB*spb():AC.currentTime;
+    /* THE LAST FINGER RUNS THE TAIL ITSELF (Gad, 2026-08-22: "do the same
+       fixes for pitch mode"). The mono stack spends the bend shims as keys
+       stack — by the time the LAST key lifts, its tv.release finds every shim
+       already released and does nothing, so the final key-up used to return
+       here having produced no audPitch(0) at all: the pitch stayed where the
+       last note left it, with nothing able to bring it home. So: release the
+       handle always (it closes the arp pool entry either way), return early
+       only while OTHER pmono fingers remain on this channel, and otherwise
+       fall through to the baseline tail — scheduled at rel8T, midi's off
+       time, frame-stamped, with an ownership guard so a new press cancels
+       it. */
+    const lastP8=!Object.keys(AUD.gk||{}).some(k8=>
+      (AUD.gk[k8]||{}).kind==='pmono'&&(AUD.gk[k8]||{}).pi===h8.pi);
     if(h8.tv&&h8.tv.release){try{h8.tv.release(Math.max(AC.currentTime,rel8T));}catch(_){}
-      dirty=true; return 'went';}
-    if(!Object.keys(AUD.gk).some(k8=>(AUD.gk[k8]||{}).kind==='pmono')){
-      /* AND THE WAY BACK GLIDES TOO (Gad, 2026-08-18: "go to note works,
-         return to autoloop isnt gliding"). Letting the last key go is landing
-         on the loop, and the loop is the note underneath — the same thing the
-         fall-back to another key already slides onto. It only slides when
-         there IS a loop to slide onto; with auto off the last key-up ends the
-         head, and sliding something to a stop is not a glide. */
-      const vg8=clamp(Math.round((S.presets[h8.pi].vox||{}).mode||0),0,2);
-      engine.audPitch(h8.pi,0,
-        (vg8===2&&autoCur(S.presets[h8.pi]))
-          ?Math.max(0.01,(S.presets[h8.pi].vox||{}).glide||0.08):0);
-      engine.busEnvFire(h8.pi,AC.currentTime,true);   // …and the key-up releases it
-      /* AUTO OFF: the last finger takes the head with it. With the loop off a
-         pitch key MAKES the one cursor, so it also has to end it — otherwise
-         the take runs on by itself at base pitch, which is what Gad heard, and
-         audCar then names a head nobody can reach. */
-      if(!autoCur(S.presets[h8.pi])){engine.audStop(h8.pi); dirty=true; return 'stop';}
-      /* WHY UP WAS WORSE THAN DOWN (Gad: "on pitching down and return it land
-         perfect but on pitching up and return it gets out of sync"). The rate
-         does not snap back, it SLEWS — c.step glides toward c.sTgt on a 20ms
-         time constant — so for ~60ms after the key-up the head is still moving
-         at the wrong speed, and correcting the position before that has
-         finished corrects it to a place the head immediately leaves.
-         The error is asymmetric because the rate delta is: +12st is x2, a
-         surplus of +1.0, while -12st is x0.5, a deficit of only -0.5. Up
-         overshoots twice as far as down undershoots, which is exactly the
-         asymmetry he heard.
-         So: correct once NOW (most of it, and it keeps the seam close to the
-         gesture) and once more after four time constants, when the rate has
-         actually landed and the remaining error is real rather than in
-         flight. */
-      /* AND IT COMES BACK IN TIME (Gad, 2026-08-17). In tape mode a pitch bend
-         IS a speed change — that is what tape means, and while you hold it the
-         head is supposed to run away. But the loop underneath it never moved:
-         the bar is where it always was, and letting go used to leave the head
-         wherever the bend had carried it, so the take was out of phase with
-         the clock for the rest of the session.
-         Under SYNC the loop has an opinion about where in the take you should
-         be, and audRelock is exactly that opinion — it puts the head at the
-         point the current bar position asks for, through the same 3ms
-         equal-power splice a cue flip uses, so it is a seam and not a click.
-         FREE has no such opinion and audRelock returns early there, which is
-         right: a free take is not on the clock and has nowhere to come back
-         to. So this is one call and it does the correct nothing when free. */
-      /* …ONTO THE SHADOW, NOT ONTO A MAP OF THE BAR. audRelock's linear map is
-         right only at speed x1; at x0.25 it is four times too far forward,
-         which is the throw Gad reported. audReturn lands on the phase the
-         cursor would have had unbent, which is the same answer at every speed.
-         Still two-stage: the rate SLEWS back over ~20ms, so for a moment after
-         the first splice the head is still moving wrong, and the second one at
-         four time constants takes out what that cost. */
-      const pi7=h8.pi;
-      if(engine.audBendMovedClock(pi7)){
-        engine.audReturn(pi7);
-        setTimeout(()=>{try{
-          if(AUD.gk&&Object.keys(AUD.gk).some(k7=>(AUD.gk[k7]||{}).pi===pi7))return;
-          engine.audReturn(pi7);
-        }catch(_){}},80);
-      }
+      if(!lastP8){dirty=true; return 'went';}}
+    if(lastP8){
+      const fin8=()=>{try{
+        if(Object.keys(AUD.gk||{}).some(k8=>
+          (AUD.gk[k8]||{}).kind==='pmono'&&(AUD.gk[k8]||{}).pi===h8.pi))return;
+        /* AND THE WAY BACK GLIDES TOO (Gad, 2026-08-18): landing on the loop
+           is landing on the note underneath; with auto off there is nothing
+           to slide onto and the key-up ends the head. */
+        const vg8=clamp(Math.round((S.presets[h8.pi].vox||{}).mode||0),0,2);
+        engine.audPitch(h8.pi,0,
+          (vg8===2&&autoCur(S.presets[h8.pi]))
+            ?Math.max(0.01,(S.presets[h8.pi].vox||{}).glide||0.08):0,
+          Math.max(rel8T,AC.currentTime));
+        engine.busEnvFire(h8.pi,AC.currentTime,true);
+        if(!autoCur(S.presets[h8.pi])){
+          engine.audStop(h8.pi,Math.max(rel8T,AC.currentTime+0.003)); return;}
+        /* two-stage return: once now, once after the rate slew has landed —
+           the up/down asymmetry note lives in git history with the numbers */
+        const pi7=h8.pi;
+        if(engine.audBendMovedClock(pi7)){
+          engine.audReturn(pi7,Math.max(rel8T,AC.currentTime));
+          setTimeout(()=>{try{
+            if(AUD.gk&&Object.keys(AUD.gk).some(k7=>(AUD.gk[k7]||{}).pi===pi7))return;
+            engine.audReturn(pi7);
+          }catch(_){}},80);
+        }
+      }catch(_){}};
+      const w8=Math.max(0,(rel8T-AC.currentTime)*1000);
+      if(w8<2)fin8(); else setTimeout(fin8,w8);
     }
     dirty=true; return 'stop';
   }
@@ -21628,8 +21671,19 @@ function endAudHold(c){
        and a tap into a sustained slice no longer grows to a full grid. */
     const durB=relB9;   // the same number the audible off was scheduled with
     if(sl!=null&&tr!=null){
-      retroBuf[pi].push({t:tr,cue:sl,dur:durB});
-      if(retroBuf[pi].length>512)retroBuf[pi].shift();
+      /* THE KEY'S OWN PUSH STANDS DOWN UNDER A GENERATOR, IN RETRO TOO (Gad,
+         2026-08-22: "arp live notes are just not being recorded" — position,
+         his gesture is retro). The LANE write below has had this guard for
+         days; the retro push did not, so the buffer held the arp's 17 steps
+         PLUS the two held keys as ~1.9-beat entries. retroCapture merged all
+         19 — and gesture-scoped overwrite then did exactly what it is told:
+         the two long finger entries swallowed every step under their span.
+         19 in the buffer, 10 in the lane. recPlayNote already wrote the steps;
+         the fingers are not the performance while a generator is playing. */
+      if(!genOn(pi)){
+        retroBuf[pi].push({t:tr,cue:sl,dur:durB});
+        if(retroBuf[pi].length>512)retroBuf[pi].shift();
+      }
       /* NOT WHILE A GENERATOR IS RUNNING. With an arp the notes you heard were
          its steps, and recPlayNote has already written every one of them —
          writing the HELD key on top adds a jump nobody played. Measured: 16
@@ -22994,7 +23048,16 @@ function genOn(pi,midi){
   if(!T.playing)return false;
   const pre=S.presets[pi]; if(!pre)return false;
   const rack=isKit(pre)?((kitSlot(pre,midi)||{ply:[]}).ply):pre.ply;
-  return (rack||[]).some(sl=>(sl.typ===2||sl.typ===1||sl.typ===13)&&!sl.off);
+  /* EVERY live generator the POOL knows, not just the arp (Gad, 2026-08-22:
+     "maybe you are recording the presses going in to the arp but not the
+     out"). With euclid, live ratchet, cycle or spray on the rack, this said
+     "no generator" — so the held key recorded itself and the generator's
+     output recorded nothing, which reads exactly as presses-in, nothing-out.
+     Same family the pool test names: arp/chord/flam plus euc, rtc (live only,
+     p1>=2), cyc, spry. */
+  return (rack||[]).some(sl=>!sl.off&&(
+    sl.typ===2||sl.typ===1||sl.typ===13||sl.typ===9||sl.typ===16||sl.typ===17||
+    (sl.typ===15&&Math.round(sl.p1??0)>=2)));
 }
 function clearLane(pi){
   const l=S.patterns[S.editPat].lanes[pi];
