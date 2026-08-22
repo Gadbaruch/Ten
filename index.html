@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-21.2215';
+const BUILD='2026-08-22.0730';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -5787,7 +5787,14 @@ function scheduleRange(from,to){
                      stroke. Same one-word fix as the live side. */
                   if(l7)engine.audPlay(li,Math.max(atP1,AC.currentTime+0.003),l7.len,0,{semis:ev.pk});
                 }
-                engine.audPitch(li,ev.pk,0,atP1);}catch(_){}},ms1);
+                engine.audPitch(li,ev.pk,0,atP1);
+                /* THE ENVELOPE IS THE ARTICULATION (Gad, 2026-08-22: "fix arp
+                   recording to match performance"). A live pitch step fires
+                   the bus envelope on the way in and releases it on the way
+                   out — that attack per step IS what an arp sounds like. The
+                   replay changed pitch and fired nothing, so a recorded arp
+                   came back as a drone of bends. Same fire, same sample. */
+                engine.busEnvFire(li,Math.max(atP1,AC.currentTime));}catch(_){}},ms1);
               /* AND THE RECORDED BEND COMES BACK IN TIME TOO. The live one got
                  its relock on the key-up; this one had none, so every replay
                  of a stored bend left the take a little further out of phase
@@ -5853,6 +5860,7 @@ function scheduleRange(from,to){
                  ride the event's own sample, not the timer's arrival */
               const atR3=timeAt(t+dur3+a.anchor);
               setTimeout(()=>{try{if(!(AUD.hold&&AUD.hold.pi===li)){
+                engine.busEnvFire(li,Math.max(atR3,AC.currentTime),true);
                 engine.audPitch(li,0,0,atR3);
                 if(!autoCur(S.presets[li])){engine.audStop(li,Math.max(atR3,AC.currentTime+0.003));return;}
                 if(engine.audBendMovedClock(li)){engine.audReturn(li,atR3);
@@ -5959,7 +5967,7 @@ function scheduleRange(from,to){
               const atE7=timeAt(te7+a.anchor);
               setTimeout(()=>{try{
                 if(AUD.hold&&AUD.hold.pi===li)return;   // a finger owns it now
-                engine.busEnvFire(li,AC.currentTime,true);
+                engine.busEnvFire(li,Math.max(atE7,AC.currentTime),true);
                 if(nxt7)return;                         // another jump is already coming
                 if(off7){engine.audStop(li,Math.max(atE7,AC.currentTime+0.003));return;}    // no bar to hand it back to
                 engine.audRelock(li);                   // …back where the bar asks
@@ -18317,7 +18325,7 @@ function recAudEvent(pi,tBeat,midi,vel,durBeats){
   if(kmodeOf(p)===1){
     const pk=Math.round(midi)-KBBASE;
     lane.clear(ev=>ev.pk===pk&&Math.abs(ev.t-t)<1e-6);
-    lane.events.push({t,pk,dur,born:performance.now()});
+    lane.events.push({t,pk,dur,vel:vel||0.9,born:performance.now()});
     audOverwrite(lane,t,dur,lane.events[lane.events.length-1]);
   }else{
     const cuts=(engine.audCuts(pi)||[]).length; if(!cuts)return;
