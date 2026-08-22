@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-22.1207';
+const BUILD='2026-08-22.1715';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -10526,6 +10526,26 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     if(t<s0-1e-6)t+=L;
     for(;t<s1-1e-9;t+=L){
       if(free&&(this.audCar||[])[li])return;
+      /* A HELD CUE KEY OWNS THE HEAD ACROSS THE BAR LINE (Gad, 2026-08-22:
+         "holding new position gets reset by the autoloop everytime the
+         autoloop gets retriggered — would be nice to ignore the retriggering
+         but still return to correct autoloop position when releasing key").
+         The cycle re-fires the carrier every bar, and the carrier is the head
+         the key moved — so each bar line snapped it back under the finger.
+         While a position key is held on this channel the carrier is not
+         re-fired; its life is extended to the NEXT boundary instead, so it
+         neither dies there nor restarts. The key-up already hands the head
+         back to the bar (audRelock), which is the "return to the correct
+         position" half, unchanged. */
+      const held9=(AUD.hold&&AUD.hold.pi===li&&AUD.hold.kind==='pos')||
+        Object.keys(AUD.gk||{}).some(k9=>(AUD.gk[k9]||{}).pi===li&&(AUD.gk[k9]||{}).kind==='pos');
+      const car9=(this.audCar||[])[li];
+      if(held9&&car9){
+        const e9=this.gn&&this.gn[li];
+        if(e9&&e9.node){try{e9.node.port.postMessage({t:'tset',car:car9,
+          dieF:Math.round(timeAt(t+L)*AC.sampleRate)});}catch(_){}}
+        continue;
+      }
       this.audPlay(li,timeAt(t),L);
     }
   }
@@ -10690,6 +10710,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
         :(cue||rate<0||!Math.round(au.fit||0)||!autoCur(S.presets[pi]))?1e6
         :Math.max(0.05,loopSec-skipSec);
     (this.audSpawn=this.audSpawn||[])[pi]={until:Math.max(at,AC.currentTime)+lifeS9};
+    (this.audStopAt=this.audStopAt||[])[pi]=null;   // a spawn outranks any earlier stop
     return this._lastTid;
   }
   /* a fade-out then the stop, so a released cue does not click on the way out */
@@ -10984,6 +11005,14 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     (this.audCar=this.audCar||[])[pi]=null;   // the carrier goes with everything else
     (this.audCarAt=this.audCarAt||[])[pi]=null;   // …and so does when it started
     (this.audSpawn=this.audSpawn||[])[pi]=null;   // …and the spawn ledger: stopped is not rolling
+    /* …AND THE STAT IS STALE FROM HERE (Gad, 2026-08-22: pitch + arp, autoloop
+       off, "A _ A _ A _ the _ being just silence"). A step's release stops the
+       head; the next step asks audRolling 14ms later; the ledger is clear but
+       the worklet's stat still reports the dying cursor for a frame or two,
+       so it said "rolling", skipped the spawn, and bent a head that was
+       already stopping. Every second step spawned. The stop's own time is the
+       truth: once it is due, the stat cannot mean rolling. */
+    (this.audStopAt=this.audStopAt||[])[pi]=Math.max(AC.currentTime,at||AC.currentTime);
     const e9=this.gn&&this.gn[pi];
     if(e9&&e9.node){try{e9.node.port.postMessage(
       {t:'tclr',frame:Math.round(at*AC.sampleRate)});}catch(_){}}
@@ -11212,6 +11241,8 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     if((this.audCar||[])[pi])return true;
     const sp9=(this.audSpawn||[])[pi];
     if(sp9&&AC.currentTime<sp9.until)return true;   // spawned this tick counts — see audPlay
+    const sa9=(this.audStopAt||[])[pi];
+    if(sa9!=null&&AC.currentTime>=sa9-0.002)return false;   // a stop is due: the stat is stale — see audStop
     const st=(this.gn&&this.gn[pi]&&this.gn[pi].stat)||null;
     return !!(st&&(st.tv|0)>0);
   }
