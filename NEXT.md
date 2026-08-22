@@ -284,6 +284,41 @@ one monoTrigger already keeps. The question to ask before writing any of it:
       the grid; only the recorded number changed.
 
 ## Landed this session — all measured unless it says otherwise
+- **[branch] ARP HOLDS PITCH UNDER A HELD KEY (auto on); OVERWRITE TELLS CHORD
+  FROM TAKE.** Standing #3's autoloop-ON half: an arp step released at 85%,
+  next onset at 100%, and the 15% gap played the loop at baseline — an audible
+  extra note. A step under a held finger hands over silently now (envelope
+  released = the chop, pitch held for the next step); key-up does the real
+  return. **auto on: steady 4@… , zeros only at the key-up.** Standing #2:
+  layered overwrite spared a note at the new onset as a "chord" — now `born`
+  distinguishes a real chord (same gesture, <60ms) from an older take.
+  **chord survives, older note at the onset clears, long hold clears its whole
+  span.**
+
+- **[branch] A HELD CUE OWNS THE HEAD ACROSS THE BAR LINE.** Gad's standing
+  bug #1 (position, autoloop ON): audCycle re-fired the carrier every bar, and
+  the carrier IS the head the key moved — every bar line snapped it back under
+  the finger. While a position key is held the cycle no longer re-fires; it
+  extends the carrier's life to the NEXT boundary via tset. The key-up's
+  audRelock still hands the head back to the bar. **Two bar lines crossed
+  while held: 0 carrier spawns, head 0.073→0.197→0.198 (continuous, the
+  synced crop wrapping), release → relock, head back at the bar.**
+- **[branch] A STOP OUTRANKS THE STALE STAT.** Standing bug #3 (pitch + arp,
+  autoloop OFF, "A _ A _"): a step's release audStops the head; the next step
+  asks audRolling 14ms later; the ledger is clear but the worklet stat still
+  reports the dying cursor, so it said "rolling", skipped the spawn, and bent
+  a stopping head — every second step silent. audStop records its time;
+  audRolling refuses the stat once a stop is due; any spawn clears it.
+  **11 spawns for 10 steps** (was one in two). Auto ON measures 84% duty —
+  the arp's designed div*0.85 gate, a parameter if he wants it changed.
+- **[branch, measured, not a bug so far] PITCH LENGTHS.** Standing bug #2:
+  four holds of known length, pitch mode, both autoloop states —
+  held 0.325/0.15/0.549/0.133 → live 0.334/0.15/0.544/0.125 → lane
+  0.342/0.154/0.551/0.143 → replay identical to the lane. Layered take
+  overwrote correctly. ONE oddity under investigation: five live spans for
+  four holds — a phantom short bend after a fast tap that the lane does not
+  contain (live ≠ recording by one ghost note).
+
 - **[branch] WITH THE LOOP OFF, THE REPLAY'S MOVES NEVER REACHED THE HEAD.**
   "arp still not being recorded" — his export: all 13 steps recorded (dur
   0.212, cues 10/13/14). The replay sent audMove with onlyCar=1; with autoloop
