@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-22.2139';
+const BUILD='2026-08-22.2152';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -6921,6 +6921,45 @@ class Voice{
         outN2.connect(merge);
         this.nodes.push(nd);
         this._fmw=this._fmw||[]; this._fmw.push(nd);
+        /* A HARD CEILING ON LIVE WORKLET NODES, ENFORCED AT BIRTH (Gad,
+           2026-08-22: capping VOICES did nothing because the cut is not voice
+           count — a dense loop makes phase worklets faster than their ~1.4s
+           release tails free them, so 4 live voices sat under ~50 decaying
+           worklet nodes and THAT is the 130% CPU. The voice cap counts act[];
+           these tails are already spliced out of act[] and invisible to it.
+           So the engine keeps its own FIFO of every live ten-fmop node and
+           when a new one would pass FMWCEIL it force-ends the OLDEST — which
+           is the quietest, furthest into its release, inaudible when killed.
+           His held sound (a few live voices) is never touched; only the pile
+           of decaying tails is trimmed, and the audio thread can never drown
+           however dense the loop. */
+        {const E9=this.eng||engine; E9._fmwReg=E9._fmwReg||[];
+         const ent9={nd,pi:this.pi,v:this};
+         E9._fmwReg.push(ent9);
+         const FMWCEIL=18;
+         let guard9=0;
+         while(E9._fmwReg.length>FMWCEIL&&guard9++<64){
+           /* EVICT THE OLDEST RELEASED TAIL FIRST — never a held note (Gad,
+              2026-08-22: he holds uni-7 chords over a dense loop; a plain FIFO
+              would kill his oldest HELD note before the loop's decaying tails).
+              Same policy the voice steal loop uses: oldest already-released,
+              then oldest of any only if every node is still held (a true
+              polyphony limit). Faded out by Voice.kill (fast), never stopped
+              dead, so no click. */
+           let vic=-1,best=Infinity;
+           for(let k=0;k<E9._fmwReg.length;k++){const e=E9._fmwReg[k];
+             if(!e||e===ent9||!e.v)continue;
+             if((e.v.released||e.v.killed)&&(e.v.relAt??e.v.startAt??0)<best){best=e.v.relAt??e.v.startAt??0;vic=k;}}
+           if(vic<0){best=Infinity;
+             for(let k=0;k<E9._fmwReg.length;k++){const e=E9._fmwReg[k];
+               if(!e||e===ent9||!e.v)continue;
+               if((e.v.startAt??0)<best){best=e.v.startAt??0;vic=k;}}}
+           if(vic<0)break;
+           const old9=E9._fmwReg.splice(vic,1)[0];
+           if(old9.v&&!old9.v.killed){try{old9.v.kill(AC.currentTime,true);}catch(_){}}
+           else{try{old9.nd.port.postMessage({t:'kill'});}catch(_){}
+                try{old9.nd.disconnect();}catch(_){}}
+         }}
         /* REGISTER THE WORKLET'S PARAMS WHERE THE MOD RACK ALREADY LOOKS.
            opDet is read as {pm,sc} with sc>=1 meaning "cents", opAmt as {g,sc}
            where g.gain is the level — so a d-param and a gain-shaped shim make
@@ -7869,6 +7908,8 @@ class Voice{
       setTimeout(()=>{
         for(const n of (this._fmw||[])){try{n.port.postMessage({t:'kill'});}catch(_){}
                                   try{n.disconnect();}catch(_){}}
+        const E9=this.eng||engine;   // …and out of the node-ceiling FIFO
+        if(E9&&E9._fmwReg)E9._fmwReg=E9._fmwReg.filter(e=>e.v!==this);
         const a=this.eng&&this.eng.act[this.pi];
         if(a){const i=a.indexOf(this); if(i>=0)a.splice(i,1);}
       },ms);
@@ -10055,7 +10096,10 @@ class Engine{
        CPU wants more phase voices he raises POLYBUDGET_PHASE, if less he
        lowers it. A voice's SOUND is untouched either way. */
     const fmwCh=Math.round((modHolder(p,'vox').vox||{}).fmw||0)===1;
-    const POLYBUDGET_NATIVE=588, POLYBUDGET_PHASE=196;   // phase 196 = 4 of his uni-7 voices (diagnostic floor)
+    /* phase back to native's budget: the FMWCEIL node ceiling above is the
+       real CPU bound now (a dense loop's decaying tails, not voice count, were
+       the drown), so this voice budget no longer needs to be phase-special */
+    const POLYBUDGET_NATIVE=588, POLYBUDGET_PHASE=588;
     const POLYBUDGET=(fmwCh?POLYBUDGET_PHASE:POLYBUDGET_NATIVE)*POLYX;
     const CAP=clamp(Math.round(POLYBUDGET/costP),4,24*POLYX);
     /* THE DEAD DO NOT HOLD A SEAT (Gad, 2026-08-21: "audio drops at passing
