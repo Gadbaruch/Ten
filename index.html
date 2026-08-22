@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-22.2115';
+const BUILD='2026-08-22.2128';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -10026,7 +10026,26 @@ class Engine{
        phase voice its unison capped ch7 at eight voices, which is worse than
        the drop it was hiding. Fewer voices is not a fix, it is the bill. The
        real phase-engine cost lives in how a stolen voice dies — see kill(). */
-    const CAP=24*POLYX;
+    /* THE CAP IS AN OSCILLATOR BUDGET, NOT A VOICE COUNT (Gad, 2026-08-22:
+       "cpu reaches and stays on 130 a second after audio cut" — confirmed the
+       audio thread drowning, on BOTH engines at the same spot, so it is the
+       oscillator count, which is identical between them). A voice's CPU cost
+       is uni x active-ops: his BES1 is uni 7 x 7 saw ops = 49 oscillators per
+       voice, where a plain patch is ~2. A flat 24-voice cap is 24 x 49 = 1176
+       oscillators on his heavy patch and 24 x 2 = 48 on a light one — the same
+       number meaning wildly different load. So the ceiling is a budget of
+       oscillators: a heavy patch gets fewer voices, a light one keeps all 24,
+       and the graceful steal (oldest-released) is unchanged. 588 = 12 of his
+       voices (three of his four-note chords), which sits under the ~16-voice
+       point his machine died at; a uni-1 two-op patch still caps at 24. He can
+       dial POLYBUDGET on 3033. */
+    const oscP=modHolder(p,'osc').osc||p.osc||[];
+    let opsP=0; for(let i=0;i<oscP.length;i++){const o=oscP[i];
+      if(o&&!o.off&&(i===0||(o.amt||0)>0.001))opsP++;}
+    const uniP=Math.max(1,Math.round((modHolder(p,'vox').vox||{}).uni||1));
+    const costP=Math.max(1,opsP*uniP);
+    const POLYBUDGET=588*POLYX;
+    const CAP=clamp(Math.round(POLYBUDGET/costP),4,24*POLYX);
     /* THE DEAD DO NOT HOLD A SEAT (Gad, 2026-08-21: "audio drops at passing
        20v and continues to climb up to 70v"). The steal loop below KILLS but
        never splices, so a killed voice stayed in `act` for good: measured,
