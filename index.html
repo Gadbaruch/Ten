@@ -1217,7 +1217,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-22.2134';
+const BUILD='2026-08-22.2139';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -10055,7 +10055,7 @@ class Engine{
        CPU wants more phase voices he raises POLYBUDGET_PHASE, if less he
        lowers it. A voice's SOUND is untouched either way. */
     const fmwCh=Math.round((modHolder(p,'vox').vox||{}).fmw||0)===1;
-    const POLYBUDGET_NATIVE=588, POLYBUDGET_PHASE=294;
+    const POLYBUDGET_NATIVE=588, POLYBUDGET_PHASE=196;   // phase 196 = 4 of his uni-7 voices (diagnostic floor)
     const POLYBUDGET=(fmwCh?POLYBUDGET_PHASE:POLYBUDGET_NATIVE)*POLYX;
     const CAP=clamp(Math.round(POLYBUDGET/costP),4,24*POLYX);
     /* THE DEAD DO NOT HOLD A SEAT (Gad, 2026-08-21: "audio drops at passing
