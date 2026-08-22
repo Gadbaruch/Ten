@@ -284,6 +284,23 @@ one monoTrigger already keeps. The question to ask before writing any of it:
       the grid; only the recorded number changed.
 
 ## Landed this session — all measured unless it says otherwise
+- **[audio-voices branch] THE VOICE CEILING FELL FROM 24 TO 8 — A DORMANT CAP
+  WOKE UP.** Gad: "it used to go up to 24v or 30v and didnt have audio cuts."
+  Measured, his ch7 supersaw (native, uni 7): pre-compaction 1801 held 24 live,
+  current 1734 held 8 (16 with the loop stopped). noteOn has two poly caps —
+  the graceful CAP=24 steal loop and a crude `act.length>=16 → kill act[0]`.
+  The 16 one was dormant for months: before "the dead do not hold a seat"
+  (1827) spliced killed voices, act[0] was always already-dead, so killing it
+  did nothing. The compaction made act[0] a LIVE voice → the 16-cap woke and
+  halved the channel. Both caps are CAP now; sound unchanged. **23 live with
+  his loop + 16 keys, zero near-silent blocks, ctx running.** Stealing
+  confirmed = the CAP loop, oldest-released-first.
+  ⚠ NOT the same as the audio-thread choke on his hardware: my machine never
+  dropped in the preview OR the gstack browser (headless can't resume audio).
+  His 3033 test is the truth. If it still drops with 24 restored, THEN it is
+  CPU (49 osc/voice × loop × live) and the fix is fewer osc/voice (uni), not a
+  bigger cap.
+
 - **[branch] ARP HOLDS PITCH UNDER A HELD KEY (auto on); OVERWRITE TELLS CHORD
   FROM TAKE.** Standing #3's autoloop-ON half: an arp step released at 85%,
   next onset at 100%, and the 15% gap played the loop at baseline — an audible
