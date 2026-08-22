@@ -2,8 +2,9 @@
 
 ## THE BRANCH PROTOCOL — from 2026-08-21 evening, Gad's call
 
-**MERGED 2026-08-22** ("lets commit and merge, its progress"): the accuracy
-batch is on main and LIVE — build 2026-08-21.2203 is the new floor. Every
+**MERGED 2026-08-22, TWICE.** First the accuracy batch (2026-08-21.2203), then
+the arp batch — "hallelujah it works" — build **2026-08-22.1207** is the new
+floor, on main and LIVE. Every
 [branch] entry below is now main. `audio-fixes` was reset onto main and stays
 the workbench for the next batch; the protocol continues unchanged.
 
