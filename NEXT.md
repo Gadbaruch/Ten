@@ -2,9 +2,11 @@
 
 ## THE BRANCH PROTOCOL — from 2026-08-21 evening, Gad's call
 
-**MERGED 2026-08-22, TWICE.** First the accuracy batch (2026-08-21.2203), then
-the arp batch — "hallelujah it works" — build **2026-08-22.1207** is the new
-floor, on main and LIVE. Every
+**MERGED 2026-08-22, FOUR TIMES.** The accuracy batch (.2203), the arp batch
+("hallelujah it works", .1207), the standing-bugs batch (1/2/3, .1734), and the
+voice/CPU batch ("no cut now, keep the ceiling", **2026-08-22.2152**) — the
+current floor, on main and LIVE. The last one's real fix: the audio cut was a
+leaking pile of decaying ten-fmop worklet tails, bounded now at FMWCEIL=18. Every
 [branch] entry below is now main. `audio-fixes` was reset onto main and stays
 the workbench for the next batch; the protocol continues unchanged.
 
