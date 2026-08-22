@@ -284,6 +284,17 @@ one monoTrigger already keeps. The question to ask before writing any of it:
       the grid; only the recorded number changed.
 
 ## Landed this session — all measured unless it says otherwise
+- **[branch] ARP HOLDS PITCH UNDER A HELD KEY (auto on); OVERWRITE TELLS CHORD
+  FROM TAKE.** Standing #3's autoloop-ON half: an arp step released at 85%,
+  next onset at 100%, and the 15% gap played the loop at baseline — an audible
+  extra note. A step under a held finger hands over silently now (envelope
+  released = the chop, pitch held for the next step); key-up does the real
+  return. **auto on: steady 4@… , zeros only at the key-up.** Standing #2:
+  layered overwrite spared a note at the new onset as a "chord" — now `born`
+  distinguishes a real chord (same gesture, <60ms) from an older take.
+  **chord survives, older note at the onset clears, long hold clears its whole
+  span.**
+
 - **[branch] A HELD CUE OWNS THE HEAD ACROSS THE BAR LINE.** Gad's standing
   bug #1 (position, autoloop ON): audCycle re-fired the carrier every bar, and
   the carrier IS the head the key moved — every bar line snapped it back under
