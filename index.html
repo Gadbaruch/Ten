@@ -1230,7 +1230,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-22.2239';
+const BUILD='2026-08-22.2340';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -6572,13 +6572,22 @@ class Voice{
       /* the mod slot AS MODULATED — an envelope whose decay is being swept
          hands this note the swept value, not the one in the slot */
       const me=E.ovObj(pi,'mod',mi2,m);
-      for(const rt of effRoutes(m)){
+      /* ONE effRoutes() CALL, INDEXED. `ri` is the position in the loop, NOT
+         effRoutes(m).indexOf(rt): effRoute returns a NEW object for an ADDRESS
+         route (dst:0 + addr), so a second effRoutes(m) call makes fresh objects
+         and indexOf(rt) is -1. That -1 rode into the handle, modReaim did
+         `effRoutes(m)[-1]` = undefined and SKIPPED it — which is why a learned
+         (addr) LFO/env on pitch could not be tweaked live while a dst route
+         could. The index is identical for both since effRoutes maps 1:1. */
+      const erts=effRoutes(m);
+      for(let ri=0;ri<erts.length;ri++){
+        const rt=erts[ri];
         if(rt.tgt)continue;                      // learned addresses handled separately below
         if(m.src===1&&MD2ENV[rt.dst]&&Math.abs(rt.amt)>0.5){
           const T3=clamp(me.tmul??1,0.1,4);   // time × scales every stage at once
           /* mi/ri ride along so a scheduled envelope can leave a live handle
              and be re-aimed mid-note, the way a connected source is */
-          envs.push({dst:MD2ENV[rt.dst],idx:rt.idx,amt:rt.amt,mi:mi2,ri:effRoutes(m).indexOf(rt),
+          envs.push({dst:MD2ENV[rt.dst],idx:rt.idx,amt:rt.amt,mi:mi2,ri,
                      a:me.a*T3,d:me.d*T3,s:me.s,r:me.r*T3,crv:me.crv,
                      lp:clamp(me.lp||0,0,1),lsyn:me.lsyn,lrate:me.lrate,
                      lrdiv:me.lrdiv,lfit:me.lfit});
@@ -6589,7 +6598,7 @@ class Voice{
              only for the pan check, which the control tick still owns */
           lfoList.push({dst:MD2LFO[rt.dst],idx:rt.idx,wav:m.wav,rate:lfoHz(me),skw:me.skw||0,
                         amt:rt.amt,ph:me.ph??m.ph,free:Math.round(m.ltr||0)===1,mi:mi2,
-                        rt,ri:effRoutes(m).indexOf(rt)});
+                        rt,ri});
       }
     }
     /* amp-target mods (vel/key/rnd) scale the envelope PEAK — never a DC
