@@ -1,5 +1,36 @@
 # WHERE THE AUDIO CHANNEL STANDS — 2026-08-20, main
 
+## LIVE PITCH-MOD-AMOUNT TWEAK — OPEN, waiting on his export (branch `live-mod` = main)
+
+Ask: "pitch live amount mods dont [work]" while "filter lfo amount indeed already
+work." SYNTH channel, not audio.
+
+**A wrong turn first, now reverted:** I misread and built a `busReaim` for AUDIO
+channels (he'd been deep in audio, so I assumed that was the target). He does NOT
+want audio touched ("took a few days"). REVERTED — `git reset --hard main`, index.html
+is byte-identical to main (.2239). Lesson re-learned: he said synth; I inferred
+audio from session history. Ask which channel, don't infer.
+
+**Then I could not reproduce the failure.** Every synthetic build of "hold a note,
+dial a pitch-mod amount" re-aims the HELD note live on 3032:
+- native LFO→pitch: depth 384→2399
+- phase (vox.fmw=1) LFO→voice-pitch (idx0): swing **32Hz→118Hz** audible, depth 384→2396
+- phase ENV→pitch (idx0, sustain 0.7): held pitch **93Hz→414Hz**
+- phase LFO→operator-ratio (idx1): depth 384→2399
+All same held voice, no retrigger. The machinery: synth mod edits →
+`applyParam`→`lfoLive`+`envLive`+`modReaim`, all of which `setTargetAtTime` the
+RUNNING oscillator/gain in place. The `ten-fmop` worklet reads its `d` (detune)
+params a-rate (line 5479, `inc=o.inc*2^(cents/1200)`), so it applies live.
+
+**So his patch or gesture differs from mine.** Candidates not yet excluded:
+his exact op stack (7 ops, mixed FM/add modes — a different opDet population),
+an env with sustain=0 (which CAN only change the next note, since the attack on
+the held note already happened — this may be the whole thing), or the gesture
+(can he hold the note AND dial? filter uses the same gesture though, so less
+likely). NEED: his export (the supersaw + the failing mod slot) and whether the
+HELD note stays unmoved or only the NEXT note changes. Do NOT build a fix before
+reproducing on his set.
+
 ## SYNTH-SHAPING — MERGED to main + LIVE 2026-08-22.2239
 
 The new floor. Three asks, in his words: (1) max-uni wide should be **wider,
