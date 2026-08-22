@@ -1230,7 +1230,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-22.2340';
+const BUILD='2026-08-22.2352';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -9170,7 +9170,11 @@ class Engine{
           const src=this._modSrc(m,pi,now,mi2); if(src===null)continue;
           for(const h of hits){
             const sp=h.spec;
-            const base=h.slot[sp.key]??destSpan(sp)[0];
+            /* the spec's own getter when it has one — a mod slot's `amt` lives in
+               routes[].amt, not slot.amt, so h.slot['amt'] was undefined and the
+               base fell back to the range floor. `rate` sits on the slot, which
+               is why mod->mod on rate worked and on amount did not. */
+            const base=(sp.get?sp.get(h.slot):h.slot[sp.key])??destSpan(sp)[0];
             /* amt and center in the same units: ±200% is the whole range, so
                200 on a bipolar source reaches both ends of whatever it is
                pointed at, and 100 reaches half. It used to be span-per-100%
@@ -9278,10 +9282,23 @@ class Engine{
     const m=(S.presets[pi].mod||[])[si]; if(!m||m.src!==2)return false;
     const n=AC.currentTime;
     for(const vo of this.act[pi]||[]){
+      /* AMOUNT aims the REAL depth: the modN 'lfo' gains (g3), the same handles
+         modReaim moves. lfoN.lg is built but never connected on the normal path,
+         so the old `L.lg.gain` write modulated nothing — which is why mod->mod on
+         RATE worked (a real oscillator frequency) and on AMOUNT did not. Same
+         tapered depth as everywhere else, lin for the learned path. */
+      if(key==='amt'){
+        for(const h of vo.modN||[]){
+          if(!h||h.mi!==si||h.kind!=='lfo')continue;
+          const rt=(m.routes||[])[h.ri];
+          const amt=v===undefined?((rt&&rt.amt)||0):v;
+          h.p.setTargetAtTime(h.lin?(amt/100)*(h.span||0):MODTAPER(amt)*(h.span||0),n,0.02);
+        }
+        continue;
+      }
       if(!vo.lfoN)continue;
       for(const L of vo.lfoN){
-        if(L.mi!==si||!L.lo||!L.lg)continue;
-        if(L.g0===undefined)L.g0=L.lg.gain.value;
+        if(L.mi!==si||!L.lo)continue;
         if(key==='rate')L.lo.frequency.setTargetAtTime(
           clamp(v===undefined?lfoHz(m):v,0.02,80),n,0.02);
         /* a division INDEX, not a frequency — so it is turned into one against
@@ -9289,8 +9306,6 @@ class Engine{
         else if(key==='rdiv')L.lo.frequency.setTargetAtTime(
           clamp(v===undefined?lfoHz(m)
                 :1/(LFODIV[clamp(Math.round(v),0,LFODIV.length-1)][1]*spb()),0.02,80),n,0.02);
-        else if(key==='amt'&&L.base)L.lg.gain.setTargetAtTime(
-          L.g0*((v===undefined?L.base:v)/L.base),n,0.02);
       }
     }
     return true;
