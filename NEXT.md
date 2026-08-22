@@ -278,6 +278,18 @@ one monoTrigger already keeps. The question to ask before writing any of it:
       the grid; only the recorded number changed.
 
 ## Landed this session — all measured unless it says otherwise
+- **[branch] RETRO RECORDS THE ARP — two eaters, one misread.** Three-gesture
+  matrix put the loss on retro alone. (1) The audio releases' RETRO pushes
+  never had the genOn stand-down the lane write has had for days — the held
+  keys entered the buffer as ~1.9-beat entries and gesture-scoped overwrite
+  let them swallow every step under their span. Guarded now (cue, pk,
+  superseded-tap). (2) endB's round-to-nearest threw away steps past the bar
+  line — the window now extends to the cycle containing the newest note.
+  (3) The remaining "loss" is retro's definition: a 1-bar lane keeps the last
+  bar (x-ray: 17 steps over 4 beats, window (4,8], kept 10 = the last bar,
+  flash says so). tab+digits widens. **17→17 in buffer, last bar kept, every
+  time.**
+
 - **[branch] A REPLAYED ARP STEP FIRES THE ENVELOPE.** "fix arp recording to
   match performance" — the lane was right; the SOUND of a step was not: live
   steps fire the bus envelope in and out (the articulation), the pk replay
