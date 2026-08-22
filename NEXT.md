@@ -284,6 +284,16 @@ one monoTrigger already keeps. The question to ask before writing any of it:
       the grid; only the recorded number changed.
 
 ## Landed this session — all measured unless it says otherwise
+- **[audio-voices branch] THE VOICE CAP IS AN OSCILLATOR BUDGET NOW.** His cut
+  is CPU (confirmed: 130% stuck a second after), on BOTH engines at the same
+  spot — so it is the oscillator COUNT, identical between engines. A voice
+  costs uni x active-ops (his BES1: 7x7=49; a plain patch ~2), so a flat
+  24-voice cap meant 1176 osc on his patch and 48 on a light one. CAP is now
+  `clamp(POLYBUDGET/(ops*uni), 4, 24)`, POLYBUDGET=588: his uni-7 7-op patch
+  caps at 12 (worklet nodes 24→12), light patches stay 24. Graceful steal and
+  voice SOUND unchanged. 588 = under his ~784 (16v) death point; POLYBUDGET is
+  the dial. ⚠ Confirm on HIS 3033 — my machine never cut.
+
 - **[audio-voices branch] THE VOICE CEILING FELL FROM 24 TO 8 — A DORMANT CAP
   WOKE UP.** Gad: "it used to go up to 24v or 30v and didnt have audio cuts."
   Measured, his ch7 supersaw (native, uni 7): pre-compaction 1801 held 24 live,
