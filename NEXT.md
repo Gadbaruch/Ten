@@ -1,35 +1,40 @@
 # WHERE THE AUDIO CHANNEL STANDS — 2026-08-20, main
 
-## LIVE PITCH-MOD-AMOUNT TWEAK — OPEN, waiting on his export (branch `live-mod` = main)
+## LIVE MOD-AMOUNT + META-MOD — FIXED on branch `live-mod`, build .2352, his ear next
 
-Ask: "pitch live amount mods dont [work]" while "filter lfo amount indeed already
-work." SYNTH channel, not audio.
+Two bugs, both found only after loading HIS set (`ten-set-2026-08-22-23-29.json`,
+ch4 KEY phase / ch7 BES1 native). The lesson AGAIN: synthetic `dst:2` routes all
+worked; his routes use the **ADDRESS** system (`{rack:voice,key:pitch}`, dst:0 +
+addr), a different code path. THE PROBE SET IS NOT HIS INSTRUMENT — load the export.
 
-**A wrong turn first, now reverted:** I misread and built a `busReaim` for AUDIO
-channels (he'd been deep in audio, so I assumed that was the target). He does NOT
-want audio touched ("took a few days"). REVERTED — `git reset --hard main`, index.html
-is byte-identical to main (.2239). Lesson re-learned: he said synth; I inferred
-audio from session history. Ask which channel, don't infer.
+Dead ends first, both reverted: a `busReaim` for AUDIO channels (he said SYNTH; I
+inferred audio from session history — reverted byte-identical to main), and a
+`_modParam` mod-amt branch (wrong resolver — the meta-mod path is modLive, not
+_modParam; reverted).
 
-**Then I could not reproduce the failure.** Every synthetic build of "hold a note,
-dial a pitch-mod amount" re-aims the HELD note live on 3032:
-- native LFO→pitch: depth 384→2399
-- phase (vox.fmw=1) LFO→voice-pitch (idx0): swing **32Hz→118Hz** audible, depth 384→2396
-- phase ENV→pitch (idx0, sustain 0.7): held pitch **93Hz→414Hz**
-- phase LFO→operator-ratio (idx1): depth 384→2399
-All same held voice, no retrigger. The machinery: synth mod edits →
-`applyParam`→`lfoLive`+`envLive`+`modReaim`, all of which `setTargetAtTime` the
-RUNNING oscillator/gain in place. The `ten-fmop` worklet reads its `d` (detune)
-params a-rate (line 5479, `inc=o.inc*2^(cents/1200)`), so it applies live.
+**A — manual amount tweak dead (ch4+ch7).** An addr LFO/env leaves its live handle
+with **ri:-1**. `effRoute` returns a NEW object for an addr route (Object.assign),
+so the loop's `effRoutes(m).indexOf(rt)` — a SECOND effRoutes() call, fresh objects
+— found nothing = -1. modReaim did `effRoutes(m)[-1]` = undefined and SKIPPED the
+handle. dst routes returned the same object so their ri was right — why synthetic
+tests passed. Fix: index the loop (`ri` = position), ~line 6582. Verified: ch4 ri
+-1→0, depth 600→2400 live; ch7 -1→0, 150→2399 across 49 unison handles.
 
-**So his patch or gesture differs from mine.** Candidates not yet excluded:
-his exact op stack (7 ops, mixed FM/add modes — a different opDet population),
-an env with sustain=0 (which CAN only change the next note, since the attack on
-the held note already happened — this may be the whole thing), or the gesture
-(can he hold the note AND dial? filter uses the same gesture though, so less
-likely). NEED: his export (the supersaw + the failing mod slot) and whether the
-HELD note stays unmoved or only the NEXT note changes. Do NOT build a fix before
-reproducing on his set.
+**B — mod→mod on AMOUNT dead while RATE worked (his ch7 meta-mod: env→LFO amount).**
+Not new — the meta-mod system exists (Gad: "lfo rate already works"). Two bugs, both
+because an LFO's amount lives in `routes[].amt` while rate lives on the slot:
+(1) `modTick` read the base as `h.slot['amt']`=undefined→range floor; now uses the
+spec getter `sp.get(h.slot)`=the route amt (~line 9176). (2) `modLive('amt')` wrote
+`L.lg.gain` — a gain built in lfoN but NEVER CONNECTED on the normal path (osc goes
+lo→g3→target; g3 is the modN 'lfo' handle). Now aims those modN handles with the
+same tapered depth modReaim uses (~line 9277). Verified: ch7 env→LFO-amount, depth
+tracks the env 1966→919 as it decays 0.97→0.52 (at env amt 35; his amt **200
+saturates the taper** — a tuning choice, dial down to hear the sweep). Rate meta-mod
+unbroken (5→8.99).
+
+Both are SYNTH-channel, addr-routed. Audio untouched. His ear on 3033 next; then
+merge. His `_modParam` still has NO mod-rack case — that path is for audio params;
+mod targets go through resolveDest+modTick+modLive.
 
 ## SYNTH-SHAPING — MERGED to main + LIVE 2026-08-22.2239
 
