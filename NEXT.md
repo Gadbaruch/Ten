@@ -284,6 +284,17 @@ one monoTrigger already keeps. The question to ask before writing any of it:
       the grid; only the recorded number changed.
 
 ## Landed this session — all measured unless it says otherwise
+- **[audio-voices branch] THE CUT WAS LEAKING WORKLET TAILS, NOT VOICE COUNT.**
+  Gad: capping voices didn't help, meter only hit 4v and still cut — "you're
+  fixing the wrong thing." Right: his dense 76-note loop makes phase worklets
+  faster than their ~1.4s release tails free them, so 4 LIVE voices sat under
+  **28-61 decaying ten-fmop nodes** = the 130% CPU, invisible to the act[]
+  voice cap. Fix: engine keeps a FIFO of live ten-fmop nodes; past FMWCEIL=18
+  it evicts the oldest RELEASED tail (quietest) via Voice.kill(fast) — clickless
+  fade, held notes protected (only an oldest held voice if all are held).
+  **Pinned at 18 through loop + held chord + 8-key storm; peak 0.88-0.94, zero
+  silence.** Phase budget back to 588; FMWCEIL is the dial. ⚠ his 3033 test.
+
 - **[audio-voices branch] PHASE GETS HALF THE BUDGET.** A phase voice is a JS
   ten-fmop worklet (uni*ops FM ops/sample); a native voice is C++ oscillators —
   dearer per operator. POLYBUDGET_NATIVE=588, POLYBUDGET_PHASE=294. His uni-7
