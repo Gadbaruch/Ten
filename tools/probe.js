@@ -1116,7 +1116,11 @@ async function probeMicRec() {
     if (MIC.on) micOff(); MIC.stream = null; MIC.ring = null; MIC.devs = null;
     pin(ch);
     if (!isAudioCh(ch)) setEngine(ch, 'audio');
-    const pr = S.presets[ch]; pr.cat = 'audio'; audDefaults(pr); pr.au.src = 0; pr.au.mon = 0;
+    /* TAPE, not cloud: seedCloud fills any gran channel with no take the
+       moment the factory pool lands — which is mid-hold right after a reload,
+       and the take then overwrote INTO nylonlick (peak 0.64 for a 0.3 sine) */
+    const pr = S.presets[ch]; pr.cat = 'audio'; pr.au = pr.au || {}; pr.au.cmode = 0; pr.au.kmode = 0; audDefaults(pr);
+    pr.au.src = 0; pr.au.mon = 0;
     engine.audBuf[ch] = null; engine.audName[ch] = null;
     if (engine.granBuf) engine.granBuf[ch] = null;
     lane.unit = 'B'; lane.count = 1; lane.auto = false; lane.events = [];
@@ -1130,6 +1134,7 @@ async function probeMicRec() {
   const flash0 = window.flash; window.flash = m => { flashes.push(String(m)); return flash0(m); };
   try {
     delete CFG.micDev; delete CFG.micDevL;
+    for (let w = 0; w < 25 && !POOL.length; w++) await sleep(200);   // let the pool land before the first take
     /* hold — and draw while holding */
     fresh(); CFG.micDb = 0;
     const beat0 = gridNow();
