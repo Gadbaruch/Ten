@@ -1,5 +1,41 @@
 # WHERE THE AUDIO CHANNEL STANDS — 2026-08-20, main
 
+## LIVE MOD-AMOUNT + META-MOD — FIXED on branch `live-mod`, build .2352, his ear next
+
+Two bugs, both found only after loading HIS set (`ten-set-2026-08-22-23-29.json`,
+ch4 KEY phase / ch7 BES1 native). The lesson AGAIN: synthetic `dst:2` routes all
+worked; his routes use the **ADDRESS** system (`{rack:voice,key:pitch}`, dst:0 +
+addr), a different code path. THE PROBE SET IS NOT HIS INSTRUMENT — load the export.
+
+Dead ends first, both reverted: a `busReaim` for AUDIO channels (he said SYNTH; I
+inferred audio from session history — reverted byte-identical to main), and a
+`_modParam` mod-amt branch (wrong resolver — the meta-mod path is modLive, not
+_modParam; reverted).
+
+**A — manual amount tweak dead (ch4+ch7).** An addr LFO/env leaves its live handle
+with **ri:-1**. `effRoute` returns a NEW object for an addr route (Object.assign),
+so the loop's `effRoutes(m).indexOf(rt)` — a SECOND effRoutes() call, fresh objects
+— found nothing = -1. modReaim did `effRoutes(m)[-1]` = undefined and SKIPPED the
+handle. dst routes returned the same object so their ri was right — why synthetic
+tests passed. Fix: index the loop (`ri` = position), ~line 6582. Verified: ch4 ri
+-1→0, depth 600→2400 live; ch7 -1→0, 150→2399 across 49 unison handles.
+
+**B — mod→mod on AMOUNT dead while RATE worked (his ch7 meta-mod: env→LFO amount).**
+Not new — the meta-mod system exists (Gad: "lfo rate already works"). Two bugs, both
+because an LFO's amount lives in `routes[].amt` while rate lives on the slot:
+(1) `modTick` read the base as `h.slot['amt']`=undefined→range floor; now uses the
+spec getter `sp.get(h.slot)`=the route amt (~line 9176). (2) `modLive('amt')` wrote
+`L.lg.gain` — a gain built in lfoN but NEVER CONNECTED on the normal path (osc goes
+lo→g3→target; g3 is the modN 'lfo' handle). Now aims those modN handles with the
+same tapered depth modReaim uses (~line 9277). Verified: ch7 env→LFO-amount, depth
+tracks the env 1966→919 as it decays 0.97→0.52 (at env amt 35; his amt **200
+saturates the taper** — a tuning choice, dial down to hear the sweep). Rate meta-mod
+unbroken (5→8.99).
+
+Both are SYNTH-channel, addr-routed. Audio untouched. His ear on 3033 next; then
+merge. His `_modParam` still has NO mod-rack case — that path is for audio params;
+mod targets go through resolveDest+modTick+modLive.
+
 ## SYNTH-SHAPING — MERGED to main + LIVE 2026-08-22.2239
 
 The new floor. Three asks, in his words: (1) max-uni wide should be **wider,
