@@ -1,4 +1,121 @@
-# WHERE THE AUDIO CHANNEL STANDS — 2026-08-20, main
+# WHERE THE AUDIO CHANNEL STANDS — 2026-08-23, branch `mic-rec`
+
+## MIC RECORDING ON AN AUDIO CHANNEL — on branch `mic-rec`, build 2026-08-23.0059, his ear next
+
+Gad, 2026-08-23: "i cant hear anything recorded, can you make my mic input
+controlable. also can you draw the incoming audio as its recorded and put a
+playhead that writes the audio." Three asks, one root cause under the first.
+
+**Why nothing was recorded: tab never started a sound recording.**
+`engine.audRecStart` existed and had NO CALLER — b7e6700 took the call out
+("the mic opens, the room is quiet, and a loop of silence lands on top of your
+take") and promised "⌃+tab records the mic", which was never wired either. The
+only route to a mic take was: hold escape past 200ms (mic on), latch it, then
+TAP tab for the last loop off the ring — and that grab ran on the key-DOWN,
+after which the key-up's retroCapture flashed 'tab records the input' over the
+take it had just placed. The trap b7e6700 guarded against is gone — audPlace
+refuses a silent take over a sample — so tab records again:
+
+    tap     the past: mic on → the last loop off the ring (now on the KEY-UP);
+            mic off → the keys' retro, as before
+    hold    record while held. BOTH recorders start on the way down — the keys
+            (pat.state='rec') and the sound (audRecStart) — and the release
+            keeps the one the hand used: a cue/pitch key on this channel under
+            the hold = keys take, sound dropped; no key = sound take.
+            `audRecEnd` is the judge, `audRec.keys` the count; tab spent as a
+            modifier (loop ops) counts as a key.
+    latch   left win + tab: the sound keeps recording; the next tab ends it
+            (latchReleaseAll → audRecEnd). 120s cap unchanged.
+    The take opens the mic if it was off and closes it with the take
+    (`openedMic`); a mic you opened yourself (escape, latched) stays.
+
+**The input stage, `MIC.g`.** One chain — stream → MIC.g → the ring's tap —
+and everything that hears the mic hangs off MIC.g: the take, the cloud's live
+wire (granLiveWire; was a SECOND MediaStreamSource), the monitor. The old
+audRecStart opened its own getUserMedia, so no dial could have reached it.
+On the audio channel's setup row after `input`, shown only while input=mic:
+
+    mic dev   steps the audio inputs (enumerateDevices after the first
+              permission — labels need it). CFG.micDev/micDevL: the whole
+              instrument, there is one mic. An unplugged remembered device
+              falls back to the default and says so.
+    mic gain  CFG.micDb ±24dB, 1dB a step, a live meter ▎▎▎▎ while the mic
+              is on (MIC.pk, falling peak; dirty only on the sound page).
+    monitor   p.au.mon — MIC.g → this channel's bus vIn, the mic through the
+              channel's strip. Off by default: speakers feed back.
+    AGC is the browser default (on), untouched; if the gain feels like it
+    fights back, `autoGainControl:false` in micCons() is the knob.
+
+**The picture.** While `engine.audRec.pi===i` the column draws `.wrec`: a
+peak per 512 samples at the place in the loop it will occupy — the same
+arithmetic as audPlace (pos0 = fmod(startBeat−anchor,L)·spb·sr − AUDLATC,
+hoisted from audPlace's LATC) — brighter than the waveform under it, and a
+SOLID line at the write position. Screenshot-verified on a 2-bar loop: the
+take wrapped from the loop's end back to its top, as the lane has it. On a
+fresh (auto) lane the picture uses the default length; audPlace still sizes
+the loop from the take at the end.
+
+**Measured — `tools/probe.sh micrec ch=9 hold=900 db=-6`** (a FAKE mic: a
+440Hz sine at 0.3 through a MediaStreamDestination, swapped in for
+getUserMedia — no permission dialog, the same numbers on any machine):
+
+    hold 0.9s   take landed, peak 0.300 (expect 0.3), 0.793s of signal (the
+                stage takes ~100ms to come up), first sample 0.797s vs the
+                placement arithmetic's 0.775s (inside one block), write head
+                118.7→149.9px, strokes 16→31, mic closed after (it opened it)
+    gain −6dB   peak 0.150 (expect 0.150)
+    keys        KeyA under the hold: keys=1, NOT landed, mic closed
+    tap+ring    mic latched on, tab tapped: 1.957s of a 2.0s loop at 0.3, mic
+                still on, nothing left recording
+    monitor     bus rms 0.078 on / 0.001 off, wires 1→0
+    device      Fake A ↔ Fake B, stage stays on, the row shows the name
+    row         sound page: input=mic · mic dev=default · mic gain=0dB ▎▎▎ ·
+                monitor=off; arrows dial the gain +1/−1, monitor 1/1 → 0/0
+    live .2352  `AUDLATC is not defined` — the probe cannot even start there;
+                none of this existed.
+  The REAL mic is unmeasured here (no permission UI in the test browser, and
+  see the next trap) — it is the first thing for his ear.
+
+**TWO TRAPS THAT ATE THE FIRST HOUR, both in the measuring, not the code:**
+  - **The Mac's output device stalled every NEW AudioContext.** 'External
+    Headphones': `afplay` of a 1.6s sound hung the full 10s timeout,
+    sandboxed or not; AC.state said 'running' and currentTime advanced exactly
+    one buffer (0.006s) then stopped — every ScriptProcessor, analyser and
+    worklet sat still and the probe read zeros in BOTH test browsers.
+    `AC.setSinkId({type:'none'})` renders in real time with no device: the
+    probe harness now checks the clock over 120ms and switches to it (it says
+    so in the notes); `sink=none` forces it. If HE hears nothing at all, that
+    is this, not TEN — replug the headphones.
+  - **The browse daemon's `eval` wraps a file in an async IIFE only when the
+    code contains `await`**, never otherwise — a bare `return` is 'Illegal
+    return', a file that is already an IIFE gets wrapped twice and returns
+    nothing. probe.js has awaits, so it is wrapped exactly once: use
+    `tools/probe.sh`, do not hand-roll eval calls. A daemon started with
+    `--headed` refuses plain calls ('headed mismatch'); probe.sh asks once
+    and follows it. Killing a wedged daemon is fine; the CLI restarts it.
+
+QA, most likely to be wrong first (the fake mic measured everything; the
+REAL mic is the first test):
+ 1. **A real take.** Audio channel, input=mic, hold tab ~2s and talk, let go.
+    The first time the browser asks for the mic, so that take starts late.
+    Right: '◉ audio: N bar loop' and you hear it (space if stopped, a key if
+    auto is off — the flash says which). Wrong: silence → is the `mic gain`
+    meter moving while you talk? No → `mic dev`.
+ 2. **The meter.** Sound page of the channel, hold escape and talk: `mic
+    gain` grows ▎ bars. None → wrong device, or the Mac's device (above).
+ 3. **The picture.** Layer 1, hold tab: the channel's column draws the take
+    as it lands under a solid line that writes down the loop and wraps.
+ 4. **Keys under tab still make a keys take.** Hold tab, play cue keys, let
+    go: the keys recorded, flash 'keys take — the sound was dropped'.
+ 5. **Tap = the past.** Escape held/latched (mic on), talk a loop, TAP tab:
+    the last loop lands, the mic stays on. Mic off + tap → the keys' retro.
+ 6. **Latch.** Left win + tab: '● REC latched — recording mic, tab again to
+    keep it'; the next tab lands it.
+ 7. **Monitor.** `monitor` on with the mic open: yourself through the
+    channel's strip. Feedback if the speakers are up — it warns.
+ 8. **Device.** `mic dev` steps the list, the flash names it, it survives a
+    reload (ten-cfg). Not measured with real devices.
+
 
 ## LIVE MOD-AMOUNT + META-MOD — FIXED on branch `live-mod`, build .2352, his ear next
 

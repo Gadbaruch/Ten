@@ -25,6 +25,10 @@ B=""
 [ -x "$ROOT/.claude/skills/gstack/browse/dist/browse" ] && B="$ROOT/.claude/skills/gstack/browse/dist/browse"
 [ -z "$B" ] && B="$HOME/.claude/skills/gstack/browse/dist/browse"
 [ -x "$B" ] || { echo "browse CLI not found at $B" >&2; exit 1; }
+# A DAEMON STARTED WITH --headed REFUSES A PLAIN CALL ("headed mismatch"), and
+# the window is the same either way — so ask once and follow it everywhere.
+HFLAG=""
+case "$("$B" url 2>&1)" in *"headed mismatch"*) HFLAG="--headed" ;; esac
 
 PROBE=""; AB=""; RAW=0; ARGS=()
 while [ $# -gt 0 ]; do
@@ -51,9 +55,12 @@ for a in sys.argv[1:]:
 print(json.dumps(o))' "${ARGS[@]+"${ARGS[@]}"}")
 
 run_here() {                      # compose args + library, eval in the fronted tab
-  local f; f=$(mktemp /tmp/ten-probe-XXXXXX.js)
+  local f out; f=$(mktemp /tmp/ten-probe-XXXXXX.js)
   { printf 'const __PROBE__ = %s;\n' "$SPEC"; cat "$LIB"; } > "$f"
-  "$B" eval "$f" 2>/dev/null || echo '{"err":"eval failed"}'
+  # a daemon started with --headed refuses a plain call ("headed mismatch"):
+  # follow it rather than fail — the window is the same either way
+  out=$("$B" $HFLAG eval "$f" 2>&1) || true
+  case "$out" in "{"*) printf '%s\n' "$out" ;; *) printf '{"err":"eval failed: %s"}\n' "$(printf '%s' "$out" | head -c 200 | tr -d '"\n')" ;; esac
   rm -f "$f"
 }
 
@@ -62,13 +69,13 @@ HERE=$(run_here)
 THERE=""
 if [ -n "$AB" ]; then
   # the tab we are standing in, so we can put the window back exactly as it was
-  BACK=$("$B" tabs | sed -n 's/^→ *\[\([0-9]*\)\].*/\1/p' | head -1)
+  BACK=$("$B" $HFLAG tabs | sed -n 's/^→ *\[\([0-9]*\)\].*/\1/p' | head -1)
   HOST=${AB%%\?*}
   # REUSE THE TAB THAT IS ALREADY THERE. `tabs` prints "[3] Title — URL" and the
   # TITLE of this app contains an em dash too, so matching the first one read
   # the word "keyboard" as the URL, never matched, and every --ab run opened
   # another tab. Anchor on the trailing http(s) URL instead.
-  TID=$("$B" tabs | python3 -c '
+  TID=$("$B" $HFLAG tabs | python3 -c '
 import sys, re
 want = sys.argv[1].rstrip("/")
 for line in sys.stdin:
@@ -76,12 +83,12 @@ for line in sys.stdin:
     if m and m.group(2).split("?")[0].rstrip("/") == want: print(m.group(1)); break
 ' "${HOST%/}" || true)
   if [ -z "$TID" ]; then
-    TID=$("$B" newtab "$AB" --json | python3 -c 'import sys,json;print(json.load(sys.stdin)["tabId"])')
+    TID=$("$B" $HFLAG newtab "$AB" --json | python3 -c 'import sys,json;print(json.load(sys.stdin)["tabId"])')
     sleep 5                        # boot, worklets, the sample pool
   fi
-  "$B" tab "$TID" >/dev/null
+  "$B" $HFLAG tab "$TID" >/dev/null
   THERE=$(run_here)
-  [ -n "$BACK" ] && "$B" tab "$BACK" >/dev/null || true
+  [ -n "$BACK" ] && "$B" $HFLAG tab "$BACK" >/dev/null || true
 fi
 
 HERE="$HERE" THERE="$THERE" RAW="$RAW" python3 - <<'PY'

@@ -1081,6 +1081,127 @@ async function probeSweep() {
       dPos: 'twoHeads live ' + twoLive, dLen: 'twoHeads rep ' + twoRep }]) };
 }
 
+/* MIC RECORDING ON AN AUDIO CHANNEL, END TO END, WITH A FAKE MIC. getUserMedia
+   is swapped for the run with a MediaStream carrying a 440Hz sine at 0.3 — the
+   same on every machine, and no permission dialog in the way — and the input
+   stage is torn down first so the fake is what it hears. Then, on channel `ch`:
+     hold     keydown Tab, `hold` ms, keyup: a take lands (length, peak, where),
+              and while held the column carries a .wrec path whose write head MOVES
+     gain     the same take at `db` dB: the dial reaches what tab records
+     keys     a cue key under the hold: the sound is DROPPED (it was a keys take)
+     tap+ring mic already on (as escape-latched), tab tapped: the last loop comes off the ring
+     monitor  the mic through the channel's strip, on vs off
+     device   the row steps the input list; the stage is rebuilt on the new one
+   ch=9 hold=900 db=-6. The channel, the lane and the mic config are put back. */
+async function probeMicRec() {
+  const ch = CH, hold = num(P.hold, 900), db = num(P.db, -6);
+  const rows = [];
+  const md = navigator.mediaDevices;
+  const gum0 = md.getUserMedia, enu0 = md.enumerateDevices;
+  const lane = S.patterns[S.editPat].lanes[ch];
+  const keep = { p: stash(ch), buf: engine.audBuf[ch], name: engine.audName[ch],
+                 gbuf: (engine.granBuf || [])[ch],
+                 lane: { unit: lane.unit, count: lane.count, auto: lane.auto, events: lane.events.slice() },
+                 micDb: CFG.micDb, micDev: CFG.micDev, micDevL: CFG.micDevL, layer: S.layer, playing: T.playing };
+  const osc = AC.createOscillator(), og = AC.createGain(), dst = AC.createMediaStreamDestination();
+  osc.frequency.value = 440; og.gain.value = 0.3; osc.connect(og); og.connect(dst); osc.start();
+  md.getUserMedia = () => Promise.resolve(dst.stream);
+  md.enumerateDevices = () => Promise.resolve([
+    { kind: 'audioinput', deviceId: 'fakeA', label: 'Fake A (probe)' },
+    { kind: 'audioinput', deviceId: 'fakeB', label: 'Fake B (probe)' }]);
+  const K = (t, c) => document.dispatchEvent(new KeyboardEvent(t, { code: c, key: c, bubbles: true, cancelable: true }));
+  const sr = AC.sampleRate;
+  const fresh = () => {            // the stage must hear the FAKE, whatever it heard before
+    if (engine.audRec) engine.audRecStop(true);
+    if (MIC.on) micOff(); MIC.stream = null; MIC.ring = null; MIC.devs = null;
+    pin(ch);
+    if (!isAudioCh(ch)) setEngine(ch, 'audio');
+    const pr = S.presets[ch]; pr.cat = 'audio'; audDefaults(pr); pr.au.src = 0; pr.au.mon = 0;
+    engine.audBuf[ch] = null; engine.audName[ch] = null;
+    if (engine.granBuf) engine.granBuf[ch] = null;
+    lane.unit = 'B'; lane.count = 1; lane.auto = false; lane.events = [];
+    S.layer = 1; dirty = true;
+  };
+  const pkOf = x => { let pk = 0; for (let i = 0; i < x.length; i++) { const v = Math.abs(x[i]); if (v > pk) pk = v; } return pk; };
+  const onOf = x => { let n = 0, first = -1; for (let i = 0; i < x.length; i++) if (Math.abs(x[i]) > 0.01) { n++; if (first < 0) first = i; } return { n, first }; };
+  const headY = () => { const l = document.querySelector('.wrec line'); return l ? +l.getAttribute('y1') : null; };
+  const strokes = () => { const q = document.querySelector('.wrec path'); return q ? (q.getAttribute('d').match(/M/g) || []).length : 0; };
+  const flashes = [];
+  const flash0 = window.flash; window.flash = m => { flashes.push(String(m)); return flash0(m); };
+  try {
+    delete CFG.micDev; delete CFG.micDevL;
+    /* hold — and draw while holding */
+    fresh(); CFG.micDb = 0;
+    const beat0 = gridNow();
+    K('keydown', 'Tab'); await sleep(hold * 0.35);
+    const r1 = engine.audRec;
+    const mid = { pi: r1 ? r1.pi : null, label: r1 ? r1.label : null, opened: r1 ? r1.openedMic : null };
+    const y1 = headY(), s1 = strokes();
+    await sleep(hold * 0.35);
+    const y2 = headY(), s2 = strokes();
+    await sleep(hold * 0.3);
+    K('keyup', 'Tab'); await sleep(150);
+    const b1 = engine.audBuf[ch], d1 = b1 ? b1.getChannelData(0) : null;
+    const L = lane.len, cl = Math.max(256, Math.round(L * spb() * sr));
+    const exp0 = ((Math.round(fmod(beat0 - editAnchor(), L) * spb() * sr - AUDLATC) % cl) + cl) % cl;
+    const o1 = d1 ? onOf(d1) : { n: 0, first: -1 };
+    rows.push({ k: 'hold', rec: mid.label + ' ch' + mid.pi + (mid.opened ? ' (opened mic)' : ''),
+                landed: !!b1, peak: d1 ? r3(pkOf(d1)) : null, expect: 0.3,
+                onSec: r3(o1.n / sr), heldSec: r3(hold / 1000), loopSec: r3(cl / sr),
+                firstAt: r3(o1.first / sr), expAt: r3(exp0 / sr),
+                head: y1 == null ? 'none' : r3(y1) + '→' + r3(y2), strokes: s1 + '→' + s2,
+                micAfter: MIC.on ? 'on' : 'off', rec2: engine.audRec ? 'STILL RUNNING' : 'none' });
+    /* gain — the dial reaches the take */
+    fresh(); CFG.micDb = db;
+    K('keydown', 'Tab'); await sleep(hold); K('keyup', 'Tab'); await sleep(150);
+    const b2 = engine.audBuf[ch], d2 = b2 ? b2.getChannelData(0) : null;
+    rows.push({ k: 'gain ' + db + 'dB', landed: !!b2, peak: d2 ? r3(pkOf(d2)) : null,
+                expect: r3(0.3 * Math.pow(10, db / 20)) });
+    /* keys — a cue key under the hold makes it a keys take */
+    fresh(); CFG.micDb = 0;
+    K('keydown', 'Tab'); await sleep(hold * 0.4); K('keydown', 'KeyA'); await sleep(80); K('keyup', 'KeyA');
+    await sleep(hold * 0.5); const keysN = engine.audRec ? engine.audRec.keys : null;
+    K('keyup', 'Tab'); await sleep(150);
+    rows.push({ k: 'keys', keysSeen: keysN, landed: !!engine.audBuf[ch], expect: 'landed false',
+                micAfter: MIC.on ? 'on' : 'off' });
+    /* tap+ring — mic already on, a tap takes the last loop off the ring */
+    fresh(); await micOn(); MIC.latched = true;
+    await sleep(Math.min(3000, cl / sr * 1000 + 400));
+    K('keydown', 'Tab'); await sleep(60); K('keyup', 'Tab'); await sleep(150);
+    const b3 = engine.audBuf[ch], d3 = b3 ? b3.getChannelData(0) : null;
+    const o3 = d3 ? onOf(d3) : { n: 0 };
+    rows.push({ k: 'tap+ring', landed: !!b3, peak: d3 ? r3(pkOf(d3)) : null, onSec: r3(o3.n / sr), loopSec: r3(cl / sr),
+                micAfter: MIC.on ? 'on' : 'off', rec2: engine.audRec ? 'STILL RUNNING' : 'none' });
+    /* monitor — the mic through the channel's strip (the mic is still on from the row above) */
+    S.presets[ch].au.mon = 1; micMonWire(); const w1 = Object.keys(MIC.monTo).length;
+    const mOn = await hit(ch, () => null, 300);
+    S.presets[ch].au.mon = 0; micMonWire(); const w0 = Object.keys(MIC.monTo).length;
+    const mOff = await hit(ch, () => null, 300);
+    rows.push({ k: 'monitor', on: mOn.rms, off: mOff.rms, wires: w1 + '→' + w0 });
+    /* device — the row steps the list and the stage follows */
+    await micStepDev(1); const dv1 = CFG.micDevL + '/' + (MIC.on ? 'on' : 'off');
+    await micStepDev(1); const dv2 = CFG.micDevL + '/' + (MIC.on ? 'on' : 'off');
+    rows.push({ k: 'device', step1: dv1, step2: dv2, listed: (MIC.devs || []).length, row: micDevName() });
+  } finally {
+    window.flash = flash0;
+    md.getUserMedia = gum0; md.enumerateDevices = enu0;
+    if (engine.audRec) engine.audRecStop(true);
+    if (MIC.on) micOff(); MIC.stream = null; MIC.ring = null; MIC.devs = null;
+    try { osc.stop(); } catch (_) {}
+    CFG.micDb = keep.micDb;
+    if (keep.micDev) { CFG.micDev = keep.micDev; CFG.micDevL = keep.micDevL; } else { delete CFG.micDev; delete CFG.micDevL; }
+    saveCfg();
+    unstash(ch, keep.p);
+    Object.assign(lane, keep.lane);
+    engine.audBuf[ch] = keep.buf; engine.audName[ch] = keep.name;
+    if (engine.granBuf) engine.granBuf[ch] = keep.gbuf;
+    S.layer = keep.layer; dirty = true;
+  }
+  notes.push('flashes: ' + flashes.join(' | '));
+  return { cols: ['rec', 'landed', 'peak', 'expect', 'onSec', 'heldSec', 'loopSec', 'firstAt', 'expAt', 'head', 'strokes',
+                  'micAfter', 'rec2', 'keysSeen', 'on', 'off', 'wires', 'step1', 'step2', 'listed', 'row'], rows };
+}
+
 const HELP = {
   cols: ['args'],
   rows: [
@@ -1096,6 +1217,7 @@ const HELP = {
     { k: 'trig',     args: 'ch=1 note=60 ph=90 — does an operator rtrg/free reach the sound, in both fm engines' },
     { k: 'matrix',   args: 'ch=8 take=nylonlick cues=4 — the seven cases + the cue jumps' },
     { k: 'modmatrix',args: 'only=filt — every mod SOURCE x every DESTINATION: reaches/anchor/live/tweak' },
+    { k: 'micrec',   args: 'ch=9 hold=900 db=-6 — tab records the mic on an audio channel (fake mic): take, picture, gain, keys, ring, monitor, device' },
     { k: '(any)',    args: '--ab <url> runs the same probe on a second build and diffs it' },
   ]
 };
@@ -1105,6 +1227,21 @@ let out;
 try {
   if (AC.state !== 'running') { try { await AC.resume(); } catch (_) {} }
   if (AC.state !== 'running') notes.push('AudioContext is ' + AC.state + ' — every level will read 0');
+  /* A STALLED OUTPUT DEVICE STALLS THE CLOCK (2026-08-23: 'External Headphones'
+     hung afplay itself; AC said 'running' and rendered exactly one buffer, so
+     every ScriptProcessor, analyser and worklet sat still). A probe can still
+     measure: the graph renders into a sink of type 'none' — real time, no
+     device, silent — so when the clock does not move in 120ms the harness
+     moves the context there and says so. sink=none asks for it outright. */
+  { const c0 = AC.currentTime; await sleep(120);
+    const stuck = AC.currentTime - c0 < 0.05;
+    if (stuck || str(P.sink, '') === 'none') {
+      if (typeof AC.setSinkId === 'function') {
+        try { await AC.setSinkId({ type: 'none' });
+              notes.push((stuck ? 'output clock stalled' : 'sink=none asked') + ' → AC.setSinkId none: rendering silently, in real time'); }
+        catch (e) { notes.push('setSinkId(none) failed: ' + e); }
+      } else notes.push('output clock stalled and this browser has no setSinkId — every level will read 0');
+    } }
   const PROBES = { level: probeLevel, spectrum: probeSpectrum, cursor: probeCursor,
                    preset: probePreset, key: probeKey, keypath: probeKeyPath,
                    roundtrip: probeRoundTrip,
@@ -1112,7 +1249,8 @@ try {
                    mono: probeMono,
                    trig: probeTrig,
                    matrix: probeMatrix,
-                   modmatrix: probeModMatrix };
+                   modmatrix: probeModMatrix,
+                   micrec: probeMicRec };
   const fn = PROBES[NAME];
   out = fn ? await fn() : (NAME === 'help' ? HELP : { cols: [], rows: [], err: 'no probe named ' + NAME });
 } catch (e) {

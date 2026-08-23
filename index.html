@@ -131,6 +131,10 @@
   /* the live ring's WRITE head: dashed, so it never reads as a playhead */
   .rwh line{stroke:var(--fg);stroke-width:1;opacity:.8;stroke-dasharray:4 3;}
   .wlay path{stroke:var(--fg);stroke-width:1;opacity:.5;fill:none;}
+  /* the take AS IT LANDS: brighter than the waveform under it, and its
+     write head is the one SOLID line here — it is the playhead that writes */
+  .wrec path{stroke:var(--rec);stroke-width:1.2;opacity:.95;fill:none;}
+  .wrec line{stroke:var(--rec);stroke-width:1.6;opacity:1;}
   .wtc path{stroke:var(--fg);stroke-width:1.2;opacity:.8;fill:none;}
   .cuet{position:absolute;left:0;width:100%;height:1px;background:var(--fg);opacity:.18;}
   .cuet.on{height:1.6px;background:#fff;box-shadow:0 0 3px rgba(255,255,255,.55);}
@@ -1230,7 +1234,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-22.2352';
+const BUILD='2026-08-23.0059';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -3610,6 +3614,7 @@ function latchReleaseAll(){
   if(AUTORND.on){AUTORND.on=false; n++;}
   if(LATCH.on){
     LATCH.on=false; n++;
+    if(engine.audRec)audRecEnd();          // a latched sound take ends with the latch
     const pat=S.patterns[S.editPat];
     if(pat.state==='rec'){pat.state='on'; finalizeCaptures(true);}
     for(const pr of S.presets){const ml=pr&&pr.modLoop; if(ml&&ml.state==='rec')ml.state='on';}
@@ -11470,8 +11475,9 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
   granLiveWire(pi){
     /* the mic straight into the cloud's input — only wired when asked for,
        only possible while the ⌃ stream exists */
-    const e=this.gn&&this.gn[pi]; if(!e||!e.node||!MIC.stream||e.liveSrc)return;
-    try{e.liveSrc=AC.createMediaStreamSource(MIC.stream); e.liveSrc.connect(e.node);}catch(_){}
+    const e=this.gn&&this.gn[pi]; if(!e||!e.node||!MIC.g||e.liveSrc)return;
+    /* off the input STAGE, not a stream of its own: the gain dial reaches the cloud too */
+    try{MIC.g.connect(e.node); e.liveSrc=MIC.g;}catch(_){}
   }
   granSend(pi){
     const e=this.granNode(pi), buf=this.granBuf&&this.granBuf[pi];
@@ -11552,34 +11558,52 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     if(this.act[pi].length>24*POLYX){const old=this.act[pi].shift(); old&&old.kill&&old.kill(AC.currentTime);}
     return sh;
   }
+  /* THE TAKE DRINKS FROM THE INPUT STAGE. This used to open a getUserMedia
+     of its own — a second stream, its own device, no gain — so nothing on
+     the channel row could reach what tab recorded. 'mic' is MIC.g now.
+     `pks` is the picture: a peak per 512 samples, so the column can draw the
+     take while it is still landing. */
   audRecStart(pi){
-    if(this.audRec)return;
-    const tap=(srcNode,stm,label)=>{
+    if(this.audRec||this.audRecPend)return;
+    const E=this;
+    const tap=(srcNode,label,openedMic)=>{
+      if(E.audRec)return;
       const sp3=AC.createScriptProcessor(4096,1,1);
       const sink=AC.createGain(); sink.gain.value=0;
-      const chunks=[];
-      sp3.onaudioprocess=ev=>{chunks.push(new Float32Array(ev.inputBuffer.getChannelData(0)));
+      const chunks=[], pks=[], SUB=512;
+      sp3.onaudioprocess=ev=>{const d=ev.inputBuffer.getChannelData(0);
+        chunks.push(new Float32Array(d));
+        for(let a=0;a<d.length;a+=SUB){let pk=0; const z=Math.min(d.length,a+SUB);
+          for(let i=a;i<z;i+=2){const v=d[i]<0?-d[i]:d[i]; if(v>pk)pk=v;}
+          pks.push(pk);}
+        dirty=true;                                  // the column draws it as it lands
         if(chunks.length*4096>AC.sampleRate*120){flash('recording capped at 120s — takes belong in loops');
-          try{engine.audRecStop();}catch(_){}}};
+          try{audRecEnd();}catch(_){}}};
       srcNode.connect(sp3); sp3.connect(sink); sink.connect(AC.destination);
-      this.audRec={pi,stm,src:srcNode,sp3,sink,chunks,startBeat:gridNow(),label};
-      flash('● recording '+label+'… (tab again to stop)'); dirty=true;
+      E.audRec={pi,src:srcNode,sp3,sink,chunks,pks,blk:SUB,startBeat:gridNow(),label,openedMic,keys:0};
+      flash('● recording '+label+'… let go of tab to keep it'); dirty=true;
     };
-    if(Math.round((S.presets[pi].au||{}).src||0)===1){tap(this.master,null,'mstr');return;}
-    if(!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia)){flash('no mic access in this browser');return;}
-    flash('mic: asking for permission…');
-    navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false}})
-      .then(stm=>{
-        if(this.audRec){stm.getTracks().forEach(t2=>t2.stop());return;}
-        tap(AC.createMediaStreamSource(stm),stm,'mic');})
-      .catch(err=>{flash('mic blocked ('+err.name+') — allow the mic in the browser, then tab again');
-        console.warn('mic',err);});
+    if(Math.round((S.presets[pi].au||{}).src||0)===1){tap(this.master,'mstr',false);return;}
+    if(MIC.on&&MIC.g){tap(MIC.g,'mic',false);return;}
+    /* the stage is down: raise it, and remember the take did, so it goes down
+       again with the take. The first time, this is the permission prompt. */
+    const tok=this.audRecPend={pi};
+    micOn().then(()=>{
+      if(this.audRecPend!==tok){            // the hand let go before the mic was up
+        if(MIC.on&&!MIC.latched&&!MIC._down)micOff();
+        return;}
+      this.audRecPend=null;
+      if(MIC.on&&MIC.g)tap(MIC.g,'mic',true); else flash('mic did not open — nothing recorded');
+    }).catch(()=>{this.audRecPend=null;});
   }
-  audRecStop(){
+  audRecStop(drop){
+    this.audRecPend=null;
     const r=this.audRec; if(!r)return; this.audRec=null;
-    try{r.src.disconnect(r.sp3);}catch(_){}     // only the tap — master keeps its other outputs
+    try{r.src.disconnect(r.sp3);}catch(_){}     // only the tap — the stage and the master keep their other outputs
     try{r.sp3.disconnect();r.sink.disconnect();}catch(_){}
-    if(r.stm)r.stm.getTracks().forEach(t2=>t2.stop());
+    if(r.openedMic&&MIC.on&&!MIC.latched&&!MIC._down)micOff();
+    dirty=true;
+    if(drop)return;
     const len=r.chunks.reduce((a2,c2)=>a2+c2.length,0);
     if(len<AC.sampleRate*0.05){flash(r.label+' take too short');return;}
     const rec=new Float32Array(len); let o=0;
@@ -13611,6 +13635,14 @@ function prsFieldDefs(){
     ...(kmodeOf(p)?[{k:'from',v:()=>Math.round((p.au||{}).start||0)?'here'
         :(cmodeOf(p)===2?'pos':'start')}]:[]),
     {k:'input', v:()=>['mic','mstr'][Math.round((p.au||{}).src||0)]},
+    /* THE MIC'S OWN DIALS (Gad, 2026-08-23), only while the input is the
+       mic: which one, how hot, and whether you hear it through this
+       channel while you record. Device and gain are the instrument's —
+       there is one mic — the monitor is this channel's. */
+    ...(Math.round((p.au||{}).src||0)===0?[
+      {k:'mic dev', v:()=>micDevName()},
+      {k:'mic gain',v:()=>micGainStr()},
+      {k:'monitor', v:()=>Math.round((p.au||{}).mon||0)?'on':'off'}]:[]),
     {k:'chan',  v:()=>['stereo','left','right'][clamp(Math.round((p.au||{}).chan||0),0,2)]},
     {k:'gain',  v:()=>((p.au||{}).gain??0.9).toFixed(2)}];
   if(p.cat==='kit')return [        // kit, but no pad played yet: no pad fields to show
@@ -14285,7 +14317,8 @@ function _prsAction(d){
     dirty=true; dirtySave=true; return;
   }
   if(p.cat==='audio'
-     &&['keys mode','auto','loop vol','from','voice','glide','input','chan','gain'].includes(f)){
+     &&['keys mode','auto','loop vol','from','voice','glide','input','chan','gain',
+        'mic dev','mic gain','monitor'].includes(f)){
     pushUndo('audio setup');
     p.au=p.au||{};
     if(f==='keys mode'){
@@ -14343,7 +14376,15 @@ function _prsAction(d){
         :cmodeOf(p)===2?'at the pos dial':'at the crop start'));
     }
     else if(f==='input'){p.au.src=Math.round(p.au.src||0)?0:1;
+      micMonWire();                                   // the monitor only makes sense on the mic
       flash('input → '+['mic','resample the master'][p.au.src]);}
+    else if(f==='mic dev'){micStepDev(d);}
+    else if(f==='mic gain'){
+      CFG.micDb=clamp(Math.round((CFG.micDb||0)+d),-24,24); saveCfg(); micGainApply();
+      flash('mic gain '+(CFG.micDb>0?'+':'')+CFG.micDb+'dB (the whole instrument)');}
+    else if(f==='monitor'){p.au.mon=Math.round(p.au.mon||0)?0:1; micMonWire();
+      flash(p.au.mon?'monitor on — the mic through this channel'+(MIC.on?'':', once the mic is open')
+                     +' — mind the speakers':'monitor off');}
     else if(f==='chan'){p.au.chan=fmod(Math.round(p.au.chan||0)+(d>0?1:-1),3);
       flash('chan → '+['stereo','left','right'][p.au.chan]);}
     else if(f==='loop vol'){p.au.lvol=clamp(+((p.au.lvol??1)+d*0.05).toFixed(2),0,1);
@@ -16396,8 +16437,12 @@ function restoreAudio(refs){
     miss.slice(0,3).join(' \u00b7 ')+(miss.length>3?' \u00b7 +'+(miss.length-3)+' more':'')+
     ' \u2014 drop the file on the channel and its settings are all still there'),600);
 }
-const MIC={stream:null,on:false,latched:false,node:null,ring:null,w:0,sr:0,
-  _down:false,_used:false,_latch:false};
+const MIC={stream:null,on:false,latched:false,node:null,ring:null,w:0,sr:0,total:0,
+  _down:false,_used:false,_latch:false,
+  /* the input stage: g is the gain every listener hangs off, pk a falling
+     peak for the row's meter, devs the input list once permission let us
+     read the labels, monTo the per-channel monitor wires */
+  g:null,pk:0,devs:null,monTo:{}};
 /* WHAT COUNTS AS THE MIC KEY. Bare control is the original, and 'Fn' is here in
    hope — a board can send one, macOS never does. PrintScreen joins them because
    it is what a 60% board's own remapper reaches for when it wants a key that
@@ -16436,24 +16481,98 @@ const TOOLKEY=c=>c==='AltLeft';
    moment ⌥ comes up, so the letters go back to their scopes. */
 let MODPICK=null;
 const MODPICK_SRC={KeyE:1,KeyL:2,KeyV:3,KeyK:4,Slash:5};
+/* THE INPUT STAGE (Gad, 2026-08-23: "make my mic input controllable"). One
+   chain per page — stream → MIC.g → the ring's tap — and everything that
+   hears the mic hangs off MIC.g: the take a tab records, the cloud's live
+   wire, the monitor. So the device, the gain and the monitor on the channel
+   row are one set of answers, and there is no second stream with its own
+   device and no gain, which is what audRecStart used to open for itself.
+   The device and the gain are INSTRUMENT-WIDE (CFG): there is one mic. The
+   monitor is per channel, because it is heard through that channel's strip. */
+const micLin=()=>Math.pow(10,(CFG.micDb||0)/20);
+const micCons=()=>{const a={echoCancellation:false,noiseSuppression:false};
+  if(CFG.micDev)a.deviceId={exact:CFG.micDev}; return {audio:a};};
+async function micDevs(){
+  /* labels are blank until permission has been granted once — which is why
+     this is asked right after the first stream, never before */
+  try{const ds=await navigator.mediaDevices.enumerateDevices();
+    MIC.devs=ds.filter(d=>d.kind==='audioinput')
+      .map((d,i)=>({id:d.deviceId,label:(d.label||('input '+(i+1))).replace(/\s*\(.*?\)\s*$/,'')}));
+  }catch(_){MIC.devs=MIC.devs||[];}
+  return MIC.devs;
+}
+const micDevName=()=>CFG.micDevL?String(CFG.micDevL).slice(0,9):(CFG.micDev?'?':'default');
+const micGainStr=()=>{const db=Math.round(CFG.micDb||0);
+  const m=!MIC.on?'':MIC.pk>0.5?' ▎▎▎▎':MIC.pk>0.25?' ▎▎▎'
+         :MIC.pk>0.1?' ▎▎':MIC.pk>0.02?' ▎':' ·';
+  return (db>0?'+':'')+db+'dB'+m;};
+function micGainApply(){if(MIC.g)MIC.g.gain.setTargetAtTime(micLin(),AC.currentTime,0.01);}
+/* the monitor wires, reconciled: every audio channel that asked for one and
+   is on the mic gets MIC.g into its strip; everyone else's comes down */
+function micMonWire(){
+  for(let i=1;i<10;i++){const p=S.presets[i], au=(p&&p.au)||{};
+    const want=MIC.on&&!!MIC.g&&!!p&&p.cat==='audio'&&Math.round(au.mon||0)===1
+      &&Math.round(au.src||0)===0&&!!(engine.buses&&engine.buses[i]);
+    const has=MIC.monTo[i];
+    if(want&&!has){const gn=AC.createGain(); gn.gain.value=1;
+      try{MIC.g.connect(gn); gn.connect(engine.buses[i].vIn); MIC.monTo[i]=gn;}catch(_){}}
+    else if(!want&&has){try{has.disconnect();}catch(_){} delete MIC.monTo[i];}
+  }
+}
+async function micSetDev(id,label){
+  CFG.micDev=id; CFG.micDevL=label; saveCfg();
+  const was=MIC.on, latched=MIC.latched;
+  if(MIC.stream){try{MIC.stream.getTracks().forEach(t=>t.stop());}catch(_){} MIC.stream=null;}
+  if(was){micOff(); await micOn(); MIC.latched=latched;}
+}
+async function micStepDev(d){
+  if(!MIC.devs||!MIC.devs.length){
+    if(!MIC.stream){
+      if(!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia)){flash('no mic in this browser');return;}
+      try{MIC.stream=await navigator.mediaDevices.getUserMedia(micCons());}
+      catch(e){flash('mic: '+(e&&e.name==='NotAllowedError'?'permission denied':'unavailable'));return;}
+    }
+    await micDevs();
+    if(!MIC.devs.length){flash('no audio inputs found');return;}
+  }
+  const cur=MIC.devs.findIndex(x=>x.id===CFG.micDev);
+  const nx=MIC.devs[fmod((cur<0?0:cur)+(d>0?1:-1),MIC.devs.length)];
+  await micSetDev(nx.id,nx.label);
+  flash('mic → '+nx.label+' (the whole instrument)'); dirty=true;
+}
 async function micOn(){
   if(MIC.on||MIC._pending)return;   // a second ⌃ during the permission prompt must not build a second graph
   MIC._pending=true;
   try{
     if(!MIC.stream){
       if(!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia)){flash('no mic in this browser');return;}
-      MIC.stream=await navigator.mediaDevices.getUserMedia(
-        {audio:{echoCancellation:false,noiseSuppression:false}});
+      try{MIC.stream=await navigator.mediaDevices.getUserMedia(micCons());}
+      catch(e3){
+        /* a remembered device that is unplugged must not make the mic dead:
+           back to the default input, and say so */
+        if(!CFG.micDev||!e3||!/Overconstrained|NotFound/.test(String(e3.name)))throw e3;
+        delete CFG.micDev; delete CFG.micDevL; saveCfg();
+        flash('mic device gone — back to the default input');
+        MIC.stream=await navigator.mediaDevices.getUserMedia(micCons());
+      }
+      micDevs();                      // the labels are readable now
     }
     if(!MIC.ring){MIC.sr=AC.sampleRate;
-      MIC.ring=new Float32Array(Math.round(MIC.sr*32)); MIC.w=0;}
+      MIC.ring=new Float32Array(Math.round(MIC.sr*32)); MIC.w=0; MIC.total=0;}
     const src=AC.createMediaStreamSource(MIC.stream);
+    const g=AC.createGain(); g.gain.value=micLin();
     const sp=AC.createScriptProcessor(4096,1,1);
     const sink=AC.createGain(); sink.gain.value=0;   // pulled, silent — no monitor, no feedback
-    sp.onaudioprocess=ev=>{const d=ev.inputBuffer.getChannelData(0);
-      for(let i=0;i<d.length;i++){MIC.ring[MIC.w]=d[i]; MIC.w=(MIC.w+1)%MIC.ring.length;}};
-    src.connect(sp); sp.connect(sink); sink.connect(AC.destination);
-    MIC.node={src,sp,sink}; MIC.on=true;
+    sp.onaudioprocess=ev=>{const d=ev.inputBuffer.getChannelData(0); let pk=0;
+      for(let i=0;i<d.length;i++){const v=d[i]; MIC.ring[MIC.w]=v; MIC.w=(MIC.w+1)%MIC.ring.length;
+        const a=v<0?-v:v; if(a>pk)pk=a;}
+      MIC.total+=d.length;
+      MIC.pk=pk>MIC.pk?pk:MIC.pk*0.6;          // the row's meter: up at once, down over a few blocks
+      if(S.layer>=2&&isAudioCh(S.editSnd))dirty=true;   // …and only redrawn where it is on screen
+    };
+    src.connect(g); g.connect(sp); sp.connect(sink); sink.connect(AC.destination);
+    MIC.node={src,g,sp,sink}; MIC.g=g; MIC.on=true;
+    micMonWire();
     for(let i9=1;i9<10;i9++)if((S.presets[i9].gr||{}).live)engine.granLiveWire(i9);
     flash('● mic ON — the ring hears you · tab on an audio channel grabs the last loop');
     dirty=true;
@@ -16462,14 +16581,18 @@ async function micOn(){
 }
 function micOff(){
   if(!MIC.on)return;
-  const n=MIC.node; MIC.node=null; MIC.on=false; MIC.latched=false;
-  if(n){try{n.src.disconnect();n.sp.disconnect();n.sink.disconnect();}catch(_){}}
-  /* the live wires into gran channels are part of the mic being ON — leaving
-     them connected was a hot mic behind an 'off' light */
-  if(engine.gn)for(const k9 in engine.gn){const e9=engine.gn[k9];
-    if(e9&&e9.liveSrc){try{e9.liveSrc.disconnect();}catch(_){} e9.liveSrc=null;}}
+  const n=MIC.node; MIC.node=null; MIC.on=false; MIC.latched=false; MIC.g=null; MIC.pk=0;
+  if(n){try{n.src.disconnect();n.g.disconnect();n.sp.disconnect();n.sink.disconnect();}catch(_){}}
+  /* the monitor wires and the live wires into gran channels are part of the
+     mic being ON — leaving them connected was a hot mic behind an 'off'
+     light. g.disconnect() above took every one of them down; this forgets them. */
+  for(const k in MIC.monTo){try{MIC.monTo[k].disconnect();}catch(_){}} MIC.monTo={};
+  if(engine.gn)for(const k9 in engine.gn){const e9=engine.gn[k9]; if(e9&&e9.liveSrc)e9.liveSrc=null;}
   /* the stream stays: permission asked once, the next ctrl is instant */
   flash('mic off'); dirty=true;
+  /* a take drinking from this stage ends with it — after the flash, so what
+     it landed is the last word on screen */
+  if(engine.audRec&&engine.audRec.label==='mic')audRecEnd();
 }
 function micGrab(sec){                 // → the LAST `sec` seconds off the ring
   if(!MIC.ring)return null;
@@ -18237,6 +18360,7 @@ function takeToLane(pi,buf){
   return g;
 }
 const takeSay=g=>g?'  ~'+g.bpm+'bpm, '+g.beats+' beats':'  (no loop tempo fits — left as it was)';
+const AUDLATC=8192;   // script-processor latency: a take's blocks arrive this much after the air did
 function audPlace(pi,rec,startBeat,name='mic'){
   /* SILENCE IS NOT A TAKE. A muted mic, a denied permission, a channel with
      nothing routed to it — all of them used to overwrite a loaded sample
@@ -18249,7 +18373,6 @@ function audPlace(pi,rec,startBeat,name='mic'){
   }
   pushUndo('take: '+name);              // …and whatever it does replace comes back
   const lane=S.patterns[S.editPat].lanes[pi], sr=AC.sampleRate;
-  const LATC=8192;                                  // script-processor latency fudge
   if(lane.auto){                                    // fresh lane: loop length from the take
     const bars=Math.max(0.25,(rec.length/sr)/spb()/4);
     let p2=1; while(p2*1.25<bars)p2*=2; p2=Math.min(p2,16);
@@ -18261,7 +18384,7 @@ function audPlace(pi,rec,startBeat,name='mic'){
   if(old){const os=old.getChannelData(0);
     for(let i=0;i<canvasLen;i++)dst[i]=os[i%os.length]||0;}
   const mode=CFG.overdub||0;                        // 0 overwrite 1 overdub 2 smart
-  const pos0=fmod(startBeat-editAnchor(),L)*spb()*sr-LATC;
+  const pos0=fmod(startBeat-editAnchor(),L)*spb()*sr-AUDLATC;
   const W2=1024; let env=0;
   for(let i=0;i<rec.length;i++){
     const di=((Math.round(pos0+i)%canvasLen)+canvasLen)%canvasLen;
@@ -18282,7 +18405,8 @@ function audPlace(pi,rec,startBeat,name='mic'){
      fills in a synth channel that just became one by being recorded onto */
   S.presets[pi].cat='audio'; audDefaults(S.presets[pi]);
   engine.granCfg(pi);
-  flash('◉ audio: '+(L/4)+' bar loop ('+['overwrite','overdub','smart'][mode]+')');
+  flash('◉ audio: '+(L/4)+' bar loop ('+['overwrite','overdub','smart'][mode]+')'
+        +(T.playing?(autoCur(S.presets[pi])?'':' — auto is off: a key plays it'):' — space plays it'));
   dirty=true; dirtySave=true;
 }
 /* tab+N: you already played it, and you know how long it was. Set the loop to
@@ -18341,6 +18465,19 @@ function retroBars(bars){
   flash(seg.length?'◉ last '+bars+' bar'+(bars>1?'s':'')+' → '+seg.length+' notes'
                   :'◉ loop set to '+bars+' bar'+(bars>1?'s':'')+' (nothing played)');
   dirty=true; dirtySave=true;
+}
+/* THE RELEASE DECIDES WHICH TAKE IT WAS. Tab on an audio channel starts
+   both recorders on the way down — the keys and the sound — and the hand
+   says which one it meant: played the cue/pitch keys (or spent tab as a
+   modifier), it was a keys take and the sound is dropped; played nothing,
+   it was a sound take and audPlace gets it. Nothing running but a mic still
+   opening for one: that mic is told to stand down. */
+function audRecEnd(){
+  const r=engine.audRec;
+  if(!r){engine.audRecStop(true);return;}
+  if(r.keys>0){engine.audRecStop(true);
+    flash('keys take — the sound was dropped (play nothing under tab for a sound take)');}
+  else engine.audRecStop();
 }
 function retroCapture(){
   /* THE GUESSER IS GONE. The tap used to walk the buffer back to the last
@@ -19613,7 +19750,8 @@ const onKeyDown=e=>{
       /* pressing the button that is currently latched RELEASES it — the way
          out is the same key you came in on, no special chord to remember */
       if(LATCH.on&&!KM.sl){
-        latchReleaseAll(); flash('rec unlatched');
+        const hadRec=!!engine.audRec;
+        latchReleaseAll(); if(!hadRec)flash('rec unlatched');   // a landed take's flash outranks this one
         dirty=true; dirtySave=true; return;
       }
       HOLD.tab=true; HOLD.tabAt=performance.now(); HOLD.tabUsed=false;
@@ -19644,16 +19782,9 @@ const onKeyDown=e=>{
         flash('\u25cf modcap armed on '+S.presets[ca].name+
               ' \u2014 move anything and it is captured'+(T.playing?'':' \u2014 press space'));
       }
-      else if(S.layer>=1&&isAudioCh(noteCh)&&MIC.on){
-        /* the mic is ALREADY listening — tab is retro for sound: the last
-           loop-length of air goes straight into the lane, aligned to now */
-        const lane2=S.patterns[S.editPat].lanes[noteCh];
-        const beats=lane2.auto?16:lane2.len;
-        const rec2=micGrab(beats*spb());
-        if(rec2){pushUndo('mic take');
-          audPlace(noteCh,rec2,gridNow()-beats,'mic');}
-        else flash('mic ring is empty — hold ctrl a moment first');
-      }
+      /* (the mic-already-on ring grab lived here, on the key-DOWN, and ran
+         before the hand had decided what the tab was; it is the TAP now —
+         see the key-up) */
       /* THE RELEASE DECIDES, ON AN AUDIO CHANNEL TOO (Gad, 2026-08-20: three
          ways to record, and momentary was dead here). This branch used to fire
          retroCapture() on the key-DOWN, which settles the gesture before the
@@ -19668,7 +19799,7 @@ const onKeyDown=e=>{
          that trap is what the old comment guarded against and ⌃+tab is still
          its own gesture; all that changed is WHEN the tap is recognised. */
       else if(S.layer>=1&&isAudioCh(noteCh)&&engine.audRec){
-        engine.audRecStop();
+        HOLD.tabUsed=true; audRecEnd();   // a take left running (latched): the key you came in on ends it
       }
       /* REC arms on the way down whatever the gesture turns out to be — a tap
          is just a hold that ended quickly, and the release decides which it
@@ -19687,6 +19818,13 @@ const onKeyDown=e=>{
           if(ml.state==='rec'&&!T.playing)
             flash('● armed — press space; automation records against the loop');
         }
+        /* AND THE SOUND, ON AN AUDIO CHANNEL (Gad, 2026-08-23: "i cant hear
+           anything recorded"). Both recorders start on the way down — the
+           keys and the input — and the release keeps the one the hand used;
+           audRecEnd is the judge. b7e6700 took this call out because a quiet
+           room landed a loop of silence on a sample; audPlace refuses a
+           silent take now, so the trap it guarded against cannot happen. */
+        if(isAudioCh(noteCh))engine.audRecStart(noteCh);
       }
       dirty=true;dirtySave=true;}
     return;}
@@ -20927,6 +21065,7 @@ const onKeyDown=e=>{
     if(KM.sl&&CFG.latch!==0){noteLatch.add(c); LATCH.used=true;}
     const wasHeld=new Set(kbHeld); kbHeld.add(c);
     const pi=S.layer>=2?S.editSnd:S.curPreset;
+    if(engine.audRec&&engine.audRec.pi===pi)engine.audRec.keys++;   // the release asks: was this a keys take?
     /* A CUE KEY IS ITS SLOT. Sent through the note path — which is what the
        play rack needs — the letter became a PITCH by the piano mapping, and
        cueNote turned that pitch back into a slot by arithmetic, so the arp
@@ -22172,11 +22311,14 @@ const onKeyUp=e=>{
     const wasUsed=HOLD.tabUsed;
     const wantLatch=HOLD.tabLatch;
     HOLD.tab=false; HOLD.tabUsed=false; HOLD.tabLatch=false;
+    /* tab spent as a modifier (loop ops, modcap) is not a sound take */
+    if(wasUsed&&engine.audRec)engine.audRec.keys++;
     if(wantLatch){                              // latch overlapped the hold: rec stays on
       LATCH.on=true; pushUndo('take');
       const pat4=S.patterns[S.editPat];
       if(pat4.state!=='rec')pat4.state='rec';
-      flash('● REC latched'); dirty=true; dirtySave=true; return;
+      flash('● REC latched'+(engine.audRec?' — recording '+engine.audRec.label+', tab again to keep it':''));
+      dirty=true; dirtySave=true; return;
     }
     /* …and the tap is a tap on an audio channel too. The exclusion here was
        the other half of the key-down grab: retroCapture had already run, so
@@ -22197,12 +22339,30 @@ const onKeyUp=e=>{
           if(ml3.state==='rec')ml3.state='on';
         }
       }
+      /* A TAP ON AN AUDIO CHANNEL TAKES THE PAST. What the key-down started
+         is dropped — it is 300ms old — and if the mic was already on, the
+         last loop-length of air comes off the ring instead, aligned to now.
+         (This grab used to fire on the key-DOWN, and then this branch ran
+         retroCapture over it and flashed 'tab records the input' across the
+         take it had just placed.) */
+      const pi3=S.layer>=2?S.editSnd:S.curPreset;
+      if(isAudioCh(pi3)){
+        engine.audRecStop(true);
+        if(MIC.on&&MIC.ring){
+          const lane5=S.patterns[S.editPat].lanes[pi3];
+          const beats=lane5.auto?16:lane5.len;
+          const rec2=micGrab(beats*spb());
+          if(rec2){pushUndo('mic take'); audPlace(pi3,rec2,gridNow()-beats,'mic');}
+          else flash('mic ring is empty — hold escape a moment first');
+          dirty=true; dirtySave=true; return;
+        }
+      }
       retroCapture();                       // the tap: take what was just played
       dirty=true; dirtySave=true; return;
     }
   }
   if(c==='Tab'&&!LATCH.on){                       // the hold ended and nothing latched it: rec off
-    if(engine.audRec)engine.audRecStop();
+    audRecEnd();                                   // …and the sound take, if the hand meant one
     const pat=S.layer>=1?S.patterns[S.editPat]:null;      // pattern rec (notes), pattern + sound layers
     if(pat&&pat.state==='rec'){pat.state='on';finalizeCaptures(true);dirty=true;dirtySave=true;}
     if(S.layer>=2){                                     // ...and disarm the mod loop with it
@@ -24171,6 +24331,34 @@ function gridHTML(pat,pos,anc,chans){
             td+='<line x1="0" x2="'+CW.toFixed(1)+'" y1="'+(p9*H).toFixed(1)+
                 '" y2="'+(p9*H).toFixed(1)+'"/>';
           h+='<svg class="wlay pvz" width="'+CW.toFixed(1)+'" height="'+H+'">'+td+'</svg>';
+        }
+        /* THE TAKE AS IT LANDS (Gad, 2026-08-23: "draw the incoming audio as
+           its recorded and put a playhead that writes the audio"). Every
+           512-sample peak the recorder has heard so far, drawn at the place
+           in the loop it will occupy — the same arithmetic audPlace uses to
+           put it there — and a solid line where the next one goes: the write
+           head. On a fresh lane the loop is still the default length; the
+           take wraps in the picture exactly as it would in the lane. */
+        const R9=engine.audRec;
+        if(R9&&R9.pi===i&&lane){
+          const sr9=AC.sampleRate, L9=lane.len||4, cl9=Math.max(256,Math.round(L9*spb()*sr9));
+          const pos9=fmod(R9.startBeat-editAnchor(),L9)*spb()*sr9-AUDLATC;
+          const rows9=Math.max(16,Math.round(H/2)), pk9=new Float32Array(rows9);
+          const fr9=k=>((((pos9+k*R9.blk)%cl9)+cl9)%cl9)/cl9;
+          const N9=R9.pks.length, k0=Math.max(0,N9-Math.ceil(cl9/R9.blk));   // only the last loop's worth can show
+          for(let k=k0;k<N9;k++){
+            let ra=Math.floor(fr9(k)*rows9), rb=Math.floor(fr9(k+1)*rows9);
+            if(rb<ra)rb+=rows9;                         // a slice that wraps the loop's end
+            for(let r2=ra;r2<=rb;r2++){const q=r2%rows9; if(R9.pks[k]>pk9[q])pk9[q]=R9.pks[k];}
+          }
+          let rp='';
+          for(let r2=0;r2<rows9;r2++){const a2=pk9[r2]; if(a2<=0)continue;
+            const y2=(r2+0.5)/rows9*H;
+            rp+='M'+((0.5-a2*0.48)*CW).toFixed(1)+','+y2.toFixed(1)+
+                'L'+((0.5+a2*0.48)*CW).toFixed(1)+','+y2.toFixed(1);}
+          const yw=(fr9(N9)*H).toFixed(1);
+          h+='<svg class="wlay wrec" width="'+CW.toFixed(1)+'" height="'+H+'">'+(rp?'<path d="'+rp+'"/>':'')+
+             '<line x1="0" x2="'+CW.toFixed(1)+'" y1="'+yw+'" y2="'+yw+'"/></svg>';
         }
       h+='</div>'; continue; }
     /* a cell cannot render below about five pixels, so past that density the
