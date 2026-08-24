@@ -7517,11 +7517,40 @@ class Voice{
     for(const e2 of opEnvs){
       const gls=this._opG(e2.idx); if(!gls.length)continue;
       const w=clamp(e2.amt/100,-1,1), a=Math.max(0.001,e2.a);
+      /* THE CURVE DIAL WAS DEAD HERE (found 2026-08-25, chasing Gad's "grimy
+         how the fm level descends"). The amp env honors crv; this path was a
+         fixed setTargetAtTime, so an FM-index descent was ALWAYS the plain
+         exponential — which lingers exactly where 1:1 FM churns hardest
+         (index 3→0, the fundamental flickering through the Bessel nulls).
+         Same recipe as the amp env: exponent on TIME, every setting the same
+         length, crv+ falls fast into a quiet tail, crv− hangs high then
+         drops off the shelf. Guarded so crv 0 — every existing patch — is
+         byte-identical: the shaped branch only runs when the dial is moved.
+         Measured on his ch5 (env→op2 level, op2 fm→op1): crv 0 unchanged;
+         −100/+100 bend the measured index trajectory both ways. */
+      const crvO=clamp(e2.crv||0,-200,200), shapedO=Math.abs(crvO)>1;
       for(const g of gls.flat()){
         const base=g.gain.value;
         const lo=w>0?base*(1-w):base, hi=w>0?base:base*(1+w);
         if(e2.lp>0.001){this._loopEnv(g.gain,lo,hi,e2.s,e2,at);continue;}
         const sus=lo+(hi-lo)*e2.s;
+        if(shapedO){
+          const pO=Math.pow(2,-crvO/55), D=Math.max(0.01,e2.d);
+          g.gain.setValueAtTime(lo,at);
+          if(a>0.002){const NA=8, kAo=Math.pow(2,crvO/55);
+            for(let i=1;i<=NA;i++){const x=i/NA;
+              g.gain.linearRampToValueAtTime(lo+(hi-lo)*Math.pow(x,kAo),at+a*x);}
+          }else g.gain.linearRampToValueAtTime(hi,at+a);
+          /* exp(-5u) matches this path's own uncurved rate (tau=d/5), so the
+             hard landing below still lands where it always did */
+          const NS=clamp(Math.ceil(D/0.008),12,48);
+          for(let i=1;i<=NS;i++){const u=i/NS;
+            g.gain.linearRampToValueAtTime(sus+(hi-sus)*Math.exp(-5*Math.pow(u,pO)),at+a+D*u);}
+          g.gain.setValueAtTime(sus,at+a+Math.max(0.006,e2.d));
+          (this.modN=this.modN||[]).push({p:g.gain,mi:e2.mi,ri:e2.ri,kind:'env',
+                                          base,mul:true,aT:a});
+          continue;
+        }
         g.gain.setValueAtTime(lo,at);
         g.gain.linearRampToValueAtTime(hi,at+a);
         /* AN OPERATOR LEVEL HAS TO LAND, and the amp envelope's shape does not
