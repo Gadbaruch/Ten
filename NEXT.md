@@ -1,6 +1,6 @@
 # WHERE THE AUDIO CHANNEL STANDS — 2026-08-23, branch `mic-rec`
 
-## MIC RECORDING ON AN AUDIO CHANNEL — on branch `mic-rec`, build 2026-08-24.1556, his ear next
+## MIC RECORDING ON AN AUDIO CHANNEL — on branch `mic-rec`, build 2026-08-24.1603, his ear next
 
 Gad, 2026-08-23: "i cant hear anything recorded, can you make my mic input
 controlable. also can you draw the incoming audio as its recorded and put a
@@ -193,6 +193,19 @@ Two more from his hands, minutes apart:
   keep a DEDICATED tab, front it BY ID (`browse tab N`) before every run,
   and read the url line of every probe header. Fronted-tab addressing in a
   shared window is a race.
+
+### ROUND 12 — a stopped take always starts from 0
+
+"when playback is stopped, recording with esc+tab should always start from
+0." It only did on the EMPTY channel (the tempo path); with a bed, a stopped
+take landed wherever the free-running grid clock happened to stand. Now any
+chord take that BEGINS with the transport stopped anchors to the loop start
+— decided at the take's birth (audRec.from0), so the live drawing fills
+from 0 while you hold; the trim is 0 (no grid to align to) and the head-cut
+keeps the first SOUND on the zero point; a transport started mid-take keeps
+the anchor. Empty-channel takes still also set the clock, unchanged.
+Measured (from0 row): 440 bed, stopped 523 punch → span starts at 0.006s
+(the crossfade edge). micrec is 9 rows now.
 
 ### ROUND 11 — ⇧⌫ clears the channel · the eaten boundary · the silent head
 

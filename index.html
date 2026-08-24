@@ -1234,7 +1234,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-24.1556';
+const BUILD='2026-08-24.1603';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -11672,8 +11672,16 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
         if(chunks.length*4096>AC.sampleRate*120){flash('recording capped at 120s — takes belong in loops');
           try{audRecEnd();}catch(_){}}};
       srcNode.connect(sp3); sp3.connect(sink); sink.connect(AC.destination);
-      E.audRec={pi,src:srcNode,sp3,sink,chunks,chunksR,pks,blk:SUB,startBeat:gridNow(),label,openedMic,keys:0,
-        lat:audRecLat(label)};
+      /* A STOPPED-TRANSPORT TAKE STARTS FROM 0 (Gad, 2026-08-24: "when
+         playback is stopped, recording with esc+tab should always start from
+         0") — bed or no bed. Decided HERE, at the take's birth, so the live
+         drawing already fills from the loop start; with nothing playing
+         there is no grid to align to, so the trim is 0 and the first sound
+         IS the zero point. A transport started mid-take keeps the anchor. */
+      const stop9=!T.playing;
+      E.audRec={pi,src:srcNode,sp3,sink,chunks,chunksR,pks,blk:SUB,
+        startBeat:stop9?editAnchor():gridNow(),from0:stop9,label,openedMic,keys:0,
+        lat:stop9?0:audRecLat(label)};
       /* in overwrite the OLD loop goes quiet under the take — the carrier and
          only the carrier; a key played under the hold must stay audible,
          because it is the keys take being played. audCycle skips respawning
@@ -11764,7 +11772,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
         return;
       }
     }
-    audPlace(r.pi,recOut,r.startBeat+sbAdj,r.label,r.lat);
+    audPlace(r.pi,recOut,r.startBeat+(r.from0?0:sbAdj),r.label,r.lat);
   }
   chokeSeq(pi){const n=AC.currentTime;for(const v of [...this.act[pi]])if(!v.live)v.kill(n);
     /* granular: the worklet may hold voices whose 'off' was lost — a choke is

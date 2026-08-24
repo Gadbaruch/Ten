@@ -1258,6 +1258,21 @@ async function probeMicRec() {
     stop(); await sleep(120);
     rows.push({ k: 'mute', carBefore, busPlay, carDuring, busRec, busResume, carAfter,
                 expect: 'car t/f/t · bus >0 · ~0 · >0 at once' });
+    /* from0 — a chord take that BEGINS with the transport stopped lands at
+       the loop start, bed or no bed (only the empty channel also sets the
+       clock). Clean 440 bed first, then a 523 punch: its span must sit at 0. */
+    CFG.overdub = 0; CFG.micDb = 0; micGainApply(); osc.frequency.value = 440; og.gain.value = 0.3;
+    await sleep(cl / sr * 1000 + 300);
+    audPlace(ch, micGrab(lane.len * spb()), gridNow() - lane.len, 'mic');
+    osc.frequency.value = 523; CFG.micDb = -6; micGainApply();
+    K('keydown', 'Tab'); await sleep(500); K('keyup', 'Tab'); await sleep(250);
+    osc.frequency.value = 440; CFG.micDb = 0; micGainApply();
+    let spanAt = -1; { const dd0 = engine.audBuf[ch].getChannelData(0), win = 256;
+      for (let a = 0; a + win <= dd0.length; a += win) { let pk = 0;
+        for (let i = a; i < a + win; i += 2) { const v = Math.abs(dd0[i]); if (v > pk) pk = v; }
+        if (pk > 0.08 && pk < 0.21) { spanAt = a; break; } } }
+    rows.push({ k: 'from0', spanStartSec: spanAt < 0 ? null : r3(spanAt / sr),
+                expect: '~0 — stopped takes land at the loop start' });
     /* (the session rows — monitor, device, sync, esc gestures, tab loop,
        latc, stereo, tempo, nearend, headtrim, clear — moved to micrec2:
        the browse CLI caps a command at 30s and the full suite outgrew it) */
@@ -1284,7 +1299,7 @@ async function probeMicRec() {
                   'on', 'off', 'bus', 'at', 'step1', 'step2', 'listed', 'row',
                   'micDuring', 'db', 'mon', 'layer', 'latched',
                   'down', 'up', 'full', 'l', 'r', 'rfull', 'sameBuf', 'spd', 'semis', 'crop',
-                  'onsets', 'E', 'Ems', 'spread', 'nowLATC', 'implied', 'trimMs', 'status', 'maxStep', 'nch', 'LtoR', 'bpm', 'lane', 'dur', 'fitRatio', 'relPh', 'busBoundary', 'busNext', 'buf', 'auto', 'events',
+                  'onsets', 'E', 'Ems', 'spread', 'nowLATC', 'implied', 'trimMs', 'status', 'maxStep', 'nch', 'LtoR', 'bpm', 'lane', 'dur', 'fitRatio', 'relPh', 'busBoundary', 'busNext', 'buf', 'auto', 'events', 'spanStartSec',
                   'spanSec', 'bedSec', 'mixSec', 'ovdubMixSec', 'dev', 'paramLeak', 'curParam', 'busResume'], rows };
 }
 
@@ -1553,7 +1568,7 @@ async function probeMicRec2() {
                   'on', 'off', 'bus', 'at', 'step1', 'step2', 'listed', 'row',
                   'micDuring', 'db', 'mon', 'layer', 'latched',
                   'down', 'up', 'full', 'l', 'r', 'rfull', 'sameBuf', 'spd', 'semis', 'crop',
-                  'onsets', 'E', 'Ems', 'spread', 'nowLATC', 'implied', 'trimMs', 'status', 'maxStep', 'nch', 'LtoR', 'bpm', 'lane', 'dur', 'fitRatio', 'relPh', 'busBoundary', 'busNext', 'buf', 'auto', 'events',
+                  'onsets', 'E', 'Ems', 'spread', 'nowLATC', 'implied', 'trimMs', 'status', 'maxStep', 'nch', 'LtoR', 'bpm', 'lane', 'dur', 'fitRatio', 'relPh', 'busBoundary', 'busNext', 'buf', 'auto', 'events', 'spanStartSec',
                   'spanSec', 'bedSec', 'mixSec', 'ovdubMixSec', 'dev', 'paramLeak', 'curParam', 'busResume'], rows };
 }
 
