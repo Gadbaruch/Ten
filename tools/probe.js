@@ -1289,20 +1289,20 @@ async function probeMicRec() {
                 paramLeak: JSON.stringify(S.presets[ch]) === snap0 ? 'none' : 'MOVED',
                 curParam: cp0 + '→' + S.curParam, layer: S.layer, micAfter: MIC.on ? 'on' : 'off' });
     S.layer = 1;
-    /* tabloop — tab+↑↓ is loop length now; with fit on the speed dial
-       absorbs the ratio, the crop does not move, and no take lands from a
-       hold that was spent as a modifier */
+    /* tabloop — tab+↑↓ is SAMPLE LENGTH: crop and lane scale together so
+       the rate cannot move, the speed dial is never written, the full take
+       refuses to grow, and no take lands from a modifier-spent hold */
     lane.unit = 'B'; lane.count = 1; lane.auto = false;
     const pau = S.presets[ch].au; pau.spd = 1; pau.rate = 1; pau.en = 1; pau.st = 0; pau.fit = 1;
     const bufRef = engine.audBuf[ch];
-    K('keydown', 'Tab'); await sleep(60); K('keydown', 'ArrowUp'); await sleep(30); K('keyup', 'ArrowUp');
-    await sleep(30); K('keyup', 'Tab'); await sleep(150);
-    const up = { count: lane.count, spd: pau.spd, en: pau.en, sameBuf: engine.audBuf[ch] === bufRef };
-    K('keydown', 'Tab'); await sleep(60); K('keydown', 'ArrowDown'); await sleep(30); K('keyup', 'ArrowDown');
-    await sleep(30); K('keyup', 'Tab'); await sleep(150);
-    rows.push({ k: 'tabloop', upCount: up.count, upSpd: up.spd, downCount: lane.count, downSpd: pau.spd,
-                en: up.en + '/' + pau.en, sameBuf: up.sameBuf,
-                expect: '2/×2 → 1/×1 · en 1/1 · sameBuf true' });
+    const tl = async c9 => { K('keydown', 'Tab'); await sleep(60); K('keydown', c9); await sleep(30);
+      K('keyup', c9); await sleep(30); K('keyup', 'Tab'); await sleep(150);
+      return lane.count + '/' + (pau.en ?? 1) + '/' + (pau.spd ?? 1); };
+    const dn = await tl('ArrowDown');
+    const up = await tl('ArrowUp');
+    const full = await tl('ArrowUp');
+    rows.push({ k: 'tabloop', down: dn, up, full, sameBuf: engine.audBuf[ch] === bufRef,
+                expect: 'dn 0.5/0.5/1 · up 1/1/1 · full 1/1/1 · true' });
   } finally {
     window.flash = flash0;
     md.getUserMedia = gum0; md.enumerateDevices = enu0;
@@ -1324,7 +1324,7 @@ async function probeMicRec() {
                   'micAfter', 'rec2', 'keysSeen', 'ovdubOnSec', 'carBefore', 'busPlay', 'carDuring', 'busRec', 'carAfter',
                   'on', 'off', 'gate', 'step1', 'step2', 'listed', 'row',
                   'micDuring', 'db', 'mon', 'layer', 'latched',
-                  'upCount', 'upSpd', 'downCount', 'downSpd', 'en', 'sameBuf', 'spd', 'semis', 'crop',
+                  'down', 'up', 'full', 'sameBuf', 'spd', 'semis', 'crop',
                   'spanSec', 'bedSec', 'mixSec', 'ovdubMixSec', 'dev', 'paramLeak', 'curParam', 'busResume'], rows };
 }
 

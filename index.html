@@ -1234,7 +1234,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-24.1227';
+const BUILD='2026-08-24.1231';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -20820,14 +20820,45 @@ const onKeyDown=e=>{
       }
       return;
     }
-    /* TAB+↑↓ IS THE LOOP'S LENGTH, ON AN AUDIO CHANNEL TOO (Gad, 2026-08-23:
-       "i dont think tab+up/down should change pitch of loop... just
-       shorten/enlarge"). It cropped the take here for a while, because with
-       the take fitted a length change WAS a speed change and the pair read as
-       redundant next to tab+-/= — but the ×2/÷2 crop is a pitch move under
-       fit, which is exactly what he heard. loopOps compensates the fit now
-       (audFitComp), so length is length, -/= is speed, and the crop lives on
-       the page's own start/length dials. */
+    /* TAB+↑↓ ON AN AUDIO CHANNEL IS THE SAMPLE LENGTH (Gad, 2026-08-24: "it
+       used to change the sample length, i think its more intuitive that
+       sample length and speed are seperate things" — revising the morning's
+       loop-length-with-speed-comp, whose visible spd writes read as a speed
+       change; and 08-23's bare crop, whose fit re-stretch was a pitch drop).
+       The crop and the lane scale TOGETHER, so under fit the rate cannot
+       move: half the material over half the loop is the same tape at the
+       same speed, and the speed dial is never touched. Speed lives on
+       tab+-/= and the dial, only there; the LOOP alone still grows on
+       tab+←→ (fit-compensated, audFitComp). Refused rather than clamped at
+       the edges — a partial ratio would un-grid the lane — and the flash
+       says which key does what instead. */
+    if((c==='ArrowUp'||c==='ArrowDown')&&!rs(e)){
+      const tgA=chTargets().filter(i=>isAudioCh(i)&&engine.audBuf[i]);
+      if(tgA.length){
+        const f=c==='ArrowUp'?2:0.5;
+        let say='', did=false;
+        for(const i of tgA){
+          const p9=S.presets[i]; p9.au=p9.au||{};
+          const lane9=S.patterns[S.editPat].lanes[i];
+          const e9=clamp(p9.au.en??1,-1,1), want=e9*f;
+          if(Math.abs(want)>1+1e-9){say='the whole take loops already — ⇥←→ grows the loop, ⇥-= the speed'; continue;}
+          if(Math.abs(want)<0.01){say='sample length at the floor'; continue;}
+          if(f>1&&lane9.count*2>256){say='loop already at the maximum'; continue;}
+          if(f<1&&lane9.count/2<0.25){say='loop already at the minimum'; continue;}
+          if(!did)pushUndo('sample length');
+          did=true;
+          p9.au.en=want;
+          if(f>1)lane9.double(true); else lane9.halve();
+          if(S.layer===1)lane9.auto=false;
+          engine.audRelock(i);
+          say=(p9.au.en<0?'◀ ':'')+Math.round(Math.abs(p9.au.en)*100)+'% of the take · loop '+
+              (lane9.count%1?lane9.count.toFixed(2):lane9.count)+'×'+UNIT_NAMES[lane9.unit];
+        }
+        HOLD.tabUsed=true; dirty=true; dirtySave=true;
+        if(tgA.length>1&&did)chSay('sample length',tgA.length); else flash(say||'sample length');
+        return;
+      }
+    }
     {const tg=chTargets(), pat=S.patterns[S.editPat];
      let did=false;
      tg.forEach(i=>{ if(loopOps(e,c,pat.lanes[i]))did=true; });

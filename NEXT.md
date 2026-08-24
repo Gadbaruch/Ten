@@ -1,6 +1,6 @@
 # WHERE THE AUDIO CHANNEL STANDS — 2026-08-23, branch `mic-rec`
 
-## MIC RECORDING ON AN AUDIO CHANNEL — on branch `mic-rec`, build 2026-08-24.1227, his ear next
+## MIC RECORDING ON AN AUDIO CHANNEL — on branch `mic-rec`, build 2026-08-24.1231, his ear next
 
 Gad, 2026-08-23: "i cant hear anything recorded, can you make my mic input
 controlable. also can you draw the incoming audio as its recorded and put a
@@ -194,6 +194,28 @@ Two more from his hands, minutes apart:
   and read the url line of every probe header. Fronted-tab addressing in a
   shared window is a race.
 
+### ROUND 6 — tab+↑↓ is SAMPLE LENGTH; speed is nobody's side effect
+
+"i noticed that now tab+updown changes the playback speed, it used to change
+the sample length, i think its more intuitive that sample length and speed
+are seperate things?" — the round-4 compensation kept the SOUND identical
+but wrote the speed dial to do it, and a dial that moves reads as a speed
+change. Third shape, and the one that closes it: **tab+↑↓ scales the crop
+AND the lane together** — half the material over half the loop is the same
+tape at the same rate — so under fit nothing else absorbs a ratio: the
+speed dial is never written, the pitch cannot move (both his complaints at
+once: 08-23's pitch drop came from crop-alone, 08-24 morning's dial writes
+from lane-alone). Refused at the edges rather than clamped — a partial
+ratio would un-grid the lane — with the flash naming which key does what:
+the whole-take ceiling says '⇥←→ grows the loop, ⇥-= the speed'.
+Measured (tabloop): ↓ 0.5count/0.5crop/spd×1 · ↑ 1/1/1 · ↑ at full refused
+1/1/1 · no take landed. Speed remains ONLY tab+-/= and the dial.
+⚠ OPEN, his call: tab+←→ (loop ±1 count) and ⇧←→ (unit) still carry the
+round-4 spd compensation — the dial shows e.g. ×1.5 after growing a fitted
+loop by a bar. If "length and speed are separate" extends there, the
+honest alternatives are (a) let pitch follow the fit again on ←→, or
+(b) ←→ also refuses on fitted audio. Asked in chat.
+
 ### ROUND 5 — letting go of rec resumes playback AT POSITION
 
 "when letting go of rec, right now it stops playback and triggers only when
@@ -263,8 +285,10 @@ not, and is test #1):
  4. **Repitch only after.** Record; turn speed/pitch/crop — now it
     repitches; record again — neutral, your voice at ×1.
  5. **The bed mutes while you record over it** (ovwrt; ovdub keeps playing).
- 6. **tab+↑↓ = loop length**, sound identical (dial shows the ratio, clears
-    on your next recording). tab+-/= is speed.
+ 6. **tab+↑↓ = sample length**: ↓ halves the material AND the loop with it
+    — same speed, same pitch, speed dial untouched; ↑ doubles back; at the
+    full take it refuses and the flash points at ⇥←→ (loop) and ⇥-= (speed).
+    tab+←→ still grows the LOOP with the speed-dial compensation showing.
  7. **Keys under the chord = keys take** ('the sound was dropped').
  8. **Settings/Input** still the reference: mic dev · mic gain (meter) ·
     monitor; esc+; and settings toggle the same monitor.
