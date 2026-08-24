@@ -1,6 +1,6 @@
 # WHERE THE AUDIO CHANNEL STANDS — 2026-08-23, branch `mic-rec`
 
-## MIC RECORDING ON AN AUDIO CHANNEL — on branch `mic-rec`, build 2026-08-24.1231, his ear next
+## MIC RECORDING ON AN AUDIO CHANNEL — on branch `mic-rec`, build 2026-08-24.1308, his ear next
 
 Gad, 2026-08-23: "i cant hear anything recorded, can you make my mic input
 controlable. also can you draw the incoming audio as its recorded and put a
@@ -194,6 +194,40 @@ Two more from his hands, minutes apart:
   and read the url line of every probe header. Fronted-tab addressing in a
   shared window is a race.
 
+### ROUND 7 — ←→ joins the sample-length gesture, and AUDLATC was fiction
+
+Two more asks, both landed:
+
+- **"make tab+←→ same as tab up down to control the length not speed, and
+  make it work the same as in midi that it will add or remove steps
+  according to the loop unit size."** One branch now serves both pairs on an
+  audio channel with a take: ↑↓ doubles/halves, **←→ steps ONE UNIT** — a
+  16th, an 8th, a beat, whatever the lane's unit is (⇧←→ still picks the
+  unit) — crop and lane locked either way, rate immovable, speed dial never
+  written. Edges refuse with a flash that names the keys; the LOOP alone
+  (more bars than material) is right shift's length dials, as ever.
+  audFitComp now only serves ⇧←→ unit switches on audio.
+  Measured: b-unit lane 4→←→3 with crop 75%/spd ×1, →→ back 4/100%/×1,
+  → at the full take refused.
+- **"the recording is placed too early, please do a calibration."** Done his
+  way, automated: the `latc` probe row fires six blips at known clock times
+  through the master and records them via the take path (src=mstr — no
+  MediaStream in that chain), then measures where they LANDED against the
+  beat grid. **E = −8190 samples, spread 0, with the old AUDLATC=8192** —
+  the tap chain's true delay is ~2 samples (the onset detector's bias), the
+  8192 was pure faith, and every take sat 186ms early. That IS his "recorded
+  click is like 1 16th note almost earlier then the live click" (125ms at
+  120bpm) plus his mic's real input delay. **AUDLATC=0 now**, and a mic take
+  adds the device's own latency at RECORD time — `audRecLat`: the stream's
+  reported settings.latency plus AC.outputLatency, so a bluetooth headset
+  pays its own bill per take and a rewire needs no rebuild. Re-measured:
+  **E=+2 samples (0.045ms), spread 0**; the fake-mic hold row's drift fell
+  ~50ms → 9ms (the loopback's own buffering, which real devices report).
+  ⚠ The test browser's fake mic reports no latency, so the REAL-mic offset
+  is verified only by the formula, not by air: his click test by ear is the
+  judge, and if a device lies about its latency the honest next step is a
+  manual trim setting (offer made, not built).
+
 ### ROUND 6 — tab+↑↓ is SAMPLE LENGTH; speed is nobody's side effect
 
 "i noticed that now tab+updown changes the playback speed, it used to change
@@ -285,10 +319,14 @@ not, and is test #1):
  4. **Repitch only after.** Record; turn speed/pitch/crop — now it
     repitches; record again — neutral, your voice at ×1.
  5. **The bed mutes while you record over it** (ovwrt; ovdub keeps playing).
- 6. **tab+↑↓ = sample length**: ↓ halves the material AND the loop with it
-    — same speed, same pitch, speed dial untouched; ↑ doubles back; at the
-    full take it refuses and the flash points at ⇥←→ (loop) and ⇥-= (speed).
-    tab+←→ still grows the LOOP with the speed-dial compensation showing.
+ 6. **tab+arrows = sample length, both pairs**: ↑↓ double/halve, ←→ one
+    unit at a time (16th/8th/beat — ⇧←→ picks the unit) — same speed, same
+    pitch, speed dial untouched, edges refuse with the flash naming keys.
+    The loop ALONE (bars beyond the material) is right shift's dials.
+ 0. **TIMING — his own test, by ear.** Click on, record it (mic to the air,
+    or input=mstr for the internal loop), play back: the recorded click sits
+    ON the live click now (was ~186ms early). If a real mic still lands off,
+    the device is lying about its latency — say so and a trim dial is next.
  7. **Keys under the chord = keys take** ('the sound was dropped').
  8. **Settings/Input** still the reference: mic dev · mic gain (meter) ·
     monitor; esc+; and settings toggle the same monitor.

@@ -1234,7 +1234,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-24.1231';
+const BUILD='2026-08-24.1308';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -11644,7 +11644,8 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
         if(chunks.length*4096>AC.sampleRate*120){flash('recording capped at 120s — takes belong in loops');
           try{audRecEnd();}catch(_){}}};
       srcNode.connect(sp3); sp3.connect(sink); sink.connect(AC.destination);
-      E.audRec={pi,src:srcNode,sp3,sink,chunks,pks,blk:SUB,startBeat:gridNow(),label,openedMic,keys:0};
+      E.audRec={pi,src:srcNode,sp3,sink,chunks,pks,blk:SUB,startBeat:gridNow(),label,openedMic,keys:0,
+        lat:audRecLat(label)};
       /* in overwrite the OLD loop goes quiet under the take — the carrier and
          only the carrier; a key played under the hold must stay audible,
          because it is the keys take being played. audCycle skips respawning
@@ -11682,7 +11683,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     if(len<AC.sampleRate*0.05){flash(r.label+' take too short');this.audResume(r.pi);return;}
     const rec=new Float32Array(len); let o=0;
     for(const c2 of r.chunks){rec.set(c2,o);o+=c2.length;}
-    audPlace(r.pi,rec,r.startBeat,r.label);
+    audPlace(r.pi,rec,r.startBeat,r.label,r.lat);
   }
   chokeSeq(pi){const n=AC.currentTime;for(const v of [...this.act[pi]])if(!v.live)v.kill(n);
     /* granular: the worklet may hold voices whose 'off' was lost — a choke is
@@ -18427,8 +18428,28 @@ function takeToLane(pi,buf){
   return g;
 }
 const takeSay=g=>g?'  ~'+g.bpm+'bpm, '+g.beats+' beats':'  (no loop tempo fits — left as it was)';
-const AUDLATC=8192;   // script-processor latency: a take's blocks arrive this much after the air did
-function audPlace(pi,rec,startBeat,name='mic'){
+const AUDLATC=0;      /* MEASURED, not assumed: six beat-locked blips through the
+   mstr take path landed at E=-8190 samples with the old 8192, spread 0 —
+   the tap chain's own delay is ~2 samples (the onset detector's bias on a
+   1kHz ramp). It was 8192 on faith and every take sat 186ms early — Gad:
+   "the recorded click is like 1 16th note almost earlier then the live
+   click". tools/probe.sh micrec, the latc row, re-measures it any time. */
+/* WHERE A TAKE SITS IS A MEASURED NUMBER (Gad, 2026-08-24: "the recording is
+   placed too early, please do a calibration"). AUDLATC is the tap chain
+   itself — measured by the latc probe row with beat-locked blips through the
+   master. A real mic adds the device's own delay on top, in and out, which
+   the browser reports per stream — read at RECORD time, so a bluetooth
+   headset pays its own bill and a rewire never needs a rebuild. */
+function audRecLat(label){
+  let lat=AUDLATC;
+  if(label==='mic'){
+    try{const t9=MIC.stream&&MIC.stream.getAudioTracks()[0];
+      const st9=t9&&t9.getSettings?t9.getSettings():{};
+      lat+=Math.round(((st9.latency||0)+(AC.outputLatency||0))*AC.sampleRate);}catch(_){}
+  }
+  return lat;
+}
+function audPlace(pi,rec,startBeat,name='mic',lat){
   /* SILENCE IS NOT A TAKE. A muted mic, a denied permission, a channel with
      nothing routed to it — all of them used to overwrite a loaded sample
      with a loop of nothing, and the sample was not coming back. */
@@ -18461,7 +18482,7 @@ function audPlace(pi,rec,startBeat,name='mic'){
   const old=engine.audBuf[pi];
   if(old){const os=old.getChannelData(0);
     for(let i=0;i<canvasLen;i++)dst[i]=os[i%os.length]||0;}
-  const pos0=fmod(startBeat-editAnchor(),L)*spb()*sr-AUDLATC;
+  const pos0=fmod(startBeat-editAnchor(),L)*spb()*sr-(lat??AUDLATC);
   const W2=1024; let env=0;
   for(let i=0;i<rec.length;i++){
     const di=((Math.round(pos0+i)%canvasLen)+canvasLen)%canvasLen;
@@ -20832,23 +20853,36 @@ const onKeyDown=e=>{
        tab+←→ (fit-compensated, audFitComp). Refused rather than clamped at
        the edges — a partial ratio would un-grid the lane — and the flash
        says which key does what instead. */
-    if((c==='ArrowUp'||c==='ArrowDown')&&!rs(e)){
+    if((c==='ArrowUp'||c==='ArrowDown'||c==='ArrowLeft'||c==='ArrowRight')&&!rs(e)){
       const tgA=chTargets().filter(i=>isAudioCh(i)&&engine.audBuf[i]);
       if(tgA.length){
-        const f=c==='ArrowUp'?2:0.5;
+        /* …AND ←→ IS THE SAME GESTURE BY ONE UNIT (Gad, 2026-08-24: "make
+           tab+←→ same as tab up down to control the length not speed, and
+           make it work the same as in midi that it will add or remove steps
+           according to the loop unit size"). ↑↓ doubles/halves, ←→ steps a
+           single UNIT — a 16th, an 8th, a beat, whatever the lane's unit is
+           (⇧←→ still changes which). Crop and lane stay locked either way,
+           so the rate cannot move and the speed dial is never written. The
+           LOOP alone — more bars than material, for structure — is right
+           shift's length dials, as ever. */
+        const vert=(c==='ArrowUp'||c==='ArrowDown');
         let say='', did=false;
         for(const i of tgA){
           const p9=S.presets[i]; p9.au=p9.au||{};
           const lane9=S.patterns[S.editPat].lanes[i];
-          const e9=clamp(p9.au.en??1,-1,1), want=e9*f;
-          if(Math.abs(want)>1+1e-9){say='the whole take loops already — ⇥←→ grows the loop, ⇥-= the speed'; continue;}
+          const e9=clamp(p9.au.en??1,-1,1), c0=lane9.count;
+          const c1=vert?(c==='ArrowUp'?c0*2:c0/2)
+                       :clamp(Math.round((c0+(c==='ArrowRight'?1:-1))*4)/4,0.25,256);
+          if(c1>256){say='loop already at the maximum'; continue;}
+          if(c1<0.25||c1===c0){say='loop already at the '+((c==='ArrowRight'||c==='ArrowUp')?'maximum':'minimum'); continue;}
+          const want=e9*(c1/c0);
+          if(Math.abs(want)>1+1e-9){say='the whole take loops already — ⇥-= for speed, rshift for the loop alone'; continue;}
           if(Math.abs(want)<0.01){say='sample length at the floor'; continue;}
-          if(f>1&&lane9.count*2>256){say='loop already at the maximum'; continue;}
-          if(f<1&&lane9.count/2<0.25){say='loop already at the minimum'; continue;}
           if(!did)pushUndo('sample length');
           did=true;
-          p9.au.en=want;
-          if(f>1)lane9.double(true); else lane9.halve();
+          p9.au.en=Math.max(-1,Math.min(1,want));
+          if(vert){if(c==='ArrowUp')lane9.double(true); else lane9.halve();}
+          else lane9.count=c1;
           if(S.layer===1)lane9.auto=false;
           engine.audRelock(i);
           say=(p9.au.en<0?'◀ ':'')+Math.round(Math.abs(p9.au.en)*100)+'% of the take · loop '+
@@ -22483,7 +22517,7 @@ const onKeyUp=e=>{
           const lane5=S.patterns[S.editPat].lanes[pi3];
           const beats=lane5.auto?16:lane5.len;
           const rec2=micGrab(beats*spb());
-          if(rec2){pushUndo('mic take'); audPlace(pi3,rec2,gridNow()-beats,'mic');}
+          if(rec2){pushUndo('mic take'); audPlace(pi3,rec2,gridNow()-beats,'mic',audRecLat('mic'));}
           else flash('mic ring is empty — hold escape a moment first');
           dirty=true; dirtySave=true; return;
         }
@@ -24473,7 +24507,7 @@ function gridHTML(pat,pos,anc,chans){
         const R9=engine.audRec;
         if(R9&&R9.pi===i&&lane){
           const sr9=AC.sampleRate, L9=lane.len||4, cl9=Math.max(256,Math.round(L9*spb()*sr9));
-          const pos9=fmod(R9.startBeat-editAnchor(),L9)*spb()*sr9-AUDLATC;
+          const pos9=fmod(R9.startBeat-editAnchor(),L9)*spb()*sr9-(R9.lat??AUDLATC);
           const rows9=Math.max(16,Math.round(H/2)), pk9=new Float32Array(rows9);
           const fr9=k=>((((pos9+k*R9.blk)%cl9)+cl9)%cl9)/cl9;
           const N9=R9.pks.length, k0=Math.max(0,N9-Math.ceil(cl9/R9.blk));   // only the last loop's worth can show

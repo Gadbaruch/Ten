@@ -1301,8 +1301,47 @@ async function probeMicRec() {
     const dn = await tl('ArrowDown');
     const up = await tl('ArrowUp');
     const full = await tl('ArrowUp');
-    rows.push({ k: 'tabloop', down: dn, up, full, sameBuf: engine.audBuf[ch] === bufRef,
-                expect: 'dn 0.5/0.5/1 · up 1/1/1 · full 1/1/1 · true' });
+    /* ←→ steps one UNIT: on a 4-beat lane, ← is 3 beats of material, → back */
+    lane.unit = 'b'; lane.count = 4; pau.en = 1;
+    const lft = await tl('ArrowLeft');
+    const rgt = await tl('ArrowRight');
+    const rfull = await tl('ArrowRight');
+    rows.push({ k: 'tabloop', down: dn, up, full, l: lft, r: rgt, rfull, sameBuf: engine.audBuf[ch] === bufRef,
+                expect: 'dn .5/.5/1 up 1/1/1 full 1/1/1 · l 3/.75/1 r 4/1/1 rfull 4/1/1 · true' });
+    /* latc — his calibration: blips at known clock times through the master,
+       recorded by the take path (src=mstr, no MediaStream in the chain).
+       Where they LAND vs the beat grid = the placement error E; the correct
+       AUDLATC is the current one PLUS the median E. */
+    fresh(); S.presets[ch].au.src = 1;
+    lane.unit = 'B'; lane.count = 2; lane.auto = false;
+    const tCall = AC.currentTime;
+    engine.audRecStart(ch);
+    const sb9 = engine.audRec.startBeat, anc9 = editAnchor(), Lb9 = lane.len;
+    const cl9 = Math.max(256, Math.round(Lb9 * spb() * sr));
+    const t0 = tCall + 0.35;
+    const bg = AC.createGain(); bg.gain.value = 0.5; bg.connect(engine.master);
+    for (let k = 0; k < 6; k++) { const o9 = AC.createOscillator(); o9.frequency.value = 1000;
+      o9.connect(bg); o9.start(t0 + k * 0.5); o9.stop(t0 + k * 0.5 + 0.03); }
+    await sleep(3600);
+    engine.audRecStop(); await sleep(250); try { bg.disconnect(); } catch (_) {}
+    const dbf = engine.audBuf[ch].getChannelData(0);
+    const on9 = [];
+    for (let i = 1; i < dbf.length; i++) if (Math.abs(dbf[i]) > 0.1 && Math.abs(dbf[i - 1]) <= 0.1) { on9.push(i); i += 4000; }
+    const errs = [];
+    for (let k = 0; k < 6; k++) {
+      const target = ((Math.round(fmod(sb9 - anc9, Lb9) * spb() * sr + (t0 - tCall + k * 0.5) * sr) % cl9) + cl9) % cl9;
+      let best = null;
+      for (const o of on9) { let d9 = o - target;
+        if (d9 > cl9 / 2) d9 -= cl9; if (d9 < -cl9 / 2) d9 += cl9;
+        if (best === null || Math.abs(d9) < Math.abs(best)) best = d9; }
+      if (best !== null) errs.push(best);
+    }
+    errs.sort((a, b) => a - b);
+    const Emed = errs.length ? errs[Math.floor(errs.length / 2)] : null;
+    rows.push({ k: 'latc', onsets: on9.length, E: Emed, Ems: Emed === null ? null : r3(Emed / sr * 1000),
+                spread: errs.length ? (errs[errs.length - 1] - errs[0]) : null,
+                nowLATC: AUDLATC, implied: Emed === null ? null : AUDLATC + Emed,
+                expect: 'after calibration E ~0' });
   } finally {
     window.flash = flash0;
     md.getUserMedia = gum0; md.enumerateDevices = enu0;
@@ -1324,7 +1363,8 @@ async function probeMicRec() {
                   'micAfter', 'rec2', 'keysSeen', 'ovdubOnSec', 'carBefore', 'busPlay', 'carDuring', 'busRec', 'carAfter',
                   'on', 'off', 'gate', 'step1', 'step2', 'listed', 'row',
                   'micDuring', 'db', 'mon', 'layer', 'latched',
-                  'down', 'up', 'full', 'sameBuf', 'spd', 'semis', 'crop',
+                  'down', 'up', 'full', 'l', 'r', 'rfull', 'sameBuf', 'spd', 'semis', 'crop',
+                  'onsets', 'E', 'Ems', 'spread', 'nowLATC', 'implied',
                   'spanSec', 'bedSec', 'mixSec', 'ovdubMixSec', 'dev', 'paramLeak', 'curParam', 'busResume'], rows };
 }
 
