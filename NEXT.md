@@ -1,6 +1,6 @@
 # WHERE THE AUDIO CHANNEL STANDS — 2026-08-24, branch `bugfixes`
 
-## EXPORT — the vanishing file, and the takes that never traveled (build 2026-08-24.2318)
+## EXPORT — the vanishing file, and the takes that never traveled (build 2026-08-24.2117)
 
 Gad: "hmm indeed export is acting wierd, please check it." The evidence: his
 export flashed ▼ and NO ten-set file landed anywhere on the disk (mdfind:
