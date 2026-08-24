@@ -1,6 +1,6 @@
 # WHERE THE AUDIO CHANNEL STANDS — 2026-08-24, branch `bugfixes`
 
-## GRAIN PITCH + FILTER RESONANCE + SLICES + ⇧⌫ — on branch `bugfixes`, build 2026-08-24.2007, his ear next
+## GRAIN PITCH + FILTER RESONANCE + SLICES + ⇧⌫ + THE EATEN BOUNDARY — on branch `bugfixes`, build 2026-08-24.2044, his ear next
 
 Two of his: "in grain mode changing pitch doesnt work ... it should ALSO
 work on its own when changing it from grain" and "anything under 1 is the
@@ -78,6 +78,32 @@ modulation.
   wrong branch and THAT cracked it — read the flash, not just the state.
   Standalone evals do not carry the probe harness's trusted-key swallow;
   rows that depend on holds now pin them (HOLD.dig=-1).
+
+**ROUND 4 — "sometimes autoloop stops after playing some cues close to end
+of sample loop" — CAUGHT AND FIXED.** A boundary hammer (cue holds whose
+releases land ±0.35 beats around the bar, deterministic seeds) caught it on
+TRY 2: a 162ms cue released 0.19 beats before the bar left one whole loop
+silent, carrier registered but dead. The mechanism is round 11's twin:
+while a position key is held, audCycle EXTENDS the old carrier and SKIPS
+posting that boundary's own spawn (held9) — right while held, an eaten
+boundary once the key releases before the bar, consumed territory behind
+T.schedBeat that no tick revisits. audRelock (every hand-back-to-the-bar)
+now re-posts a consumed imminent boundary, with one guard audResume did not
+need: audRelock runs constantly, so it checks audCarAt first — a carrier
+already AIMED at that boundary means the handshake is intact and posting
+again would double the head. Measured: 18 hammer tries post-fix all clean,
+including the exact seed that caught it; 28 suite rows unaffected.
+
+**HIS EXPORT DID NOT LAND (items 1 and 2 blocked on it).** Downloads'
+newest ten-set is 2026-08-22 23:29 — the live-mod session's — and its ch5
+is BES1 with every op mode 0: no env→op2, no op2→op1. Today's export never
+reached ~/Downloads (or went somewhere else). Synthetic findings while
+waiting: recorded-vs-live cue gesture spans are SAMPLE-IDENTICAL on a
+clean rig (move→relock 500.1ms live vs 501.9ms replay, message-level), so
+item 2's cause lives in his set's specifics — swing, quantize, play-rack
+(ratchet/nudge/humanize), per-cue offsets — and the FM grime (item 1)
+needs his actual ch5. Ask standing: re-export, and say where the file
+landed if not Downloads.
 
 QA: (1) grain channel, cloud sounding, ARROW-dial the pitch row on the
 sound page — the cloud follows immediately; automation on the same dial

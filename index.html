@@ -1234,7 +1234,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-24.2007';
+const BUILD='2026-08-24.2044';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -11162,6 +11162,24 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     const au=Object.assign({},S.presets[pi].au||{},(this.audOv&&this.audOv[pi])||{});
     if(!Math.round(au.fit||0))return;
     const a=actAt(posNow()), ph=fmod(posNow()-a.anchor,L);
+    /* THE BOUNDARY A HELD KEY ATE (Gad, 2026-08-24: "sometimes autoloop
+       stops after playing some cues close to end of sample loop" — caught on
+       try 2 of a boundary hammer: a 162ms cue released 0.19 beats before the
+       bar left ONE SILENT LOOP, carrier registered but dead). While a
+       position key is held, audCycle EXTENDS the old carrier and SKIPS that
+       boundary's own spawn — right while held, an eaten boundary once the
+       key releases before the bar: consumed territory (behind T.schedBeat)
+       no tick revisits. Same repair as audResume's mute case, with one
+       extra care: audRelock runs on every hand-back, so it must not
+       double-post a boundary whose carrier the scheduler DID aim — audCarAt
+       carries the current carrier's start, and one already aimed at the
+       boundary means the handshake is intact. */
+    {const nextB=a.anchor+Math.ceil((posNow()-a.anchor)/L-1e-9)*L;
+     if(nextB<T.schedBeat-1e-9){
+       const atB=timeAt(nextB);
+       const aimed=this.audCarAt&&Math.abs((this.audCarAt[pi]||-1)-atB)<0.005;
+       if(!aimed)this.audPlay(pi,atB,L);
+     }}
     const W=audWin(au);
     /* SPEED IS PART OF THE MAP (Gad, 2026-08-18: "with sync on doubling and
        halving should land the playhead in the correct moment, right now it
