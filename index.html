@@ -22272,8 +22272,16 @@ function lateAudWrite(h){
   try{
     if(!h||h.tr==null||h._wrote)return; h._wrote=1;
     const lane=S.patterns[S.editPat].lanes[h.pi]; if(!lane)return;
-    const held=h.press!=null?((((h._relAt)??AC.currentTime)-h.press)/spb()):0.25;
-    const dur=Math.max(0.05,held);
+    /* DUR COUNTS FROM THE GRID, NOT THE FINGER (Gad, 2026-08-25: "count dur
+       from the grid, recording should match what i heard"). With live
+       quantize the sound starts at the grid line, up to a 16th after the
+       press — so a dur measured from the press replayed LONGER than what he
+       heard, by exactly that gap. Count from whichever came later, press or
+       grid: with Q off they coincide and nothing changes. Floor at AUDMINMS
+       because that is the least a deferred tap ever SOUNDS. */
+    const on0=Math.max(h.press??-1e9,(Number.isFinite(h.tr)&&T.playing&&CFG.qOn)?gridTime(h.tr):-1e9);
+    const held=on0>-1e8?((((h._relAt)??AC.currentTime)-on0)/spb()):0.25;
+    const dur=Math.max(0.05,AUDMINMS/1000/spb(),held);
     const ent={t:h.tr,dur};
     if(h.kind==='pmono'&&h.pk!==undefined)ent.pk=h.pk;
     else if(h.sl!=null)ent.cue=h.sl;
@@ -22338,7 +22346,9 @@ function endAudHold(c){
          same number — the off sounds where it is written. */
       /* nearest grid, same experiment as the cue release above */
       /* the midi rule, on the sound as well as the lane — see the cue release */
-      const held8=h8.press!=null?((((h8._relAt)??AC.currentTime)-h8.press)/spb()):0.25;
+      /* from the grid, same rule as the cue write in lateAudWrite */
+      const on8=Math.max(h8.press??-1e9,(Number.isFinite(h8.tr)&&T.playing&&CFG.qOn)?gridTime(h8.tr):-1e9);
+      const held8=on8>-1e8?((((h8._relAt)??AC.currentTime)-on8)/spb()):0.25;
       const dur8=Math.max(0.05,AUDMINMS/1000/spb(),held8);
       h8._durB=dur8;   // the release below is outside this block's scope
       if(!genOn(h8.pi)){   // the same stand-down as the pos release above
@@ -22452,7 +22462,8 @@ function endAudHold(c){
     if(hg9)delete AUD.gk[c];
     if(AUD.hold===src9)AUD.hold=null;
     const lane=S.patterns[S.editPat].lanes[pi], L=lane.len;
-    const durB=Math.max(0.05,press!=null?(AC.currentTime-press)/spb():0.25);
+    const on0f=Math.max(press??-1e9,(Number.isFinite(tr)&&T.playing&&CFG.qOn)?gridTime(tr):-1e9);
+    const durB=Math.max(0.05,on0f>-1e8?(AC.currentTime-on0f)/spb():0.25);
     if(pk!==undefined){engine.audPitch(pi,0);
       engine.audGain(pi,(S.presets[pi].au||{}).gain??0.9);
       retroBuf[pi].push({t:tr,pk,dur:durB});
@@ -22507,8 +22518,16 @@ function endAudHold(c){
        number for the ear and the lane. Same here now: the off is scheduled at
        tr+durB, and durB is what the lane writes. */
     const gq9=gridOf(lane), nowB9=gridNow();
+    /* FROM THE GRID, NOT THE FINGER (Gad, 2026-08-25: "count dur from the
+       grid, recording should match what i heard") — with Q on the sound
+       starts at the grid line, so the press-to-grid wait is not part of what
+       sounded and must not ring past the keyup or be written to the lane.
+       Same one-number rule as before: this offB9 is the ear, lateAudWrite is
+       the lane, and both count from the same clock. Q off: on9 = press,
+       nothing changes. */
+    const on9=Math.max(press??-1e9,(Number.isFinite(tr)&&T.playing&&CFG.qOn)?gridTime(tr):-1e9);
     const relB9=Math.max(0.05,AUDMINMS/1000/spb(),
-      press!=null?((((hj9&&hj9._relAt)??AC.currentTime)-press)/spb()):0.25);
+      on9>-1e8?((((hj9&&hj9._relAt)??AC.currentTime)-on9)/spb()):0.25);
     const offB9=(CFG.qOn&&tr!=null)?tr+relB9:nowB9;
     const wait9=Math.max(0,(gridTime(offB9)-AC.currentTime)*1000);
     const endIt=()=>{
