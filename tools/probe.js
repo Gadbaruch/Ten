@@ -1144,6 +1144,12 @@ async function probeMicRec() {
     setBpm(120);        // the rows quote seconds that assume it; scratch state had drifted to 287 once
     delete CFG.micTrimMs;   // rows that need a trim set their own
     for (let w = 0; w < 25 && !POOL.length; w++) await sleep(200);   // let the pool land before the first take
+    /* a take lands (lat+4096)/sr+8ms AFTER keyup — and while the transport
+       plays, lat rides the reported output latency (measured 20066 samples =
+       556ms drain under sink-none). A fixed sleep raced that and lost; wait
+       for the buffer itself. */
+    const landWait = async (b0, cap9) => { for (let i9 = 0; i9 < (cap9 || 1200) / 20; i9++) {
+      const b9 = engine.audBuf[ch]; if (b9 && b9 !== b0) return true; await sleep(20); } return false; };
     /* tab-alone — the sound recorder must NOT start without the mic key
        (Gad, 2026-08-24: "it should be mic+rec records audio input") */
     fresh(); CFG.micDb = 0;
@@ -1165,7 +1171,8 @@ async function probeMicRec() {
     await sleep(hold * 0.35);
     const y2 = headY(), s2 = strokes();
     await sleep(hold * 0.3);
-    K('keyup', 'Tab'); await sleep(150);
+    const bh0 = engine.audBuf[ch];
+    K('keyup', 'Tab'); await landWait(bh0);
     K('keyup', 'Escape'); await sleep(120);
     const b1 = engine.audBuf[ch], d1 = b1 ? b1.getChannelData(0) : null;
     const L = lane.len, cl = Math.max(256, Math.round(L * spb() * sr));
@@ -1215,7 +1222,8 @@ async function probeMicRec() {
       return { span: r3(span * win / sr), bed: r3(bed * win / sr), mix: r3(mix * win / sr) }; };
     osc.frequency.value = 523; CFG.micDb = -6; micGainApply();
     CFG.overdub = 1;
-    K('keydown', 'Tab'); await sleep(450); K('keyup', 'Tab'); await sleep(150);
+    const bp0 = engine.audBuf[ch];
+    K('keydown', 'Tab'); await sleep(450); K('keyup', 'Tab'); await landWait(bp0);
     const od9 = cls(engine.audBuf[ch].getChannelData(0));
     /* the clean 440 bed back — in OVERWRITE, so the full-loop grab replaces
        everything (same-frequency overdub would phase-cancel the bed) — then
@@ -1225,7 +1233,8 @@ async function probeMicRec() {
     await sleep(cl / sr * 1000 + 300);
     audPlace(ch, micGrab(lane.len * spb()), gridNow() - lane.len, 'mic');
     osc.frequency.value = 523; CFG.micDb = -6; micGainApply(); await sleep(150);
-    K('keydown', 'Tab'); await sleep(450); K('keyup', 'Tab'); await sleep(150);
+    const bp1 = engine.audBuf[ch];
+    K('keydown', 'Tab'); await sleep(450); K('keyup', 'Tab'); await landWait(bp1);
     const pw9 = cls(engine.audBuf[ch].getChannelData(0));
     let mstep = 0; { const dd = engine.audBuf[ch].getChannelData(0);
       for (let i = 1; i < dd.length; i++) { const v = Math.abs(dd[i] - dd[i - 1]); if (v > mstep) mstep = v; } }

@@ -1,5 +1,53 @@
 # WHERE THE AUDIO CHANNEL STANDS — 2026-08-24, branch `bugfixes`
 
+## EXPORT — the vanishing file, and the takes that never traveled (build 2026-08-24.2318)
+
+Gad: "hmm indeed export is acting wierd, please check it." The evidence: his
+export flashed ▼ and NO ten-set file landed anywhere on the disk (mdfind:
+newest is Aug 23 01:29), while the in-app path measured perfect — picker
+opens on ⌘E, Enter hands dl() a correct 91596-byte blob. Four fixes, one
+suite:
+
+- **dl() revoked its blob URL after 4 seconds.** A Chrome set to ask where
+  to save shows a dialog; pick a folder slower than 4s and the URL is dead
+  before the save starts — "Failed - file missing" or nothing at all. 120s
+  now. (exportAudio's stems ride the same window.)
+- **exportSet goes through showSaveFilePicker** — import's own API. The
+  dialog shows WHERE the file goes, its close is the save completing, esc
+  flashes "export cancelled" instead of pretending. Anchor download stays
+  as the fallback for browsers without the API. If the dialog-per-export
+  annoys him, one word and it reverts to the plain anchor (with the 120s
+  window it would likely land now).
+- **THE TAKES NEVER TRAVELED.** audRef saved a recording as `{k:'r'}` — a
+  named hole. Every export AND every reload dropped the audio the mic
+  instrument records; only factory phrases survived. audSave now embeds
+  recordings as 16-bit base64 inside SMPCAP (3MB, shared with op samples);
+  restoreAudio decodes and lands them. Over budget or in the localStorage
+  quota fallback they degrade to exactly the old named hole. Measured
+  (probe `setio`): 0.5s stereo take rides as 115KB, round-trips 22050=22050
+  samples, rms 0.283/0.283 both channels; no-audio fallback holes it
+  (209KB→92KB); stubbed picker receives full set bytes; cancel does NOT
+  fall back to a silent anchor download. **Format note: additive, no SAVEV
+  bump** — old sets load unchanged; an OLD build reading a NEW export shows
+  takes as holes exactly as it always did.
+- **Stamps were UTC.** A set saved 01:29 was named 23-29 of the day before
+  and sorted into yesterday. stampNow() is local wall-clock now (both
+  exportSet and exportAudio).
+
+**And the probe rot this uncovered:** micrec's `hold` and `punch` rows had
+been failing on EVERY recent build including main .1839 — not the app, the
+rows: a take lands (lat+4096)/sr+8ms after keyup, and while the transport
+plays, lat rides the reported output latency (20066 samples = 556ms drain
+under sink-none), so their fixed sleep(150) measured before the take landed.
+`landWait` polls for the buffer now. Post-fix: hold lands 0.873s of 0.9
+held, punch span 0.412 / bed 1.585 / mix 0 / ovdubMix 0.383 / maxStep 0.02.
+Lesson written in blood: **round-4's "green" checked err+row-counts only;
+check the rows.** All four suites: micrec 13, micrec2 13, grainflt 2,
+setio 4 — every row's values read, clean.
+
+Still blocked on his export (which now works): ch5 FM grime and the ch9
+recorded-cue mismatch — the Aug 22 export's ch5 is BES1 with no FM routes.
+
 ## GRAIN PITCH + FILTER RESONANCE + SLICES + ⇧⌫ + THE EATEN BOUNDARY — on branch `bugfixes`, build 2026-08-24.2044, his ear next
 
 Two of his: "in grain mode changing pitch doesnt work ... it should ALSO
