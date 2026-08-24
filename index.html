@@ -1234,7 +1234,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-24.1857';
+const BUILD='2026-08-24.1958';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -14413,6 +14413,12 @@ function audAction(d,m){
       'grain · the playhead becomes a cloud'][cmodeOf(pre)]);
     dirty=true; dirtySave=true; return;}
   if(spec.key==='wnd')engine.audWnd(S.editSnd);
+  /* THE CLOUD HEARS THE KEYBOARD TOO (Gad, 2026-08-24: "grain pitch param
+     still not working ... im talking about the main pitch param"): the first
+     fix pushed granCfg from applyAudParam — the AUTOMATION door — and the
+     KEYS come through here. Same push, same reason: in grain the pitch spec
+     writes gr.semis and audLive alone never reaches a grain. */
+  if(spec.key==='semis'&&cmodeOf(pre)===2)engine.granCfg(S.editSnd);
   engine.audLive(S.editSnd);         // …and the take that is already running hears it
   /* SPEED AND SYNC MOVE WHERE THE BAR PUTS YOU (Gad, 2026-08-18: "resetting
      speed to x1 in sync on should position the time synced, right now it looses

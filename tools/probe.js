@@ -1722,14 +1722,21 @@ async function probeGrainFlt() {
       return z > 2 ? +(((z - 1) / ((last - first) / sr))).toFixed(1) : 0; };
     play(); await sleep(1000);
     const base9 = await freq();
+    /* THE REAL DOOR: the sound page's pitch row, dialed with arrow keys —
+       the first fix sat on applyAudParam (automation) while the keys come
+       through audAction, which is where it did not work for him */
+    const KS9 = (t9, c9) => document.dispatchEvent(new KeyboardEvent(t9, { code: c9, key: c9, bubbles: true, cancelable: true }));
+    S.layer = 2; S.mSel = false;
+    S.curParam = AUDALL().findIndex(s9 => s9.key === 'semis');
+    for (let k9 = 0; k9 < 12; k9++) { KS9('keydown', 'ArrowUp'); KS9('keyup', 'ArrowUp'); await sleep(12); }
+    await sleep(380);
+    const up9 = await freq(); const reads9 = pr.gr.semis;
     const spec9 = AUDALL().find(s9 => s9.key === 'semis');
-    applyAudParam(ch, 'aud', spec9, 12); await sleep(400);
-    const up9 = await freq(); const reads9 = spec9.get(pr.au);
-    applyAudParam(ch, 'aud', spec9, 0); await sleep(250);
+    applyAudParam(ch, 'aud', spec9, 0); await sleep(250);   // …and the automation door still lands it back
     const back9 = await freq();
-    stop(); await sleep(120);
+    S.layer = 1; stop(); await sleep(120);
     rows.push({ k: 'grainpitch', base: base9, plus12: up9, back: back9, dial: reads9,
-                expect: '≈440 · ≈880 · ≈440 · dial 12 — the cloud follows its own pitch dial' });
+                expect: '≈440 · ≈880 · ≈440 · gr.semis 12 — keys AND automation doors both reach the cloud' });
   } finally {
     md.getUserMedia = gum0; try { o0.stop(); } catch (_) {}
     if (engine.audRec) engine.audRecStop(true);

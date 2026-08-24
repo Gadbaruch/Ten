@@ -1,6 +1,6 @@
 # WHERE THE AUDIO CHANNEL STANDS — 2026-08-24, branch `bugfixes`
 
-## GRAIN PITCH + FILTER RESONANCE — on branch `bugfixes`, build 2026-08-24.1857, his ear next
+## GRAIN PITCH + FILTER RESONANCE — on branch `bugfixes`, build 2026-08-24.1958, his ear next
 
 Two of his: "in grain mode changing pitch doesnt work ... it should ALSO
 work on its own when changing it from grain" and "anything under 1 is the
@@ -25,11 +25,39 @@ same as 1, and i want to have options for very soft filtering with no rez".
   preset probe confirms the rack still builds (SNR 0.638 peak); micrec 13 +
   micrec2 12 green.
 
-QA: (1) grain channel, cloud sounding, turn the channel pitch dial — the
-cloud follows immediately, and it still carries over when walking
-tape↔stretch↔grain. (2) any synth, filter lowpass, reso at 0.3-0.7: the
-cutoff now rolls off soft with no bump — sweep the cutoff and hear a
-gentle slope instead of the old ringing edge; reso ≥1 unchanged.
+**ROUND 2 — "grain pitch param still not working."** He was right and the
+first fix was on the wrong DOOR: applyAudParam is the automation/mod path,
+and the KEYS come through audAction, which applies the spec itself and only
+pushed audLive. Same one-line push there (`key==='semis' && cmode 2 →
+granCfg`). Verified through the real gesture this time: sound page, cursor
+on the pitch row, 12 real ArrowUp events → 437→885Hz, gr.semis 12, back
+down → 442. The grainflt probe row now dials through the KEYS (and lands
+back through the automation door, so both stay covered). Lesson, again:
+verify at the door the finger uses, not the door the code offers.
+
+**FM-LEVEL CRUNCH — INVESTIGATED, NOT REPRODUCED, waiting on his export.**
+"modulating level of op that is doing fm to another op ... has some
+crunchiness." What the measurements ruled OUT on a hand-built 2-op FM pair
+(sine 2:1, phase engine path): the dial/automation path slews
+(setTargetAtTime 20ms); mod-rack LFO and env are audio-wired to the
+worklet's a-rate g-params (no 40Hz tick ripple in the demodulated envelope:
+ratio 0.08-0.16 vs the LFO band); even deliberate SQUARE jumps on the level
+param produce zero amplitude-kink — because an FM-depth step is a FREQUENCY
+discontinuity, not an amplitude one, and its audibility depends on the
+patch (index depth, ratios, engine) — which is guessing territory. Per the
+house rule (his set travels as a FILE), asked for: the exportSet + which
+modulation source (lfo/env/automation/velocity) and which channel. Also on
+the suspect list once the patch is real: the native path modulates FM depth
+through detune-CENTS (exponential FM — index modulation shifts the pitch
+center), and the depth's 6(1+3a²) curve applies at build but LINEARLY under
+modulation.
+
+QA: (1) grain channel, cloud sounding, ARROW-dial the pitch row on the
+sound page — the cloud follows immediately; automation on the same dial
+also lands; the carry over tape↔stretch↔grain unchanged. (2) any synth,
+filter lowpass, reso at 0.3-0.7: the cutoff rolls off soft with no bump —
+sweep the cutoff and hear a gentle slope instead of the old ringing edge;
+reso ≥1 unchanged.
 
 
 ## UNIT SNAP + TOP STEP — MERGED to main + LIVE 2026-08-24.1839 ("works well")
