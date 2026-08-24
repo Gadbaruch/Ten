@@ -131,6 +131,10 @@
   /* the live ring's WRITE head: dashed, so it never reads as a playhead */
   .rwh line{stroke:var(--fg);stroke-width:1;opacity:.8;stroke-dasharray:4 3;}
   .wlay path{stroke:var(--fg);stroke-width:1;opacity:.5;fill:none;}
+  /* the take AS IT LANDS: brighter than the waveform under it, and its
+     write head is the one SOLID line here — it is the playhead that writes */
+  .wrec path{stroke:var(--rec);stroke-width:1.2;opacity:.95;fill:none;}
+  .wrec line{stroke:var(--rec);stroke-width:1.6;opacity:1;}
   .wtc path{stroke:var(--fg);stroke-width:1.2;opacity:.8;fill:none;}
   .cuet{position:absolute;left:0;width:100%;height:1px;background:var(--fg);opacity:.18;}
   .cuet.on{height:1.6px;background:#fff;box-shadow:0 0 3px rgba(255,255,255,.55);}
@@ -1230,7 +1234,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-22.2352';
+const BUILD='2026-08-24.1701';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1316,6 +1320,21 @@ const SETTINGS=[
  {n:'scale',g:'Behavior',  v:()=>CFG.scaleOn?'on':'off',    a:()=>CFG.scaleOn=CFG.scaleOn?0:1},
  {n:'key',g:'Behavior',    v:()=>KEYN[CFG.key],             a:d=>CFG.key=fmod(CFG.key+d,12)},
  {n:'mode',g:'Behavior',   v:()=>SCALES[CFG.scale][0],      a:d=>CFG.scale=fmod(CFG.scale+d,SCALES.length)},
+ /* THE MIC (Gad, 2026-08-23: "move the mic settings in global settings in
+    settings/input"). Instrument-wide — there is one mic — and they also ride
+    the mic key itself: hold esc and -/= is this gain, ; this monitor, so the
+    panel is the reference, not the gesture. */
+ {n:'mic dev',g:'Input', v:()=>micDevName(),         a:d=>{micStepDev(d);}},
+ {n:'mic gain',g:'Input',v:()=>micGainStr(),         a:d=>micGainStep(d)},
+ {n:'monitor',g:'Input', v:()=>CFG.micMon?'on':'off',a:()=>micMonToggle()},
+ /* the chain measured on THIS machine (micCalibrate) and a hand dial over
+    the same number; 'auto' means the browser's reported guess is in use */
+ {n:'mic sync',g:'Input',v:()=>'▶ measure',          a:()=>{micCalibrate();}},
+ {n:'mic trim',g:'Input',
+   v:()=>Number.isFinite(CFG.micTrimMs)?((CFG.micTrimMs>0?'+':'')+Math.round(CFG.micTrimMs)+'ms'):'auto',
+   a:d=>{const b9=Number.isFinite(CFG.micTrimMs)?CFG.micTrimMs:micLatGuessMs();
+         CFG.micTrimMs=clamp(Math.round(b9+d*5),-250,500); saveCfg();
+         flash('mic trim '+(CFG.micTrimMs>0?'+':'')+CFG.micTrimMs+'ms — mic takes land this much earlier');}},
  {n:'vel',g:'Input', v:()=>String(Math.round(clamp(CFG.kvel??0.9,0.02,1)*127)), a:d=>EXP.bump(d*0.05)},
  /* THE KEYBOARD IS NOT A SETTING ANY MORE (Gad, 2026-08-17). tools key, scope
     key, win key, menu key, last key and the arrows mode selector all lived
@@ -1593,7 +1612,7 @@ const OSC_P=sl=>[
      get:()=>{const k=S.editSnd+':'+S.curSlot;
        const i=POOL.findIndex(p2=>p2.buf===engine.opSamples.get(k)); return i<0?0:i;},
      set:(o,v)=>{const e2=POOL[clamp(Math.round(v),0,Math.max(0,POOL.length-1))];
-       if(!e2){flash('pool is empty — record (⌃+tab) or drop audio first');return;}
+       if(!e2){flash('pool is empty — record (esc+tab) or drop audio first');return;}
        engine.opSamples.set(S.editSnd+':'+S.curSlot,e2.buf);
        engine.rebuildRack(S.editSnd);}}),
    /* the CLIP half: crop the take per slot, loop it or fire it once */
@@ -3610,6 +3629,7 @@ function latchReleaseAll(){
   if(AUTORND.on){AUTORND.on=false; n++;}
   if(LATCH.on){
     LATCH.on=false; n++;
+    if(engine.audRec)audRecEnd();          // a latched sound take ends with the latch
     const pat=S.patterns[S.editPat];
     if(pat.state==='rec'){pat.state='on'; finalizeCaptures(true);}
     for(const pr of S.presets){const ml=pr&&pr.modLoop; if(ml&&ml.state==='rec')ml.state='on';}
@@ -3641,6 +3661,27 @@ function markRecorded(lp){
 function loopOps(e,c,lp){
   if(!lp)return false;
   const shift=rs(e);
+  /* AN AUDIO LOOP KEEPS ITS SOUND WHEN ITS LENGTH CHANGES (Gad, 2026-08-23:
+     "tab+up/down should not change pitch ... just shorten/enlarge the
+     loop"). With fit on the fit rate is dur/loopSec, so a longer loop meant
+     a slower, lower take — length and pitch were one knob. The SPEED dial
+     absorbs the ratio instead (audFoldPitch's own arithmetic), so the take
+     sounds exactly as it did with more or less room around it. The dial
+     rails at ×4 and cannot sit below ×0.25; if the rail eats part of the
+     ratio the take does stretch, and the flash says so. tab+-/= is still
+     the speed pair, and ⇧⌫'s reset stays a true reset. */
+  const audFitComp=L0=>{
+    const li=S.patterns[S.editPat].lanes.indexOf(lp);
+    if(li<1||!isAudioCh(li)||!engine.audBuf[li])return;
+    const au=S.presets[li].au=S.presets[li].au||{};
+    if(!Math.round(au.fit||0)||!(L0>0)||!(lp.len>0)||Math.abs(lp.len-L0)<1e-9)return;
+    const cur=audSpd(au), want=cur*(lp.len/L0);
+    let s2=clamp(+want.toFixed(2),-4,4);
+    if(Math.abs(s2)<0.25)s2=cur<0?-0.25:0.25;
+    au.spd=s2; au.rate=s2;
+    if(Math.abs(s2-want)>0.005)flash('speed at the rail — the take stretches from here');
+    engine.audLive(li);
+  };
   if(c==='ArrowUp'||c==='ArrowDown'){
     const d=c==='ArrowUp'?1:-1;
     if(shift){                                   // OFFSET the content — vertical, like the grid
@@ -3659,19 +3700,24 @@ function loopOps(e,c,lp){
     /* the notes come along. Growing the loop empty and putting the copy on
        another key (⌘D) was a mistake in practice: the gesture people reach
        for is "give me a second bar OF THIS", and an empty half is a surprise. */
+    const L0=lp.len;
     if(d>0){if(lp.count*2>256){flash('loop already at the maximum');return true;} lp.double(true);}
     else lp.halve();
+    audFitComp(L0);
     if(S.layer===1)lp.auto=false;
     flash('loop '+(lp.count%1?lp.count.toFixed(2):lp.count)+'×'+UNIT_NAMES[lp.unit]);
     dirty=true; dirtySave=true; return true;
   }
   if(c==='ArrowLeft'||c==='ArrowRight'){
     const d=c==='ArrowRight'?1:-1;
+    const L0=lp.len;
     if(shift){                                   // UNIT SIZE — horizontal
       if(!unitStep(lp,d)){flash('unit at the '+(d>0?'largest':'smallest'));return true;}
+      audFitComp(L0);
       flash('unit '+UNIT_NAMES[lp.unit]+'  ('+(lp.count%1?lp.count.toFixed(2):lp.count)+'×)');
     }else{
       pushUndo('loop'); lp.inc(d); if(S.layer===1)lp.auto=false;
+      audFitComp(L0);
       flash('loop '+(lp.count%1?lp.count.toFixed(2):lp.count)+'×'+UNIT_NAMES[lp.unit]);
     }
     dirty=true; dirtySave=true; return true;
@@ -10651,6 +10697,13 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
      left to wrap its own crop; `audCar` is the one already rolling. */
   audCycle(li,lane,act,s0,s1,fresh){
     if(!this.audBuf[li])return;
+    /* A TAKE IN OVERWRITE IS REPLACING THIS LOOP (Gad, 2026-08-23: "mute the
+       previous one when holding mic+rec"): while the recording runs the cycle
+       neither joins nor re-fires the carrier, so the bed being erased is not
+       playing over you. Keys stay audible — they are the keys take. Overdub
+       and smart keep the bed: layering is their point. */
+    if((CFG.overdub||0)===0
+       &&((this.audRec&&this.audRec.pi===li)||(this.audRecPend&&this.audRecPend.pi===li)))return;
     const L=lane.len;
     const free=!Math.round((S.presets[li].au||{}).fit||0);
     if(fresh){                          // pattern just switched: cut the old cycle, join in progress
@@ -11152,6 +11205,42 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     const e9=this.gn&&this.gn[pi]; if(!e9||!e9.node||!id)return;
     try{e9.node.port.postMessage({t:'toff',id});}catch(_){}
   }
+  /* THE LOOP COMES BACK MID-PHRASE WHEN A TAKE ENDS (Gad, 2026-08-24: "when
+     letting go of rec ... it should continue playback from the correct
+     position"). The record-mute put the carrier down and audCycle only
+     re-fires at the loop's start, so a release mid-bar left silence until
+     the bar came round. This is audCycle's fresh-pattern join, callable the
+     moment a recording stops — landed, dropped or too short: stop whatever
+     fragment is left, spawn joined-in-progress at the position the
+     transport says, and the boundary's own carrier takes over next cycle.
+     Quiet when there is nothing to do: transport stopped, no take, auto
+     off, a carrier still rolling (overdub never lost its bed), a recording
+     still running, or the phase already sitting on the boundary. */
+  audResume(pi){
+    if(!T.playing||!this.audBuf[pi])return;
+    if(!autoCur(S.presets[pi]))return;
+    if((this.audCar||[])[pi])return;
+    if(this.audRec&&this.audRec.pi===pi)return;
+    if(this.audRecPend&&this.audRecPend.pi===pi)return;
+    const lane=S.patterns[S.editPat]&&S.patterns[S.editPat].lanes[pi];
+    const L=lane&&lane.len; if(!(L>0))return;
+    const nowB=posNow(), a=actAt(nowB), ph=fmod(nowB-a.anchor,L);
+    this.audStop(pi,AC.currentTime+0.004);
+    if(ph<L-1e-3)this.audPlay(pi,AC.currentTime+0.008,L,ph);
+    /* THE BOUNDARY THE MUTE ATE (Gad, 2026-08-24: "when i finish a recording
+       near the end of existing loop it stops autoloop play"). While the take
+       ran, audCycle skipped every boundary inside its windows — including,
+       near the loop's end, the NEXT one: posted-territory (behind
+       T.schedBeat) that no later tick revisits, and the join's tclr flushes
+       even a queued spawn. Measured: release at 0.126 beats before the bar =
+       one whole loop of silence. If the scheduler has already consumed that
+       boundary, post its carrier here; a FREE channel keeps its one
+       deadline-less join and must not get a second. */
+    if(Math.round((S.presets[pi].au||{}).fit||0)){
+      const nextB=a.anchor+Math.ceil((nowB-a.anchor)/L-1e-9)*L;
+      if(nextB<T.schedBeat-1e-9)this.audPlay(pi,timeAt(nextB),L);
+    }
+  }
   audStop(pi,at){
     at=at??AC.currentTime+0.002;
     (this.audCar=this.audCar||[])[pi]=null;   // the carrier goes with everything else
@@ -11470,8 +11559,9 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
   granLiveWire(pi){
     /* the mic straight into the cloud's input — only wired when asked for,
        only possible while the ⌃ stream exists */
-    const e=this.gn&&this.gn[pi]; if(!e||!e.node||!MIC.stream||e.liveSrc)return;
-    try{e.liveSrc=AC.createMediaStreamSource(MIC.stream); e.liveSrc.connect(e.node);}catch(_){}
+    const e=this.gn&&this.gn[pi]; if(!e||!e.node||!MIC.g||e.liveSrc)return;
+    /* off the input STAGE, not a stream of its own: the gain dial reaches the cloud too */
+    try{MIC.g.connect(e.node); e.liveSrc=MIC.g;}catch(_){}
   }
   granSend(pi){
     const e=this.granNode(pi), buf=this.granBuf&&this.granBuf[pi];
@@ -11552,39 +11642,195 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     if(this.act[pi].length>24*POLYX){const old=this.act[pi].shift(); old&&old.kill&&old.kill(AC.currentTime);}
     return sh;
   }
+  /* THE TAKE DRINKS FROM THE INPUT STAGE. This used to open a getUserMedia
+     of its own — a second stream, its own device, no gain — so nothing on
+     the channel row could reach what tab recorded. 'mic' is MIC.g now.
+     `pks` is the picture: a peak per 512 samples, so the column can draw the
+     take while it is still landing. */
   audRecStart(pi){
-    if(this.audRec)return;
-    const tap=(srcNode,stm,label)=>{
-      const sp3=AC.createScriptProcessor(4096,1,1);
+    if(this.audRec||this.audRecPend)return;
+    const E=this;
+    const tap=(srcNode,label,openedMic)=>{
+      if(E.audRec)return;
+      /* THE MASTER IS STEREO AND THE TAKE KEEPS IT (Gad, 2026-08-24: "record
+         the stereo out of master, rn its mono"): a mstr tap runs two channels
+         end to end — audPlace builds a 2ch canvas, granSend already ships
+         L/R, and `chan` picks at playback. The mic stays mono. */
+      const nch=label==='mstr'?2:1;
+      const sp3=AC.createScriptProcessor(4096,nch,nch);
       const sink=AC.createGain(); sink.gain.value=0;
-      const chunks=[];
-      sp3.onaudioprocess=ev=>{chunks.push(new Float32Array(ev.inputBuffer.getChannelData(0)));
+      const chunks=[], chunksR=[], pks=[], SUB=512;
+      sp3.onaudioprocess=ev=>{const d=ev.inputBuffer.getChannelData(0);
+        chunks.push(new Float32Array(d));
+        const d2=nch>1?ev.inputBuffer.getChannelData(1):null;
+        if(d2)chunksR.push(new Float32Array(d2));
+        for(let a=0;a<d.length;a+=SUB){let pk=0; const z=Math.min(d.length,a+SUB);
+          for(let i=a;i<z;i+=2){let v=d[i]<0?-d[i]:d[i]; if(v>pk)pk=v;
+            if(d2){v=d2[i]<0?-d2[i]:d2[i]; if(v>pk)pk=v;}}
+          pks.push(pk);}
+        dirty=true;                                  // the column draws it as it lands
         if(chunks.length*4096>AC.sampleRate*120){flash('recording capped at 120s — takes belong in loops');
-          try{engine.audRecStop();}catch(_){}}};
+          try{audRecEnd();}catch(_){}}};
       srcNode.connect(sp3); sp3.connect(sink); sink.connect(AC.destination);
-      this.audRec={pi,stm,src:srcNode,sp3,sink,chunks,startBeat:gridNow(),label};
-      flash('● recording '+label+'… (tab again to stop)'); dirty=true;
+      /* A STOPPED-TRANSPORT TAKE STARTS FROM 0 (Gad, 2026-08-24: "when
+         playback is stopped, recording with esc+tab should always start from
+         0") — bed or no bed. Decided HERE, at the take's birth, so the live
+         drawing already fills from the loop start; with nothing playing
+         there is no grid to align to, so the trim is 0 and the first sound
+         IS the zero point. A transport started mid-take keeps the anchor. */
+      const stop9=!T.playing;
+      E.audRec={pi,src:srcNode,sp3,sink,chunks,chunksR,pks,blk:SUB,at0:AC.currentTime,
+        startBeat:stop9?editAnchor():gridNow(),from0:stop9,label,openedMic,keys:0,
+        lat:stop9?0:audRecLat(label)};
+      /* in overwrite the OLD loop goes quiet under the take — the carrier and
+         only the carrier; a key played under the hold must stay audible,
+         because it is the keys take being played. audCycle skips respawning
+         it for as long as the recording runs. */
+      if((CFG.overdub||0)===0&&isAudioCh(pi)){
+        const car9=(E.audCar||[])[pi], e9=E.gn&&E.gn[pi];
+        if(car9&&e9&&e9.node){try{e9.node.port.postMessage({t:'tset',car:car9,
+          dieF:Math.round((AC.currentTime+0.02)*AC.sampleRate)});}catch(_){}}
+        (E.audCar=E.audCar||[])[pi]=null; (E.audCarAt=E.audCarAt||[])[pi]=null;
+      }
+      flash('● recording '+label+'… let go of tab to keep it'); dirty=true;
     };
-    if(Math.round((S.presets[pi].au||{}).src||0)===1){tap(this.master,null,'mstr');return;}
-    if(!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia)){flash('no mic access in this browser');return;}
-    flash('mic: asking for permission…');
-    navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false}})
-      .then(stm=>{
-        if(this.audRec){stm.getTracks().forEach(t2=>t2.stop());return;}
-        tap(AC.createMediaStreamSource(stm),stm,'mic');})
-      .catch(err=>{flash('mic blocked ('+err.name+') — allow the mic in the browser, then tab again');
-        console.warn('mic',err);});
+    if(Math.round((S.presets[pi].au||{}).src||0)===1){tap(this.master,'mstr',false);return;}
+    if(MIC.on&&MIC.g){tap(MIC.g,'mic',false);return;}
+    /* the stage is down: raise it, and remember the take did, so it goes down
+       again with the take. The first time, this is the permission prompt. */
+    const tok=this.audRecPend={pi};
+    micOn().then(()=>{
+      if(this.audRecPend!==tok){            // the hand let go before the mic was up
+        if(MIC.on&&!MIC.latched&&!MIC._down)micOff();
+        return;}
+      this.audRecPend=null;
+      if(MIC.on&&MIC.g)tap(MIC.g,'mic',true); else flash('mic did not open — nothing recorded');
+    }).catch(()=>{this.audRecPend=null;});
   }
-  audRecStop(){
+  audRecStop(drop){
+    this.audRecPend=null;
     const r=this.audRec; if(!r)return; this.audRec=null;
-    try{r.src.disconnect(r.sp3);}catch(_){}     // only the tap — master keeps its other outputs
+    const E9=this;
+    /* THE PUNCH WINDOW OBEYS THE LATENCY TOO (Gad, 2026-08-24: "the record
+       on/off of mic doesnt obey it, so it sounds like recording starts too
+       early and ends too early"). The content was already placed lat early —
+       correct for WHERE sounds sit, wrong for WHAT the take is: the span
+       began lat before the press (pre-press air) and the air of the last lat
+       ms had not reached the stream when the tap closed, so short punches
+       lost their tails. Now the tap DRAINS exactly lat past the release and
+       the same lat is cut off the head: the take is the AIR of
+       [press..release], placed at the press with nothing left to shift. */
+    const relAt=AC.currentTime;
+    /* THE SEED PLAYS FROM THE RELEASE, NOT FROM THE DRAIN (Gad, 2026-08-24:
+       "the seed rec starts playback with a bit too much delay ... try to
+       start playback in real time not compensated"). The drain (lat + one
+       SP block, ~100-180ms) exists to catch the take's tail — the TRANSPORT
+       has no tail to wait for. Start it here; the take lands mid-drain and
+       audResume joins it at the phase the clock has reached. The tempo
+       branch below keys off r.from0 (the take's birth state), because
+       T.playing is true by the time it runs. */
+    if(!drop&&r.from0&&r.label==='mic'&&!engine.audBuf[r.pi]&&!T.playing)play();
+    const finish=()=>{
+    try{r.src.disconnect(r.sp3);}catch(_){}     // only the tap — the stage and the master keep their other outputs
     try{r.sp3.disconnect();r.sink.disconnect();}catch(_){}
-    if(r.stm)r.stm.getTracks().forEach(t2=>t2.stop());
-    const len=r.chunks.reduce((a2,c2)=>a2+c2.length,0);
-    if(len<AC.sampleRate*0.05){flash(r.label+' take too short');return;}
+    if(r.openedMic&&MIC.on&&!MIC.latched&&!MIC._down)micOff();
+    dirty=true;
+    if(drop){E9.audResume(r.pi);return;}
+    let len=r.chunks.reduce((a2,c2)=>a2+c2.length,0);
+    if(len<AC.sampleRate*0.05+(r.lat||0)){flash(r.label+' take too short');E9.audResume(r.pi);return;}
     const rec=new Float32Array(len); let o=0;
     for(const c2 of r.chunks){rec.set(c2,o);o+=c2.length;}
-    audPlace(r.pi,rec,r.startBeat,r.label);
+    let recOut=rec;
+    if(r.chunksR&&r.chunksR.length){
+      const recR=new Float32Array(len); let o2=0;
+      for(const c2 of r.chunksR){recR.set(c2,o2);o2+=c2.length;}
+      recOut=[rec,recR];
+    }
+    if(r.lat>0&&len>r.lat){
+      recOut=Array.isArray(recOut)?recOut.map(cD=>cD.subarray(r.lat)):recOut.subarray(r.lat);
+      len-=r.lat;
+    }
+    /* …and cut to exactly the held window of air: the drain runs one SP
+       block past the latency, because the block being filled at disconnect
+       is thrown away — up to 93ms of the newest air, the same loss that
+       was hiding inside the old early-tail. Nothing past the release is
+       kept: the punch ends where the hand ended it. */
+    {const heldN=Math.max(0,Math.round((relAt-r.at0)*AC.sampleRate));
+     if(heldN>0&&len>heldN){
+       recOut=Array.isArray(recOut)?recOut.map(cD=>cD.subarray(0,heldN)):recOut.subarray(0,heldN);
+       len=heldN;
+     }}
+    /* …AND THE LAST 30ms GO WITH IT (Gad, 2026-08-24: "the punch out can be
+       a tik earlier then now since it picks up me removing the finger from
+       the key sound"): a mic take ends just before the release, so the key
+       click the mic hears on the way UP is not in the loop. Mstr resamples
+       keep their full window — no finger in that chain. */
+    if(r.label==='mic'){
+      const cut9=Math.round(0.03*AC.sampleRate);
+      if(len>cut9+2048){
+        recOut=Array.isArray(recOut)?recOut.map(cD=>cD.subarray(0,len-cut9)):recOut.subarray(0,len-cut9);
+        len-=cut9;
+      }
+    }
+    /* THE SILENT HEAD IS NOT PART OF THE TAKE (Gad, 2026-08-24: "there is a
+       bit of silence added before when i seem to be pressing rec please
+       check it"). The trim moves CONTENT earlier by the chain delay, so the
+       stream's spin-up and the breath before the first sound land BEFORE the
+       press — and in overwrite that silence punched a hole in the bed. The
+       head is cut to ~6ms before the first audible sample and the start
+       beat moves with it: the sound stays exactly where it sounded, and the
+       punch begins where the TAKE does. The tail stays — a punch-out is
+       timing, not noise. */
+    let sbAdj=0;
+    {const cs=Array.isArray(recOut)?recOut:[recOut];
+     let pkA=0; for(const cD of cs)for(let i=0;i<cD.length;i+=7){const v=cD[i]<0?-cD[i]:cD[i]; if(v>pkA)pkA=v;}
+     const thr=Math.max(0.004,pkA*0.05);
+     let first=-1;
+     outer9: for(let i=0;i<len;i++){for(const cD of cs)if(Math.abs(cD[i])>thr){first=i;break outer9;}}
+     const keep=first<0?0:Math.max(0,first-256);
+     if(keep>1024){
+       recOut=Array.isArray(recOut)?recOut.map(cD=>cD.subarray(keep)):recOut.subarray(keep);
+       sbAdj=keep/AC.sampleRate/spb();
+     }}
+    const lenT=(Array.isArray(recOut)?recOut[0]:recOut).length;
+    /* A TAKE INTO SILENCE SETS THE CLOCK (Gad, 2026-08-24: "when playback is
+       stopped, and i start a new mic recording, it will start the recording
+       from 0, and will change the tempo to make the recording length match
+       the new tempo"). Stopped transport, a mic take, and a loop it may
+       define — the channel EMPTY, a truly new loop: guessTake picks the most
+       probable musical length — 16th to bars, bpm 80-170, bars and the
+       middle of the window preferred — the tempo is set EXACTLY so that
+       length IS the take, the lane is cut to it, and the take lands at 0.
+       A channel that already holds a take keeps the clock whatever the
+       mode: a stopped punch-in must never re-tempo the set. (Undo restores
+       the take but keeps the tempo — a dial, not a loss.) */
+    if(r.from0&&r.label==='mic'&&!engine.audBuf[r.pi]){
+      const durS=lenT/AC.sampleRate, g9=guessTake(durS);
+      if(g9){
+        const bpmX=+(60*g9.beats/durS).toFixed(3);
+        setBpm(bpmX);
+        const lane9=S.patterns[S.editPat].lanes[r.pi], bars9=g9.beats/4;
+        if(bars9>=1&&Math.abs(bars9-Math.round(bars9))<1e-9){lane9.unit='B'; lane9.count=Math.round(bars9);}
+        else{lane9.unit='b'; lane9.count=g9.beats;}
+        lane9.auto=false;
+        audPlace(r.pi,recOut,editAnchor(),r.label,0);
+        /* …AND IT PLAYS AT ONCE (Gad, 2026-08-24: "make stopped rec mode on
+           empty channel ... trigger playback imediatly after rec is done").
+           This is the SEED TAKE — his flow, named: it seeds the loop, the
+           clock, and now the transport, so the next recording is a PLAYING
+           punch and lands where the ear expects (a stopped punch after a
+           seed was the 'messed up position': round 12's own from-0 rule
+           replacing the seed's head at 0). */
+        if(!T.playing)play();
+        flash('◉ seed: '+(bars9>=1?Math.round(bars9)+' bar':g9.beats+' beat')+' → '
+              +Math.round(bpmX*10)/10+'bpm ▶');
+        return;
+      }
+    }
+    audPlace(r.pi,recOut,r.startBeat+(r.from0?0:sbAdj),r.label,0);
+    };
+    if(!drop)setTimeout(finish,Math.ceil((r.lat+4096)/AC.sampleRate*1000)+8);
+    else finish();
   }
   chokeSeq(pi){const n=AC.currentTime;for(const v of [...this.act[pi]])if(!v.live)v.kill(n);
     /* granular: the worklet may hold voices whose 'off' was lost — a choke is
@@ -11629,6 +11875,7 @@ fetch('samples/manifest.json').then(r=>r.ok?r.json():null).then(man=>{
    than a blinking one. Channels with nothing sounding answer with two empty
    arrays and cost a message. */
 setInterval(()=>{
+  if(MIC.on&&CFG.micMon)micMonWire();     // the monitor follows the focus
   const gn=engine.gn; if(!gn)return;
   for(const i of CHANS()){
     const e=gn[i]; if(!e||!e.node||!isAudioCh(i))continue;
@@ -13611,6 +13858,8 @@ function prsFieldDefs(){
     ...(kmodeOf(p)?[{k:'from',v:()=>Math.round((p.au||{}).start||0)?'here'
         :(cmodeOf(p)===2?'pos':'start')}]:[]),
     {k:'input', v:()=>['mic','mstr'][Math.round((p.au||{}).src||0)]},
+    /* (the mic's own dials — device, gain, monitor — live in settings/Input
+       (Gad, 2026-08-23) and ride the mic key: esc held, -/= gain, ; monitor) */
     {k:'chan',  v:()=>['stereo','left','right'][clamp(Math.round((p.au||{}).chan||0),0,2)]},
     {k:'gain',  v:()=>((p.au||{}).gain??0.9).toFixed(2)}];
   if(p.cat==='kit')return [        // kit, but no pad played yet: no pad fields to show
@@ -13684,7 +13933,7 @@ const GRANF=[
    fmt:v=>POOL[Math.round(v)]?POOL[Math.round(v)].name:'\u2014',
    get:()=>{const i=POOL.findIndex(p2=>p2.buf===(engine.granBuf||[])[S.editSnd]); return i<0?0:i;},
    set:(o,v)=>{const pi=S.editSnd, e2=POOL[clamp(Math.round(v),0,Math.max(0,POOL.length-1))];
-     if(!e2){flash('pool is empty — record (\u2303+tab) or drop audio first');return;}
+     if(!e2){flash('pool is empty — record (esc+tab) or drop audio first');return;}
      engine.granNode(pi); engine.setChanBuf(pi,e2.buf,e2.name);
      takeToLane(pi,e2.buf); engine.audLive(pi);}}),
 ];
@@ -14274,7 +14523,7 @@ function _prsAction(d){
   /* the pool, on either face of the audio channel: one clip per channel, so
      the tape and the cloud are handed the same take by the same call */
   if(f==='sample'&&(p.cat==='audio'||engineGranP(p))){
-    if(!POOL.length){flash('pool is empty — record (\u2303+tab) or drop audio in');dirty=true;return;}
+    if(!POOL.length){flash('pool is empty — record (esc+tab) or drop audio in');dirty=true;return;}
     const cur=POOL.findIndex(e2=>e2.buf===(engine.audBuf[pi]||(engine.granBuf||[])[pi]));
     const nx=POOL[fmod((cur<0?0:cur)+(d>0?1:-1),POOL.length)];
     pushUndo('sample');
@@ -16396,8 +16645,12 @@ function restoreAudio(refs){
     miss.slice(0,3).join(' \u00b7 ')+(miss.length>3?' \u00b7 +'+(miss.length-3)+' more':'')+
     ' \u2014 drop the file on the channel and its settings are all still there'),600);
 }
-const MIC={stream:null,on:false,latched:false,node:null,ring:null,w:0,sr:0,
-  _down:false,_used:false,_latch:false};
+const MIC={stream:null,on:false,latched:false,node:null,ring:null,w:0,sr:0,total:0,
+  _down:false,_used:false,_latch:false,
+  /* the input stage: g is the gain every listener hangs off, pk a falling
+     peak for the row's meter, devs the input list once permission let us
+     read the labels, monG the monitor's tap into the master */
+  g:null,pk:0,devs:null,monG:null};
 /* WHAT COUNTS AS THE MIC KEY. Bare control is the original, and 'Fn' is here in
    hope — a board can send one, macOS never does. PrintScreen joins them because
    it is what a 60% board's own remapper reaches for when it wants a key that
@@ -16436,24 +16689,123 @@ const TOOLKEY=c=>c==='AltLeft';
    moment ⌥ comes up, so the letters go back to their scopes. */
 let MODPICK=null;
 const MODPICK_SRC={KeyE:1,KeyL:2,KeyV:3,KeyK:4,Slash:5};
+/* THE INPUT STAGE (Gad, 2026-08-23: "make my mic input controllable"). One
+   chain per page — stream → MIC.g → the ring's tap — and everything that
+   hears the mic hangs off MIC.g: the take a tab records, the cloud's live
+   wire, the monitor. So the device, the gain and the monitor on the channel
+   row are one set of answers, and there is no second stream with its own
+   device and no gain, which is what audRecStart used to open for itself.
+   The device and the gain are INSTRUMENT-WIDE (CFG): there is one mic. The
+   monitor is per channel, because it is heard through that channel's strip. */
+const micLin=()=>Math.pow(10,(CFG.micDb||0)/20);
+const micCons=()=>{const a={echoCancellation:false,noiseSuppression:false};
+  if(CFG.micDev)a.deviceId={exact:CFG.micDev}; return {audio:a};};
+async function micDevs(){
+  /* labels are blank until permission has been granted once — which is why
+     this is asked right after the first stream, never before */
+  try{const ds=await navigator.mediaDevices.enumerateDevices();
+    MIC.devs=ds.filter(d=>d.kind==='audioinput')
+      .map((d,i)=>({id:d.deviceId,label:(d.label||('input '+(i+1))).replace(/\s*\(.*?\)\s*$/,'')}));
+  }catch(_){MIC.devs=MIC.devs||[];}
+  return MIC.devs;
+}
+const micDevName=()=>CFG.micDevL?String(CFG.micDevL).slice(0,9):(CFG.micDev?'?':'default');
+const micMeter=()=>!MIC.on?'':MIC.pk>0.5?'▎▎▎▎':MIC.pk>0.25?'▎▎▎'
+         :MIC.pk>0.1?'▎▎':MIC.pk>0.02?'▎':'·';
+const micGainStr=()=>{const db=Math.round(CFG.micDb||0), m=micMeter();
+  return (db>0?'+':'')+db+'dB'+(m?' '+m:'');};
+function micGainApply(){if(MIC.g)MIC.g.gain.setTargetAtTime(micLin(),AC.currentTime,0.01);}
+/* THE MONITOR IS ONE SWITCH, HEARD THROUGH THE CHANNEL (Gad, 2026-08-24:
+   "can you make monitor on go through the channel effects?"). CFG.micMon
+   still owns on/off — settings and esc+; — but the wire lands in the strip
+   of the audio channel the mic would record: the one recording now, else
+   the one you stand on. You hear yourself through its rack, fader and pan —
+   the take in place — and only when no audio channel is in focus does it
+   fall back to the master. Re-aimed from the cursor-ping interval: compare
+   the target, touch the graph only on a change. (Through a strip it is
+   still inside what 'resample the master' records — worn openly.) */
+function micMonTarget(){
+  if(engine.audRec&&engine.audRec.label==='mic'&&isAudioCh(engine.audRec.pi))return engine.audRec.pi;
+  const f=S.layer>=2?S.editSnd:S.curPreset;
+  return (S.presets[f]&&isAudioCh(f))?f:0;          // 0 = the master
+}
+function micMonWire(){
+  if(!MIC.monG)return;
+  MIC.monG.gain.value=CFG.micMon?1:0;
+  const want=CFG.micMon?micMonTarget():(MIC._monAt??0);
+  if(want===MIC._monAt&&MIC._monWired)return;
+  try{MIC.monG.disconnect();}catch(_){}
+  const bus=want>0&&engine.buses&&engine.buses[want];
+  try{if(bus)MIC.monG.connect(bus.vIn); else MIC.monG.connect(engine.master);}catch(_){}
+  MIC._monAt=want; MIC._monWired=true;
+}
+function micGainStep(d){
+  CFG.micDb=clamp(Math.round((CFG.micDb||0)+d),-24,24); saveCfg(); micGainApply();
+  flash('mic gain '+(CFG.micDb>0?'+':'')+CFG.micDb+'dB'+(MIC.on?'  '+micMeter():''));
+}
+function micMonToggle(){
+  CFG.micMon=CFG.micMon?0:1; saveCfg(); micMonWire();
+  flash(CFG.micMon?'monitor on — you, through this channel\u2019s strip'+(MIC.on?'':' once the mic is open')+' — mind the speakers'
+                  :'monitor off');
+}
+async function micSetDev(id,label){
+  CFG.micDev=id; CFG.micDevL=label; saveCfg();
+  const was=MIC.on, latched=MIC.latched;
+  if(MIC.stream){try{MIC.stream.getTracks().forEach(t=>t.stop());}catch(_){} MIC.stream=null;}
+  if(was){micOff(); await micOn(); MIC.latched=latched;}
+}
+async function micStepDev(d){
+  if(!MIC.devs||!MIC.devs.length){
+    if(!MIC.stream){
+      if(!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia)){flash('no mic in this browser');return;}
+      try{MIC.stream=await navigator.mediaDevices.getUserMedia(micCons());}
+      catch(e){flash('mic: '+(e&&e.name==='NotAllowedError'?'permission denied':'unavailable'));return;}
+    }
+    await micDevs();
+    if(!MIC.devs.length){flash('no audio inputs found');return;}
+  }
+  const cur=MIC.devs.findIndex(x=>x.id===CFG.micDev);
+  const nx=MIC.devs[fmod((cur<0?0:cur)+(d>0?1:-1),MIC.devs.length)];
+  await micSetDev(nx.id,nx.label);
+  flash('mic → '+nx.label+' (the whole instrument)'); dirty=true;
+}
 async function micOn(){
   if(MIC.on||MIC._pending)return;   // a second ⌃ during the permission prompt must not build a second graph
   MIC._pending=true;
   try{
     if(!MIC.stream){
       if(!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia)){flash('no mic in this browser');return;}
-      MIC.stream=await navigator.mediaDevices.getUserMedia(
-        {audio:{echoCancellation:false,noiseSuppression:false}});
+      try{MIC.stream=await navigator.mediaDevices.getUserMedia(micCons());}
+      catch(e3){
+        /* a remembered device that is unplugged must not make the mic dead:
+           back to the default input, and say so */
+        if(!CFG.micDev||!e3||!/Overconstrained|NotFound/.test(String(e3.name)))throw e3;
+        delete CFG.micDev; delete CFG.micDevL; saveCfg();
+        flash('mic device gone — back to the default input');
+        MIC.stream=await navigator.mediaDevices.getUserMedia(micCons());
+      }
+      micDevs();                      // the labels are readable now
     }
     if(!MIC.ring){MIC.sr=AC.sampleRate;
-      MIC.ring=new Float32Array(Math.round(MIC.sr*32)); MIC.w=0;}
+      MIC.ring=new Float32Array(Math.round(MIC.sr*32)); MIC.w=0; MIC.total=0;}
     const src=AC.createMediaStreamSource(MIC.stream);
+    const g=AC.createGain(); g.gain.value=micLin();
     const sp=AC.createScriptProcessor(4096,1,1);
     const sink=AC.createGain(); sink.gain.value=0;   // pulled, silent — no monitor, no feedback
-    sp.onaudioprocess=ev=>{const d=ev.inputBuffer.getChannelData(0);
-      for(let i=0;i<d.length;i++){MIC.ring[MIC.w]=d[i]; MIC.w=(MIC.w+1)%MIC.ring.length;}};
-    src.connect(sp); sp.connect(sink); sink.connect(AC.destination);
-    MIC.node={src,sp,sink}; MIC.on=true;
+    sp.onaudioprocess=ev=>{const d=ev.inputBuffer.getChannelData(0); let pk=0;
+      for(let i=0;i<d.length;i++){const v=d[i]; MIC.ring[MIC.w]=v; MIC.w=(MIC.w+1)%MIC.ring.length;
+        const a=v<0?-v:v; if(a>pk)pk=a;}
+      MIC.total+=d.length;
+      MIC.pk=pk>MIC.pk?pk:MIC.pk*0.6;          // the row's meter: up at once, down over a few blocks
+      if(S.layer===-1)dirty=true;               // the meter lives in settings/Input
+    };
+    src.connect(g); g.connect(sp); sp.connect(sink); sink.connect(AC.destination);
+    /* the monitor: one tap, aimed by micMonWire at the channel's strip */
+    const monG=AC.createGain(); monG.gain.value=0;
+    g.connect(monG);
+    MIC.node={src,g,sp,sink,monG}; MIC.g=g; MIC.monG=monG;
+    MIC._monWired=false; MIC._monAt=null; MIC.on=true;
+    micMonWire();
     for(let i9=1;i9<10;i9++)if((S.presets[i9].gr||{}).live)engine.granLiveWire(i9);
     flash('● mic ON — the ring hears you · tab on an audio channel grabs the last loop');
     dirty=true;
@@ -16463,13 +16815,18 @@ async function micOn(){
 function micOff(){
   if(!MIC.on)return;
   const n=MIC.node; MIC.node=null; MIC.on=false; MIC.latched=false;
-  if(n){try{n.src.disconnect();n.sp.disconnect();n.sink.disconnect();}catch(_){}}
-  /* the live wires into gran channels are part of the mic being ON — leaving
-     them connected was a hot mic behind an 'off' light */
-  if(engine.gn)for(const k9 in engine.gn){const e9=engine.gn[k9];
-    if(e9&&e9.liveSrc){try{e9.liveSrc.disconnect();}catch(_){} e9.liveSrc=null;}}
+  MIC.g=null; MIC.monG=null; MIC._monWired=false; MIC._monAt=null; MIC.pk=0;
+  if(n){try{n.src.disconnect();n.g.disconnect();n.sp.disconnect();n.sink.disconnect();
+            if(n.monG)n.monG.disconnect();}catch(_){}}
+  /* the monitor tap and the live wires into gran channels are part of the
+     mic being ON — leaving them connected was a hot mic behind an 'off'
+     light. g.disconnect() above took every one of them down; this forgets them. */
+  if(engine.gn)for(const k9 in engine.gn){const e9=engine.gn[k9]; if(e9&&e9.liveSrc)e9.liveSrc=null;}
   /* the stream stays: permission asked once, the next ctrl is instant */
   flash('mic off'); dirty=true;
+  /* a take drinking from this stage ends with it — after the flash, so what
+     it landed is the last word on screen */
+  if(engine.audRec&&engine.audRec.label==='mic')audRecEnd();
 }
 function micGrab(sec){                 // → the LAST `sec` seconds off the ring
   if(!MIC.ring)return null;
@@ -18209,7 +18566,7 @@ function detectCuts(buf,st,en,n){
    than not. Returns null when nothing fits — a one-shot, a field recording,
    anything that is not a loop — and then nothing is assumed at all. */
 const TEMPOLO=80, TEMPOHI=170;
-const BEATCANDS=[1,2,3,4,6,8,12,16,24,32,48,64,96,128];
+const BEATCANDS=[0.25,0.5,1,2,3,4,6,8,12,16,24,32,48,64,96,128];   // 0.25/0.5: a 16th and an 8th can be a loop too (Gad, 2026-08-24)
 function guessTake(durSec){
   if(!(durSec>0.05))return null;
   const mid=Math.sqrt(TEMPOLO*TEMPOHI);
@@ -18237,11 +18594,89 @@ function takeToLane(pi,buf){
   return g;
 }
 const takeSay=g=>g?'  ~'+g.bpm+'bpm, '+g.beats+' beats':'  (no loop tempo fits — left as it was)';
-function audPlace(pi,rec,startBeat,name='mic'){
+const AUDLATC=0;      /* MEASURED, not assumed: six beat-locked blips through the
+   mstr take path landed at E=-8190 samples with the old 8192, spread 0 —
+   the tap chain's own delay is ~2 samples (the onset detector's bias on a
+   1kHz ramp). It was 8192 on faith and every take sat 186ms early — Gad:
+   "the recorded click is like 1 16th note almost earlier then the live
+   click". tools/probe.sh micrec, the latc row, re-measures it any time. */
+/* WHERE A TAKE SITS IS A MEASURED NUMBER (Gad, 2026-08-24: "the recording is
+   placed too early, please do a calibration"). AUDLATC is the tap chain
+   itself — measured by the latc probe row with beat-locked blips through the
+   master. A real mic adds the device's own delay on top, in and out, which
+   the browser reports per stream — read at RECORD time, so a bluetooth
+   headset pays its own bill and a rewire never needs a rebuild. */
+function micLatGuessMs(){
+  try{const t9=MIC.stream&&MIC.stream.getAudioTracks()[0];
+    const st9=t9&&t9.getSettings?t9.getSettings():{};
+    return Math.round(((st9.latency||0)+(AC.outputLatency||0))*1000);}catch(_){return 0;}
+}
+function audRecLat(label){
+  let lat=AUDLATC;
+  if(label==='mic')
+    lat+=Math.round((Number.isFinite(CFG.micTrimMs)?CFG.micTrimMs:micLatGuessMs())/1000*AC.sampleRate);
+  return lat;
+}
+/* HIS TEST, AS A BUTTON (Gad, 2026-08-24: "set mic input>turn on metronome
+   click>record full loop>playback> notice the recording transient of the
+   click comes after the actual click" — the browser under-reported his chain
+   by ~100ms and no constant measured elsewhere can know his room). Four
+   clicks out the speakers at known clock times, the mic records the room
+   through the SAME tap chain a take uses, and the offset between played and
+   arrived is the whole path — output, air, mic, stream — on THIS machine
+   with THIS gear. The median goes to CFG.micTrimMs and audRecLat spends it
+   on every mic take. It refuses to store garbage: fewer than 3 of 4 clicks
+   heard (headphones, muted speakers) or a spread over 30ms flashes why and
+   stores nothing. */
+async function micCalibrate(){
+  const was=MIC.on;
+  if(!MIC.on)await micOn();
+  if(!MIC.on||!MIC.g){flash('mic did not open — no measurement');return 'no-mic';}
+  flash('▶ mic sync — 4 clicks through the speakers, keep the room quiet…');
+  const sr=AC.sampleRate, N=4, GAP=0.35;
+  const sp=AC.createScriptProcessor(4096,1,1), chunks=[];
+  sp.onaudioprocess=ev=>chunks.push(new Float32Array(ev.inputBuffer.getChannelData(0)));
+  const sink=AC.createGain(); sink.gain.value=0;
+  MIC.g.connect(sp); sp.connect(sink); sink.connect(AC.destination);
+  const tTap=AC.currentTime;
+  const bg=AC.createGain(); bg.gain.value=0.9; bg.connect(engine.master);
+  const tks=[];
+  for(let k=0;k<N;k++){const tk=tTap+0.3+k*GAP; tks.push(tk);
+    const o=AC.createOscillator(); o.frequency.value=2000;
+    const g=AC.createGain(); g.gain.value=0; o.connect(g); g.connect(bg);
+    g.gain.setValueAtTime(0,tk); g.gain.linearRampToValueAtTime(1,tk+0.002);
+    g.gain.setValueAtTime(1,tk+0.012); g.gain.linearRampToValueAtTime(0,tk+0.014);
+    o.start(tk); o.stop(tk+0.03);}
+  await new Promise(r=>setTimeout(r,(0.3+N*GAP+0.5)*1000));
+  try{MIC.g.disconnect(sp);}catch(_){}
+  try{sp.disconnect();sink.disconnect();bg.disconnect();}catch(_){}
+  if(!was&&MIC.on&&!MIC.latched)micOff();
+  const n=chunks.reduce((a,c)=>a+c.length,0), rec=new Float32Array(n);
+  {let q=0; for(const c of chunks){rec.set(c,q); q+=c.length;}}
+  const offs=[];
+  for(let k=0;k<N;k++){
+    const a=Math.max(0,Math.round((tks[k]-tTap)*sr)), z=Math.min(rec.length,a+Math.round(0.3*sr));
+    let mx=0; for(let i=a;i<z;i++){const v=Math.abs(rec[i]); if(v>mx)mx=v;}
+    if(mx<0.02)continue;
+    const thr=mx*0.35;
+    for(let i=a;i<z;i++)if(Math.abs(rec[i])>thr){offs.push((i-a)/sr*1000);break;}
+  }
+  if(offs.length<3){
+    flash('mic heard '+offs.length+' of 4 clicks — speakers audible? room quiet? nothing stored');
+    return 'heard '+offs.length+'/4';}
+  offs.sort((x,y)=>x-y);
+  const med=offs[Math.floor(offs.length/2)], spread=offs[offs.length-1]-offs[0];
+  if(spread>30){flash('unstable ('+Math.round(spread)+'ms spread) — nothing stored, try again in a quieter room');return 'spread '+Math.round(spread);}
+  CFG.micTrimMs=Math.round(med); saveCfg(); dirty=true;
+  flash('✓ mic sync '+Math.round(med)+'ms — every mic take lands that much earlier now');
+  return 'ok '+Math.round(med);
+}
+function audPlace(pi,rec,startBeat,name='mic',lat){
   /* SILENCE IS NOT A TAKE. A muted mic, a denied permission, a channel with
      nothing routed to it — all of them used to overwrite a loaded sample
      with a loop of nothing, and the sample was not coming back. */
-  let pk9=0; for(let i=0;i<rec.length;i+=17){const v=rec[i]<0?-rec[i]:rec[i]; if(v>pk9)pk9=v;}
+  const chs=Array.isArray(rec)?rec:[rec], recN=chs[0].length;
+  let pk9=0; for(const cD of chs)for(let i=0;i<cD.length;i+=17){const v=cD[i]<0?-cD[i]:cD[i]; if(v>pk9)pk9=v;}
   if(pk9<0.0015&&engine.audBuf[pi]){
     flash('that take is silent — '+(name==='mic'?'is the mic on?':'nothing came through')+
           ' — the sample is untouched');
@@ -18249,32 +18684,64 @@ function audPlace(pi,rec,startBeat,name='mic'){
   }
   pushUndo('take: '+name);              // …and whatever it does replace comes back
   const lane=S.patterns[S.editPat].lanes[pi], sr=AC.sampleRate;
-  const LATC=8192;                                  // script-processor latency fudge
   if(lane.auto){                                    // fresh lane: loop length from the take
-    const bars=Math.max(0.25,(rec.length/sr)/spb()/4);
+    const bars=Math.max(0.25,(recN/sr)/spb()/4);
     let p2=1; while(p2*1.25<bars)p2*=2; p2=Math.min(p2,16);
     lane.unit='B'; lane.count=p2; lane.auto=false;
   }
   const L=lane.len, canvasLen=Math.max(256,Math.round(L*spb()*sr));
-  const cv=AC.createBuffer(1,canvasLen,sr), dst=cv.getChannelData(0);
-  const old=engine.audBuf[pi];
-  if(old){const os=old.getChannelData(0);
-    for(let i=0;i<canvasLen;i++)dst[i]=os[i%os.length]||0;}
   const mode=CFG.overdub||0;                        // 0 overwrite 1 overdub 2 smart
-  const pos0=fmod(startBeat-editAnchor(),L)*spb()*sr-LATC;
-  const W2=1024; let env=0;
-  for(let i=0;i<rec.length;i++){
-    const di=((Math.round(pos0+i)%canvasLen)+canvasLen)%canvasLen;
-    if(mode===2){                                   // smart: duck the old under the new
-      if(i%W2===0){let s2=0;const e2=Math.min(i+W2,rec.length);
-        for(let j=i;j<e2;j++)s2+=rec[j]*rec[j];
-        const tgt=Math.sqrt(s2/W2)>0.02?1:0;
-        env+=(tgt-env)*(tgt>env?0.5:0.12);}
-      dst[di]=dst[di]*(1-0.85*env)+rec[i];
-    }else if(mode===1)dst[di]+=rec[i];
-    else dst[di]=rec[i];
+  /* OVERWRITE IS A PUNCH-IN (Gad, 2026-08-24: "it should overwrite only the
+     part where rec was held and keep other areas of the previous layer
+     intact" — refining 08-23's "just erase the previous", which one build
+     read as erase-the-whole-loop). The canvas starts from the old layer in
+     EVERY mode; the recorded span is where the modes differ: overwrite
+     REPLACES its samples outright (never sums — that is the no-mix half),
+     overdub sums, smart ducks. Outside the span nothing is touched. The old
+     loop still goes QUIET while the take runs (the mute), and a whole-loop
+     replace stays one gesture away: the mic-latched TAP takes a full loop,
+     and a hold longer than the loop covers it all. */
+  const old=engine.audBuf[pi];
+  const nch9=Math.max(chs.length,old?old.numberOfChannels:1);
+  const cv=AC.createBuffer(nch9,canvasLen,sr);
+  const pos0=fmod(startBeat-editAnchor(),L)*spb()*sr-(lat??AUDLATC);
+  /* A PUNCH WITHOUT A CLICK (Gad, 2026-08-24: "put a little crossfade when
+     punching a recording to avoid clicks"): the take's first and last ~6ms
+     ramp, and in overwrite the old layer holds the complement, so both
+     joins are seams instead of steps. */
+  const F9=Math.max(1,Math.min(256,recN>>2));
+  for(let c9=0;c9<nch9;c9++){
+    const dst=cv.getChannelData(c9);
+    if(old){const os=old.getChannelData(Math.min(c9,old.numberOfChannels-1));
+      for(let i=0;i<canvasLen;i++)dst[i]=os[i%os.length]||0;}
+    const rc=chs[Math.min(c9,chs.length-1)];
+    const W2=1024; let env=0;
+    for(let i=0;i<recN;i++){
+      const di=((Math.round(pos0+i)%canvasLen)+canvasLen)%canvasLen;
+      const w9=Math.max(0,Math.min(1,i/F9,(recN-1-i)/F9));
+      if(mode===2){                                 // smart: duck the old under the new
+        if(i%W2===0){let s2=0;const e2=Math.min(i+W2,recN);
+          for(let j=i;j<e2;j++)s2+=rc[j]*rc[j];
+          const tgt=Math.sqrt(s2/W2)>0.02?1:0;
+          env+=(tgt-env)*(tgt>env?0.5:0.12);}
+        dst[di]=dst[di]*(1-0.85*env*w9)+rc[i]*w9;
+      }else if(mode===1)dst[di]+=rc[i]*w9;
+      else dst[di]=dst[di]*(1-w9)+rc[i]*w9;
+    }
   }
   engine.audBuf[pi]=cv; engine.audName[pi]=name;
+  /* A FRESH TAKE PLAYS BACK AS IT WAS RECORDED (Gad, 2026-08-24: "the
+     playback should give me the audio in the pitch i recorded it, repitching
+     should happen only if i change the pitch after i recorded"). The speed,
+     pitch and crop dials described the PREVIOUS take; inherited, they
+     repitched every new recording — sing over a ×2 loop and your own voice
+     came back an octave up. Neutral now: the canvas is cut to the loop, so
+     ×1 is exactly what the air heard. Sample PICKS keep their dials — sound
+     design survives auditioning the pool; only a RECORDING resets. In
+     overdub the bed comes back at ITS recorded pitch too — the layers keep
+     their own pitches, not the repitched mix you happened to sing over. */
+  {const au9=S.presets[pi].au=S.presets[pi].au||{};
+   au9.spd=1; au9.rate=1; au9.semis=0; au9.st=0; au9.en=1;}
   poolAdd(cv,name+' ch'+pi,{k:'r'});
   if(engineGranP(S.presets[pi])){engine.granBuf=engine.granBuf||[];
     engine.granBuf[pi]=cv; engine.granSend(pi);}
@@ -18282,7 +18749,9 @@ function audPlace(pi,rec,startBeat,name='mic'){
      fills in a synth channel that just became one by being recorded onto */
   S.presets[pi].cat='audio'; audDefaults(S.presets[pi]);
   engine.granCfg(pi);
-  flash('◉ audio: '+(L/4)+' bar loop ('+['overwrite','overdub','smart'][mode]+')');
+  engine.audResume(pi);         // the loop carries on from where the bar is, take and all
+  flash('◉ audio: '+(L/4)+' bar loop ('+['overwrite','overdub','smart'][mode]+')'
+        +(T.playing?(autoCur(S.presets[pi])?'':' — auto is off: a key plays it'):' — space plays it'));
   dirty=true; dirtySave=true;
 }
 /* tab+N: you already played it, and you know how long it was. Set the loop to
@@ -18294,7 +18763,7 @@ function retroBars(bars){
   const lane=S.patterns[S.editPat].lanes[pi];
   /* an audio channel CAN reveal — when what you jammed was cue jumps */
   if(isAudioCh(pi)&&!retroBuf[pi].some(n=>n.cue!==undefined||n.pk!==undefined||n.fz!==undefined)){
-    flash('audio channel — tab records the input');return;}
+    flash('audio channel — mic key (esc) + tab records the input');return;}
   const L=bars*4, nowB=gridNow(), anc=editAnchor();
   /* Two separate questions, and conflating them is what made captures play
      back rotated: WHICH notes to take, and WHERE they sit in the loop.
@@ -18342,6 +18811,19 @@ function retroBars(bars){
                   :'◉ loop set to '+bars+' bar'+(bars>1?'s':'')+' (nothing played)');
   dirty=true; dirtySave=true;
 }
+/* THE RELEASE DECIDES WHICH TAKE IT WAS. Tab on an audio channel starts
+   both recorders on the way down — the keys and the sound — and the hand
+   says which one it meant: played the cue/pitch keys (or spent tab as a
+   modifier), it was a keys take and the sound is dropped; played nothing,
+   it was a sound take and audPlace gets it. Nothing running but a mic still
+   opening for one: that mic is told to stand down. */
+function audRecEnd(){
+  const r=engine.audRec;
+  if(!r){engine.audRecStop(true);return;}
+  if(r.keys>0){engine.audRecStop(true);
+    flash('keys take — the sound was dropped (play nothing under tab for a sound take)');}
+  else engine.audRecStop();
+}
 function retroCapture(){
   /* THE GUESSER IS GONE. The tap used to walk the buffer back to the last
      long silence and estimate a loop length from what it found — clever, and
@@ -18352,7 +18834,7 @@ function retroCapture(){
      against the same anchor. */
   const pi=S.layer>=2?S.editSnd:S.curPreset, lane=S.patterns[S.editPat].lanes[pi];
   if(isAudioCh(pi)&&!retroBuf[pi].some(n=>n.cue!==undefined||n.pk!==undefined||n.fz!==undefined)){
-    flash('audio channel — tab records the input');return;}
+    flash('audio channel — mic key (esc) + tab records the input');return;}
   /* A LANE THAT HAS NEVER BEEN SET TAKES defLen. Retro cuts "the last cycle of
      the loop as set" — but on a fresh lane there is no length you set, and it
      was using the Looper's own construction default instead of the one bar
@@ -19043,6 +19525,29 @@ const onKeyDown=e=>{
     arepStart(e.code);
   }
   if(arrowAlias(e,'keydown'))return;   // right alt is ←, menu is ↑, F13-F16 are all four
+  /* THE MIC HOLD IS A SCOPE (Gad, 2026-08-24: "holding mic button and
+     up/down to change gain should not use updown for other params, it
+     should scope only on the mic"). While esc (or a board's Fn) holds the
+     mic open, the row is the mic's, exactly like a held param scope:
+         ↑↓  gain (⇧ = 6dB)     ←→  input device
+         -/= gain as well        ;   monitor
+     — and none of them reaches the page's params, the cursor, or the
+     settings rows underneath. Deliberately NOT chord-use: operating the mic
+     is not borrowing its key, so MIC._used stays false and a win+esc latch
+     still latches. ESCH.used is set so the release does not ALSO escape.
+     Repeats step the gain; a device swap and a toggle must not repeat. */
+  if((ESCH||MIC._down)
+     &&(e.code==='Minus'||e.code==='Equal'||e.code==='Semicolon'
+        ||e.code==='ArrowUp'||e.code==='ArrowDown'||e.code==='ArrowLeft'||e.code==='ArrowRight')
+     &&!cmdOf(e)&&!e.ctrlKey&&!altOf(e)){
+    e.preventDefault();
+    if(ESCH)ESCH.used=true;
+    if(e.code==='Semicolon'){if(!e.repeat)micMonToggle();}
+    else if(e.code==='ArrowLeft'||e.code==='ArrowRight'){
+      if(!e.repeat)micStepDev(e.code==='ArrowRight'?1:-1);}
+    else micGainStep(((e.code==='Equal'||e.code==='ArrowUp')?1:-1)*(e.shiftKey?6:1));
+    dirty=true; return;
+  }
   /* BARE CONTROL (or a board's fn) IS THE MIC. Down opens it; a ctrl+letter
      chord marks the hold as modifier use so the mic closes on release instead
      of latching; left-shift at the press latches (decided at release). */
@@ -19613,7 +20118,8 @@ const onKeyDown=e=>{
       /* pressing the button that is currently latched RELEASES it — the way
          out is the same key you came in on, no special chord to remember */
       if(LATCH.on&&!KM.sl){
-        latchReleaseAll(); flash('rec unlatched');
+        const hadRec=!!engine.audRec;
+        latchReleaseAll(); if(!hadRec)flash('rec unlatched');   // a landed take's flash outranks this one
         dirty=true; dirtySave=true; return;
       }
       HOLD.tab=true; HOLD.tabAt=performance.now(); HOLD.tabUsed=false;
@@ -19644,16 +20150,9 @@ const onKeyDown=e=>{
         flash('\u25cf modcap armed on '+S.presets[ca].name+
               ' \u2014 move anything and it is captured'+(T.playing?'':' \u2014 press space'));
       }
-      else if(S.layer>=1&&isAudioCh(noteCh)&&MIC.on){
-        /* the mic is ALREADY listening — tab is retro for sound: the last
-           loop-length of air goes straight into the lane, aligned to now */
-        const lane2=S.patterns[S.editPat].lanes[noteCh];
-        const beats=lane2.auto?16:lane2.len;
-        const rec2=micGrab(beats*spb());
-        if(rec2){pushUndo('mic take');
-          audPlace(noteCh,rec2,gridNow()-beats,'mic');}
-        else flash('mic ring is empty — hold ctrl a moment first');
-      }
+      /* (the mic-already-on ring grab lived here, on the key-DOWN, and ran
+         before the hand had decided what the tab was; it is the TAP now —
+         see the key-up) */
       /* THE RELEASE DECIDES, ON AN AUDIO CHANNEL TOO (Gad, 2026-08-20: three
          ways to record, and momentary was dead here). This branch used to fire
          retroCapture() on the key-DOWN, which settles the gesture before the
@@ -19668,7 +20167,7 @@ const onKeyDown=e=>{
          that trap is what the old comment guarded against and ⌃+tab is still
          its own gesture; all that changed is WHEN the tap is recognised. */
       else if(S.layer>=1&&isAudioCh(noteCh)&&engine.audRec){
-        engine.audRecStop();
+        HOLD.tabUsed=true; audRecEnd();   // a take left running (latched): the key you came in on ends it
       }
       /* REC arms on the way down whatever the gesture turns out to be — a tap
          is just a hold that ended quickly, and the release decides which it
@@ -19687,6 +20186,16 @@ const onKeyDown=e=>{
           if(ml.state==='rec'&&!T.playing)
             flash('● armed — press space; automation records against the loop');
         }
+        /* AND THE SOUND — ON THE CHORD, NOT ON TAB ALONE (Gad, 2026-08-24:
+           "it should be mic+rec records audio input". For one build tab by
+           itself started this, and every rec gesture on an audio channel
+           threatened a take). The MIC KEY is the audio modifier: with esc
+           or Fn engaged — held, still opening, or latched — tab records the
+           channel's input; without it, tab is the keys recorder it always
+           was. The reverse order lands in the esc handler, so the chord
+           works whichever key is second. audRecEnd still judges a chord
+           that turns out to be keys. */
+        if(isAudioCh(noteCh)&&(MIC.on||MIC._down||ESCH))engine.audRecStart(noteCh);
       }
       dirty=true;dirtySave=true;}
     return;}
@@ -19968,6 +20477,14 @@ const onKeyDown=e=>{
       if(KM.sl)LATCH.used=true;
       if(MIC.latched)MIC._unlatch=true; else micOn();
     },200);
+    /* REC ALREADY DOWN: mic+rec is the record-the-input chord in either
+       order, so esc landing second starts the take too. used is set so this
+       press cannot also escape; HOLD.tabUsed is NOT set — that would read
+       as tab-spent-as-modifier and drop the very take this starts. */
+    if(HOLD.tab&&S.layer>=1&&!engine.audRec){
+      const nc9=S.layer>=2?S.editSnd:S.curPreset;
+      if(isAudioCh(nc9)){ESCH.used=true; engine.audRecStart(nc9);}
+    }
     return;}
   if(c==='CapsLock'){e.preventDefault(); return;}   // the state is read, not toggled
   /* ` IS THE INSTRUMENT and \\ IS THE DICE. They swapped places: the scope you
@@ -20211,6 +20728,32 @@ const onKeyDown=e=>{
     if(engine.granName)engine.granName[pi9]=null;
     engine.chokeSeq(pi9); WAVEC.clear();
     flash('cleared '+nm9+' from ch '+pi9+' — still in the pool, ⌘z brings it back');
+    dirty=true; dirtySave=true; return;
+  }
+  /* ⇧⌫ ON AN AUDIO CHANNEL CLEARS THE WHOLE RECORDING CHANNEL (Gad,
+     2026-08-24: "i want shift+del to clear the recording channel so its
+     setup for bpm detection"): take gone, cues and lane events gone, lane
+     back to AUTO at the default length, dials neutral — the next stopped
+     mic take is a NEW loop and sets the clock. Right shift, like the
+     layer's other ⇧⌫; it outranks the lane-only clear (and the held
+     layerInit) on audio channels. The take stays in the pool; ⌘z brings
+     everything back. */
+  if(c==='Backspace'&&rs(e)&&!e.repeat&&!HOLD.tab&&HOLD.dig<0&&S.layer>=1
+     &&isAudioCh(S.layer>=2?S.editSnd:S.curPreset)){
+    e.preventDefault();
+    const pi9=S.layer>=2?S.editSnd:S.curPreset;
+    pushUndo('clear channel');
+    engine.audStop(pi9,AC.currentTime+0.004);
+    engine.chokeSeq(pi9);
+    engine.audBuf[pi9]=null; engine.audName[pi9]=null;
+    if(engine.granBuf)engine.granBuf[pi9]=null;
+    if(engine.granName)engine.granName[pi9]=null;
+    const lane9=S.patterns[S.editPat].lanes[pi9];
+    lane9.events=[]; lane9.unit='B'; lane9.count=DEFLENS[CFG.defLen]; lane9.auto=true;
+    const au9=S.presets[pi9].au=S.presets[pi9].au||{};
+    au9.spd=1; au9.rate=1; au9.semis=0; au9.st=0; au9.en=1; delete au9.cues;
+    WAVEC.clear();
+    flash('ch '+pi9+' cleared — next stopped mic take sets the tempo (⌘z undoes)');
     dirty=true; dirtySave=true; return;
   }
   if(c==='Backspace'){e.preventDefault();
@@ -20558,35 +21101,55 @@ const onKeyDown=e=>{
       }
       return;
     }
-    /* ON AN AUDIO CHANNEL ↑↓ CROPS THE TAKE, because on a lane with no cue
-       events tab+↑↓ and tab+-/= were the same gesture wearing two key pairs:
-       loopOps doubles the loop LENGTH, stretchLoop scales the count and the
-       (absent) event times — and with the take fitted to the loop, both come
-       out as "the loop is twice as long, so the take plays half speed". Gad
-       spotted it. The pair that is now redundant takes the job the audio
-       channel actually wants: half as much material, or twice as much, the
-       same ×2/÷2 a midi loop's length does. -/= still stretches the loop.
-       ⇧ is still "offset the content", so it falls through to loopOps. */
-    if((c==='ArrowUp'||c==='ArrowDown')&&!rs(e)){
+    /* TAB+↑↓ ON AN AUDIO CHANNEL IS THE SAMPLE LENGTH (Gad, 2026-08-24: "it
+       used to change the sample length, i think its more intuitive that
+       sample length and speed are seperate things" — revising the morning's
+       loop-length-with-speed-comp, whose visible spd writes read as a speed
+       change; and 08-23's bare crop, whose fit re-stretch was a pitch drop).
+       The crop and the lane scale TOGETHER, so under fit the rate cannot
+       move: half the material over half the loop is the same tape at the
+       same speed, and the speed dial is never touched. Speed lives on
+       tab+-/= and the dial, only there; the LOOP alone still grows on
+       tab+←→ (fit-compensated, audFitComp). Refused rather than clamped at
+       the edges — a partial ratio would un-grid the lane — and the flash
+       says which key does what instead. */
+    if((c==='ArrowUp'||c==='ArrowDown'||c==='ArrowLeft'||c==='ArrowRight')&&!rs(e)){
       const tgA=chTargets().filter(i=>isAudioCh(i)&&engine.audBuf[i]);
       if(tgA.length){
-        pushUndo('crop');
-        const f=c==='ArrowUp'?2:0.5;
-        let say='';
+        /* …AND ←→ IS THE SAME GESTURE BY ONE UNIT (Gad, 2026-08-24: "make
+           tab+←→ same as tab up down to control the length not speed, and
+           make it work the same as in midi that it will add or remove steps
+           according to the loop unit size"). ↑↓ doubles/halves, ←→ steps a
+           single UNIT — a 16th, an 8th, a beat, whatever the lane's unit is
+           (⇧←→ still changes which). Crop and lane stay locked either way,
+           so the rate cannot move and the speed dial is never written. The
+           LOOP alone — more bars than material, for structure — is right
+           shift's length dials, as ever. */
+        const vert=(c==='ArrowUp'||c==='ArrowDown');
+        let say='', did=false;
         for(const i of tgA){
           const p9=S.presets[i]; p9.au=p9.au||{};
-          /* `en` IS the length now, signed — so halving or doubling the crop is
-             the multiply it always wanted to be, and it keeps its direction */
-          const e9=clamp(p9.au.en??1,-1,1);
-          p9.au.en=clamp(e9*f,-1,1)||0.01;
-          if(Math.abs(p9.au.en)<0.01)p9.au.en=e9<0?-0.01:0.01;
+          const lane9=S.patterns[S.editPat].lanes[i];
+          const e9=clamp(p9.au.en??1,-1,1), c0=lane9.count;
+          const c1=vert?(c==='ArrowUp'?c0*2:c0/2)
+                       :clamp(Math.round((c0+(c==='ArrowRight'?1:-1))*4)/4,0.25,256);
+          if(c1>256){say='loop already at the maximum'; continue;}
+          if(c1<0.25||c1===c0){say='loop already at the '+((c==='ArrowRight'||c==='ArrowUp')?'maximum':'minimum'); continue;}
+          const want=e9*(c1/c0);
+          if(Math.abs(want)>1+1e-9){say='the whole take loops already — ⇥-= for speed, rshift for the loop alone'; continue;}
+          if(Math.abs(want)<0.01){say='sample length at the floor'; continue;}
+          if(!did)pushUndo('sample length');
+          did=true;
+          p9.au.en=Math.max(-1,Math.min(1,want));
+          if(vert){if(c==='ArrowUp')lane9.double(true); else lane9.halve();}
+          else lane9.count=c1;
+          if(S.layer===1)lane9.auto=false;
           engine.audRelock(i);
-          say=(p9.au.en<0?'◀ ':'')+Math.round(Math.abs(p9.au.en)*100)+'% from start';
+          say=(p9.au.en<0?'◀ ':'')+Math.round(Math.abs(p9.au.en)*100)+'% of the take · loop '+
+              (lane9.count%1?lane9.count.toFixed(2):lane9.count)+'×'+UNIT_NAMES[lane9.unit];
         }
-        /* the cut list is cached against the crop, so it re-detects by itself
-           on the next read — but the page and any running cursor need telling */
         HOLD.tabUsed=true; dirty=true; dirtySave=true;
-        if(tgA.length>1)chSay('crop '+say,tgA.length); else flash('crop '+say);
+        if(tgA.length>1&&did)chSay('sample length',tgA.length); else flash(say||'sample length');
         return;
       }
     }
@@ -20927,6 +21490,7 @@ const onKeyDown=e=>{
     if(KM.sl&&CFG.latch!==0){noteLatch.add(c); LATCH.used=true;}
     const wasHeld=new Set(kbHeld); kbHeld.add(c);
     const pi=S.layer>=2?S.editSnd:S.curPreset;
+    if(engine.audRec&&engine.audRec.pi===pi)engine.audRec.keys++;   // the release asks: was this a keys take?
     /* A CUE KEY IS ITS SLOT. Sent through the note path — which is what the
        play rack needs — the letter became a PITCH by the piano mapping, and
        cueNote turned that pitch back into a slot by arithmetic, so the arp
@@ -20957,7 +21521,7 @@ const onKeyDown=e=>{
          the transport says it should be. Each cue is its own little take:
          while held, ←→ nudges its position, ↑↓ its pitch, ⇧↑↓ its volume,
          ⌥←→ its pan. */
-      if(!engine.audBuf[pi]){flash('audio channel — tab records ('+(Math.round((S.presets[pi].au||{}).src||0)?'resample':'mic')+'), or drop a file');return;}
+      if(!engine.audBuf[pi]){flash('audio channel — mic key (esc) + tab records ('+(Math.round((S.presets[pi].au||{}).src||0)?'resample':'mic')+'), or drop a file');return;}
       const lane=S.patterns[S.editPat].lanes[pi], L=lane.len;
       const kmode=kmodeOf(S.presets[pi]);
       if(kmode===1){
@@ -22172,11 +22736,14 @@ const onKeyUp=e=>{
     const wasUsed=HOLD.tabUsed;
     const wantLatch=HOLD.tabLatch;
     HOLD.tab=false; HOLD.tabUsed=false; HOLD.tabLatch=false;
+    /* tab spent as a modifier (loop ops, modcap) is not a sound take */
+    if(wasUsed&&engine.audRec)engine.audRec.keys++;
     if(wantLatch){                              // latch overlapped the hold: rec stays on
       LATCH.on=true; pushUndo('take');
       const pat4=S.patterns[S.editPat];
       if(pat4.state!=='rec')pat4.state='rec';
-      flash('● REC latched'); dirty=true; dirtySave=true; return;
+      flash('● REC latched'+(engine.audRec?' — recording '+engine.audRec.label+', tab again to keep it':''));
+      dirty=true; dirtySave=true; return;
     }
     /* …and the tap is a tap on an audio channel too. The exclusion here was
        the other half of the key-down grab: retroCapture had already run, so
@@ -22197,12 +22764,48 @@ const onKeyUp=e=>{
           if(ml3.state==='rec')ml3.state='on';
         }
       }
+      /* A TAP ON AN AUDIO CHANNEL TAKES THE PAST. What the key-down started
+         is dropped — it is 300ms old — and if the mic was already on, the
+         last loop-length of air comes off the ring instead, aligned to now.
+         (This grab used to fire on the key-DOWN, and then this branch ran
+         retroCapture over it and flashed 'tab records the input' across the
+         take it had just placed.) */
+      const pi3=S.layer>=2?S.editSnd:S.curPreset;
+      if(isAudioCh(pi3)){
+        /* A CHORD TAP IS A TINY PUNCH (Gad, 2026-08-24: "i want to be able
+           to do very short punches, but now they cancel... please allow
+           short punch recordings when holding esc and tapping tab"). The
+           cancel-on-tap existed to keep the tap free for the ring grab; the
+           ring tap is parked, so the tap LANDS what it recorded — keys still
+           outrank it (audRecEnd), and a graze under 50ms of air still says
+           'take too short'. A plain tab tap (no chord) stays the keys retro. */
+        if(engine.audRec||engine.audRecPend){
+          audRecEnd(); dirty=true; dirtySave=true; return;
+        }
+        /* THE RING TAP IS PARKED (Gad, 2026-08-24: "lets remove retro rec on
+           audio for now, comment it out or something, it doesnt feel good").
+           It grabbed the last loop of air off the ring, aligned to now — and
+           "now" is the free grid when stopped, which is nowhere the hands
+           can feel. If it comes back, it comes back with his stopped rule
+           already in: aligned while playing, AT ZERO when stopped. A tap on
+           an audio channel is the keys' retro again, nothing more.
+        if(MIC.on&&MIC.ring){
+          const lane5=S.patterns[S.editPat].lanes[pi3];
+          const beats=lane5.auto?16:lane5.len;
+          const rec2=micGrab(beats*spb());
+          if(rec2){pushUndo('mic take');
+            audPlace(pi3,rec2,T.playing?gridNow()-beats:editAnchor(),'mic',
+                     T.playing?audRecLat('mic'):0);}
+          else flash('mic ring is empty — hold escape a moment first');
+          dirty=true; dirtySave=true; return;
+        } */
+      }
       retroCapture();                       // the tap: take what was just played
       dirty=true; dirtySave=true; return;
     }
   }
   if(c==='Tab'&&!LATCH.on){                       // the hold ended and nothing latched it: rec off
-    if(engine.audRec)engine.audRecStop();
+    audRecEnd();                                   // …and the sound take, if the hand meant one
     const pat=S.layer>=1?S.patterns[S.editPat]:null;      // pattern rec (notes), pattern + sound layers
     if(pat&&pat.state==='rec'){pat.state='on';finalizeCaptures(true);dirty=true;dirtySave=true;}
     if(S.layer>=2){                                     // ...and disarm the mod loop with it
@@ -24171,6 +24774,34 @@ function gridHTML(pat,pos,anc,chans){
             td+='<line x1="0" x2="'+CW.toFixed(1)+'" y1="'+(p9*H).toFixed(1)+
                 '" y2="'+(p9*H).toFixed(1)+'"/>';
           h+='<svg class="wlay pvz" width="'+CW.toFixed(1)+'" height="'+H+'">'+td+'</svg>';
+        }
+        /* THE TAKE AS IT LANDS (Gad, 2026-08-23: "draw the incoming audio as
+           its recorded and put a playhead that writes the audio"). Every
+           512-sample peak the recorder has heard so far, drawn at the place
+           in the loop it will occupy — the same arithmetic audPlace uses to
+           put it there — and a solid line where the next one goes: the write
+           head. On a fresh lane the loop is still the default length; the
+           take wraps in the picture exactly as it would in the lane. */
+        const R9=engine.audRec;
+        if(R9&&R9.pi===i&&lane){
+          const sr9=AC.sampleRate, L9=lane.len||4, cl9=Math.max(256,Math.round(L9*spb()*sr9));
+          const pos9=fmod(R9.startBeat-editAnchor(),L9)*spb()*sr9-(R9.lat??AUDLATC);
+          const rows9=Math.max(16,Math.round(H/2)), pk9=new Float32Array(rows9);
+          const fr9=k=>((((pos9+k*R9.blk)%cl9)+cl9)%cl9)/cl9;
+          const N9=R9.pks.length, k0=Math.max(0,N9-Math.ceil(cl9/R9.blk));   // only the last loop's worth can show
+          for(let k=k0;k<N9;k++){
+            let ra=Math.floor(fr9(k)*rows9), rb=Math.floor(fr9(k+1)*rows9);
+            if(rb<ra)rb+=rows9;                         // a slice that wraps the loop's end
+            for(let r2=ra;r2<=rb;r2++){const q=r2%rows9; if(R9.pks[k]>pk9[q])pk9[q]=R9.pks[k];}
+          }
+          let rp='';
+          for(let r2=0;r2<rows9;r2++){const a2=pk9[r2]; if(a2<=0)continue;
+            const y2=(r2+0.5)/rows9*H;
+            rp+='M'+((0.5-a2*0.48)*CW).toFixed(1)+','+y2.toFixed(1)+
+                'L'+((0.5+a2*0.48)*CW).toFixed(1)+','+y2.toFixed(1);}
+          const yw=(fr9(N9)*H).toFixed(1);
+          h+='<svg class="wlay wrec" width="'+CW.toFixed(1)+'" height="'+H+'">'+(rp?'<path d="'+rp+'"/>':'')+
+             '<line x1="0" x2="'+CW.toFixed(1)+'" y1="'+yw+'" y2="'+yw+'"/></svg>';
         }
       h+='</div>'; continue; }
     /* a cell cannot render below about five pixels, so past that density the

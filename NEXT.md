@@ -1,4 +1,576 @@
-# WHERE THE AUDIO CHANNEL STANDS — 2026-08-20, main
+# WHERE THE AUDIO CHANNEL STANDS — 2026-08-23, branch `mic-rec`
+
+## MIC RECORDING ON AN AUDIO CHANNEL — on branch `mic-rec`, build 2026-08-24.1701, his ear next
+
+Gad, 2026-08-23: "i cant hear anything recorded, can you make my mic input
+controlable. also can you draw the incoming audio as its recorded and put a
+playhead that writes the audio." Three asks, one root cause under the first.
+
+**Why nothing was recorded: tab never started a sound recording.**
+`engine.audRecStart` existed and had NO CALLER — b7e6700 took the call out
+("the mic opens, the room is quiet, and a loop of silence lands on top of your
+take") and promised "⌃+tab records the mic", which was never wired either. The
+only route to a mic take was: hold escape past 200ms (mic on), latch it, then
+TAP tab for the last loop off the ring — and that grab ran on the key-DOWN,
+after which the key-up's retroCapture flashed 'tab records the input' over the
+take it had just placed. The trap b7e6700 guarded against is gone — audPlace
+refuses a silent take over a sample — so tab records again:
+
+    tap     the past: mic on → the last loop off the ring (now on the KEY-UP);
+            mic off → the keys' retro, as before
+    hold    record while held. BOTH recorders start on the way down — the keys
+            (pat.state='rec') and the sound (audRecStart) — and the release
+            keeps the one the hand used: a cue/pitch key on this channel under
+            the hold = keys take, sound dropped; no key = sound take.
+            `audRecEnd` is the judge, `audRec.keys` the count; tab spent as a
+            modifier (loop ops) counts as a key.
+    latch   left win + tab: the sound keeps recording; the next tab ends it
+            (latchReleaseAll → audRecEnd). 120s cap unchanged.
+    The take opens the mic if it was off and closes it with the take
+    (`openedMic`); a mic you opened yourself (escape, latched) stays.
+
+**The input stage, `MIC.g`.** One chain — stream → MIC.g → the ring's tap —
+and everything that hears the mic hangs off MIC.g: the take, the cloud's live
+wire (granLiveWire; was a SECOND MediaStreamSource), the monitor. The old
+audRecStart opened its own getUserMedia, so no dial could have reached it.
+On the audio channel's setup row after `input`, shown only while input=mic:
+
+    mic dev   steps the audio inputs (enumerateDevices after the first
+              permission — labels need it). CFG.micDev/micDevL: the whole
+              instrument, there is one mic. An unplugged remembered device
+              falls back to the default and says so.
+    mic gain  CFG.micDb ±24dB, 1dB a step, a live meter ▎▎▎▎ while the mic
+              is on (MIC.pk, falling peak; dirty only on the sound page).
+    monitor   p.au.mon — MIC.g → this channel's bus vIn, the mic through the
+              channel's strip. Off by default: speakers feed back.
+    AGC is the browser default (on), untouched; if the gain feels like it
+    fights back, `autoGainControl:false` in micCons() is the knob.
+
+**The picture.** While `engine.audRec.pi===i` the column draws `.wrec`: a
+peak per 512 samples at the place in the loop it will occupy — the same
+arithmetic as audPlace (pos0 = fmod(startBeat−anchor,L)·spb·sr − AUDLATC,
+hoisted from audPlace's LATC) — brighter than the waveform under it, and a
+SOLID line at the write position. Screenshot-verified on a 2-bar loop: the
+take wrapped from the loop's end back to its top, as the lane has it. On a
+fresh (auto) lane the picture uses the default length; audPlace still sizes
+the loop from the take at the end.
+
+**Measured — `tools/probe.sh micrec ch=9 hold=900 db=-6`** (a FAKE mic: a
+440Hz sine at 0.3 through a MediaStreamDestination, swapped in for
+getUserMedia — no permission dialog, the same numbers on any machine):
+
+    hold 0.9s   take landed, peak 0.300 (expect 0.3), 0.793s of signal (the
+                stage takes ~100ms to come up), first sample 0.797s vs the
+                placement arithmetic's 0.775s (inside one block), write head
+                118.7→149.9px, strokes 16→31, mic closed after (it opened it)
+    gain −6dB   peak 0.150 (expect 0.150)
+    keys        KeyA under the hold: keys=1, NOT landed, mic closed
+    tap+ring    mic latched on, tab tapped: 1.957s of a 2.0s loop at 0.3, mic
+                still on, nothing left recording
+    monitor     bus rms 0.078 on / 0.001 off, wires 1→0
+    device      Fake A ↔ Fake B, stage stays on, the row shows the name
+    row         sound page: input=mic · mic dev=default · mic gain=0dB ▎▎▎ ·
+                monitor=off; arrows dial the gain +1/−1, monitor 1/1 → 0/0
+    live .2352  `AUDLATC is not defined` — the probe cannot even start there;
+                none of this existed.
+  The REAL mic is unmeasured here (no permission UI in the test browser, and
+  see the next trap) — it is the first thing for his ear.
+
+**TWO TRAPS THAT ATE THE FIRST HOUR, both in the measuring, not the code:**
+  - **The Mac's output device stalled every NEW AudioContext.** 'External
+    Headphones': `afplay` of a 1.6s sound hung the full 10s timeout,
+    sandboxed or not; AC.state said 'running' and currentTime advanced exactly
+    one buffer (0.006s) then stopped — every ScriptProcessor, analyser and
+    worklet sat still and the probe read zeros in BOTH test browsers.
+    `AC.setSinkId({type:'none'})` renders in real time with no device: the
+    probe harness now checks the clock over 120ms and switches to it (it says
+    so in the notes); `sink=none` forces it. If HE hears nothing at all, that
+    is this, not TEN — replug the headphones.
+  - **The browse daemon's `eval` wraps a file in an async IIFE only when the
+    code contains `await`**, never otherwise — a bare `return` is 'Illegal
+    return', a file that is already an IIFE gets wrapped twice and returns
+    nothing. probe.js has awaits, so it is wrapped exactly once: use
+    `tools/probe.sh`, do not hand-roll eval calls. A daemon started with
+    `--headed` refuses plain calls ('headed mismatch'); probe.sh asks once
+    and follows it. Killing a wedged daemon is fine; the CLI restarts it.
+
+### ROUND 2, same day — settings/Input · esc-held dials · overwrite=erase+mute · tab+↑↓=length
+
+His three: (1) "move the mic settings in global settings in settings/input -
+hold mic key (esc) and use -= to adjust mic gain and ; to toggle monitor";
+(2) overwrite must "not mix ... just erase the previous recording", and "mute
+the previous one when holding mic+rec"; (3) tab+↑↓ should "not affect pitch
+just shorten/enlarge the loop".
+
+- **The mic lives in settings/Input now** — mic dev · mic gain (live ▎ meter)
+  · monitor — and OFF the channel row. Monitor became ONE switch
+  (CFG.micMon): MIC.g → a gain → engine.master, not a channel strip, because
+  a global switch must not route by where the cursor stands. (It is inside
+  what 'resample the master' records — monitoring while bouncing prints the
+  mic, openly.) p.au.mon is gone.
+- **The dials ride the mic key**: esc (or Fn) held, -/= steps CFG.micDb
+  (⇧=6dB, repeats step), ; toggles the monitor. Deliberately NOT chord-use —
+  MIC._used stays false, so a win+esc latch still latches — and ESCH.used is
+  set so the release does not ALSO escape. Measured: esc 280ms → mic on,
+  −1−1+⇧6 → +4dB, ; → mon 1, layer 1→1, mic off at release, latched false.
+- **Overwrite erases.** audPlace pre-filled the canvas with the old buffer,
+  so a short take replaced only its own span and the rest of the old loop
+  played on around it — a mix wearing overwrite's name. Mode 0 starts from
+  silence now (overdub/smart still start from the bed — that is their
+  point). Measured, 0.45s take into a 2.0s loop: overdub bed survives
+  (1.955s on), overwrite leaves 0.455s.
+- **…and the bed is MUTED while you record over it.** audCycle neither joins
+  nor re-fires the carrier while a mode-0 take runs on that channel (audRec
+  or audRecPend), and audRecStart tset-kills the running carrier — the
+  carrier ONLY, so cue/pitch keys under the hold stay audible (they are the
+  keys take). Overdub/smart keep the bed. Measured: carrier t→f→t around a
+  recording, bus rms 0.058 playing → 0 under the take, back next cycle.
+- **tab+↑↓ is loop length on an audio channel too.** It CROPPED the take
+  here (×2/÷2 on au.en) since the crop-takeover — and with fit on a crop IS
+  a pitch move, which is what he heard. Gone; it falls through to loopOps,
+  and loopOps carries **audFitComp** now: any length change on a fitted
+  audio lane (↑↓ double/halve, ←→ count, ⇧←→ unit) scales the SPEED dial
+  (au.spd, mirrored to au.rate — audFoldPitch's own arithmetic) by
+  newLen/oldLen, so the take sounds IDENTICAL and the loop just gains or
+  loses room. The dial rails at ×4/×0.25: past it the take genuinely
+  stretches and the flash says 'speed at the rail'. tab+-/= stays the SPEED
+  pair (stretchLoop); ⇧⌫ reset stays a true reset (no comp). The quick
+  crop-×2 gesture has NO key now — the crop keeps its start/length dials on
+  the page; if his hands miss it, it needs a new key, not this pair back.
+  Measured: count 1→2 with spd ×1→×2 and back, en 1/1 untouched, no take
+  landed from the modifier-spent hold.
+- Probe run of record (micrec, ten rows, on this build): hold 0.300/0.787s
+  head 121→152 · gain −6dB 0.150 · keys drop · ring 1.957s · erase
+  1.955/0.455 · mute t/f/t 0.058→0 · monitor 0.17/0 · device A↔B · escmic
+  +4dB/mon1 · tabloop 2/×2→1/×1.
+- ⚠ Hygiene, worth remembering: mid-session my 3032 `serve` DIED and the
+  browse daemon's crash-restore left the fronted tab on a 3033 tab — the
+  GSTACK profile, not his Chrome, so his set was never reachable — and one
+  probe round ran there before the URL line gave it away. Scratch storage
+  at that origin cleared, ten-main restarted, everything re-measured on
+  3032 (same bytes, numbers stood). READ THE URL LINE OF EVERY PROBE
+  HEADER; a dead server turns "reload" into "restore whatever tab was
+  there".
+
+### ROUND 3, 2026-08-24 — mic+rec is the chord, and a fresh take is never repitched
+
+Two more from his hands, minutes apart:
+
+- **"pressing only tab records audio, it should be mic+rec records audio
+  input."** Right — for one build every rec gesture on an audio channel
+  threatened a take. The MIC KEY is the audio modifier now: tab starts the
+  sound recorder only with esc (or Fn) ENGAGED — held, still opening, or
+  latched (`MIC.on||MIC._down||ESCH`). Plain tab is the keys recorder it
+  always was: no permission prompt, no take, ever. The chord works in either
+  order — esc landing while tab is already down starts the take from the esc
+  handler (ESCH.used set so it cannot also escape; HOLD.tabUsed deliberately
+  NOT set — that reads as tab-spent-as-modifier and would drop the very take
+  it starts). With the mic LATCHED, plain tab records — the chord is
+  satisfied by the latch, which is what a latch is for. Every message that
+  said 'tab records' or the never-wired '⌃+tab' now names the chord.
+  Measured: tab alone 300ms → rec none/pend none/mic off/nothing landed;
+  esc+tab → the same 0.300-peak take as before, mic closed after.
+- **"the playback should give me the audio in the pitch i recorded it,
+  repitching should happen only if i change the pitch after i recorded."**
+  The take inherited the channel's speed/pitch/crop dials from the PREVIOUS
+  take — including the ×2 audFitComp had just written to keep that previous
+  take honest — so a fresh recording came back repitched. audPlace resets
+  spd/rate to 1, semis to 0, crop to 0/1 when a RECORDING lands: the canvas
+  is cut to the loop, so ×1 is exactly what the air heard. Sample PICKS keep
+  their dials (sound design survives auditioning the pool); only recordings
+  reset. In overdub the bed also returns to ITS recorded pitch — layers keep
+  their own pitches, not the repitched mix you happened to sing over; a dial
+  turned after the take repitches everything together, which is the rule.
+  Measured: spd 2 / semis 7 / crop 0.3–0.6 set before a take → after it,
+  1/1 · 0 · 0/1, take landed.
+- ⚠ **THE BROWSE WINDOW IS SHARED, and `goto` opens a NEW tab.** The 3033
+  tab kept coming back to the front between my runs — tab [1] belongs to the
+  window, other sessions drive the same daemon, and my earlier `goto
+  localhost:3032` had quietly opened tab [4] instead of repointing [1]. Two
+  probe rounds ran against 3033 before the URL line gave each away (same
+  working tree both times — the numbers stood — and his Chrome was never
+  reachable; my scratch on that origin is cleared). The rule that survives:
+  keep a DEDICATED tab, front it BY ID (`browse tab N`) before every run,
+  and read the url line of every probe header. Fronted-tab addressing in a
+  shared window is a race.
+
+### ROUND 15 — the key-up click shaved, the seed plays from the release
+
+- **"the punch out can be a tik earlier ... it picks up me removing the
+  finger from the key sound ... shave off like 30ms from the end."** Done:
+  a MIC take ends 30ms before the release, so the key click the mic hears
+  on the way up is not in the loop; the edge crossfade rides the new end.
+  Mstr resamples keep their full window — no finger in that chain.
+  Measured: press .619 / release .938 → span .625–.904 (release −34ms);
+  a 120ms tap still lands 87ms.
+- **"the seed rec starts playback with a bit too much delay ... start
+  playback in real time not compensated."** The delay was the round-14
+  drain (~lat + one SP block) — right for the take's tail, meaningless for
+  the transport. play() fires AT the release now (seed condition read from
+  the take's birth: r.from0 + mic + empty channel); the take lands
+  mid-drain and audResume joins it at the phase the clock has reached; the
+  tempo branch keys off r.from0 since T.playing is already true when it
+  runs. Measured: playDelayMs 0 (first 10ms poll), was ~100–180ms; fit
+  1.000 and the seed head at 0.006 unchanged.
+  ⚠ Small honest edge: a failed tempo guess (an under-88ms scrap into an
+  empty channel) still starts the transport — the set plays, the flash says
+  what landed. Rare enough to leave until it annoys.
+
+### ROUND 14 — the punch WINDOW obeys the latency, and a chord tap is a tiny punch
+
+His diagnosis, verbatim and correct: "we fixed the audio latency, but the
+record on/off of mic doesnt obey it, so it sounds like recording starts too
+early and ends too early ... im getting empty space before and the end is
+cut when i do short punch ins."
+
+- **The window.** Content was placed lat early — right for WHERE sounds sit,
+  wrong for WHAT the take is: the span began lat before the press
+  (pre-press air over the bed) and the air of the last lat ms had not
+  reached the stream when the tap closed. Now audRecStop DRAINS: the tap
+  stays open lat + one SP block past the release (the block being filled at
+  disconnect is discarded by the browser — up to 93ms of the newest air,
+  a loss that had been hiding inside the early tail), then the head is cut
+  by exactly lat and the take truncated to the held air window
+  (relAt−at0). The take IS the air of [press..release], placed at the
+  press, lat spent. Placement/auto-play arrive ~lat+93ms after the release
+  — imperceptible. Measured (trim = the rig's own 22ms chain): press 0.613
+  / release 0.933 → span 0.620–0.916 (was ending 87ms short; start was
+  87ms early); the plain punch row's span grew 0.36→0.44 of a 0.45 hold —
+  the block loss had been eating every tail.
+  ⚠ The drop equals r.lat, so a trim that does not match the real chain
+  shifts content by the difference — the tailfix row proves it both ways.
+  His 87 is measured; a gear change needs one press of mic sync.
+- **"please allow short punch recordings when holding esc and tapping tab."**
+  The tap-cancels-the-take rule existed to keep the tap free for the ring
+  grab; with the ring tap parked, a chord TAP LANDS what it recorded — keys
+  still outrank it (audRecEnd), a graze under 50ms of air still refuses.
+  A plain tab tap (no chord) stays the keys' retro. Measured: a 120ms tap
+  → 104ms landed at the press (was: cancelled).
+- Probe: tailfix + shortpunch rows in micrec (11 rows), trim pinned/restored
+  in both prologues; micrec2 12 rows — all green, headtrim's span now the
+  full tone (0.499s) with the recovered tail.
+
+### ROUND 13 — the ring tap parked · the SEED take, named and self-starting
+
+- **"lets remove retro rec on audio for now, comment it out or something, it
+  doesnt feel good."** Parked — the mic-latched tap that grabbed the last
+  loop off the ring is a block comment now; a tap on an audio channel is the
+  keys' retro again and lands NO audio (measured: tap-parked row, nothing
+  lands, nothing left recording). His follow-up rule is written INTO the
+  parked code so a revival is born correct: aligned while playing, AT ZERO
+  when stopped. The ring itself still runs (the meter and micCalibrate use
+  it); only the gesture is gone.
+- **THE SEED TAKE, named** (his "lets give it a name?"): stopped transport +
+  mic chord + EMPTY channel. It seeds the loop (take at 0), the clock
+  (guessTake, exact bpm), and now the TRANSPORT — "make stopped rec mode on
+  empty channel also trigger playback imediatly": play() fires the moment
+  the take lands, flash '◉ seed: 1 bar → 135.4bpm ▶'. Measured: playing
+  true right after the release, fit 1.0.
+- **"punch in rec messes up the position of initial recording" — measured,
+  and the vanilla flow is CLEAN.** Seed (marker at its head) → play → punch
+  while playing: the seed's marker stayed at 0.006s and the punch landed at
+  the press phase (seedpunch repro + the tempo row asserts it every run:
+  head 0.006 / punch 1.033 after a mid-loop punch). What DOES move it: a
+  punch while STOPPED — round 12's own "always from 0" replaces the seed's
+  HEAD at 0, which reads exactly as "the initial recording moved". The seed
+  auto-play dissolves that flow (after a seed you are playing, so punches
+  are playing punches). ⚠ If his hands still find a stopped punch over a
+  bed and it still reads wrong, the dial to revisit is round 12's
+  stopped-with-bed rule — one condition, his call.
+- Probe self-sufficiency, twice more: micscope leaves the gain dial at −5
+  (the tempo row now pins it) and the new tempo row mutes the feed (nearend
+  now raises it). A row that borrows state from its neighbours breaks the
+  moment the neighbourhood changes — every row sets its own stage now.
+
+### ROUND 12 — a stopped take always starts from 0
+
+"when playback is stopped, recording with esc+tab should always start from
+0." It only did on the EMPTY channel (the tempo path); with a bed, a stopped
+take landed wherever the free-running grid clock happened to stand. Now any
+chord take that BEGINS with the transport stopped anchors to the loop start
+— decided at the take's birth (audRec.from0), so the live drawing fills
+from 0 while you hold; the trim is 0 (no grid to align to) and the head-cut
+keeps the first SOUND on the zero point; a transport started mid-take keeps
+the anchor. Empty-channel takes still also set the clock, unchanged.
+Measured (from0 row): 440 bed, stopped 523 punch → span starts at 0.006s
+(the crossfade edge). micrec is 9 rows now.
+
+### ROUND 11 — ⇧⌫ clears the channel · the eaten boundary · the silent head
+
+- **"i want shift+del to clear the recording channel so its setup for bpm
+  detection."** Right-shift+⌫ on an audio channel (any layer ≥1) clears the
+  WHOLE recording channel: take gone, cues and lane events gone, lane back
+  to AUTO at the default length, dials neutral — the next stopped mic take
+  is a NEW loop and sets the clock. It outranks the lane-only ⇧⌫ (and the
+  held layerInit) on audio channels; the take stays in the pool, ⌘z brings
+  everything back. Measured: buf false · auto true · 0 events.
+- **"i finish a recording near the end of existing loop it stops autoloop
+  play."** Reproduced exactly: release 0.126 beats before the bar → ONE FULL
+  LOOP of silence (feels stopped; a stop/start also cures it, which is what
+  he did). Root cause: while a mode-0 take runs, audCycle skips every
+  boundary in its windows — including the NEXT one, already consumed into
+  posted-territory (T.schedBeat) that no later tick revisits — and
+  audResume's tclr flushes even a queued spawn. audResume now re-posts that
+  one boundary's carrier when it is behind T.schedBeat (fit channels only:
+  a FREE channel keeps its single deadline-less join and must not get a
+  second; the ph<1e-3 early-return also joined the fix). Measured: bus rms
+  0.102 across the boundary and 0.102 a loop later, carrier back — was 0
+  for a whole loop.
+- **"there is a bit of silence added before when i seem to be pressing
+  rec."** The +87ms trim moves CONTENT earlier, so the stream's spin-up and
+  the breath before the first sound landed BEFORE the press — and in
+  overwrite that silence punched a hole in the bed. audRecStop now trims
+  the head to ~6ms before the first audible sample (thr = max(0.004,
+  peak·0.05), only when ≥ ~23ms of silence) and moves the start beat with
+  it: the sound sits exactly where it sounded and the punch begins where
+  the TAKE does. The tail stays — a punch-out is timing, not noise. The
+  tempo guess reads the trimmed length (a truer duration). Measured: 400ms
+  of silence under the press then 500ms of tone → span 0.418s, bed intact,
+  zero holes where the silence was.
+- **The probe split in two** — the browse CLI hard-caps any command at 30s
+  and the suite had grown past it: `micrec` (the recorder: chord, tab-alone,
+  picture, gain, keys, ring, punch/xfade, repitch, mute/resume — ~17s) and
+  `micrec2` (the session: monitor, device, sync, esc dials+arrows, tab
+  loop, latc, stereo, tempo, nearend, headtrim, clear — ~26s). Rows carry
+  their own setup now (the split re-ordered them and three ran cold before
+  they did). 8 + 12 rows, all green on this build.
+
+### ROUND 10 — stereo resample · crossfaded punches · a take into silence sets the clock
+
+Three asks, one scope decision:
+
+- **"when ch input is set to master, and chan is stereo, record the stereo
+  out of master, rn its mono."** The mstr tap runs ScriptProcessor(4096,2,2)
+  and audPlace builds an n-channel canvas (max of take and old bed; a mono
+  bed under a stereo take doubles to both sides). granSend already shipped
+  L/R and the worklet already stored both — only the recorder was mono. The
+  mic stays mono; `chan` still picks at playback. Measured: a hard-left
+  660Hz blip through the master → a 2-channel take, right channel energy 0.
+- **"put a little crossfade when punching a recording to avoid clicks."**
+  audPlace ramps the take's first and last ~6ms (F=256 samples, capped at a
+  quarter of a short take), and in overwrite the old layer holds the
+  complement — both joins are seams. Overdub/smart scale their sum/duck by
+  the same ramp. Measured on the punch buffer: max sample step 0.019 (a
+  hard edge between the two test tones would be ~0.45).
+- **"when playback is stopped, and i start a new mic recording, it will
+  start the recording from 0, and will change the tempo to make the
+  recording length match."** Done via guessTake — BEATCANDS gained 0.25/0.5
+  (his 16th and 8th), window already 80-170, bars and the middle preferred
+  — the bpm is set EXACTLY (60·beats/dur, 3 decimals) so the loop IS the
+  take, the lane is recut (unit b under a bar, B at and above), and the
+  take lands at position 0 with lat 0. Measured: 1.765s of signal → 1×B at
+  135.999bpm, fitRatio 1.000, from 0.
+  **SCOPE, decided by the probe itself: EMPTY CHANNEL ONLY.** The first cut
+  fired on every stopped overwrite take — and the suite's own hold row
+  (stopped, empty, mic) promptly re-clocked the set to 143bpm and every
+  loop-seconds assertion moved, which is exactly what a stopped punch-in
+  would have done to HIS set. A channel that already holds a take keeps the
+  clock in every mode; only a truly new loop defines it. (Undo restores the
+  take but keeps the tempo — a dial.) If his ear wants stopped FULL
+  re-records (overwrite over a bed) to also re-clock, it is one condition.
+- Probe hygiene that fell out: the suite pins bpm 120 at start (scratch
+  state had drifted once and every seconds-assert chased it), and the
+  hold/gain rows now run under a PLAYING transport — truer to life, and the
+  only way they stay out of the new tempo path. Grid placement under play:
+  firstAt−expAt ≈ 32ms (one SP block of scheduling jitter), loop 2.000s.
+
+### ROUND 9 — trim confirmed at +87ms; the monitor goes through the strip
+
+**His chain measured +87ms and "its tight"** — the number lives in his
+ten-cfg (CFG.micTrimMs, origin 3033); a gear change is one more press of
+`mic sync`.
+
+- **"can you make monitor on go through the channel effects?"** — done. One
+  switch still (settings/Input, esc+;), but the wire lands in the STRIP of
+  the audio channel the mic would record: the one recording now, else the
+  one the cursor stands on; the master only when no audio channel has
+  focus. You hear yourself through its rack, fader and pan — the take in
+  place. Re-aimed from the 70ms cursor-ping interval, graph touched only on
+  a target change (MIC._monAt). Measured: monitor on → bus9 rms 0.202,
+  master 0.172 downstream, off 0.026 (strip tail in the window), at ch9.
+- **Retro, for the record** (he asked how it works): with the mic OPEN (esc
+  held or latched) a 32s ring hears everything; a TAP on tab grabs the last
+  loop-length of air (auto lane: 16 beats) and places it ending NOW, mic
+  trim applied. Without the mic, a tap is the KEYS retro (retroCapture /
+  tab+digit reveal), unchanged. Hold = forward recording; there is no
+  forward-armed "record the NEXT loop" — the ring makes it unnecessary.
+- **Quantize, for the record**: a take's placement is NEVER snapped —
+  startBeat is raw gridNow() through the trim, so the audio sits where it
+  actually sounded (that is what the calibration is for). Keys played under
+  the hold quantize like any notes when Q is on. Offer on the table: Q-on
+  snapping the take's START to the grid — declined by default because it
+  would move audio off where it sounded; his call if punch edges should
+  snap.
+
+### ROUND 8 — his mic test is a BUTTON: settings/Input → mic sync
+
+"click test is better ... but with mic it is now lightly late like the
+recording is flaming about 100ms after the click, maybe you can do my test."
+His ~100ms is the REAL chain — speakers out, air, mic in, MediaStream
+buffering — which the browser under-reports (settings.latency was the whole
+guess) and which no constant measured on another machine can know. So his
+test ships as a button:
+
+- **settings/Input → `mic sync`**: plays 4 clicks through the master at
+  known clock times, records the room through the SAME tap chain a take
+  uses, finds each click's arrival, and stores the median in
+  **CFG.micTrimMs**. audRecLat spends it on every mic take (and the ring
+  grabs, and the live drawing). It refuses to store garbage: fewer than 3
+  of 4 clicks heard ('speakers audible? room quiet?') or spread >30ms
+  ('unstable') flashes why and keeps the old value. micCalibrate returns
+  its verdict, so the probe can assert it.
+- **`mic trim`**: the same number by hand, ±5ms a step (from the browser's
+  guess when unset — 'auto'), −250..+500ms, for a device that lies.
+- Probe: the sync row wires the master into the fake mic and runs the real
+  button — **'ok 22', trimMs 22** — which equals the loopback's own
+  buffering measured independently (22.4ms, spread 0, four clicks). The
+  first run heard 0/4 and exposed a PROBE defect worth keeping: the fake
+  getUserMedia returned one singleton stream, and micSetDev stops the old
+  stream's tracks — a stopped singleton was a dead mic for every row after
+  the device one. The fake mints a fresh stream per call off one feed now.
+- Still his ear's to confirm: run `mic sync` once with the speakers audible
+  (headphone-only monitoring cannot hear the clicks — it says so), then his
+  click test again: the transient should sit ON the click. Per-machine, per
+  origin; a gear change is one more press.
+
+### ROUND 7 — ←→ joins the sample-length gesture, and AUDLATC was fiction
+
+Two more asks, both landed:
+
+- **"make tab+←→ same as tab up down to control the length not speed, and
+  make it work the same as in midi that it will add or remove steps
+  according to the loop unit size."** One branch now serves both pairs on an
+  audio channel with a take: ↑↓ doubles/halves, **←→ steps ONE UNIT** — a
+  16th, an 8th, a beat, whatever the lane's unit is (⇧←→ still picks the
+  unit) — crop and lane locked either way, rate immovable, speed dial never
+  written. Edges refuse with a flash that names the keys; the LOOP alone
+  (more bars than material) is right shift's length dials, as ever.
+  audFitComp now only serves ⇧←→ unit switches on audio.
+  Measured: b-unit lane 4→←→3 with crop 75%/spd ×1, →→ back 4/100%/×1,
+  → at the full take refused.
+- **"the recording is placed too early, please do a calibration."** Done his
+  way, automated: the `latc` probe row fires six blips at known clock times
+  through the master and records them via the take path (src=mstr — no
+  MediaStream in that chain), then measures where they LANDED against the
+  beat grid. **E = −8190 samples, spread 0, with the old AUDLATC=8192** —
+  the tap chain's true delay is ~2 samples (the onset detector's bias), the
+  8192 was pure faith, and every take sat 186ms early. That IS his "recorded
+  click is like 1 16th note almost earlier then the live click" (125ms at
+  120bpm) plus his mic's real input delay. **AUDLATC=0 now**, and a mic take
+  adds the device's own latency at RECORD time — `audRecLat`: the stream's
+  reported settings.latency plus AC.outputLatency, so a bluetooth headset
+  pays its own bill per take and a rewire needs no rebuild. Re-measured:
+  **E=+2 samples (0.045ms), spread 0**; the fake-mic hold row's drift fell
+  ~50ms → 9ms (the loopback's own buffering, which real devices report).
+  ⚠ The test browser's fake mic reports no latency, so the REAL-mic offset
+  is verified only by the formula, not by air: his click test by ear is the
+  judge, and if a device lies about its latency the honest next step is a
+  manual trim setting (offer made, not built).
+
+### ROUND 6 — tab+↑↓ is SAMPLE LENGTH; speed is nobody's side effect
+
+"i noticed that now tab+updown changes the playback speed, it used to change
+the sample length, i think its more intuitive that sample length and speed
+are seperate things?" — the round-4 compensation kept the SOUND identical
+but wrote the speed dial to do it, and a dial that moves reads as a speed
+change. Third shape, and the one that closes it: **tab+↑↓ scales the crop
+AND the lane together** — half the material over half the loop is the same
+tape at the same rate — so under fit nothing else absorbs a ratio: the
+speed dial is never written, the pitch cannot move (both his complaints at
+once: 08-23's pitch drop came from crop-alone, 08-24 morning's dial writes
+from lane-alone). Refused at the edges rather than clamped — a partial
+ratio would un-grid the lane — with the flash naming which key does what:
+the whole-take ceiling says '⇥←→ grows the loop, ⇥-= the speed'.
+Measured (tabloop): ↓ 0.5count/0.5crop/spd×1 · ↑ 1/1/1 · ↑ at full refused
+1/1/1 · no take landed. Speed remains ONLY tab+-/= and the dial.
+⚠ OPEN, his call: tab+←→ (loop ±1 count) and ⇧←→ (unit) still carry the
+round-4 spd compensation — the dial shows e.g. ×1.5 after growing a fitted
+loop by a bar. If "length and speed are separate" extends there, the
+honest alternatives are (a) let pitch follow the fit again on ←→, or
+(b) ←→ also refuses on fitted audio. Asked in chat.
+
+### ROUND 5 — letting go of rec resumes playback AT POSITION
+
+"when letting go of rec, right now it stops playback and triggers only when
+loop retriggers in start of the loop. instead it should continue playback
+from the correct position." The record-mute killed the carrier and audCycle
+only re-fires at the loop's start — the release left silence until the bar
+came round. **engine.audResume(pi)**: audCycle's fresh-pattern join (actAt
+anchor, audStop then audPlay with the phase as skipBeats), called wherever a
+recording ends — audPlace (landed), audRecStop (dropped / too short). Quiet
+when there is nothing to do: transport stopped, auto off, a carrier still
+rolling (overdub never lost its bed), or the phase on the boundary. The
+boundary's own carrier takes over next cycle, as after a pattern switch.
+Measured (mute row): bus 0.058 playing → 0 under the take → **0.04 within
+~370ms of the release**, carrier t→f→t unchanged.
+
+### ROUND 4, same morning — the mic hold is a SCOPE, and overwrite is a PUNCH-IN
+
+"much better", then two:
+
+- **"holding mic button and up/down to change gain should not use updown for
+  other params, it should scope only on the mic."** The mic hold is a held
+  scope now, the PARAM FOCUS shape exactly: while esc (or Fn) is down,
+  ↑↓ = gain (⇧ 6dB) · ←→ = input device · -/= = gain too · ; = monitor,
+  and NONE of it reaches the page's params, the cursor, the settings rows or
+  the layer. The ←→ device pair is the scope's second pair by the MAGPAIR
+  convention — he asked only for ↑↓; if ←→ on the mic annoys, it is one line.
+  A latched mic does NOT hold the scope — the key must be physically down, a
+  latch frees the keyboard (same rule as every held scope). Measured on the
+  sound page: esc-held ↑, ⇧↓, → gave db +1−6=−5 and Fake A→Fake B, with the
+  preset JSON byte-identical, curParam 0→0, layer parked, mic off at release.
+- **"recording a small area overwrites the whole loop, it should overwrite
+  only the part where rec was held and keep other areas of the previous
+  layer intact."** Overwrite is a punch-in now. This REFINES 08-23's "just
+  erase the previous" (which one build read as erase-the-whole-loop): the
+  no-mix half survives — inside the held span the new take REPLACES outright,
+  never sums — and outside the span the previous layer is untouched, in
+  every mode (the canvas starts from the old layer again; the modes differ
+  only inside the span: replace / sum / duck). A whole-loop replace is still
+  one gesture: the mic-latched TAP takes a full loop, and a hold longer than
+  the loop covers it all. The mute while recording stays as it was.
+  Measured (bed 2.0s @0.3/440Hz, punch 0.45s @0.15/523Hz): overwrite —
+  span 0.36s at punch level, bed 1.64s intact, ZERO windows above the sum
+  threshold; overdub — 0.35s of summed windows. If his ear finds the mute
+  fighting punch-in timing (you cannot hear the bed you are punching into),
+  that is the next dial to discuss — it was his ask and it stands.
+- ⚠ Probe trap for the file: re-laying a bed by OVERDUBBING the same
+  frequency phase-cancels (0.3+0.3 came out ~0.12 and read as the punch
+  band). Beds are re-laid in OVERWRITE, and any same-tone layering assert
+  should use two frequencies (440/523 here) so a sum is unmistakable.
+
+QA — most likely to be wrong first (fake-mic measured; the REAL mic still is
+not, and is test #1):
+ 1. **The chord, at your pitch.** Hold esc, keep it, hold tab ~2s, talk, let
+    go: '◉ audio: N bar loop', played back exactly as spoken — dials neutral
+    after. Plain tab: keys recorder only, no prompt, no take. Mic latched:
+    plain tab records (the latch is the mic half).
+ 2. **Punch-in.** Loop with sound, rec ovwrt, chord-record a SHORT bit
+    mid-loop: only that span is replaced — clean, no doubling inside it —
+    and the rest of the layer is exactly as it was. While you hold, the old
+    loop is quiet; let go and playback carries on from the CORRECT POSITION
+    at once (the bar's own respawn takes over next cycle). Full replace:
+    mic-latched TAP (the ring takes a whole loop), or hold past the loop.
+ 3. **The mic scope.** Hold esc: ↑↓ walks the gain (⇧ = 6dB), ←→ steps the
+    input device, -/= also gain, ; monitor — and NOTHING else moves: no
+    param dials, no cursor, no settings row. Release: all keys back to
+    normal. (←→ on the device was not asked for — say if it should go.)
+ 4. **Repitch only after.** Record; turn speed/pitch/crop — now it
+    repitches; record again — neutral, your voice at ×1.
+ 5. **The bed mutes while you record over it** (ovwrt; ovdub keeps playing).
+ 6. **tab+arrows = sample length, both pairs**: ↑↓ double/halve, ←→ one
+    unit at a time (16th/8th/beat — ⇧←→ picks the unit) — same speed, same
+    pitch, speed dial untouched, edges refuse with the flash naming keys.
+    The loop ALONE (bars beyond the material) is right shift's dials.
+ 0. **TIMING — press the button, then his test.** Settings/Input →
+    `mic sync`, speakers audible, room quiet: 4 clicks, then '✓ mic sync
+    NNms'. Now click on, chord-record a loop of it, play back: the recorded
+    transient sits ON the live click. Off by a hair → `mic trim` ±5ms.
+    Internal loop (input=mstr) needs no trim and is already sample-exact.
+ 7. **Keys under the chord = keys take** ('the sound was dropped').
+ 8. **Settings/Input** still the reference: mic dev · mic gain (meter) ·
+    monitor; esc+; and settings toggle the same monitor.
+
 
 ## LIVE MOD-AMOUNT + META-MOD — FIXED on branch `live-mod`, build .2352, his ear next
 
