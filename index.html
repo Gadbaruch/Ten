@@ -1234,7 +1234,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-24.1002';
+const BUILD='2026-08-24.1038';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1604,7 +1604,7 @@ const OSC_P=sl=>[
      get:()=>{const k=S.editSnd+':'+S.curSlot;
        const i=POOL.findIndex(p2=>p2.buf===engine.opSamples.get(k)); return i<0?0:i;},
      set:(o,v)=>{const e2=POOL[clamp(Math.round(v),0,Math.max(0,POOL.length-1))];
-       if(!e2){flash('pool is empty — record (⌃+tab) or drop audio first');return;}
+       if(!e2){flash('pool is empty — record (esc+tab) or drop audio first');return;}
        engine.opSamples.set(S.editSnd+':'+S.curSlot,e2.buf);
        engine.rebuildRack(S.editSnd);}}),
    /* the CLIP half: crop the take per slot, loop it or fire it once */
@@ -13760,7 +13760,7 @@ const GRANF=[
    fmt:v=>POOL[Math.round(v)]?POOL[Math.round(v)].name:'\u2014',
    get:()=>{const i=POOL.findIndex(p2=>p2.buf===(engine.granBuf||[])[S.editSnd]); return i<0?0:i;},
    set:(o,v)=>{const pi=S.editSnd, e2=POOL[clamp(Math.round(v),0,Math.max(0,POOL.length-1))];
-     if(!e2){flash('pool is empty — record (\u2303+tab) or drop audio first');return;}
+     if(!e2){flash('pool is empty — record (esc+tab) or drop audio first');return;}
      engine.granNode(pi); engine.setChanBuf(pi,e2.buf,e2.name);
      takeToLane(pi,e2.buf); engine.audLive(pi);}}),
 ];
@@ -14350,7 +14350,7 @@ function _prsAction(d){
   /* the pool, on either face of the audio channel: one clip per channel, so
      the tape and the cloud are handed the same take by the same call */
   if(f==='sample'&&(p.cat==='audio'||engineGranP(p))){
-    if(!POOL.length){flash('pool is empty — record (\u2303+tab) or drop audio in');dirty=true;return;}
+    if(!POOL.length){flash('pool is empty — record (esc+tab) or drop audio in');dirty=true;return;}
     const cur=POOL.findIndex(e2=>e2.buf===(engine.audBuf[pi]||(engine.granBuf||[])[pi]));
     const nx=POOL[fmod((cur<0?0:cur)+(d>0?1:-1),POOL.length)];
     pushUndo('sample');
@@ -18447,6 +18447,18 @@ function audPlace(pi,rec,startBeat,name='mic'){
     else dst[di]=rec[i];
   }
   engine.audBuf[pi]=cv; engine.audName[pi]=name;
+  /* A FRESH TAKE PLAYS BACK AS IT WAS RECORDED (Gad, 2026-08-24: "the
+     playback should give me the audio in the pitch i recorded it, repitching
+     should happen only if i change the pitch after i recorded"). The speed,
+     pitch and crop dials described the PREVIOUS take; inherited, they
+     repitched every new recording — sing over a ×2 loop and your own voice
+     came back an octave up. Neutral now: the canvas is cut to the loop, so
+     ×1 is exactly what the air heard. Sample PICKS keep their dials — sound
+     design survives auditioning the pool; only a RECORDING resets. In
+     overdub the bed comes back at ITS recorded pitch too — the layers keep
+     their own pitches, not the repitched mix you happened to sing over. */
+  {const au9=S.presets[pi].au=S.presets[pi].au||{};
+   au9.spd=1; au9.rate=1; au9.semis=0; au9.st=0; au9.en=1;}
   poolAdd(cv,name+' ch'+pi,{k:'r'});
   if(engineGranP(S.presets[pi])){engine.granBuf=engine.granBuf||[];
     engine.granBuf[pi]=cv; engine.granSend(pi);}
@@ -18467,7 +18479,7 @@ function retroBars(bars){
   const lane=S.patterns[S.editPat].lanes[pi];
   /* an audio channel CAN reveal — when what you jammed was cue jumps */
   if(isAudioCh(pi)&&!retroBuf[pi].some(n=>n.cue!==undefined||n.pk!==undefined||n.fz!==undefined)){
-    flash('audio channel — tab records the input');return;}
+    flash('audio channel — mic key (esc) + tab records the input');return;}
   const L=bars*4, nowB=gridNow(), anc=editAnchor();
   /* Two separate questions, and conflating them is what made captures play
      back rotated: WHICH notes to take, and WHERE they sit in the loop.
@@ -18538,7 +18550,7 @@ function retroCapture(){
      against the same anchor. */
   const pi=S.layer>=2?S.editSnd:S.curPreset, lane=S.patterns[S.editPat].lanes[pi];
   if(isAudioCh(pi)&&!retroBuf[pi].some(n=>n.cue!==undefined||n.pk!==undefined||n.fz!==undefined)){
-    flash('audio channel — tab records the input');return;}
+    flash('audio channel — mic key (esc) + tab records the input');return;}
   /* A LANE THAT HAS NEVER BEEN SET TAKES defLen. Retro cuts "the last cycle of
      the loop as set" — but on a fresh lane there is no length you set, and it
      was using the Looper's own construction default instead of the one bar
@@ -19881,13 +19893,16 @@ const onKeyDown=e=>{
           if(ml.state==='rec'&&!T.playing)
             flash('● armed — press space; automation records against the loop');
         }
-        /* AND THE SOUND, ON AN AUDIO CHANNEL (Gad, 2026-08-23: "i cant hear
-           anything recorded"). Both recorders start on the way down — the
-           keys and the input — and the release keeps the one the hand used;
-           audRecEnd is the judge. b7e6700 took this call out because a quiet
-           room landed a loop of silence on a sample; audPlace refuses a
-           silent take now, so the trap it guarded against cannot happen. */
-        if(isAudioCh(noteCh))engine.audRecStart(noteCh);
+        /* AND THE SOUND — ON THE CHORD, NOT ON TAB ALONE (Gad, 2026-08-24:
+           "it should be mic+rec records audio input". For one build tab by
+           itself started this, and every rec gesture on an audio channel
+           threatened a take). The MIC KEY is the audio modifier: with esc
+           or Fn engaged — held, still opening, or latched — tab records the
+           channel's input; without it, tab is the keys recorder it always
+           was. The reverse order lands in the esc handler, so the chord
+           works whichever key is second. audRecEnd still judges a chord
+           that turns out to be keys. */
+        if(isAudioCh(noteCh)&&(MIC.on||MIC._down||ESCH))engine.audRecStart(noteCh);
       }
       dirty=true;dirtySave=true;}
     return;}
@@ -20169,6 +20184,14 @@ const onKeyDown=e=>{
       if(KM.sl)LATCH.used=true;
       if(MIC.latched)MIC._unlatch=true; else micOn();
     },200);
+    /* REC ALREADY DOWN: mic+rec is the record-the-input chord in either
+       order, so esc landing second starts the take too. used is set so this
+       press cannot also escape; HOLD.tabUsed is NOT set — that would read
+       as tab-spent-as-modifier and drop the very take this starts. */
+    if(HOLD.tab&&S.layer>=1&&!engine.audRec){
+      const nc9=S.layer>=2?S.editSnd:S.curPreset;
+      if(isAudioCh(nc9)){ESCH.used=true; engine.audRecStart(nc9);}
+    }
     return;}
   if(c==='CapsLock'){e.preventDefault(); return;}   // the state is read, not toggled
   /* ` IS THE INSTRUMENT and \\ IS THE DICE. They swapped places: the scope you
@@ -21135,7 +21158,7 @@ const onKeyDown=e=>{
          the transport says it should be. Each cue is its own little take:
          while held, ←→ nudges its position, ↑↓ its pitch, ⇧↑↓ its volume,
          ⌥←→ its pan. */
-      if(!engine.audBuf[pi]){flash('audio channel — tab records ('+(Math.round((S.presets[pi].au||{}).src||0)?'resample':'mic')+'), or drop a file');return;}
+      if(!engine.audBuf[pi]){flash('audio channel — mic key (esc) + tab records ('+(Math.round((S.presets[pi].au||{}).src||0)?'resample':'mic')+'), or drop a file');return;}
       const lane=S.patterns[S.editPat].lanes[pi], L=lane.len;
       const kmode=kmodeOf(S.presets[pi]);
       if(kmode===1){

@@ -1137,9 +1137,18 @@ async function probeMicRec() {
   try {
     delete CFG.micDev; delete CFG.micDevL;
     for (let w = 0; w < 25 && !POOL.length; w++) await sleep(200);   // let the pool land before the first take
-    /* hold — and draw while holding */
+    /* tab-alone — the sound recorder must NOT start without the mic key
+       (Gad, 2026-08-24: "it should be mic+rec records audio input") */
+    fresh(); CFG.micDb = 0;
+    K('keydown', 'Tab'); await sleep(300);
+    const alone = { rec: engine.audRec ? 'RECORDING' : 'none', pend: engine.audRecPend ? 'pend' : 'none', mic: MIC.on };
+    K('keyup', 'Tab'); await sleep(120);
+    rows.push({ k: 'tab-alone', rec: alone.rec + '/' + alone.pend, micAfter: (alone.mic || MIC.on) ? 'on' : 'off',
+                landed: !!engine.audBuf[ch], expect: 'none/none · off · false' });
+    /* hold — the chord: esc engages the mic, tab records; draw while held */
     fresh(); CFG.micDb = 0;
     const beat0 = gridNow();
+    K('keydown', 'Escape'); await sleep(30);
     K('keydown', 'Tab'); await sleep(hold * 0.35);
     const r1 = engine.audRec;
     const mid = { pi: r1 ? r1.pi : null, label: r1 ? r1.label : null, opened: r1 ? r1.openedMic : null };
@@ -1148,6 +1157,7 @@ async function probeMicRec() {
     const y2 = headY(), s2 = strokes();
     await sleep(hold * 0.3);
     K('keyup', 'Tab'); await sleep(150);
+    K('keyup', 'Escape'); await sleep(120);
     const b1 = engine.audBuf[ch], d1 = b1 ? b1.getChannelData(0) : null;
     const L = lane.len, cl = Math.max(256, Math.round(L * spb() * sr));
     const exp0 = ((Math.round(fmod(beat0 - editAnchor(), L) * spb() * sr - AUDLATC) % cl) + cl) % cl;
@@ -1160,15 +1170,17 @@ async function probeMicRec() {
                 micAfter: MIC.on ? 'on' : 'off', rec2: engine.audRec ? 'STILL RUNNING' : 'none' });
     /* gain — the dial reaches the take */
     fresh(); CFG.micDb = db;
-    K('keydown', 'Tab'); await sleep(hold); K('keyup', 'Tab'); await sleep(150);
+    K('keydown', 'Escape'); await sleep(30); K('keydown', 'Tab'); await sleep(hold);
+    K('keyup', 'Tab'); K('keyup', 'Escape'); await sleep(220);
     const b2 = engine.audBuf[ch], d2 = b2 ? b2.getChannelData(0) : null;
     rows.push({ k: 'gain ' + db + 'dB', landed: !!b2, peak: d2 ? r3(pkOf(d2)) : null,
                 expect: r3(0.3 * Math.pow(10, db / 20)) });
     /* keys — a cue key under the hold makes it a keys take */
     fresh(); CFG.micDb = 0;
+    K('keydown', 'Escape'); await sleep(30);
     K('keydown', 'Tab'); await sleep(hold * 0.4); K('keydown', 'KeyA'); await sleep(80); K('keyup', 'KeyA');
     await sleep(hold * 0.5); const keysN = engine.audRec ? engine.audRec.keys : null;
-    K('keyup', 'Tab'); await sleep(150);
+    K('keyup', 'Tab'); K('keyup', 'Escape'); await sleep(200);
     rows.push({ k: 'keys', keysSeen: keysN, landed: !!engine.audBuf[ch], expect: 'landed false',
                 micAfter: MIC.on ? 'on' : 'off' });
     /* tap+ring — mic already on, a tap takes the last loop off the ring */
@@ -1190,6 +1202,13 @@ async function probeMicRec() {
     const o4 = onOf(engine.audBuf[ch].getChannelData(0));
     rows.push({ k: 'erase', ovdubOnSec: r3(o5.n / sr), onSec: r3(o4.n / sr), loopSec: r3(cl / sr),
                 expect: 'ovdub ~2.0 · ovwrt ~0.45' });
+    /* repitch — a fresh take resets speed/pitch/crop to neutral, so it plays
+       back as recorded; the dials only repitch when turned AFTER the take
+       (Gad, 2026-08-24) */
+    const auR = S.presets[ch].au; auR.spd = 2; auR.rate = 2; auR.semis = 7; auR.st = 0.3; auR.en = 0.6;
+    K('keydown', 'Tab'); await sleep(500); K('keyup', 'Tab'); await sleep(200);
+    rows.push({ k: 'repitch', spd: auR.spd + '/' + auR.rate, semis: auR.semis, crop: auR.st + '/' + auR.en,
+                landed: !!engine.audBuf[ch], expect: '1/1 · 0 · 0/1 · true' });
     /* mute — in overwrite the carrier goes down while a take records, and
        comes back with the next cycle after the stop. The bed is re-laid
        wall-to-wall first (a full-loop ring grab), so a 250ms bus window
@@ -1271,7 +1290,7 @@ async function probeMicRec() {
                   'micAfter', 'rec2', 'keysSeen', 'ovdubOnSec', 'carBefore', 'busPlay', 'carDuring', 'busRec', 'carAfter',
                   'on', 'off', 'gate', 'step1', 'step2', 'listed', 'row',
                   'micDuring', 'db', 'mon', 'layer', 'latched',
-                  'upCount', 'upSpd', 'downCount', 'downSpd', 'en', 'sameBuf'], rows };
+                  'upCount', 'upSpd', 'downCount', 'downSpd', 'en', 'sameBuf', 'spd', 'semis', 'crop'], rows };
 }
 
 const HELP = {
@@ -1289,7 +1308,7 @@ const HELP = {
     { k: 'trig',     args: 'ch=1 note=60 ph=90 — does an operator rtrg/free reach the sound, in both fm engines' },
     { k: 'matrix',   args: 'ch=8 take=nylonlick cues=4 — the seven cases + the cue jumps' },
     { k: 'modmatrix',args: 'only=filt — every mod SOURCE x every DESTINATION: reaches/anchor/live/tweak' },
-    { k: 'micrec',   args: 'ch=9 hold=900 db=-6 — mic on an audio channel (fake mic): take, picture, gain, keys, ring, erase/mute, monitor, device, esc dials, tab loop' },
+    { k: 'micrec',   args: 'ch=9 hold=900 db=-6 — mic on an audio channel (fake mic): esc+tab chord, tab-alone, picture, gain, keys, ring, erase/mute/repitch, monitor, device, esc dials, tab loop' },
     { k: '(any)',    args: '--ab <url> runs the same probe on a second build and diffs it' },
   ]
 };

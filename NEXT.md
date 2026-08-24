@@ -1,6 +1,6 @@
 # WHERE THE AUDIO CHANNEL STANDS — 2026-08-23, branch `mic-rec`
 
-## MIC RECORDING ON AN AUDIO CHANNEL — on branch `mic-rec`, build 2026-08-24.1002, his ear next
+## MIC RECORDING ON AN AUDIO CHANNEL — on branch `mic-rec`, build 2026-08-24.1038, his ear next
 
 Gad, 2026-08-23: "i cant hear anything recorded, can you make my mic input
 controlable. also can you draw the incoming audio as its recorded and put a
@@ -152,36 +152,73 @@ just shorten/enlarge the loop".
   HEADER; a dead server turns "reload" into "restore whatever tab was
   there".
 
+### ROUND 3, 2026-08-24 — mic+rec is the chord, and a fresh take is never repitched
+
+Two more from his hands, minutes apart:
+
+- **"pressing only tab records audio, it should be mic+rec records audio
+  input."** Right — for one build every rec gesture on an audio channel
+  threatened a take. The MIC KEY is the audio modifier now: tab starts the
+  sound recorder only with esc (or Fn) ENGAGED — held, still opening, or
+  latched (`MIC.on||MIC._down||ESCH`). Plain tab is the keys recorder it
+  always was: no permission prompt, no take, ever. The chord works in either
+  order — esc landing while tab is already down starts the take from the esc
+  handler (ESCH.used set so it cannot also escape; HOLD.tabUsed deliberately
+  NOT set — that reads as tab-spent-as-modifier and would drop the very take
+  it starts). With the mic LATCHED, plain tab records — the chord is
+  satisfied by the latch, which is what a latch is for. Every message that
+  said 'tab records' or the never-wired '⌃+tab' now names the chord.
+  Measured: tab alone 300ms → rec none/pend none/mic off/nothing landed;
+  esc+tab → the same 0.300-peak take as before, mic closed after.
+- **"the playback should give me the audio in the pitch i recorded it,
+  repitching should happen only if i change the pitch after i recorded."**
+  The take inherited the channel's speed/pitch/crop dials from the PREVIOUS
+  take — including the ×2 audFitComp had just written to keep that previous
+  take honest — so a fresh recording came back repitched. audPlace resets
+  spd/rate to 1, semis to 0, crop to 0/1 when a RECORDING lands: the canvas
+  is cut to the loop, so ×1 is exactly what the air heard. Sample PICKS keep
+  their dials (sound design survives auditioning the pool); only recordings
+  reset. In overdub the bed also returns to ITS recorded pitch — layers keep
+  their own pitches, not the repitched mix you happened to sing over; a dial
+  turned after the take repitches everything together, which is the rule.
+  Measured: spd 2 / semis 7 / crop 0.3–0.6 set before a take → after it,
+  1/1 · 0 · 0/1, take landed.
+- ⚠ **THE BROWSE WINDOW IS SHARED, and `goto` opens a NEW tab.** The 3033
+  tab kept coming back to the front between my runs — tab [1] belongs to the
+  window, other sessions drive the same daemon, and my earlier `goto
+  localhost:3032` had quietly opened tab [4] instead of repointing [1]. Two
+  probe rounds ran against 3033 before the URL line gave each away (same
+  working tree both times — the numbers stood — and his Chrome was never
+  reachable; my scratch on that origin is cleared). The rule that survives:
+  keep a DEDICATED tab, front it BY ID (`browse tab N`) before every run,
+  and read the url line of every probe header. Fronted-tab addressing in a
+  shared window is a race.
+
 QA — most likely to be wrong first (fake-mic measured; the REAL mic still is
 not, and is test #1):
- 1. **A real take, and you can hear yourself set it up.** Settings (⇧esc) →
-    Input: mic dev · mic gain · monitor. Or without the panel: HOLD esc —
-    after the one-time permission the meter runs — and while holding, -/=
-    moves the gain (⇧ = 6dB steps), ; toggles the monitor (you, in the
-    master — mind the speakers). Then on an audio channel hold tab ~2s and
-    talk. Right: '◉ audio: N bar loop' and you hear it. Wrong: silence →
-    hold esc and watch the mic gain meter in settings while you talk.
- 2. **Overwrite = erase.** rec mode ovwrt, a loop with sound in it, hold tab
-    and record a SHORT bit: the old loop is gone everywhere, only the new
-    bit remains (before: the rest of the old loop kept playing around it).
-    Undo brings the old take back.
- 3. **The bed goes quiet WHILE you record over it** (ovwrt only). Transport
-    running, loop sounding, hold tab: the old loop drops out under you, keys
-    still sound, the new take enters at the next bar after release. In
-    ovdub it keeps playing — layering.
- 4. **tab+↑↓ = loop length, pitch stays.** Audio channel, sync on, loop
-    sounding: tab+↑ doubles the bars and it SOUNDS THE SAME (speed dial
-    reads ×2); tab+↓ halves back. The old crop ×2/÷2 gesture is gone (the
-    crop dials on the page remain). tab+-/= still doubles/halves SPEED.
-    ⇧ under tab unchanged (offset / unit).
- 5. **Keys under tab still record keys** — 'keys take — the sound was
-    dropped'.
- 6. **Tap and latch as round 1**: tap with the mic latched = the last loop
-    off the ring; win+tab latches the recorder, tab again keeps it.
- 7. **Monitor is one switch**: settings/Input and esc+; flip the same thing;
-    it only sounds while the mic is open.
- 8. **Device** steps survive a reload; an unplugged remembered device falls
-    back to default (not measured with real hardware).
+ 1. **The chord records; tab alone never does.** Hold esc (mic opens — first
+    time the browser asks), keep it, hold tab ~2s and talk, let go. Right:
+    '◉ audio: N bar loop' and it plays back AT THE PITCH YOU SPOKE — even if
+    the speed dial read ×2 from before. Plain tab (no esc): keys recorder
+    only, no prompt, no take. Mic latched (win+esc): plain tab records — the
+    latch IS the mic half of the chord.
+ 2. **Repitch only after.** Record; then turn speed/pitch/crop — NOW it
+    repitches. Record again — back to your voice at ×1, dials neutral.
+ 3. **Overwrite = erase.** rec ovwrt, loop with sound, chord-record a SHORT
+    bit: only the new bit remains anywhere in the loop. Undo restores.
+ 4. **The bed mutes WHILE you record over it** (ovwrt, transport running):
+    the old loop drops out under the take, keys still audible, the new take
+    enters at the next bar. ovdub keeps the bed playing.
+ 5. **tab+↑↓ = loop length, pitch stays** (sync on: tab+↑ doubles the bars,
+    sounds identical, speed dial shows ×2 — that ×2 clears on your next
+    recording). tab+-/= is still speed. The crop ×2 gesture is gone; crop
+    dials on the page remain.
+ 6. **Keys under the chord = keys take** ('the sound was dropped').
+ 7. **Tap with mic latched** = last loop off the ring; **win+tab** latches
+    the recorder, tab again keeps it.
+ 8. **Settings/Input**: mic dev · mic gain (meter) · monitor — and on the
+    mic key: esc held, -/= gain (⇧ 6dB), ; monitor. One switch, in the
+    master, only audible while the mic is open.
 
 
 ## LIVE MOD-AMOUNT + META-MOD — FIXED on branch `live-mod`, build .2352, his ear next
