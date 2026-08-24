@@ -1,6 +1,6 @@
-# WHERE THE AUDIO CHANNEL STANDS — 2026-08-24, branch `ux-fixes`
+# WHERE THE AUDIO CHANNEL STANDS — 2026-08-24, main
 
-## UNIT SNAP + TOP STEP — on branch `ux-fixes`, build 2026-08-24.1839, his ear next
+## UNIT SNAP + TOP STEP — MERGED to main + LIVE 2026-08-24.1839 ("works well")
 
 Gad: "when changing any loop length unit size, midi or audio, snap the loop
 current length to the closest ... if current loop is 7 16th notes length and
