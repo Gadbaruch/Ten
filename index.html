@@ -1234,7 +1234,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-24.1701';
+const BUILD='2026-08-24.1839';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -3646,12 +3646,16 @@ function unitStep(lp,d){
   const i=UNIT_ORDER.indexOf(lp.unit), j=clamp(i+d,0,UNIT_ORDER.length-1);
   if(j===i)return false;
   const L=lp.len; lp.unit=UNIT_ORDER[j];
-  /* Going UP, round the count up to a whole one: three beats asked for in bars
-     is one bar, not 0.75 of one. A fractional count of a big unit is a worse
-     description of the same length than a whole count of a small one — you
-     changed unit to stop thinking in the old grain. Going down is always exact. */
+  /* THE LENGTH SNAPS TO THE CLOSEST WHOLE COUNT OF THE NEW UNIT (Gad,
+     2026-08-24: "if current loop is 7 16th notes ... change unit size to
+     half bars and then bars ... moving from 7, to 8 then to 16 16th notes"),
+     both directions, midi and audio alike. It used to CEIL going up — nine
+     16ths asked for in halves became sixteen, not the closest eight — and
+     keep exact fractional counts going down, which is a worse description
+     of the length than the whole count you changed unit to think in.
+     Half rounds up, so 7 16ths → 1 half → 1 bar, exactly his walk. */
   const raw=L/UNITS[lp.unit];
-  lp.count=clamp(d>0?Math.max(1,Math.ceil(raw-1e-9)):Math.round(raw*4)/4,0.25,256);
+  lp.count=clamp(Math.max(1,Math.round(raw)),1,256);
   return true;
 }
 /* Remember a loop exactly as it was captured, so it can be put back. */
@@ -3676,7 +3680,13 @@ function loopOps(e,c,lp){
     const au=S.presets[li].au=S.presets[li].au||{};
     if(!Math.round(au.fit||0)||!(L0>0)||!(lp.len>0)||Math.abs(lp.len-L0)<1e-9)return;
     const cur=audSpd(au), want=cur*(lp.len/L0);
-    let s2=clamp(+want.toFixed(2),-4,4);
+    /* EXACT, not toFixed(2): the compensation is stored, re-read and
+       compounded on the next length change, and two decimals lost 15 cents
+       over one unit walk (Gad, 2026-08-24: "the snap to nearest unit size
+       changes the pitch"). The dial still DISPLAYS ×N.NN; the number under
+       it keeps the whole ratio, so walks and round trips return to pitch
+       exactly. Only the rail and the detent still bend it — and say so. */
+    let s2=clamp(want,-4,4);
     if(Math.abs(s2)<0.25)s2=cur<0?-0.25:0.25;
     au.spd=s2; au.rate=s2;
     if(Math.abs(s2-want)>0.005)flash('speed at the rail — the take stretches from here');
@@ -21131,17 +21141,35 @@ const onKeyDown=e=>{
           const p9=S.presets[i]; p9.au=p9.au||{};
           const lane9=S.patterns[S.editPat].lanes[i];
           const e9=clamp(p9.au.en??1,-1,1), c0=lane9.count;
-          const c1=vert?(c==='ArrowUp'?c0*2:c0/2)
-                       :clamp(Math.round((c0+(c==='ArrowRight'?1:-1))*4)/4,0.25,256);
+          let clamped9=false;
+          let c1=vert?(c==='ArrowUp'?c0*2:c0/2)
+                     :clamp(Math.round((c0+(c==='ArrowRight'?1:-1))*4)/4,0.25,256);
           if(c1>256){say='loop already at the maximum'; continue;}
           if(c1<0.25||c1===c0){say='loop already at the '+((c==='ArrowRight'||c==='ArrowUp')?'maximum':'minimum'); continue;}
-          const want=e9*(c1/c0);
-          if(Math.abs(want)>1+1e-9){say='the whole take loops already — ⇥-= for speed, rshift for the loop alone'; continue;}
+          let want=e9*(c1/c0);
+          if(Math.abs(want)>1+1e-9){
+            /* THE TOP STEP LANDS ON THE TOP (Gad, 2026-08-24: "going one
+               step over the max - right now it just stays and doesnt
+               expand, expected behavior is that it just goes to max length
+               100%"). The step past the whole take pins AT the whole take:
+               the count becomes the 100% point on the quarter-count grid,
+               FLOORED so the lock never overshoots, and en is derived back
+               from the count the grid accepted — pitch untouched. en's own
+               history is count ratios, so this lands on exactly 100% in
+               practice, including takes whose full length is not a whole
+               unit (7.5 16ths tops out at 7.5×16th). Already at the top,
+               the step still refuses and says where speed lives. */
+            if(Math.abs(e9)>=1-1e-9){say='the whole take loops already — ⇥-= for speed, rshift for the loop alone'; continue;}
+            c1=clamp(Math.floor((c0/Math.abs(e9))*4+1e-6)/4,0.25,256);
+            if(c1===c0){say='the whole take loops already — ⇥-= for speed, rshift for the loop alone'; continue;}
+            want=e9*(c1/c0);
+            clamped9=true;                       // the count write must land on c1, not on double()
+          }
           if(Math.abs(want)<0.01){say='sample length at the floor'; continue;}
           if(!did)pushUndo('sample length');
           did=true;
           p9.au.en=Math.max(-1,Math.min(1,want));
-          if(vert){if(c==='ArrowUp')lane9.double(true); else lane9.halve();}
+          if(vert&&!clamped9){if(c==='ArrowUp')lane9.double(true); else lane9.halve();}
           else lane9.count=c1;
           if(S.layer===1)lane9.auto=false;
           engine.audRelock(i);

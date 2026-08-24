@@ -1,4 +1,53 @@
-# WHERE THE AUDIO CHANNEL STANDS — 2026-08-24, main
+# WHERE THE AUDIO CHANNEL STANDS — 2026-08-24, branch `ux-fixes`
+
+## UNIT SNAP + TOP STEP — on branch `ux-fixes`, build 2026-08-24.1839, his ear next
+
+Gad: "when changing any loop length unit size, midi or audio, snap the loop
+current length to the closest ... if current loop is 7 16th notes length and
+i change unit size to half bars and then bars ... moving from 7, to 8 then
+to 16 16th notes." One change in `unitStep` (the only door every unit change
+goes through, ⇧←→ under tab): the count becomes the CLOSEST whole count of
+the new unit, both directions — it used to CEIL going up (nine 16ths in
+halves became sixteen, not eight) and keep exact fractional counts going
+down. Half rounds up, so his walk lands exactly. Audio channels keep their
+existing ⇧←→ coupling (audFitComp compensates the snapped ratio on the
+speed dial). Measured (unitsnap row, midi lane): 16th→8th→beat→half→bar =
+7→8→8→8→16 sixteenths. micrec is 12 rows now.
+
+**ROUND 2 — "the snap to nearest unit size changes the pitch, and it
+shouldnt."** Measured three ways before touching anything: the engine was
+already holding rate through the walk (a spawn spy showed every cursor at
+2.286→2.28, even the mid-join in a canvas≠lane config; the wild ±octave
+readings of the first attempt were the zero-crossing estimator tripping on
+splice seams — estimator lesson, kept). The REAL movement was
+audFitComp's toFixed(2): the compensation is stored, re-read and
+compounded on the next length change, and two decimals cost −15 cents
+over one walk (442.7 → 438.9Hz), more on round trips. The spd is stored
+EXACT now (the dial still displays ×N.NN); only the ±4 rail and the 0.25
+detent may bend it, and they flash. Measured: the audible walk is flat —
+442.7Hz at every step — and the unitpitch probe row asserts 0.0 cents of
+rate deviation on every run. micrec is 13 rows.
+
+**ROUND 3 — "going one step over the max ... expected behavior is that it
+just goes to max length 100%."** The sample-length gesture (tab+↑↓←→) used
+to refuse any step past the whole take; now the top step PINS AT THE TOP:
+the count becomes the 100% point on the quarter-count grid (floored, so
+the pitch lock never overshoots) and en derives back from the count the
+grid accepted — which is exactly 100% whenever en's history is count
+ratios, including takes whose full length is not a whole unit (7.5 16ths
+tops out at 7.5×16th). Already at the top, the step still refuses and the
+flash says where speed lives. One bug caught by the micro-debug on the way:
+the clamped count write went through lane.double() (×2) instead of the
+clamped value — 3b/75% doubled to 6b; a `clamped9` flag routes the write.
+Measured: 3×b at 75% + one ↑ → 4×b at 100%, spd untouched; next ↑ refuses.
+
+QA: any loop, tab+⇧→ up the units: the length re-grids to the nearest whole
+new unit each step; tab+⇧← back down stays whole. Audio channel: same, and
+the PITCH DOES NOT MOVE — walk the units up and back with a take sounding;
+the speed dial's number changes, the sound does not. And the top step: crop
+below 100%, tab+↑ past the end lands ON 100% (loop grows to match), never a
+dead key; at 100% it refuses with the speed hint.
+
 
 ## MIC RECORDING ON AN AUDIO CHANNEL — MERGED to main + LIVE 2026-08-24.1701 ("its tight")
 

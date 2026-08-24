@@ -1312,6 +1312,41 @@ async function probeMicRec() {
     const spSpan = spanIn(Math.max(0, spP - 0.06), Math.min(1.95, spP + 0.5));
     rows.push({ k: 'shortpunch', press: spP, span: spSpan ? spSpan.join('-') : null,
                 expect: '~120ms landed at the press (was: cancelled)' });
+    /* unitsnap — changing the unit snaps the length to the CLOSEST whole
+       count of the new unit (his walk: 7 16ths → … → 1 bar = 16 16ths).
+       On a MIDI lane, pure length arithmetic, no audio coupling. */
+    const laneM = S.patterns[S.editPat].lanes[2];
+    const keepM = { u: laneM.unit, c: laneM.count, a: laneM.auto }, keepCur = S.curPreset;
+    S.curPreset = 2; laneM.unit = 's'; laneM.count = 7; laneM.auto = false;
+    const walk = ['7'];
+    K('keydown', 'Tab'); await sleep(40);
+    KS('keydown', 'ShiftRight', { shiftKey: true });
+    for (let k9 = 0; k9 < 4; k9++) {
+      KS('keydown', 'ArrowRight', { shiftKey: true }); KS('keyup', 'ArrowRight', { shiftKey: true });
+      await sleep(20); walk.push(String(laneM.len * 4));
+    }
+    K('keyup', 'ShiftRight'); K('keyup', 'Tab'); await sleep(80);
+    laneM.unit = keepM.u; laneM.count = keepM.c; laneM.auto = keepM.a; S.curPreset = keepCur;
+    rows.push({ k: 'unitsnap', s16walk: walk.join('→'), expect: '7→8→8→8→16 (16th→8th→beat→half→bar)' });
+    /* unitpitch — on AUDIO the snap must never move the pitch: the
+       fit-compensated rate is invariant through the walk (exact spd now;
+       toFixed(2) compounded to −15 cents over one walk) */
+    pin(ch); S.layer = 1;
+    const pau2 = S.presets[ch].au; pau2.spd = 1; pau2.rate = 1; pau2.fit = 1;
+    pau2.st = 0; pau2.en = 1; pau2.semis = 0;
+    lane.unit = 's'; lane.count = 7; lane.auto = false;
+    const theo9 = () => { const au9 = Object.assign({}, pau2); const W9 = audWin(au9);
+      const D9 = engine.audBuf[ch].duration, dur9 = Math.max(1e-6, (W9.hi - W9.lo) * D9);
+      return audRate(au9, dur9, lane.len * spb()); };
+    const r0 = theo9(); let rDev = 0;
+    K('keydown', 'Tab'); await sleep(40); KS('keydown', 'ShiftRight', { shiftKey: true });
+    for (let k9 = 0; k9 < 4; k9++) {
+      KS('keydown', 'ArrowRight', { shiftKey: true }); KS('keyup', 'ArrowRight', { shiftKey: true });
+      await sleep(20); rDev = Math.max(rDev, Math.abs(theo9() / r0 - 1)); }
+    K('keyup', 'ShiftRight'); K('keyup', 'Tab'); await sleep(80);
+    lane.unit = 'B'; lane.count = 1; pau2.spd = 1; pau2.rate = 1;
+    rows.push({ k: 'unitpitch', cents: r3(1200 * Math.log2(1 + rDev)),
+                expect: '0 — the snap never moves the pitch' });
     /* (the session rows — monitor, device, sync, esc gestures, tab loop,
        latc, stereo, tempo, nearend, headtrim, clear — moved to micrec2:
        the browse CLI caps a command at 30s and the full suite outgrew it) */
@@ -1339,7 +1374,7 @@ async function probeMicRec() {
                   'on', 'off', 'bus', 'at', 'step1', 'step2', 'listed', 'row',
                   'micDuring', 'db', 'mon', 'layer', 'latched',
                   'down', 'up', 'full', 'l', 'r', 'rfull', 'sameBuf', 'spd', 'semis', 'crop',
-                  'onsets', 'E', 'Ems', 'spread', 'nowLATC', 'implied', 'trimMs', 'status', 'maxStep', 'nch', 'LtoR', 'bpm', 'lane', 'dur', 'fitRatio', 'playingAfterSeed', 'playDelayMs', 'seedHeadAt', 'punchAt', 'relPh', 'busBoundary', 'busNext', 'buf', 'auto', 'events', 'spanStartSec', 'press', 'release', 'span',
+                  'onsets', 'E', 'Ems', 'spread', 'nowLATC', 'implied', 'trimMs', 'status', 'maxStep', 'nch', 'LtoR', 'bpm', 'lane', 'dur', 'fitRatio', 'playingAfterSeed', 'playDelayMs', 'seedHeadAt', 'punchAt', 'relPh', 'busBoundary', 'busNext', 'buf', 'auto', 'events', 'spanStartSec', 'press', 'release', 'span', 's16walk', 'cents', 'clampUp', 'clampFull',
                   'spanSec', 'bedSec', 'mixSec', 'ovdubMixSec', 'dev', 'paramLeak', 'curParam', 'busResume'], rows };
 }
 
@@ -1484,8 +1519,14 @@ async function probeMicRec2() {
     const lft = await tl('ArrowLeft');
     const rgt = await tl('ArrowRight');
     const rfull = await tl('ArrowRight');
-    rows.push({ k: 'tabloop', down: dn, up, full, l: lft, r: rgt, rfull, sameBuf: engine.audBuf[ch] === bufRef,
-                expect: 'dn .5/.5/1 up 1/1/1 full 1/1/1 · l 3/.75/1 r 4/1/1 rfull 4/1/1 · true' });
+    /* the step OVER the top pins at 100%: 3 beats of a 4-beat take (75%),
+       doubled, lands at 4×b en 1 — not a refuse; the next ↑ refuses */
+    lane.unit = 'b'; lane.count = 3; pau.en = 0.75;
+    const cUp = await tl('ArrowUp');
+    const cFull = await tl('ArrowUp');
+    rows.push({ k: 'tabloop', down: dn, up, full, l: lft, r: rgt, rfull, clampUp: cUp, clampFull: cFull,
+                sameBuf: engine.audBuf[ch] === bufRef,
+                expect: 'dn .5/.5/1 up 1/1/1 full 1/1/1 · l 3/.75/1 r 4/1/1 rfull 4/1/1 · clamp 4/1/1 then refuse · true' });
     /* latc — his calibration: blips at known clock times through the master,
        recorded by the take path (src=mstr, no MediaStream in the chain).
        Where they LAND vs the beat grid = the placement error E; the correct
@@ -1628,7 +1669,7 @@ async function probeMicRec2() {
                   'on', 'off', 'bus', 'at', 'step1', 'step2', 'listed', 'row',
                   'micDuring', 'db', 'mon', 'layer', 'latched',
                   'down', 'up', 'full', 'l', 'r', 'rfull', 'sameBuf', 'spd', 'semis', 'crop',
-                  'onsets', 'E', 'Ems', 'spread', 'nowLATC', 'implied', 'trimMs', 'status', 'maxStep', 'nch', 'LtoR', 'bpm', 'lane', 'dur', 'fitRatio', 'playingAfterSeed', 'playDelayMs', 'seedHeadAt', 'punchAt', 'relPh', 'busBoundary', 'busNext', 'buf', 'auto', 'events', 'spanStartSec', 'press', 'release', 'span',
+                  'onsets', 'E', 'Ems', 'spread', 'nowLATC', 'implied', 'trimMs', 'status', 'maxStep', 'nch', 'LtoR', 'bpm', 'lane', 'dur', 'fitRatio', 'playingAfterSeed', 'playDelayMs', 'seedHeadAt', 'punchAt', 'relPh', 'busBoundary', 'busNext', 'buf', 'auto', 'events', 'spanStartSec', 'press', 'release', 'span', 's16walk', 'cents', 'clampUp', 'clampFull',
                   'spanSec', 'bedSec', 'mixSec', 'ovdubMixSec', 'dev', 'paramLeak', 'curParam', 'busResume'], rows };
 }
 
