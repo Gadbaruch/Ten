@@ -16730,8 +16730,11 @@ function audSave(noAudio,spent0){
     if(r.src.k==='f'&&r.src.f)return r;            // factory: re-fetched by name
     if(noAudio)return r;
     const buf=engine.audBuf[pi]||(engine.granBuf||[])[pi];
+    /* NESTED under emb, never spread: smpEnc's fields are {r,c,n,d} and its
+       n (sample count) CLOBBERED the ref's n (the take's NAME) — every
+       embedded take came back named by its length ("22050"). */
     const enc=smpEnc(buf);
-    if(enc&&spent+enc.d.length<=SMPCAP){spent+=enc.d.length; return {...r,...enc};}
+    if(enc&&spent+enc.d.length<=SMPCAP){spent+=enc.d.length; return {...r,emb:enc};}
     return r;
   });
 }
@@ -16744,8 +16747,8 @@ function restoreAudio(refs){
   const want=new Map(), miss=[]; let landed=false;
   refs.forEach((r,i)=>{
     if(!r||!r.src)return;
-    if(r.d){                        // the take itself traveled — decode and land it
-      const buf=smpDec(r);
+    if(r.emb){                      // the take itself traveled — decode and land it
+      const buf=smpDec(r.emb);
       if(buf){poolAdd(buf,r.n||'take',r.src); engine.granNode(i);
         engine.setChanBuf(i,buf,r.n||'take'); landed=true; return;}
     }

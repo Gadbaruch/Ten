@@ -1803,13 +1803,14 @@ async function probeSetIO() {
     const back = engine.audBuf[ch] || (engine.granBuf || [])[ch];
     const dL = back && back.getChannelData(0);
     const dR = back && back.numberOfChannels > 1 ? back.getChannelData(1) : null;
-    rows.push({ k: 'embed', hasD: ref && ref.d ? 'yes' : 'NO',
-                kb: ref && ref.d ? Math.round(ref.d.length / 1024) : 0,
+    rows.push({ k: 'embed', hasD: ref && ref.emb && ref.emb.d ? 'yes' : 'NO',
+                kb: ref && ref.emb ? Math.round(ref.emb.d.length / 1024) : 0,
                 lenBack: back ? back.length : 0, lenWant: n,
+                nameBack: engine.audName[ch],
                 rmsL: dL ? r3(rms(dL)) : null, rmsR: dR ? r3(rms(dR)) : null,
-                expect: 'yes; len equal; rms ~0.283 both sides' });
+                expect: 'yes; len equal; name probe-take; rms ~0.283 both sides' });
     const o2 = JSON.parse(serialize(true));
-    rows.push({ k: 'noaudio', hasD: o2.aud[ch] && o2.aud[ch].d ? 'LEAKED' : 'no',
+    rows.push({ k: 'noaudio', hasD: o2.aud[ch] && o2.aud[ch].emb ? 'LEAKED' : 'no',
                 n: o2.aud[ch] && o2.aud[ch].n,
                 bytesFull: s1.length, bytesBare: JSON.stringify(o2).length,
                 expect: 'no; named; full >> bare' });
@@ -1838,7 +1839,7 @@ async function probeSetIO() {
     engine.audBuf[ch] = keep.buf; if (engine.granBuf) engine.granBuf[ch] = keep.gbuf;
     engine.audName[ch] = keep.name; unstash(ch, keep.p);
   }
-  return { cols: ['k', 'hasD', 'kb', 'lenBack', 'lenWant', 'rmsL', 'rmsR', 'n', 'bytesFull',
+  return { cols: ['k', 'hasD', 'kb', 'lenBack', 'lenWant', 'nameBack', 'rmsL', 'rmsR', 'n', 'bytesFull',
                   'bytesBare', 'stamp', 'localClock', 'match', 'pickerBytes', 'fallback',
                   'cancelFellBack', 'expect'], rows };
 }
