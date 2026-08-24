@@ -1,4 +1,20 @@
-# WHERE THE AUDIO CHANNEL STANDS — 2026-08-25, branch `bugfixes`
+# WHERE THE AUDIO CHANNEL STANDS — 2026-08-25
+
+**The whole `bugfixes` batch is MERGED TO MAIN and LIVE, build
+2026-08-24.2220** (his word 2026-08-25: "merge"). That covers: grain pitch
+at both doors, filter reso real under 1, slices toggle, two-stage ⇧⌫, the
+eaten-boundary audRelock repair, the export rebuild (save dialog, takes
+travel embedded, local stamps, emb nesting), crv alive on op-level
+envelopes, probe suites setio/sweep-wnd/landWait, and dur-from-grid.
+
+**HELD THOUGHT — dur-from-grid needs his deeper test (his words: "hold the
+thought on the dur from grid, ill test tomorrow deeper").** What to keep in
+mind when he reports: the change moves BOTH the lane and the live audible
+off (one-number rule) to count from max(press, grid) when Q is on; floors
+at AUDMINMS; Q off unchanged; MIDI notes still count from the finger —
+extending them is one word away. If juggling still feels wrong, the next
+suspects are the wnd-180 release fade (replay measured 30-50ms lean) and
+overlapped-finger legato semantics (mono steal ordering).
 
 ## DUR FROM THE GRID + THE SLOW-LFO VERDICT (build 2026-08-24.2220)
 
