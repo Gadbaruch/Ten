@@ -1302,7 +1302,7 @@ async function probeMicRec() {
     await sleep(450);
     const tfSpan = spanIn(0.55, 1.95);
     rows.push({ k: 'tailfix', press: tfP, release: tfR, span: tfSpan ? tfSpan.join('-') : null,
-                expect: 'span ≈ press..release — tail not cut, no early start' });
+                expect: 'span ≈ press..release−30ms — tail kept, key-up click shaved' });
     /* shortpunch — a chord TAP lands a tiny punch now instead of cancelling */
     gg = 0; while ((phS() < 1.25 || phS() > 1.45) && gg++ < 300) await sleep(15);
     osc.frequency.value = 523; CFG.micDb = -6; micGainApply();
@@ -1339,7 +1339,7 @@ async function probeMicRec() {
                   'on', 'off', 'bus', 'at', 'step1', 'step2', 'listed', 'row',
                   'micDuring', 'db', 'mon', 'layer', 'latched',
                   'down', 'up', 'full', 'l', 'r', 'rfull', 'sameBuf', 'spd', 'semis', 'crop',
-                  'onsets', 'E', 'Ems', 'spread', 'nowLATC', 'implied', 'trimMs', 'status', 'maxStep', 'nch', 'LtoR', 'bpm', 'lane', 'dur', 'fitRatio', 'playingAfterSeed', 'seedHeadAt', 'punchAt', 'relPh', 'busBoundary', 'busNext', 'buf', 'auto', 'events', 'spanStartSec', 'press', 'release', 'span',
+                  'onsets', 'E', 'Ems', 'spread', 'nowLATC', 'implied', 'trimMs', 'status', 'maxStep', 'nch', 'LtoR', 'bpm', 'lane', 'dur', 'fitRatio', 'playingAfterSeed', 'playDelayMs', 'seedHeadAt', 'punchAt', 'relPh', 'busBoundary', 'busNext', 'buf', 'auto', 'events', 'spanStartSec', 'press', 'release', 'span',
                   'spanSec', 'bedSec', 'mixSec', 'ovdubMixSec', 'dev', 'paramLeak', 'curParam', 'busResume'], rows };
 }
 
@@ -1544,7 +1544,9 @@ async function probeMicRec2() {
     fresh(); og.gain.value = 0; CFG.micDb = 0; micGainApply();   // micscope leaves the dial at -5
     K('keydown', 'Escape'); await sleep(30); K('keydown', 'Tab'); await sleep(60);
     og.gain.value = 0.3; await sleep(300); og.gain.value = 0.12; await sleep(1500);
-    K('keyup', 'Tab'); K('keyup', 'Escape'); og.gain.value = 0; await sleep(300);
+    K('keyup', 'Tab'); K('keyup', 'Escape'); og.gain.value = 0;
+    let playDelayMs = 0; while (!T.playing && playDelayMs < 600) { await sleep(10); playDelayMs += 10; }
+    await sleep(300);
     const tb9 = engine.audBuf[ch];
     const playingAfterSeed = T.playing;                 // the seed starts the transport itself
     /* …and a PLAYING punch must leave the seed's head where it was (his
@@ -1561,8 +1563,8 @@ async function probeMicRec2() {
     rows.push({ k: 'tempo', bpm: r3(T.bpm), lane: lane.count + '×' + lane.unit,
                 dur: tb9 ? r3(tb9.duration) : null,
                 fitRatio: tb9 ? r3(tb9.duration / (lane.len * spb())) : null,
-                playingAfterSeed, seedHeadAt: mAt < 0 ? null : r3(mAt / sr), punchAt: pAt < 0 ? null : r3(pAt / sr),
-                expect: 'bpm 125-145 · fit 1.0 · playing · head ~0 after the punch' });
+                playingAfterSeed, playDelayMs, seedHeadAt: mAt < 0 ? null : r3(mAt / sr), punchAt: pAt < 0 ? null : r3(pAt / sr),
+                expect: 'bpm 125-145 · fit 1.0 · playing ≤30ms after release · head ~0 after the punch' });
     setBpm(120);
     /* nearend — releasing a take just before the bar must not eat the next
        loop: the boundary the mute consumed is re-posted (round 11) */
@@ -1626,7 +1628,7 @@ async function probeMicRec2() {
                   'on', 'off', 'bus', 'at', 'step1', 'step2', 'listed', 'row',
                   'micDuring', 'db', 'mon', 'layer', 'latched',
                   'down', 'up', 'full', 'l', 'r', 'rfull', 'sameBuf', 'spd', 'semis', 'crop',
-                  'onsets', 'E', 'Ems', 'spread', 'nowLATC', 'implied', 'trimMs', 'status', 'maxStep', 'nch', 'LtoR', 'bpm', 'lane', 'dur', 'fitRatio', 'playingAfterSeed', 'seedHeadAt', 'punchAt', 'relPh', 'busBoundary', 'busNext', 'buf', 'auto', 'events', 'spanStartSec', 'press', 'release', 'span',
+                  'onsets', 'E', 'Ems', 'spread', 'nowLATC', 'implied', 'trimMs', 'status', 'maxStep', 'nch', 'LtoR', 'bpm', 'lane', 'dur', 'fitRatio', 'playingAfterSeed', 'playDelayMs', 'seedHeadAt', 'punchAt', 'relPh', 'busBoundary', 'busNext', 'buf', 'auto', 'events', 'spanStartSec', 'press', 'release', 'span',
                   'spanSec', 'bedSec', 'mixSec', 'ovdubMixSec', 'dev', 'paramLeak', 'curParam', 'busResume'], rows };
 }
 

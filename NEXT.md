@@ -1,6 +1,6 @@
 # WHERE THE AUDIO CHANNEL STANDS — 2026-08-23, branch `mic-rec`
 
-## MIC RECORDING ON AN AUDIO CHANNEL — on branch `mic-rec`, build 2026-08-24.1647, his ear next
+## MIC RECORDING ON AN AUDIO CHANNEL — on branch `mic-rec`, build 2026-08-24.1701, his ear next
 
 Gad, 2026-08-23: "i cant hear anything recorded, can you make my mic input
 controlable. also can you draw the incoming audio as its recorded and put a
@@ -193,6 +193,28 @@ Two more from his hands, minutes apart:
   keep a DEDICATED tab, front it BY ID (`browse tab N`) before every run,
   and read the url line of every probe header. Fronted-tab addressing in a
   shared window is a race.
+
+### ROUND 15 — the key-up click shaved, the seed plays from the release
+
+- **"the punch out can be a tik earlier ... it picks up me removing the
+  finger from the key sound ... shave off like 30ms from the end."** Done:
+  a MIC take ends 30ms before the release, so the key click the mic hears
+  on the way up is not in the loop; the edge crossfade rides the new end.
+  Mstr resamples keep their full window — no finger in that chain.
+  Measured: press .619 / release .938 → span .625–.904 (release −34ms);
+  a 120ms tap still lands 87ms.
+- **"the seed rec starts playback with a bit too much delay ... start
+  playback in real time not compensated."** The delay was the round-14
+  drain (~lat + one SP block) — right for the take's tail, meaningless for
+  the transport. play() fires AT the release now (seed condition read from
+  the take's birth: r.from0 + mic + empty channel); the take lands
+  mid-drain and audResume joins it at the phase the clock has reached; the
+  tempo branch keys off r.from0 since T.playing is already true when it
+  runs. Measured: playDelayMs 0 (first 10ms poll), was ~100–180ms; fit
+  1.000 and the seed head at 0.006 unchanged.
+  ⚠ Small honest edge: a failed tempo guess (an under-88ms scrap into an
+  empty channel) still starts the transport — the set plays, the flash says
+  what landed. Rare enough to leave until it annoys.
 
 ### ROUND 14 — the punch WINDOW obeys the latency, and a chord tap is a tiny punch
 

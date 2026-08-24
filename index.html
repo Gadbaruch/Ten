@@ -1234,7 +1234,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-24.1647';
+const BUILD='2026-08-24.1701';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -11721,6 +11721,15 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
        the same lat is cut off the head: the take is the AIR of
        [press..release], placed at the press with nothing left to shift. */
     const relAt=AC.currentTime;
+    /* THE SEED PLAYS FROM THE RELEASE, NOT FROM THE DRAIN (Gad, 2026-08-24:
+       "the seed rec starts playback with a bit too much delay ... try to
+       start playback in real time not compensated"). The drain (lat + one
+       SP block, ~100-180ms) exists to catch the take's tail — the TRANSPORT
+       has no tail to wait for. Start it here; the take lands mid-drain and
+       audResume joins it at the phase the clock has reached. The tempo
+       branch below keys off r.from0 (the take's birth state), because
+       T.playing is true by the time it runs. */
+    if(!drop&&r.from0&&r.label==='mic'&&!engine.audBuf[r.pi]&&!T.playing)play();
     const finish=()=>{
     try{r.src.disconnect(r.sp3);}catch(_){}     // only the tap — the stage and the master keep their other outputs
     try{r.sp3.disconnect();r.sink.disconnect();}catch(_){}
@@ -11751,6 +11760,18 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
        recOut=Array.isArray(recOut)?recOut.map(cD=>cD.subarray(0,heldN)):recOut.subarray(0,heldN);
        len=heldN;
      }}
+    /* …AND THE LAST 30ms GO WITH IT (Gad, 2026-08-24: "the punch out can be
+       a tik earlier then now since it picks up me removing the finger from
+       the key sound"): a mic take ends just before the release, so the key
+       click the mic hears on the way UP is not in the loop. Mstr resamples
+       keep their full window — no finger in that chain. */
+    if(r.label==='mic'){
+      const cut9=Math.round(0.03*AC.sampleRate);
+      if(len>cut9+2048){
+        recOut=Array.isArray(recOut)?recOut.map(cD=>cD.subarray(0,len-cut9)):recOut.subarray(0,len-cut9);
+        len-=cut9;
+      }
+    }
     /* THE SILENT HEAD IS NOT PART OF THE TAKE (Gad, 2026-08-24: "there is a
        bit of silence added before when i seem to be pressing rec please
        check it"). The trim moves CONTENT earlier by the chain delay, so the
@@ -11783,7 +11804,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
        A channel that already holds a take keeps the clock whatever the
        mode: a stopped punch-in must never re-tempo the set. (Undo restores
        the take but keeps the tempo — a dial, not a loss.) */
-    if(!T.playing&&r.label==='mic'&&!engine.audBuf[r.pi]){
+    if(r.from0&&r.label==='mic'&&!engine.audBuf[r.pi]){
       const durS=lenT/AC.sampleRate, g9=guessTake(durS);
       if(g9){
         const bpmX=+(60*g9.beats/durS).toFixed(3);
