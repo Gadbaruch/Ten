@@ -1770,6 +1770,70 @@ async function probeGrainFlt() {
   return { cols: ['q01', 'q05', 'q1', 'q4', 'base', 'plus12', 'back', 'dial'], rows };
 }
 
+/* setio — the set FILE: a recorded take travels embedded (within the sample
+   budget), the no-audio quota fallback degrades it to a named hole, stamps
+   are local wall-clock, and exportSet writes through the save picker
+   (stubbed here — no dialogs in a probe). */
+async function probeSetIO() {
+  const ch = CH, sr = AC.sampleRate, rows = [];
+  const keep = { buf: engine.audBuf[ch], gbuf: (engine.granBuf || [])[ch],
+                 name: engine.audName[ch], p: stash(ch) };
+  try {
+    pin(ch); if (!isAudioCh(ch)) setEngine(ch, 'audio');
+    if (T.playing) stop();
+    /* a synthetic stereo take: 0.5s, 440 left / 660 right */
+    const n = Math.round(0.5 * sr), buf = AC.createBuffer(2, n, sr);
+    for (let c = 0; c < 2; c++) { const d = buf.getChannelData(c), f = c ? 660 : 440;
+      for (let i = 0; i < n; i++) d[i] = 0.4 * Math.sin(2 * Math.PI * f * i / sr); }
+    poolAdd(buf, 'probe-take', { k: 'r' });
+    engine.granNode(ch); engine.setChanBuf(ch, buf, 'probe-take');
+    const s1 = serialize(), o1 = JSON.parse(s1), ref = o1.aud[ch];
+    const rms = d => { let a = 0, m = 0; for (let i = 0; i < d.length; i += 7) { a += d[i] * d[i]; m++; } return Math.sqrt(a / m); };
+    engine.audBuf[ch] = null; if (engine.granBuf) engine.granBuf[ch] = null;
+    restoreAudio(o1.aud);
+    const back = engine.audBuf[ch] || (engine.granBuf || [])[ch];
+    const dL = back && back.getChannelData(0);
+    const dR = back && back.numberOfChannels > 1 ? back.getChannelData(1) : null;
+    rows.push({ k: 'embed', hasD: ref && ref.d ? 'yes' : 'NO',
+                kb: ref && ref.d ? Math.round(ref.d.length / 1024) : 0,
+                lenBack: back ? back.length : 0, lenWant: n,
+                rmsL: dL ? r3(rms(dL)) : null, rmsR: dR ? r3(rms(dR)) : null,
+                expect: 'yes; len equal; rms ~0.283 both sides' });
+    const o2 = JSON.parse(serialize(true));
+    rows.push({ k: 'noaudio', hasD: o2.aud[ch] && o2.aud[ch].d ? 'LEAKED' : 'no',
+                n: o2.aud[ch] && o2.aud[ch].n,
+                bytesFull: s1.length, bytesBare: JSON.stringify(o2).length,
+                expect: 'no; named; full >> bare' });
+    const st = stampNow(), d0 = new Date(), p2 = x9 => String(x9).padStart(2, '0');
+    rows.push({ k: 'stamp', stamp: st, localClock: p2(d0.getHours()) + ':' + p2(d0.getMinutes()),
+                match: st.slice(11, 13) === p2(d0.getHours()) ? 'local' : 'NOT LOCAL',
+                expect: 'stamp hour = wall clock (UTC was the bug)' });
+    /* exportSet through a stubbed picker: bytes written, no anchor fallback,
+       and esc in the dialog must cancel — not fall back to a silent anchor */
+    const sp0 = window.showSaveFilePicker, dl0 = window.dl;
+    let wrote = null, fellBack = null;
+    window.dl = (b9, nm) => { fellBack = nm; };
+    window.showSaveFilePicker = () => Promise.resolve({ name: 'stub.json',
+      createWritable: () => Promise.resolve({
+        write: b9 => { wrote = b9.size; return Promise.resolve(); },
+        close: () => Promise.resolve() }) });
+    await exportSet();
+    const wrote1 = wrote, fb1 = fellBack;
+    window.showSaveFilePicker = () => Promise.reject(Object.assign(new Error('x'), { name: 'AbortError' }));
+    fellBack = null; await exportSet();
+    window.showSaveFilePicker = sp0; window.dl = dl0;
+    rows.push({ k: 'export', pickerBytes: wrote1, fallback: fb1 || 'none',
+                cancelFellBack: fellBack || 'no',
+                expect: 'bytes ~ set size; none; no' });
+  } finally {
+    engine.audBuf[ch] = keep.buf; if (engine.granBuf) engine.granBuf[ch] = keep.gbuf;
+    engine.audName[ch] = keep.name; unstash(ch, keep.p);
+  }
+  return { cols: ['k', 'hasD', 'kb', 'lenBack', 'lenWant', 'rmsL', 'rmsR', 'n', 'bytesFull',
+                  'bytesBare', 'stamp', 'localClock', 'match', 'pickerBytes', 'fallback',
+                  'cancelFellBack', 'expect'], rows };
+}
+
 const HELP = {
   cols: ['args'],
   rows: [
@@ -1788,6 +1852,7 @@ const HELP = {
     { k: 'micrec',   args: 'ch=9 hold=900 db=-6 — the RECORDER rows (fake mic): chord, tab-alone, picture, gain, keys, ring, punch/xfade, repitch, mute/resume' },
     { k: 'micrec2',  args: 'ch=9 — the SESSION rows: monitor, device, mic sync, esc dials+arrows, tab loop, latc, stereo, tempo-from-take, nearend, headtrim, rshift-del clear' },
     { k: 'grainflt', args: 'ch=9 — the cloud follows its own pitch dial (440→880 on +12) and the reso dial is real under 1 (LP/HP Q maps below 0dB)' },
+    { k: 'setio',    args: 'ch=9 — the set file: takes travel embedded, no-audio fallback holes them, local stamps, exportSet via stubbed save picker' },
     { k: '(any)',    args: '--ab <url> runs the same probe on a second build and diffs it' },
   ]
 };
@@ -1822,7 +1887,8 @@ try {
                    modmatrix: probeModMatrix,
                    micrec: probeMicRec,
                    micrec2: probeMicRec2,
-                   grainflt: probeGrainFlt };
+                   grainflt: probeGrainFlt,
+                   setio: probeSetIO };
   const fn = PROBES[NAME];
   out = fn ? await fn() : (NAME === 'help' ? HELP : { cols: [], rows: [], err: 'no probe named ' + NAME });
 } catch (e) {

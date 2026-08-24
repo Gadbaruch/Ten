@@ -16689,20 +16689,43 @@ function audRef(pi){
   const e=POOL.find(p2=>p2.buf===buf);
   return {n:(e&&e.name)||engine.audName[pi]||'take', src:(e&&e.src)||{k:'r'}};
 }
+/* the takes themselves, for the channels whose audio exists nowhere else.
+   Budget is SHARED with the op samples (spent0 arrives from opSmpSave), so a
+   set full of both cannot blow past what localStorage holds; over budget or
+   in the no-audio fallback a take degrades to exactly what it was before —
+   a named hole. */
+function audSave(noAudio,spent0){
+  let spent=spent0||0;
+  return S.presets.map((p2,pi)=>{
+    const r=audRef(pi); if(!r)return r;
+    if(r.src.k==='f'&&r.src.f)return r;            // factory: re-fetched by name
+    if(noAudio)return r;
+    const buf=engine.audBuf[pi]||(engine.granBuf||[])[pi];
+    const enc=smpEnc(buf);
+    if(enc&&spent+enc.d.length<=SMPCAP){spent+=enc.d.length; return {...r,...enc};}
+    return r;
+  });
+}
 /* …and putting them back. Factory files are re-fetched and re-attached to
    every channel that asked for them; anything else is reported by name rather
    than silently missing, because "channel 7 is quiet" and "channel 7 wants
    mybreak.wav" are very different things to be told. */
 function restoreAudio(refs){
   if(!Array.isArray(refs))return;
-  const want=new Map(), miss=[];
+  const want=new Map(), miss=[]; let landed=false;
   refs.forEach((r,i)=>{
     if(!r||!r.src)return;
+    if(r.d){                        // the take itself traveled — decode and land it
+      const buf=smpDec(r);
+      if(buf){poolAdd(buf,r.n||'take',r.src); engine.granNode(i);
+        engine.setChanBuf(i,buf,r.n||'take'); landed=true; return;}
+    }
     if(r.src.k==='f'&&r.src.f){
       if(!want.has(r.src.f))want.set(r.src.f,[]);
       want.get(r.src.f).push(i);
     }else miss.push('ch '+i+' \u2192 '+(r.src.f||r.n||'a take from that session'));
   });
+  if(landed){engine.audRelockAll(); dirty=true;}
   for(const [file,chans] of want){
     const have=POOL.find(p2=>p2.src&&p2.src.k==='f'&&p2.src.f===file);
     const put=buf=>{ if(!buf)return;
@@ -23164,16 +23187,17 @@ function portPreset(p,out){
   if(Array.isArray(q.kit))q.kit=q.kit.map(k=>k?portPreset(k,out):null);
   return q;
 }
-function serialize(noAudio){const _os=opSmpSave(noAudio); return JSON.stringify({v:SAVEV,bpm:T.bpm,metro:S.metro,hum:S.hum,grv:S.grv,oct:S.oct,master:S.master,mLvl:S.mLvl??0.8,dj:S.dj,gmT:S.gmT||[],arrOn:S.arrOn!==false,
+function serialize(noAudio){const _os=opSmpSave(noAudio); const _as=audSave(noAudio,_os._bytes); return JSON.stringify({v:SAVEV,bpm:T.bpm,metro:S.metro,hum:S.hum,grv:S.grv,oct:S.oct,master:S.master,mLvl:S.mLvl??0.8,dj:S.dj,gmT:S.gmT||[],arrOn:S.arrOn!==false,
   clips:S.clips,scenes:S.scenes,clipAt:S.clipAt,sceneAt:S.sceneAt,
   arr:S.arr,
   patterns:S.patterns.map(p=>({state:p.state==='edit'?'on':p.state,sw:p.sw||0,lanes:p.lanes})),
-  /* THE TAKES TRAVEL WITH THE SET, as far as they can. A set used to save an
-     audio channel's every dial and none of its SOUND, so loading one gave you
-     a perfectly configured silence and no clue which file it wanted. One
-     reference per channel: a factory phrase comes back by itself, and anything
-     else comes back as a named hole with all its settings intact. */
-  aud:S.presets.map((p,i)=>audRef(i)),
+  /* THE TAKES TRAVEL WITH THE SET — the audio itself now (2026-08-24). A
+     reference per channel used to be the whole story: factory phrases came
+     back by themselves and a RECORDING came back as a named hole, which as of
+     the mic being an instrument means the set loses its performances on every
+     export and every reload. A recorded take rides as 16-bit base64 inside
+     the op-sample budget; factory files stay references. */
+  aud:_as,
   /* …and the SYNTH ops' samples, which unlike a channel's take cannot be
      re-fetched, so the audio itself travels. Two keys: the deduped blobs and
      the map of which op points at which. */
@@ -23510,7 +23534,11 @@ function wavOf(chans,rate){
 function dl(blob,name){
   const a=document.createElement('a');
   a.href=URL.createObjectURL(blob); a.download=name; a.click();
-  setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+  /* 4s used to be the revoke window, and a Chrome set to ask where to save
+     shows a DIALOG here — take longer than the window to pick a folder and
+     the blob is gone before the save starts: "Failed - file missing", or
+     nothing at all. Two minutes outlives any dialog. */
+  setTimeout(()=>URL.revokeObjectURL(a.href),120000);
 }
 function tapOf(node){                      // a stereo recorder hanging off a node
   const sp=AC.createScriptProcessor(4096,2,2);
@@ -23546,7 +23574,7 @@ async function exportAudio(stems){
        out progressively longer — 768KB for the master and 1328KB for the last
        channel — and none of them lined up. They are cut at one instant now. */
     const cut=taps.map(x=>({name:x.name,data:x.t.stop()}));
-    const stamp=new Date().toISOString().slice(0,16).replace(/[:T]/g,'-');
+    const stamp=stampNow();
     let n=0;
     for(const x of cut){
       const [L,R]=x.data;
@@ -23560,10 +23588,33 @@ async function exportAudio(stems){
 }
 let EXPORTING=false;
 /* ---------------- set files ------------------------------------------ */
-function exportSet(){
-  const stamp=new Date().toISOString().slice(0,16).replace(/[:T]/g,'-');
-  dl(new Blob([serialize()],{type:'application/json'}),'ten-set-'+stamp+'.json');
-  flash('▼ ten-set-'+stamp+'.json');
+/* stamps were toISOString = UTC — a set saved at 01:29 was NAMED 23-29 of the
+   day before, so the newest export sorted into yesterday. Local time now. */
+function stampNow(){const d9=new Date(),p2=x9=>String(x9).padStart(2,'0');
+  return d9.getFullYear()+'-'+p2(d9.getMonth()+1)+'-'+p2(d9.getDate())+'-'+p2(d9.getHours())+'-'+p2(d9.getMinutes());}
+async function exportSet(){
+  const name='ten-set-'+stampNow()+'.json';
+  const blob=new Blob([serialize()],{type:'application/json'});
+  /* THE EXPORT IS A SAVE DIALOG NOW (2026-08-24: an export flashed ▼ and no
+     file landed anywhere on the disk — an anchor click hands the file to the
+     browser and nothing ever reports whether the browser dropped it). The
+     picker shows WHERE the file goes and its close is the save completing;
+     import has used the same API for months. Esc in the dialog says
+     "cancelled" instead of pretending. The anchor stays as the fallback for
+     browsers without the API. */
+  if(window.showSaveFilePicker){
+    try{
+      const h=await showSaveFilePicker({suggestedName:name,
+        types:[{description:'TEN set',accept:{'application/json':['.json']}}]});
+      const w=await h.createWritable(); await w.write(blob); await w.close();
+      flash('▼ '+(h.name||name)); return;
+    }catch(err){
+      if(err&&err.name==='AbortError'){flash('export cancelled'); return;}
+      /* picker refused outright — fall through to the anchor */
+    }
+  }
+  dl(blob,name);
+  flash('▼ '+name);
 }
 async function importSet(){
   const take=t=>{ if(load(t)){flash('▲ set loaded'); dirty=true; dirtySave=true; bakPush('after importing a set',true);}
