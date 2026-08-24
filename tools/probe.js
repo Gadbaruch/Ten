@@ -1727,7 +1727,8 @@ async function probeGrainFlt() {
        through audAction, which is where it did not work for him */
     const KS9 = (t9, c9) => document.dispatchEvent(new KeyboardEvent(t9, { code: c9, key: c9, bubbles: true, cancelable: true }));
     S.layer = 2; S.mSel = false;
-    S.curParam = AUDALL().findIndex(s9 => s9.key === 'semis');
+    S.curMod = MODULES.findIndex(m9 => m9.id === 'osc');   // the audio page rides the OSC module
+    S.curParam = AUDPAGE().findIndex(s9 => s9.key === 'semis');   // the PAGE array, not AUDALL — the cursor indexes the filtered list
     for (let k9 = 0; k9 < 12; k9++) { KS9('keydown', 'ArrowUp'); KS9('keyup', 'ArrowUp'); await sleep(12); }
     await sleep(380);
     const up9 = await freq(); const reads9 = pr.gr.semis;
