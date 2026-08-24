@@ -1258,8 +1258,100 @@ async function probeMicRec() {
     stop(); await sleep(120);
     rows.push({ k: 'mute', carBefore, busPlay, carDuring, busRec, busResume, carAfter,
                 expect: 'car t/f/t · bus >0 · ~0 · >0 at once' });
+    /* (the session rows — monitor, device, sync, esc gestures, tab loop,
+       latc, stereo, tempo, nearend, headtrim, clear — moved to micrec2:
+       the browse CLI caps a command at 30s and the full suite outgrew it) */
+
+  } finally {
+    window.flash = flash0;
+    md.getUserMedia = gum0; md.enumerateDevices = enu0;
+    if (engine.audRec) engine.audRecStop(true);
+    if (MIC.on) micOff(); MIC.stream = null; MIC.ring = null; MIC.devs = null;
+    try { osc.stop(); } catch (_) {}
+    CFG.micDb = keep.micDb; CFG.overdub = keep.overdub; CFG.micMon = keep.micMon; micMonWire();
+    if (T.playing && !keep.playing) stop();
+    if (keep.micDev) { CFG.micDev = keep.micDev; CFG.micDevL = keep.micDevL; } else { delete CFG.micDev; delete CFG.micDevL; }
+    saveCfg();
+    unstash(ch, keep.p);
+    Object.assign(lane, keep.lane);
+    engine.audBuf[ch] = keep.buf; engine.audName[ch] = keep.name;
+    if (engine.granBuf) engine.granBuf[ch] = keep.gbuf;
+    S.layer = keep.layer; try { setBpm(keep.bpm); } catch (_) {} dirty = true;
+  }
+  notes.push('flashes: ' + flashes.join(' | '));
+  return { cols: ['rec', 'landed', 'peak', 'expect', 'onSec', 'heldSec', 'loopSec', 'firstAt', 'expAt', 'head', 'strokes',
+                  'micAfter', 'rec2', 'keysSeen', 'ovdubOnSec', 'carBefore', 'busPlay', 'carDuring', 'busRec', 'carAfter',
+                  'on', 'off', 'bus', 'at', 'step1', 'step2', 'listed', 'row',
+                  'micDuring', 'db', 'mon', 'layer', 'latched',
+                  'down', 'up', 'full', 'l', 'r', 'rfull', 'sameBuf', 'spd', 'semis', 'crop',
+                  'onsets', 'E', 'Ems', 'spread', 'nowLATC', 'implied', 'trimMs', 'status', 'maxStep', 'nch', 'LtoR', 'bpm', 'lane', 'dur', 'fitRatio', 'relPh', 'busBoundary', 'busNext', 'buf', 'auto', 'events',
+                  'spanSec', 'bedSec', 'mixSec', 'ovdubMixSec', 'dev', 'paramLeak', 'curParam', 'busResume'], rows };
+}
+
+async function probeMicRec2() {
+  const ch = CH, hold = num(P.hold, 900), db = num(P.db, -6);
+  const rows = [];
+  const md = navigator.mediaDevices;
+  const gum0 = md.getUserMedia, enu0 = md.enumerateDevices;
+  const lane = S.patterns[S.editPat].lanes[ch];
+  const keep = { p: stash(ch), buf: engine.audBuf[ch], name: engine.audName[ch],
+                 gbuf: (engine.granBuf || [])[ch],
+                 lane: { unit: lane.unit, count: lane.count, auto: lane.auto, events: lane.events.slice() },
+                 micDb: CFG.micDb, micDev: CFG.micDev, micDevL: CFG.micDevL,
+                 overdub: CFG.overdub, micMon: CFG.micMon, layer: S.layer, playing: T.playing, bpm: T.bpm };
+  /* the fake mic mints a FRESH stream per call off one feed node: micSetDev
+     stops the old stream's tracks, and a stopped singleton was a dead mic
+     for every row after the device one (sync heard 0/4 that way) */
+  const osc = AC.createOscillator(), og = AC.createGain(), feed = AC.createGain();
+  osc.frequency.value = 440; og.gain.value = 0.3; feed.gain.value = 1;
+  osc.connect(og); og.connect(feed); osc.start();
+  md.getUserMedia = () => { const d9 = AC.createMediaStreamDestination(); feed.connect(d9); return Promise.resolve(d9.stream); };
+  md.enumerateDevices = () => Promise.resolve([
+    { kind: 'audioinput', deviceId: 'fakeA', label: 'Fake A (probe)' },
+    { kind: 'audioinput', deviceId: 'fakeB', label: 'Fake B (probe)' }]);
+  const KS = (t, c, o) => document.dispatchEvent(new KeyboardEvent(t, Object.assign({ code: c, key: c, bubbles: true, cancelable: true }, o || {})));
+  const K = (t, c) => KS(t, c);
+  const sr = AC.sampleRate;
+  const fresh = () => {            // the stage must hear the FAKE, whatever it heard before
+    if (engine.audRec) engine.audRecStop(true);
+    if (MIC.on) micOff(); MIC.stream = null; MIC.ring = null; MIC.devs = null;
+    pin(ch);
+    if (!isAudioCh(ch)) setEngine(ch, 'audio');
+    /* TAPE, not cloud: seedCloud fills any gran channel with no take the
+       moment the factory pool lands — which is mid-hold right after a reload,
+       and the take then overwrote INTO nylonlick (peak 0.64 for a 0.3 sine) */
+    const pr = S.presets[ch]; pr.cat = 'audio'; pr.au = pr.au || {}; pr.au.cmode = 0; pr.au.kmode = 0; audDefaults(pr);
+    pr.au.src = 0; CFG.micMon = 0; micMonWire(); CFG.overdub = 0;
+    engine.audBuf[ch] = null; engine.audName[ch] = null;
+    if (engine.granBuf) engine.granBuf[ch] = null;
+    lane.unit = 'B'; lane.count = 1; lane.auto = false; lane.events = [];
+    S.layer = 1; dirty = true;
+  };
+  const pkOf = x => { let pk = 0; for (let i = 0; i < x.length; i++) { const v = Math.abs(x[i]); if (v > pk) pk = v; } return pk; };
+  const onOf = x => { let n = 0, first = -1; for (let i = 0; i < x.length; i++) if (Math.abs(x[i]) > 0.01) { n++; if (first < 0) first = i; } return { n, first }; };
+  const headY = () => { const l = document.querySelector('.wrec line'); return l ? +l.getAttribute('y1') : null; };
+  const strokes = () => { const q = document.querySelector('.wrec path'); return q ? (q.getAttribute('d').match(/M/g) || []).length : 0; };
+  const flashes = [];
+  const flash0 = window.flash; window.flash = m => { flashes.push(String(m)); return flash0(m); };
+  try {
+    delete CFG.micDev; delete CFG.micDevL;
+    setBpm(120);        // the rows quote seconds that assume it; scratch state had drifted to 287 once
+    for (let w = 0; w < 25 && !POOL.length; w++) await sleep(200);   // let the pool land before the first take
+    /* helpers the first half defined inside its rows */
+    const brms = async () => { const t9 = tap(busOf(ch)); await sleep(250); const [L9] = t9.stop();
+      let s9 = 0; for (let i = 0; i < L9.length; i++) s9 += L9[i] * L9[i];
+      return r3(Math.sqrt(s9 / Math.max(1, L9.length))); };
+    const cls = d9 => { const win = 256; let span = 0, bed = 0, mix = 0;
+      for (let a = 0; a + win <= d9.length; a += win) { let pk = 0;
+        for (let i = a; i < a + win; i += 2) { const v = Math.abs(d9[i]); if (v > pk) pk = v; }
+        if (pk > 0.33) mix++; else if (pk > 0.21) bed++; else if (pk > 0.08) span++; }
+      return { span: r3(span * win / sr), bed: r3(bed * win / sr), mix: r3(mix * win / sr) }; };
+    const cl = Math.max(256, Math.round(lane.len * spb() * sr));
+
     /* monitor — one switch, heard through the focused audio channel's STRIP:
-       the bus carries it and the master hears it downstream */
+       the bus carries it and the master hears it downstream. This half of
+       the suite starts cold: raise the stage first. */
+    fresh(); if (!MIC.on) await micOn(); MIC.latched = true; await sleep(250);
     const nrms = async nd => { const t9 = tap(nd); await sleep(300); const [L9] = t9.stop();
       let s9 = 0; for (let i = 0; i < L9.length; i++) s9 += L9[i] * L9[i];
       return r3(Math.sqrt(s9 / Math.max(1, L9.length))); };
@@ -1316,7 +1408,11 @@ async function probeMicRec() {
     S.layer = 1;
     /* tabloop — tab+↑↓ is SAMPLE LENGTH: crop and lane scale together so
        the rate cannot move, the speed dial is never written, the full take
-       refuses to grow, and no take lands from a modifier-spent hold */
+       refuses to grow, and no take lands from a modifier-spent hold.
+       The gesture needs a take on the channel — lay a bed first. */
+    fresh(); if (!MIC.on) await micOn(); MIC.latched = true;
+    await sleep(lane.len * spb() * 1000 + 300);
+    audPlace(ch, micGrab(lane.len * spb()), gridNow() - lane.len, 'mic');
     lane.unit = 'B'; lane.count = 1; lane.auto = false;
     const pau = S.presets[ch].au; pau.spd = 1; pau.rate = 1; pau.en = 1; pau.st = 0; pau.fit = 1;
     const bufRef = engine.audBuf[ch];
@@ -1395,8 +1491,46 @@ async function probeMicRec() {
     rows.push({ k: 'tempo', bpm: r3(T.bpm), lane: lane.count + '×' + lane.unit,
                 dur: tb9 ? r3(tb9.duration) : null,
                 fitRatio: tb9 ? r3(tb9.duration / (lane.len * spb())) : null,
-                expect: 'bpm ~125-140 · 1×B · fit 1.0' });
-    setBpm(keep.bpm);
+                expect: 'bpm ~125-145 · 1×B · fit 1.0' });
+    setBpm(120);
+    /* nearend — releasing a take just before the bar must not eat the next
+       loop: the boundary the mute consumed is re-posted (round 11) */
+    fresh(); CFG.overdub = 0;
+    await micOn(); MIC.latched = true; await sleep(lane.len * spb() * 1000 + 300);
+    audPlace(ch, micGrab(lane.len * spb()), gridNow() - lane.len, 'mic');
+    play(); await sleep(1200);
+    const relAt = () => fmod(posNow() - actAt(posNow()).anchor, lane.len);
+    engine.audRecStart(ch); await sleep(250);
+    let g9 = 0; while (relAt() < lane.len - 0.14 && g9++ < 500) await sleep(10);
+    engine.audRecStop();
+    const relPh = r3(relAt());
+    await sleep(150); const busB = await brms();
+    await sleep(1200); const busN = await brms();
+    const carN = !!(engine.audCar || [])[ch];
+    stop(); await sleep(150);
+    rows.push({ k: 'nearend', relPh, busBoundary: busB, busNext: busN, carAfter: carN,
+                expect: 'both >0 (was: a silent loop)' });
+    /* headtrim — silence between the press and the first sound must not
+       punch a hole in the bed: the head is trimmed, the start beat moves */
+    fresh(); CFG.overdub = 0; CFG.micDb = 0; micGainApply();
+    if (!MIC.on) await micOn(); MIC.latched = true;
+    osc.frequency.value = 440; og.gain.value = 0.3; await sleep(lane.len * spb() * 1000 + 300);
+    audPlace(ch, micGrab(lane.len * spb()), gridNow() - lane.len, 'mic');
+    osc.frequency.value = 523; CFG.micDb = -6; micGainApply(); og.gain.value = 0;
+    K('keydown', 'Tab'); await sleep(400);
+    og.gain.value = 0.3; await sleep(500);
+    K('keyup', 'Tab'); await sleep(250);
+    og.gain.value = 0.3; osc.frequency.value = 440; CFG.micDb = 0; micGainApply();
+    const ht = cls(engine.audBuf[ch].getChannelData(0));
+    rows.push({ k: 'headtrim', spanSec: ht.span, bedSec: ht.bed, mixSec: ht.mix,
+                expect: 'span ~0.5 (tone only) · bed ~1.45 · no hole' });
+    /* clear — rshift+⌫ empties the recording channel and re-arms the clock */
+    pin(ch); S.layer = 1;
+    KS('keydown', 'ShiftRight', { shiftKey: true });
+    KS('keydown', 'Backspace', { shiftKey: true }); await sleep(60);
+    KS('keyup', 'Backspace', { shiftKey: true }); K('keyup', 'ShiftRight'); await sleep(120);
+    rows.push({ k: 'clear', buf: !!engine.audBuf[ch], auto: lane.auto, events: lane.events.length,
+                expect: 'buf false · auto true · 0 events' });
   } finally {
     window.flash = flash0;
     md.getUserMedia = gum0; md.enumerateDevices = enu0;
@@ -1419,7 +1553,7 @@ async function probeMicRec() {
                   'on', 'off', 'bus', 'at', 'step1', 'step2', 'listed', 'row',
                   'micDuring', 'db', 'mon', 'layer', 'latched',
                   'down', 'up', 'full', 'l', 'r', 'rfull', 'sameBuf', 'spd', 'semis', 'crop',
-                  'onsets', 'E', 'Ems', 'spread', 'nowLATC', 'implied', 'trimMs', 'status', 'maxStep', 'nch', 'LtoR', 'bpm', 'lane', 'dur', 'fitRatio',
+                  'onsets', 'E', 'Ems', 'spread', 'nowLATC', 'implied', 'trimMs', 'status', 'maxStep', 'nch', 'LtoR', 'bpm', 'lane', 'dur', 'fitRatio', 'relPh', 'busBoundary', 'busNext', 'buf', 'auto', 'events',
                   'spanSec', 'bedSec', 'mixSec', 'ovdubMixSec', 'dev', 'paramLeak', 'curParam', 'busResume'], rows };
 }
 
@@ -1438,7 +1572,8 @@ const HELP = {
     { k: 'trig',     args: 'ch=1 note=60 ph=90 — does an operator rtrg/free reach the sound, in both fm engines' },
     { k: 'matrix',   args: 'ch=8 take=nylonlick cues=4 — the seven cases + the cue jumps' },
     { k: 'modmatrix',args: 'only=filt — every mod SOURCE x every DESTINATION: reaches/anchor/live/tweak' },
-    { k: 'micrec',   args: 'ch=9 hold=900 db=-6 — mic on an audio channel (fake mic): chord, tab-alone, picture, gain, keys, ring, punch/mute/repitch, monitor, device, esc scope (dials+arrows), tab loop' },
+    { k: 'micrec',   args: 'ch=9 hold=900 db=-6 — the RECORDER rows (fake mic): chord, tab-alone, picture, gain, keys, ring, punch/xfade, repitch, mute/resume' },
+    { k: 'micrec2',  args: 'ch=9 — the SESSION rows: monitor, device, mic sync, esc dials+arrows, tab loop, latc, stereo, tempo-from-take, nearend, headtrim, rshift-del clear' },
     { k: '(any)',    args: '--ab <url> runs the same probe on a second build and diffs it' },
   ]
 };
@@ -1471,7 +1606,8 @@ try {
                    trig: probeTrig,
                    matrix: probeMatrix,
                    modmatrix: probeModMatrix,
-                   micrec: probeMicRec };
+                   micrec: probeMicRec,
+                   micrec2: probeMicRec2 };
   const fn = PROBES[NAME];
   out = fn ? await fn() : (NAME === 'help' ? HELP : { cols: [], rows: [], err: 'no probe named ' + NAME });
 } catch (e) {

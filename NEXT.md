@@ -1,6 +1,6 @@
 # WHERE THE AUDIO CHANNEL STANDS — 2026-08-23, branch `mic-rec`
 
-## MIC RECORDING ON AN AUDIO CHANNEL — on branch `mic-rec`, build 2026-08-24.1406, his ear next
+## MIC RECORDING ON AN AUDIO CHANNEL — on branch `mic-rec`, build 2026-08-24.1556, his ear next
 
 Gad, 2026-08-23: "i cant hear anything recorded, can you make my mic input
 controlable. also can you draw the incoming audio as its recorded and put a
@@ -193,6 +193,46 @@ Two more from his hands, minutes apart:
   keep a DEDICATED tab, front it BY ID (`browse tab N`) before every run,
   and read the url line of every probe header. Fronted-tab addressing in a
   shared window is a race.
+
+### ROUND 11 — ⇧⌫ clears the channel · the eaten boundary · the silent head
+
+- **"i want shift+del to clear the recording channel so its setup for bpm
+  detection."** Right-shift+⌫ on an audio channel (any layer ≥1) clears the
+  WHOLE recording channel: take gone, cues and lane events gone, lane back
+  to AUTO at the default length, dials neutral — the next stopped mic take
+  is a NEW loop and sets the clock. It outranks the lane-only ⇧⌫ (and the
+  held layerInit) on audio channels; the take stays in the pool, ⌘z brings
+  everything back. Measured: buf false · auto true · 0 events.
+- **"i finish a recording near the end of existing loop it stops autoloop
+  play."** Reproduced exactly: release 0.126 beats before the bar → ONE FULL
+  LOOP of silence (feels stopped; a stop/start also cures it, which is what
+  he did). Root cause: while a mode-0 take runs, audCycle skips every
+  boundary in its windows — including the NEXT one, already consumed into
+  posted-territory (T.schedBeat) that no later tick revisits — and
+  audResume's tclr flushes even a queued spawn. audResume now re-posts that
+  one boundary's carrier when it is behind T.schedBeat (fit channels only:
+  a FREE channel keeps its single deadline-less join and must not get a
+  second; the ph<1e-3 early-return also joined the fix). Measured: bus rms
+  0.102 across the boundary and 0.102 a loop later, carrier back — was 0
+  for a whole loop.
+- **"there is a bit of silence added before when i seem to be pressing
+  rec."** The +87ms trim moves CONTENT earlier, so the stream's spin-up and
+  the breath before the first sound landed BEFORE the press — and in
+  overwrite that silence punched a hole in the bed. audRecStop now trims
+  the head to ~6ms before the first audible sample (thr = max(0.004,
+  peak·0.05), only when ≥ ~23ms of silence) and moves the start beat with
+  it: the sound sits exactly where it sounded and the punch begins where
+  the TAKE does. The tail stays — a punch-out is timing, not noise. The
+  tempo guess reads the trimmed length (a truer duration). Measured: 400ms
+  of silence under the press then 500ms of tone → span 0.418s, bed intact,
+  zero holes where the silence was.
+- **The probe split in two** — the browse CLI hard-caps any command at 30s
+  and the suite had grown past it: `micrec` (the recorder: chord, tab-alone,
+  picture, gain, keys, ring, punch/xfade, repitch, mute/resume — ~17s) and
+  `micrec2` (the session: monitor, device, sync, esc dials+arrows, tab
+  loop, latc, stereo, tempo, nearend, headtrim, clear — ~26s). Rows carry
+  their own setup now (the split re-ordered them and three ran cold before
+  they did). 8 + 12 rows, all green on this build.
 
 ### ROUND 10 — stereo resample · crossfaded punches · a take into silence sets the clock
 
