@@ -1234,7 +1234,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-24.1626';
+const BUILD='2026-08-24.1647';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -11679,7 +11679,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
          there is no grid to align to, so the trim is 0 and the first sound
          IS the zero point. A transport started mid-take keeps the anchor. */
       const stop9=!T.playing;
-      E.audRec={pi,src:srcNode,sp3,sink,chunks,chunksR,pks,blk:SUB,
+      E.audRec={pi,src:srcNode,sp3,sink,chunks,chunksR,pks,blk:SUB,at0:AC.currentTime,
         startBeat:stop9?editAnchor():gridNow(),from0:stop9,label,openedMic,keys:0,
         lat:stop9?0:audRecLat(label)};
       /* in overwrite the OLD loop goes quiet under the take — the carrier and
@@ -11710,13 +11710,25 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
   audRecStop(drop){
     this.audRecPend=null;
     const r=this.audRec; if(!r)return; this.audRec=null;
+    const E9=this;
+    /* THE PUNCH WINDOW OBEYS THE LATENCY TOO (Gad, 2026-08-24: "the record
+       on/off of mic doesnt obey it, so it sounds like recording starts too
+       early and ends too early"). The content was already placed lat early —
+       correct for WHERE sounds sit, wrong for WHAT the take is: the span
+       began lat before the press (pre-press air) and the air of the last lat
+       ms had not reached the stream when the tap closed, so short punches
+       lost their tails. Now the tap DRAINS exactly lat past the release and
+       the same lat is cut off the head: the take is the AIR of
+       [press..release], placed at the press with nothing left to shift. */
+    const relAt=AC.currentTime;
+    const finish=()=>{
     try{r.src.disconnect(r.sp3);}catch(_){}     // only the tap — the stage and the master keep their other outputs
     try{r.sp3.disconnect();r.sink.disconnect();}catch(_){}
     if(r.openedMic&&MIC.on&&!MIC.latched&&!MIC._down)micOff();
     dirty=true;
-    if(drop){this.audResume(r.pi);return;}
-    const len=r.chunks.reduce((a2,c2)=>a2+c2.length,0);
-    if(len<AC.sampleRate*0.05){flash(r.label+' take too short');this.audResume(r.pi);return;}
+    if(drop){E9.audResume(r.pi);return;}
+    let len=r.chunks.reduce((a2,c2)=>a2+c2.length,0);
+    if(len<AC.sampleRate*0.05+(r.lat||0)){flash(r.label+' take too short');E9.audResume(r.pi);return;}
     const rec=new Float32Array(len); let o=0;
     for(const c2 of r.chunks){rec.set(c2,o);o+=c2.length;}
     let recOut=rec;
@@ -11725,6 +11737,20 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
       for(const c2 of r.chunksR){recR.set(c2,o2);o2+=c2.length;}
       recOut=[rec,recR];
     }
+    if(r.lat>0&&len>r.lat){
+      recOut=Array.isArray(recOut)?recOut.map(cD=>cD.subarray(r.lat)):recOut.subarray(r.lat);
+      len-=r.lat;
+    }
+    /* …and cut to exactly the held window of air: the drain runs one SP
+       block past the latency, because the block being filled at disconnect
+       is thrown away — up to 93ms of the newest air, the same loss that
+       was hiding inside the old early-tail. Nothing past the release is
+       kept: the punch ends where the hand ended it. */
+    {const heldN=Math.max(0,Math.round((relAt-r.at0)*AC.sampleRate));
+     if(heldN>0&&len>heldN){
+       recOut=Array.isArray(recOut)?recOut.map(cD=>cD.subarray(0,heldN)):recOut.subarray(0,heldN);
+       len=heldN;
+     }}
     /* THE SILENT HEAD IS NOT PART OF THE TAKE (Gad, 2026-08-24: "there is a
        bit of silence added before when i seem to be pressing rec please
        check it"). The trim moves CONTENT earlier by the chain delay, so the
@@ -11780,7 +11806,10 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
         return;
       }
     }
-    audPlace(r.pi,recOut,r.startBeat+(r.from0?0:sbAdj),r.label,r.lat);
+    audPlace(r.pi,recOut,r.startBeat+(r.from0?0:sbAdj),r.label,0);
+    };
+    if(!drop)setTimeout(finish,Math.ceil((r.lat+4096)/AC.sampleRate*1000)+8);
+    else finish();
   }
   chokeSeq(pi){const n=AC.currentTime;for(const v of [...this.act[pi]])if(!v.live)v.kill(n);
     /* granular: the worklet may hold voices whose 'off' was lost — a choke is
@@ -22722,7 +22751,16 @@ const onKeyUp=e=>{
          take it had just placed.) */
       const pi3=S.layer>=2?S.editSnd:S.curPreset;
       if(isAudioCh(pi3)){
-        engine.audRecStop(true);
+        /* A CHORD TAP IS A TINY PUNCH (Gad, 2026-08-24: "i want to be able
+           to do very short punches, but now they cancel... please allow
+           short punch recordings when holding esc and tapping tab"). The
+           cancel-on-tap existed to keep the tap free for the ring grab; the
+           ring tap is parked, so the tap LANDS what it recorded — keys still
+           outrank it (audRecEnd), and a graze under 50ms of air still says
+           'take too short'. A plain tab tap (no chord) stays the keys retro. */
+        if(engine.audRec||engine.audRecPend){
+          audRecEnd(); dirty=true; dirtySave=true; return;
+        }
         /* THE RING TAP IS PARKED (Gad, 2026-08-24: "lets remove retro rec on
            audio for now, comment it out or something, it doesnt feel good").
            It grabbed the last loop of air off the ring, aligned to now — and

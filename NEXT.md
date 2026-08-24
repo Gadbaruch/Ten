@@ -1,6 +1,6 @@
 # WHERE THE AUDIO CHANNEL STANDS — 2026-08-23, branch `mic-rec`
 
-## MIC RECORDING ON AN AUDIO CHANNEL — on branch `mic-rec`, build 2026-08-24.1626, his ear next
+## MIC RECORDING ON AN AUDIO CHANNEL — on branch `mic-rec`, build 2026-08-24.1647, his ear next
 
 Gad, 2026-08-23: "i cant hear anything recorded, can you make my mic input
 controlable. also can you draw the incoming audio as its recorded and put a
@@ -193,6 +193,40 @@ Two more from his hands, minutes apart:
   keep a DEDICATED tab, front it BY ID (`browse tab N`) before every run,
   and read the url line of every probe header. Fronted-tab addressing in a
   shared window is a race.
+
+### ROUND 14 — the punch WINDOW obeys the latency, and a chord tap is a tiny punch
+
+His diagnosis, verbatim and correct: "we fixed the audio latency, but the
+record on/off of mic doesnt obey it, so it sounds like recording starts too
+early and ends too early ... im getting empty space before and the end is
+cut when i do short punch ins."
+
+- **The window.** Content was placed lat early — right for WHERE sounds sit,
+  wrong for WHAT the take is: the span began lat before the press
+  (pre-press air over the bed) and the air of the last lat ms had not
+  reached the stream when the tap closed. Now audRecStop DRAINS: the tap
+  stays open lat + one SP block past the release (the block being filled at
+  disconnect is discarded by the browser — up to 93ms of the newest air,
+  a loss that had been hiding inside the early tail), then the head is cut
+  by exactly lat and the take truncated to the held air window
+  (relAt−at0). The take IS the air of [press..release], placed at the
+  press, lat spent. Placement/auto-play arrive ~lat+93ms after the release
+  — imperceptible. Measured (trim = the rig's own 22ms chain): press 0.613
+  / release 0.933 → span 0.620–0.916 (was ending 87ms short; start was
+  87ms early); the plain punch row's span grew 0.36→0.44 of a 0.45 hold —
+  the block loss had been eating every tail.
+  ⚠ The drop equals r.lat, so a trim that does not match the real chain
+  shifts content by the difference — the tailfix row proves it both ways.
+  His 87 is measured; a gear change needs one press of mic sync.
+- **"please allow short punch recordings when holding esc and tapping tab."**
+  The tap-cancels-the-take rule existed to keep the tap free for the ring
+  grab; with the ring tap parked, a chord TAP LANDS what it recorded — keys
+  still outrank it (audRecEnd), a graze under 50ms of air still refuses.
+  A plain tab tap (no chord) stays the keys' retro. Measured: a 120ms tap
+  → 104ms landed at the press (was: cancelled).
+- Probe: tailfix + shortpunch rows in micrec (11 rows), trim pinned/restored
+  in both prologues; micrec2 12 rows — all green, headtrim's span now the
+  full tone (0.499s) with the recovered tail.
 
 ### ROUND 13 — the ring tap parked · the SEED take, named and self-starting
 

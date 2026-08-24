@@ -1103,7 +1103,8 @@ async function probeMicRec() {
                  gbuf: (engine.granBuf || [])[ch],
                  lane: { unit: lane.unit, count: lane.count, auto: lane.auto, events: lane.events.slice() },
                  micDb: CFG.micDb, micDev: CFG.micDev, micDevL: CFG.micDevL,
-                 overdub: CFG.overdub, micMon: CFG.micMon, layer: S.layer, playing: T.playing, bpm: T.bpm };
+                 overdub: CFG.overdub, micMon: CFG.micMon, micTrim: CFG.micTrimMs,
+                 layer: S.layer, playing: T.playing, bpm: T.bpm };
   /* the fake mic mints a FRESH stream per call off one feed node: micSetDev
      stops the old stream's tracks, and a stopped singleton was a dead mic
      for every row after the device one (sync heard 0/4 that way) */
@@ -1141,6 +1142,7 @@ async function probeMicRec() {
   try {
     delete CFG.micDev; delete CFG.micDevL;
     setBpm(120);        // the rows quote seconds that assume it; scratch state had drifted to 287 once
+    delete CFG.micTrimMs;   // rows that need a trim set their own
     for (let w = 0; w < 25 && !POOL.length; w++) await sleep(200);   // let the pool land before the first take
     /* tab-alone — the sound recorder must NOT start without the mic key
        (Gad, 2026-08-24: "it should be mic+rec records audio input") */
@@ -1274,6 +1276,42 @@ async function probeMicRec() {
         if (pk > 0.08 && pk < 0.21) { spanAt = a; break; } } }
     rows.push({ k: 'from0', spanStartSec: spanAt < 0 ? null : r3(spanAt / sr),
                 expect: '~0 — stopped takes land at the loop start' });
+    /* tailfix — with a trim set, the punch WINDOW obeys it: the tap drains
+       past the release and drops the pre-press head, so the take is the AIR
+       of press..release — tail complete, no early start. Reuses from0's bed;
+       the scan skips from0's span at 0-0.5s. */
+    /* trim = the fake chain's OWN latency (22ms, the number the sync row
+       measures) — the drop must equal the real chain delay; a trim that
+       does not match the chain shifts content by the difference, which is
+       exactly what it does on a machine whose gear changed without a
+       re-measure */
+    CFG.micTrimMs = 22;
+    const phS = () => fmod(posNow() - actAt(posNow()).anchor, lane.len) * spb();
+    const spanIn = (lo, hi) => { const d9 = engine.audBuf[ch].getChannelData(0), win = 256;
+      let s1 = -1, s2 = -1;
+      for (let a = Math.round(lo * sr); a + win <= Math.min(d9.length, Math.round(hi * sr)); a += win) {
+        let pk = 0; for (let i = a; i < a + win; i += 2) { const v = Math.abs(d9[i]); if (v > pk) pk = v; }
+        if (pk > 0.08 && pk < 0.21) { if (s1 < 0) s1 = a; s2 = a + win; } }
+      return s1 < 0 ? null : [r3(s1 / sr), r3(s2 / sr)]; };
+    play(); await sleep(400);
+    let gg = 0; while ((phS() < 0.6 || phS() > 0.75) && gg++ < 300) await sleep(15);
+    osc.frequency.value = 523; CFG.micDb = -6; micGainApply();
+    K('keydown', 'Tab'); const tfP = r3(phS()); await sleep(320);
+    const tfR = r3(phS()); K('keyup', 'Tab');
+    osc.frequency.value = 440; CFG.micDb = 0; micGainApply();
+    await sleep(450);
+    const tfSpan = spanIn(0.55, 1.95);
+    rows.push({ k: 'tailfix', press: tfP, release: tfR, span: tfSpan ? tfSpan.join('-') : null,
+                expect: 'span ≈ press..release — tail not cut, no early start' });
+    /* shortpunch — a chord TAP lands a tiny punch now instead of cancelling */
+    gg = 0; while ((phS() < 1.25 || phS() > 1.45) && gg++ < 300) await sleep(15);
+    osc.frequency.value = 523; CFG.micDb = -6; micGainApply();
+    K('keydown', 'Tab'); const spP = r3(phS()); await sleep(120); K('keyup', 'Tab');
+    osc.frequency.value = 440; CFG.micDb = 0; micGainApply();
+    await sleep(400); stop(); await sleep(150); delete CFG.micTrimMs;
+    const spSpan = spanIn(Math.max(0, spP - 0.06), Math.min(1.95, spP + 0.5));
+    rows.push({ k: 'shortpunch', press: spP, span: spSpan ? spSpan.join('-') : null,
+                expect: '~120ms landed at the press (was: cancelled)' });
     /* (the session rows — monitor, device, sync, esc gestures, tab loop,
        latc, stereo, tempo, nearend, headtrim, clear — moved to micrec2:
        the browse CLI caps a command at 30s and the full suite outgrew it) */
@@ -1285,6 +1323,7 @@ async function probeMicRec() {
     if (MIC.on) micOff(); MIC.stream = null; MIC.ring = null; MIC.devs = null;
     try { osc.stop(); } catch (_) {}
     CFG.micDb = keep.micDb; CFG.overdub = keep.overdub; CFG.micMon = keep.micMon; micMonWire();
+    if (Number.isFinite(keep.micTrim)) CFG.micTrimMs = keep.micTrim; else delete CFG.micTrimMs;
     if (T.playing && !keep.playing) stop();
     if (keep.micDev) { CFG.micDev = keep.micDev; CFG.micDevL = keep.micDevL; } else { delete CFG.micDev; delete CFG.micDevL; }
     saveCfg();
@@ -1300,7 +1339,7 @@ async function probeMicRec() {
                   'on', 'off', 'bus', 'at', 'step1', 'step2', 'listed', 'row',
                   'micDuring', 'db', 'mon', 'layer', 'latched',
                   'down', 'up', 'full', 'l', 'r', 'rfull', 'sameBuf', 'spd', 'semis', 'crop',
-                  'onsets', 'E', 'Ems', 'spread', 'nowLATC', 'implied', 'trimMs', 'status', 'maxStep', 'nch', 'LtoR', 'bpm', 'lane', 'dur', 'fitRatio', 'playingAfterSeed', 'seedHeadAt', 'punchAt', 'relPh', 'busBoundary', 'busNext', 'buf', 'auto', 'events', 'spanStartSec',
+                  'onsets', 'E', 'Ems', 'spread', 'nowLATC', 'implied', 'trimMs', 'status', 'maxStep', 'nch', 'LtoR', 'bpm', 'lane', 'dur', 'fitRatio', 'playingAfterSeed', 'seedHeadAt', 'punchAt', 'relPh', 'busBoundary', 'busNext', 'buf', 'auto', 'events', 'spanStartSec', 'press', 'release', 'span',
                   'spanSec', 'bedSec', 'mixSec', 'ovdubMixSec', 'dev', 'paramLeak', 'curParam', 'busResume'], rows };
 }
 
@@ -1314,7 +1353,8 @@ async function probeMicRec2() {
                  gbuf: (engine.granBuf || [])[ch],
                  lane: { unit: lane.unit, count: lane.count, auto: lane.auto, events: lane.events.slice() },
                  micDb: CFG.micDb, micDev: CFG.micDev, micDevL: CFG.micDevL,
-                 overdub: CFG.overdub, micMon: CFG.micMon, layer: S.layer, playing: T.playing, bpm: T.bpm };
+                 overdub: CFG.overdub, micMon: CFG.micMon, micTrim: CFG.micTrimMs,
+                 layer: S.layer, playing: T.playing, bpm: T.bpm };
   /* the fake mic mints a FRESH stream per call off one feed node: micSetDev
      stops the old stream's tracks, and a stopped singleton was a dead mic
      for every row after the device one (sync heard 0/4 that way) */
@@ -1352,6 +1392,7 @@ async function probeMicRec2() {
   try {
     delete CFG.micDev; delete CFG.micDevL;
     setBpm(120);        // the rows quote seconds that assume it; scratch state had drifted to 287 once
+    delete CFG.micTrimMs;   // rows that need a trim set their own
     for (let w = 0; w < 25 && !POOL.length; w++) await sleep(200);   // let the pool land before the first take
     /* helpers the first half defined inside its rows */
     const brms = async () => { const t9 = tap(busOf(ch)); await sleep(250); const [L9] = t9.stop();
@@ -1569,6 +1610,7 @@ async function probeMicRec2() {
     if (MIC.on) micOff(); MIC.stream = null; MIC.ring = null; MIC.devs = null;
     try { osc.stop(); } catch (_) {}
     CFG.micDb = keep.micDb; CFG.overdub = keep.overdub; CFG.micMon = keep.micMon; micMonWire();
+    if (Number.isFinite(keep.micTrim)) CFG.micTrimMs = keep.micTrim; else delete CFG.micTrimMs;
     if (T.playing && !keep.playing) stop();
     if (keep.micDev) { CFG.micDev = keep.micDev; CFG.micDevL = keep.micDevL; } else { delete CFG.micDev; delete CFG.micDevL; }
     saveCfg();
@@ -1584,7 +1626,7 @@ async function probeMicRec2() {
                   'on', 'off', 'bus', 'at', 'step1', 'step2', 'listed', 'row',
                   'micDuring', 'db', 'mon', 'layer', 'latched',
                   'down', 'up', 'full', 'l', 'r', 'rfull', 'sameBuf', 'spd', 'semis', 'crop',
-                  'onsets', 'E', 'Ems', 'spread', 'nowLATC', 'implied', 'trimMs', 'status', 'maxStep', 'nch', 'LtoR', 'bpm', 'lane', 'dur', 'fitRatio', 'playingAfterSeed', 'seedHeadAt', 'punchAt', 'relPh', 'busBoundary', 'busNext', 'buf', 'auto', 'events', 'spanStartSec',
+                  'onsets', 'E', 'Ems', 'spread', 'nowLATC', 'implied', 'trimMs', 'status', 'maxStep', 'nch', 'LtoR', 'bpm', 'lane', 'dur', 'fitRatio', 'playingAfterSeed', 'seedHeadAt', 'punchAt', 'relPh', 'busBoundary', 'busNext', 'buf', 'auto', 'events', 'spanStartSec', 'press', 'release', 'span',
                   'spanSec', 'bedSec', 'mixSec', 'ovdubMixSec', 'dev', 'paramLeak', 'curParam', 'busResume'], rows };
 }
 
