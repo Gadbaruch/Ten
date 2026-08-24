@@ -1240,11 +1240,13 @@ async function probeMicRec() {
     engine.audRecStart(ch); await sleep(350);
     const carDuring = !!(engine.audCar || [])[ch];
     const busRec = await brms();
-    engine.audRecStop(true); await sleep(2600);
+    engine.audRecStop(true); await sleep(120);
+    const busResume = await brms();     // back BEFORE the bar comes round: the mid-phrase join
+    await sleep(2100);
     const carAfter = !!(engine.audCar || [])[ch];
     stop(); await sleep(120);
-    rows.push({ k: 'mute', carBefore, busPlay, carDuring, busRec, carAfter,
-                expect: 'car t/f/t · bus >0 then ~0' });
+    rows.push({ k: 'mute', carBefore, busPlay, carDuring, busRec, busResume, carAfter,
+                expect: 'car t/f/t · bus >0 · ~0 · >0 at once' });
     /* monitor — one global switch, the mic into the master (still on from above) */
     const mrms = async () => { const t9 = tap(engine.master); await sleep(300); const [L9] = t9.stop();
       let s9 = 0; for (let i = 0; i < L9.length; i++) s9 += L9[i] * L9[i];
@@ -1323,7 +1325,7 @@ async function probeMicRec() {
                   'on', 'off', 'gate', 'step1', 'step2', 'listed', 'row',
                   'micDuring', 'db', 'mon', 'layer', 'latched',
                   'upCount', 'upSpd', 'downCount', 'downSpd', 'en', 'sameBuf', 'spd', 'semis', 'crop',
-                  'spanSec', 'bedSec', 'mixSec', 'ovdubMixSec', 'dev', 'paramLeak', 'curParam'], rows };
+                  'spanSec', 'bedSec', 'mixSec', 'ovdubMixSec', 'dev', 'paramLeak', 'curParam', 'busResume'], rows };
 }
 
 const HELP = {

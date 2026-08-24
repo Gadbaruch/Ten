@@ -1,6 +1,6 @@
 # WHERE THE AUDIO CHANNEL STANDS — 2026-08-23, branch `mic-rec`
 
-## MIC RECORDING ON AN AUDIO CHANNEL — on branch `mic-rec`, build 2026-08-24.1202, his ear next
+## MIC RECORDING ON AN AUDIO CHANNEL — on branch `mic-rec`, build 2026-08-24.1227, his ear next
 
 Gad, 2026-08-23: "i cant hear anything recorded, can you make my mic input
 controlable. also can you draw the incoming audio as its recorded and put a
@@ -194,6 +194,21 @@ Two more from his hands, minutes apart:
   and read the url line of every probe header. Fronted-tab addressing in a
   shared window is a race.
 
+### ROUND 5 — letting go of rec resumes playback AT POSITION
+
+"when letting go of rec, right now it stops playback and triggers only when
+loop retriggers in start of the loop. instead it should continue playback
+from the correct position." The record-mute killed the carrier and audCycle
+only re-fires at the loop's start — the release left silence until the bar
+came round. **engine.audResume(pi)**: audCycle's fresh-pattern join (actAt
+anchor, audStop then audPlay with the phase as skipBeats), called wherever a
+recording ends — audPlace (landed), audRecStop (dropped / too short). Quiet
+when there is nothing to do: transport stopped, auto off, a carrier still
+rolling (overdub never lost its bed), or the phase on the boundary. The
+boundary's own carrier takes over next cycle, as after a pattern switch.
+Measured (mute row): bus 0.058 playing → 0 under the take → **0.04 within
+~370ms of the release**, carrier t→f→t unchanged.
+
 ### ROUND 4, same morning — the mic hold is a SCOPE, and overwrite is a PUNCH-IN
 
 "much better", then two:
@@ -238,7 +253,8 @@ not, and is test #1):
  2. **Punch-in.** Loop with sound, rec ovwrt, chord-record a SHORT bit
     mid-loop: only that span is replaced — clean, no doubling inside it —
     and the rest of the layer is exactly as it was. While you hold, the old
-    loop is quiet; the patched loop returns on the next bar. Full replace:
+    loop is quiet; let go and playback carries on from the CORRECT POSITION
+    at once (the bar's own respawn takes over next cycle). Full replace:
     mic-latched TAP (the ring takes a whole loop), or hold past the loop.
  3. **The mic scope.** Hold esc: ↑↓ walks the gain (⇧ = 6dB), ←→ steps the
     input device, -/= also gain, ; monitor — and NOTHING else moves: no

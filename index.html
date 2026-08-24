@@ -1234,7 +1234,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-24.1202';
+const BUILD='2026-08-24.1227';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -11197,6 +11197,30 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     const e9=this.gn&&this.gn[pi]; if(!e9||!e9.node||!id)return;
     try{e9.node.port.postMessage({t:'toff',id});}catch(_){}
   }
+  /* THE LOOP COMES BACK MID-PHRASE WHEN A TAKE ENDS (Gad, 2026-08-24: "when
+     letting go of rec ... it should continue playback from the correct
+     position"). The record-mute put the carrier down and audCycle only
+     re-fires at the loop's start, so a release mid-bar left silence until
+     the bar came round. This is audCycle's fresh-pattern join, callable the
+     moment a recording stops — landed, dropped or too short: stop whatever
+     fragment is left, spawn joined-in-progress at the position the
+     transport says, and the boundary's own carrier takes over next cycle.
+     Quiet when there is nothing to do: transport stopped, no take, auto
+     off, a carrier still rolling (overdub never lost its bed), a recording
+     still running, or the phase already sitting on the boundary. */
+  audResume(pi){
+    if(!T.playing||!this.audBuf[pi])return;
+    if(!autoCur(S.presets[pi]))return;
+    if((this.audCar||[])[pi])return;
+    if(this.audRec&&this.audRec.pi===pi)return;
+    if(this.audRecPend&&this.audRecPend.pi===pi)return;
+    const lane=S.patterns[S.editPat]&&S.patterns[S.editPat].lanes[pi];
+    const L=lane&&lane.len; if(!(L>0))return;
+    const a=actAt(posNow()), ph=fmod(posNow()-a.anchor,L);
+    if(ph<1e-3||ph>L-1e-3)return;
+    this.audStop(pi,AC.currentTime+0.004);
+    this.audPlay(pi,AC.currentTime+0.008,L,ph);
+  }
   audStop(pi,at){
     at=at??AC.currentTime+0.002;
     (this.audCar=this.audCar||[])[pi]=null;   // the carrier goes with everything else
@@ -11653,9 +11677,9 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     try{r.sp3.disconnect();r.sink.disconnect();}catch(_){}
     if(r.openedMic&&MIC.on&&!MIC.latched&&!MIC._down)micOff();
     dirty=true;
-    if(drop)return;
+    if(drop){this.audResume(r.pi);return;}
     const len=r.chunks.reduce((a2,c2)=>a2+c2.length,0);
-    if(len<AC.sampleRate*0.05){flash(r.label+' take too short');return;}
+    if(len<AC.sampleRate*0.05){flash(r.label+' take too short');this.audResume(r.pi);return;}
     const rec=new Float32Array(len); let o=0;
     for(const c2 of r.chunks){rec.set(c2,o);o+=c2.length;}
     audPlace(r.pi,rec,r.startBeat,r.label);
@@ -18470,6 +18494,7 @@ function audPlace(pi,rec,startBeat,name='mic'){
      fills in a synth channel that just became one by being recorded onto */
   S.presets[pi].cat='audio'; audDefaults(S.presets[pi]);
   engine.granCfg(pi);
+  engine.audResume(pi);         // the loop carries on from where the bar is, take and all
   flash('◉ audio: '+(L/4)+' bar loop ('+['overwrite','overdub','smart'][mode]+')'
         +(T.playing?(autoCur(S.presets[pi])?'':' — auto is off: a key plays it'):' — space plays it'));
   dirty=true; dirtySave=true;
