@@ -1,4 +1,23 @@
-# WHERE THE AUDIO CHANNEL STANDS — 2026-08-24, main
+# WHERE THE AUDIO CHANNEL STANDS — 2026-08-24, branch `ux-fixes`
+
+## UNIT SNAP — on branch `ux-fixes`, build 2026-08-24.1711, his ear next
+
+Gad: "when changing any loop length unit size, midi or audio, snap the loop
+current length to the closest ... if current loop is 7 16th notes length and
+i change unit size to half bars and then bars ... moving from 7, to 8 then
+to 16 16th notes." One change in `unitStep` (the only door every unit change
+goes through, ⇧←→ under tab): the count becomes the CLOSEST whole count of
+the new unit, both directions — it used to CEIL going up (nine 16ths in
+halves became sixteen, not eight) and keep exact fractional counts going
+down. Half rounds up, so his walk lands exactly. Audio channels keep their
+existing ⇧←→ coupling (audFitComp compensates the snapped ratio on the
+speed dial). Measured (unitsnap row, midi lane): 16th→8th→beat→half→bar =
+7→8→8→8→16 sixteenths. micrec is 12 rows now.
+
+QA: any loop, tab+⇧→ up the units: the length re-grids to the nearest whole
+new unit each step; tab+⇧← back down stays whole. Audio channel: same, with
+the speed dial showing the fit ratio as before.
+
 
 ## MIC RECORDING ON AN AUDIO CHANNEL — MERGED to main + LIVE 2026-08-24.1701 ("its tight")
 

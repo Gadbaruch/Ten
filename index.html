@@ -1234,7 +1234,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-24.1701';
+const BUILD='2026-08-24.1711';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -3646,12 +3646,16 @@ function unitStep(lp,d){
   const i=UNIT_ORDER.indexOf(lp.unit), j=clamp(i+d,0,UNIT_ORDER.length-1);
   if(j===i)return false;
   const L=lp.len; lp.unit=UNIT_ORDER[j];
-  /* Going UP, round the count up to a whole one: three beats asked for in bars
-     is one bar, not 0.75 of one. A fractional count of a big unit is a worse
-     description of the same length than a whole count of a small one — you
-     changed unit to stop thinking in the old grain. Going down is always exact. */
+  /* THE LENGTH SNAPS TO THE CLOSEST WHOLE COUNT OF THE NEW UNIT (Gad,
+     2026-08-24: "if current loop is 7 16th notes ... change unit size to
+     half bars and then bars ... moving from 7, to 8 then to 16 16th notes"),
+     both directions, midi and audio alike. It used to CEIL going up — nine
+     16ths asked for in halves became sixteen, not the closest eight — and
+     keep exact fractional counts going down, which is a worse description
+     of the length than the whole count you changed unit to think in.
+     Half rounds up, so 7 16ths → 1 half → 1 bar, exactly his walk. */
   const raw=L/UNITS[lp.unit];
-  lp.count=clamp(d>0?Math.max(1,Math.ceil(raw-1e-9)):Math.round(raw*4)/4,0.25,256);
+  lp.count=clamp(Math.max(1,Math.round(raw)),1,256);
   return true;
 }
 /* Remember a loop exactly as it was captured, so it can be put back. */

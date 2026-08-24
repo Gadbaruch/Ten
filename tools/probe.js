@@ -1312,6 +1312,22 @@ async function probeMicRec() {
     const spSpan = spanIn(Math.max(0, spP - 0.06), Math.min(1.95, spP + 0.5));
     rows.push({ k: 'shortpunch', press: spP, span: spSpan ? spSpan.join('-') : null,
                 expect: '~120ms landed at the press (was: cancelled)' });
+    /* unitsnap — changing the unit snaps the length to the CLOSEST whole
+       count of the new unit (his walk: 7 16ths → … → 1 bar = 16 16ths).
+       On a MIDI lane, pure length arithmetic, no audio coupling. */
+    const laneM = S.patterns[S.editPat].lanes[2];
+    const keepM = { u: laneM.unit, c: laneM.count, a: laneM.auto }, keepCur = S.curPreset;
+    S.curPreset = 2; laneM.unit = 's'; laneM.count = 7; laneM.auto = false;
+    const walk = ['7'];
+    K('keydown', 'Tab'); await sleep(40);
+    KS('keydown', 'ShiftRight', { shiftKey: true });
+    for (let k9 = 0; k9 < 4; k9++) {
+      KS('keydown', 'ArrowRight', { shiftKey: true }); KS('keyup', 'ArrowRight', { shiftKey: true });
+      await sleep(20); walk.push(String(laneM.len * 4));
+    }
+    K('keyup', 'ShiftRight'); K('keyup', 'Tab'); await sleep(80);
+    laneM.unit = keepM.u; laneM.count = keepM.c; laneM.auto = keepM.a; S.curPreset = keepCur;
+    rows.push({ k: 'unitsnap', s16walk: walk.join('→'), expect: '7→8→8→8→16 (16th→8th→beat→half→bar)' });
     /* (the session rows — monitor, device, sync, esc gestures, tab loop,
        latc, stereo, tempo, nearend, headtrim, clear — moved to micrec2:
        the browse CLI caps a command at 30s and the full suite outgrew it) */
@@ -1339,7 +1355,7 @@ async function probeMicRec() {
                   'on', 'off', 'bus', 'at', 'step1', 'step2', 'listed', 'row',
                   'micDuring', 'db', 'mon', 'layer', 'latched',
                   'down', 'up', 'full', 'l', 'r', 'rfull', 'sameBuf', 'spd', 'semis', 'crop',
-                  'onsets', 'E', 'Ems', 'spread', 'nowLATC', 'implied', 'trimMs', 'status', 'maxStep', 'nch', 'LtoR', 'bpm', 'lane', 'dur', 'fitRatio', 'playingAfterSeed', 'playDelayMs', 'seedHeadAt', 'punchAt', 'relPh', 'busBoundary', 'busNext', 'buf', 'auto', 'events', 'spanStartSec', 'press', 'release', 'span',
+                  'onsets', 'E', 'Ems', 'spread', 'nowLATC', 'implied', 'trimMs', 'status', 'maxStep', 'nch', 'LtoR', 'bpm', 'lane', 'dur', 'fitRatio', 'playingAfterSeed', 'playDelayMs', 'seedHeadAt', 'punchAt', 'relPh', 'busBoundary', 'busNext', 'buf', 'auto', 'events', 'spanStartSec', 'press', 'release', 'span', 's16walk',
                   'spanSec', 'bedSec', 'mixSec', 'ovdubMixSec', 'dev', 'paramLeak', 'curParam', 'busResume'], rows };
 }
 
@@ -1628,7 +1644,7 @@ async function probeMicRec2() {
                   'on', 'off', 'bus', 'at', 'step1', 'step2', 'listed', 'row',
                   'micDuring', 'db', 'mon', 'layer', 'latched',
                   'down', 'up', 'full', 'l', 'r', 'rfull', 'sameBuf', 'spd', 'semis', 'crop',
-                  'onsets', 'E', 'Ems', 'spread', 'nowLATC', 'implied', 'trimMs', 'status', 'maxStep', 'nch', 'LtoR', 'bpm', 'lane', 'dur', 'fitRatio', 'playingAfterSeed', 'playDelayMs', 'seedHeadAt', 'punchAt', 'relPh', 'busBoundary', 'busNext', 'buf', 'auto', 'events', 'spanStartSec', 'press', 'release', 'span',
+                  'onsets', 'E', 'Ems', 'spread', 'nowLATC', 'implied', 'trimMs', 'status', 'maxStep', 'nch', 'LtoR', 'bpm', 'lane', 'dur', 'fitRatio', 'playingAfterSeed', 'playDelayMs', 'seedHeadAt', 'punchAt', 'relPh', 'busBoundary', 'busNext', 'buf', 'auto', 'events', 'spanStartSec', 'press', 'release', 'span', 's16walk',
                   'spanSec', 'bedSec', 'mixSec', 'ovdubMixSec', 'dev', 'paramLeak', 'curParam', 'busResume'], rows };
 }
 
