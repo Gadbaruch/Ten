@@ -1,4 +1,33 @@
-# WHERE THE AUDIO CHANNEL STANDS — 2026-08-24, branch `bugfixes`
+# WHERE THE AUDIO CHANNEL STANDS — 2026-08-25, branch `bugfixes`
+
+## DUR FROM THE GRID + THE SLOW-LFO VERDICT (build 2026-08-24.2220)
+
+**His ruling on ch9: "count dur from the grid, recording should match what
+i heard."** Shipped at all four write sites — lateAudWrite (cue+pmono
+deferred), the pmono inline write, the pk/fz unwind, and relB9 (the cue
+release, which is ALSO the audible off — ear and lane still share one
+number, both from-grid now). Q on: dur counts from max(press, gridTime(tr));
+Q off: press==grid, nothing changes; floors kept at AUDMINMS. Measured:
+press 17ms early, hold to grid+320ms → recorded 320ms exact (was 337 =
+finger span). Note the live off moves too: a cue no longer rings past the
+keyup by the press-early gap. sweep/roundtrip/mono/micrec clean.
+MIDI notes still count from the finger (the old rule) — flagged to Gad,
+one word extends the grid rule there.
+
+**ch5 "slow LFO" fluctuation on the new set (ten-set-2026-08-25-00-07,
+Documents): NORMAL — Bessel physics, not an artifact.** His new patch:
+same sine 1:1 pair, FM-level env d=8s, note B5 (midi 83). At B5 the
+Nyquist budget compresses the dialed index 24 → 16.3 (fmDepth tanh — by
+design). As the index descends 16.3→0 over seconds, the fundamental's
+amplitude passes through the J0 Bessel nulls (I = 14.9/11.8/8.7/5.5/2.4)
+— predicted dips at ≈0.14/0.5/1.0/1.7/3.1s, measured dips at
+≈0.37/0.56/1.1/1.9s then a clean monotonic rise: dip-for-dip the Bessel
+pattern. Every FM engine does this — Operator will too at a comparable
+index trajectory (its level→index mapping differs, so pacing shifts).
+Ways to tame it if wanted: keep peak index under 2.4 (below the last null
+— no fundamental dip at all, "soft FM"), crv+ on that env (rushes the
+null zone — the dial is alive as of yesterday), or detune the ratio a
+hair (1.01) so the nulls smear instead of breathing.
 
 ## HIS SET ARRIVED — ch5 FM diagnosed (crv was dead), ch9 cues measured (build 2026-08-24.2155)
 
