@@ -1,6 +1,6 @@
 # WHERE THE AUDIO CHANNEL STANDS — 2026-08-23, branch `mic-rec`
 
-## MIC RECORDING ON AN AUDIO CHANNEL — on branch `mic-rec`, build 2026-08-24.1603, his ear next
+## MIC RECORDING ON AN AUDIO CHANNEL — on branch `mic-rec`, build 2026-08-24.1626, his ear next
 
 Gad, 2026-08-23: "i cant hear anything recorded, can you make my mic input
 controlable. also can you draw the incoming audio as its recorded and put a
@@ -193,6 +193,38 @@ Two more from his hands, minutes apart:
   keep a DEDICATED tab, front it BY ID (`browse tab N`) before every run,
   and read the url line of every probe header. Fronted-tab addressing in a
   shared window is a race.
+
+### ROUND 13 — the ring tap parked · the SEED take, named and self-starting
+
+- **"lets remove retro rec on audio for now, comment it out or something, it
+  doesnt feel good."** Parked — the mic-latched tap that grabbed the last
+  loop off the ring is a block comment now; a tap on an audio channel is the
+  keys' retro again and lands NO audio (measured: tap-parked row, nothing
+  lands, nothing left recording). His follow-up rule is written INTO the
+  parked code so a revival is born correct: aligned while playing, AT ZERO
+  when stopped. The ring itself still runs (the meter and micCalibrate use
+  it); only the gesture is gone.
+- **THE SEED TAKE, named** (his "lets give it a name?"): stopped transport +
+  mic chord + EMPTY channel. It seeds the loop (take at 0), the clock
+  (guessTake, exact bpm), and now the TRANSPORT — "make stopped rec mode on
+  empty channel also trigger playback imediatly": play() fires the moment
+  the take lands, flash '◉ seed: 1 bar → 135.4bpm ▶'. Measured: playing
+  true right after the release, fit 1.0.
+- **"punch in rec messes up the position of initial recording" — measured,
+  and the vanilla flow is CLEAN.** Seed (marker at its head) → play → punch
+  while playing: the seed's marker stayed at 0.006s and the punch landed at
+  the press phase (seedpunch repro + the tempo row asserts it every run:
+  head 0.006 / punch 1.033 after a mid-loop punch). What DOES move it: a
+  punch while STOPPED — round 12's own "always from 0" replaces the seed's
+  HEAD at 0, which reads exactly as "the initial recording moved". The seed
+  auto-play dissolves that flow (after a seed you are playing, so punches
+  are playing punches). ⚠ If his hands still find a stopped punch over a
+  bed and it still reads wrong, the dial to revisit is round 12's
+  stopped-with-bed rule — one condition, his call.
+- Probe self-sufficiency, twice more: micscope leaves the gain dial at −5
+  (the tempo row now pins it) and the new tempo row mutes the feed (nearend
+  now raises it). A row that borrows state from its neighbours breaks the
+  moment the neighbourhood changes — every row sets its own stage now.
 
 ### ROUND 12 — a stopped take always starts from 0
 

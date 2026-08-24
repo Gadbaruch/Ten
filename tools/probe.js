@@ -1191,14 +1191,15 @@ async function probeMicRec() {
     K('keyup', 'Tab'); K('keyup', 'Escape'); await sleep(200);
     rows.push({ k: 'keys', keysSeen: keysN, landed: !!engine.audBuf[ch], expect: 'landed false',
                 micAfter: MIC.on ? 'on' : 'off' });
-    /* tap+ring — mic already on, a tap takes the last loop off the ring */
+    /* tap-parked — the ring tap is commented out (round 13): a tap on an
+       audio channel must land NO audio. The bed the later rows need is laid
+       directly off the ring instead. */
     fresh(); await micOn(); MIC.latched = true;
     await sleep(Math.min(3000, cl / sr * 1000 + 400));
     K('keydown', 'Tab'); await sleep(60); K('keyup', 'Tab'); await sleep(150);
-    const b3 = engine.audBuf[ch], d3 = b3 ? b3.getChannelData(0) : null;
-    const o3 = d3 ? onOf(d3) : { n: 0 };
-    rows.push({ k: 'tap+ring', landed: !!b3, peak: d3 ? r3(pkOf(d3)) : null, onSec: r3(o3.n / sr), loopSec: r3(cl / sr),
-                micAfter: MIC.on ? 'on' : 'off', rec2: engine.audRec ? 'STILL RUNNING' : 'none' });
+    rows.push({ k: 'tap-parked', landed: !!engine.audBuf[ch], rec2: engine.audRec ? 'STILL RUNNING' : 'none',
+                micAfter: MIC.on ? 'on' : 'off', expect: 'landed false · none · on' });
+    audPlace(ch, micGrab(lane.len * spb()), gridNow() - lane.len, 'mic');
     /* punch — overwrite replaces ONLY the held span and never sums (Gad,
        2026-08-24: "overwrite only the part where rec was held and keep other
        areas of the previous layer intact"). Bed: the full 2s ring take at
@@ -1299,7 +1300,7 @@ async function probeMicRec() {
                   'on', 'off', 'bus', 'at', 'step1', 'step2', 'listed', 'row',
                   'micDuring', 'db', 'mon', 'layer', 'latched',
                   'down', 'up', 'full', 'l', 'r', 'rfull', 'sameBuf', 'spd', 'semis', 'crop',
-                  'onsets', 'E', 'Ems', 'spread', 'nowLATC', 'implied', 'trimMs', 'status', 'maxStep', 'nch', 'LtoR', 'bpm', 'lane', 'dur', 'fitRatio', 'relPh', 'busBoundary', 'busNext', 'buf', 'auto', 'events', 'spanStartSec',
+                  'onsets', 'E', 'Ems', 'spread', 'nowLATC', 'implied', 'trimMs', 'status', 'maxStep', 'nch', 'LtoR', 'bpm', 'lane', 'dur', 'fitRatio', 'playingAfterSeed', 'seedHeadAt', 'punchAt', 'relPh', 'busBoundary', 'busNext', 'buf', 'auto', 'events', 'spanStartSec',
                   'spanSec', 'bedSec', 'mixSec', 'ovdubMixSec', 'dev', 'paramLeak', 'curParam', 'busResume'], rows };
 }
 
@@ -1499,18 +1500,33 @@ async function probeMicRec2() {
     /* tempo — a mic take into stopped silence sets the clock: ~1.75s of
        signal reads as one bar in the 80-170 window, lands at 0, fills the
        loop exactly */
-    fresh();
-    K('keydown', 'Escape'); await sleep(30); K('keydown', 'Tab'); await sleep(1850);
-    K('keyup', 'Tab'); K('keyup', 'Escape'); await sleep(250);
+    fresh(); og.gain.value = 0; CFG.micDb = 0; micGainApply();   // micscope leaves the dial at -5
+    K('keydown', 'Escape'); await sleep(30); K('keydown', 'Tab'); await sleep(60);
+    og.gain.value = 0.3; await sleep(300); og.gain.value = 0.12; await sleep(1500);
+    K('keyup', 'Tab'); K('keyup', 'Escape'); og.gain.value = 0; await sleep(300);
     const tb9 = engine.audBuf[ch];
+    const playingAfterSeed = T.playing;                 // the seed starts the transport itself
+    /* …and a PLAYING punch must leave the seed's head where it was (his
+       'messed up position' was a STOPPED punch replacing the head at 0) */
+    await sleep(0.4 * lane.len * spb() * 1000);
+    K('keydown', 'Escape'); await sleep(30); K('keydown', 'Tab'); await sleep(40);
+    og.gain.value = 0.19; await sleep(400);
+    K('keyup', 'Tab'); K('keyup', 'Escape'); og.gain.value = 0; await sleep(300);
+    let mAt = -1, pAt = -1; { const d9 = engine.audBuf[ch].getChannelData(0), win = 256;
+      for (let a = 0; a + win <= d9.length; a += win) { let pk = 0;
+        for (let i = a; i < a + win; i += 2) { const v = Math.abs(d9[i]); if (v > pk) pk = v; }
+        if (mAt < 0 && pk > 0.25) mAt = a; if (pAt < 0 && pk > 0.16 && pk <= 0.25) pAt = a; } }
+    stop(); await sleep(150);
     rows.push({ k: 'tempo', bpm: r3(T.bpm), lane: lane.count + '×' + lane.unit,
                 dur: tb9 ? r3(tb9.duration) : null,
                 fitRatio: tb9 ? r3(tb9.duration / (lane.len * spb())) : null,
-                expect: 'bpm ~125-145 · 1×B · fit 1.0' });
+                playingAfterSeed, seedHeadAt: mAt < 0 ? null : r3(mAt / sr), punchAt: pAt < 0 ? null : r3(pAt / sr),
+                expect: 'bpm 125-145 · fit 1.0 · playing · head ~0 after the punch' });
     setBpm(120);
     /* nearend — releasing a take just before the bar must not eat the next
        loop: the boundary the mute consumed is re-posted (round 11) */
     fresh(); CFG.overdub = 0;
+    og.gain.value = 0.3; osc.frequency.value = 440; CFG.micDb = 0; micGainApply();   // the tempo row mutes the feed
     await micOn(); MIC.latched = true; await sleep(lane.len * spb() * 1000 + 300);
     audPlace(ch, micGrab(lane.len * spb()), gridNow() - lane.len, 'mic');
     play(); await sleep(1200);
@@ -1568,7 +1584,7 @@ async function probeMicRec2() {
                   'on', 'off', 'bus', 'at', 'step1', 'step2', 'listed', 'row',
                   'micDuring', 'db', 'mon', 'layer', 'latched',
                   'down', 'up', 'full', 'l', 'r', 'rfull', 'sameBuf', 'spd', 'semis', 'crop',
-                  'onsets', 'E', 'Ems', 'spread', 'nowLATC', 'implied', 'trimMs', 'status', 'maxStep', 'nch', 'LtoR', 'bpm', 'lane', 'dur', 'fitRatio', 'relPh', 'busBoundary', 'busNext', 'buf', 'auto', 'events', 'spanStartSec',
+                  'onsets', 'E', 'Ems', 'spread', 'nowLATC', 'implied', 'trimMs', 'status', 'maxStep', 'nch', 'LtoR', 'bpm', 'lane', 'dur', 'fitRatio', 'playingAfterSeed', 'seedHeadAt', 'punchAt', 'relPh', 'busBoundary', 'busNext', 'buf', 'auto', 'events', 'spanStartSec',
                   'spanSec', 'bedSec', 'mixSec', 'ovdubMixSec', 'dev', 'paramLeak', 'curParam', 'busResume'], rows };
 }
 

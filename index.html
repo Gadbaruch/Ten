@@ -1234,7 +1234,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-24.1603';
+const BUILD='2026-08-24.1626';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -11767,8 +11767,16 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
         else{lane9.unit='b'; lane9.count=g9.beats;}
         lane9.auto=false;
         audPlace(r.pi,recOut,editAnchor(),r.label,0);
-        flash('◉ '+(bars9>=1?Math.round(bars9)+' bar':g9.beats+' beat')+' take → '
-              +Math.round(bpmX*10)/10+'bpm — space plays it');
+        /* …AND IT PLAYS AT ONCE (Gad, 2026-08-24: "make stopped rec mode on
+           empty channel ... trigger playback imediatly after rec is done").
+           This is the SEED TAKE — his flow, named: it seeds the loop, the
+           clock, and now the transport, so the next recording is a PLAYING
+           punch and lands where the ear expects (a stopped punch after a
+           seed was the 'messed up position': round 12's own from-0 rule
+           replacing the seed's head at 0). */
+        if(!T.playing)play();
+        flash('◉ seed: '+(bars9>=1?Math.round(bars9)+' bar':g9.beats+' beat')+' → '
+              +Math.round(bpmX*10)/10+'bpm ▶');
         return;
       }
     }
@@ -22715,14 +22723,23 @@ const onKeyUp=e=>{
       const pi3=S.layer>=2?S.editSnd:S.curPreset;
       if(isAudioCh(pi3)){
         engine.audRecStop(true);
+        /* THE RING TAP IS PARKED (Gad, 2026-08-24: "lets remove retro rec on
+           audio for now, comment it out or something, it doesnt feel good").
+           It grabbed the last loop of air off the ring, aligned to now — and
+           "now" is the free grid when stopped, which is nowhere the hands
+           can feel. If it comes back, it comes back with his stopped rule
+           already in: aligned while playing, AT ZERO when stopped. A tap on
+           an audio channel is the keys' retro again, nothing more.
         if(MIC.on&&MIC.ring){
           const lane5=S.patterns[S.editPat].lanes[pi3];
           const beats=lane5.auto?16:lane5.len;
           const rec2=micGrab(beats*spb());
-          if(rec2){pushUndo('mic take'); audPlace(pi3,rec2,gridNow()-beats,'mic',audRecLat('mic'));}
+          if(rec2){pushUndo('mic take');
+            audPlace(pi3,rec2,T.playing?gridNow()-beats:editAnchor(),'mic',
+                     T.playing?audRecLat('mic'):0);}
           else flash('mic ring is empty — hold escape a moment first');
           dirty=true; dirtySave=true; return;
-        }
+        } */
       }
       retroCapture();                       // the tap: take what was just played
       dirty=true; dirtySave=true; return;
