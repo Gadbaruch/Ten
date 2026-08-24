@@ -1,6 +1,10 @@
-# WHERE THE AUDIO CHANNEL STANDS — 2026-08-23, branch `mic-rec`
+# WHERE THE AUDIO CHANNEL STANDS — 2026-08-24, main
 
-## MIC RECORDING ON AN AUDIO CHANNEL — on branch `mic-rec`, build 2026-08-24.1701, his ear next
+## MIC RECORDING ON AN AUDIO CHANNEL — MERGED to main + LIVE 2026-08-24.1701 ("its tight")
+
+His ear signed the whole branch off; 15 rounds, merged as 98698fc, live
+confirmed byte-identical to the working tree. `mic-rec` stays pushed as
+history; the next batch starts its own branch off main.
 
 Gad, 2026-08-23: "i cant hear anything recorded, can you make my mic input
 controlable. also can you draw the incoming audio as its recorded and put a
