@@ -1102,14 +1102,16 @@ async function probeMicRec() {
   const keep = { p: stash(ch), buf: engine.audBuf[ch], name: engine.audName[ch],
                  gbuf: (engine.granBuf || [])[ch],
                  lane: { unit: lane.unit, count: lane.count, auto: lane.auto, events: lane.events.slice() },
-                 micDb: CFG.micDb, micDev: CFG.micDev, micDevL: CFG.micDevL, layer: S.layer, playing: T.playing };
+                 micDb: CFG.micDb, micDev: CFG.micDev, micDevL: CFG.micDevL,
+                 overdub: CFG.overdub, micMon: CFG.micMon, layer: S.layer, playing: T.playing };
   const osc = AC.createOscillator(), og = AC.createGain(), dst = AC.createMediaStreamDestination();
   osc.frequency.value = 440; og.gain.value = 0.3; osc.connect(og); og.connect(dst); osc.start();
   md.getUserMedia = () => Promise.resolve(dst.stream);
   md.enumerateDevices = () => Promise.resolve([
     { kind: 'audioinput', deviceId: 'fakeA', label: 'Fake A (probe)' },
     { kind: 'audioinput', deviceId: 'fakeB', label: 'Fake B (probe)' }]);
-  const K = (t, c) => document.dispatchEvent(new KeyboardEvent(t, { code: c, key: c, bubbles: true, cancelable: true }));
+  const KS = (t, c, o) => document.dispatchEvent(new KeyboardEvent(t, Object.assign({ code: c, key: c, bubbles: true, cancelable: true }, o || {})));
+  const K = (t, c) => KS(t, c);
   const sr = AC.sampleRate;
   const fresh = () => {            // the stage must hear the FAKE, whatever it heard before
     if (engine.audRec) engine.audRecStop(true);
@@ -1120,7 +1122,7 @@ async function probeMicRec() {
        moment the factory pool lands — which is mid-hold right after a reload,
        and the take then overwrote INTO nylonlick (peak 0.64 for a 0.3 sine) */
     const pr = S.presets[ch]; pr.cat = 'audio'; pr.au = pr.au || {}; pr.au.cmode = 0; pr.au.kmode = 0; audDefaults(pr);
-    pr.au.src = 0; pr.au.mon = 0;
+    pr.au.src = 0; CFG.micMon = 0; micMonWire(); CFG.overdub = 0;
     engine.audBuf[ch] = null; engine.audName[ch] = null;
     if (engine.granBuf) engine.granBuf[ch] = null;
     lane.unit = 'B'; lane.count = 1; lane.auto = false; lane.events = [];
@@ -1177,23 +1179,85 @@ async function probeMicRec() {
     const o3 = d3 ? onOf(d3) : { n: 0 };
     rows.push({ k: 'tap+ring', landed: !!b3, peak: d3 ? r3(pkOf(d3)) : null, onSec: r3(o3.n / sr), loopSec: r3(cl / sr),
                 micAfter: MIC.on ? 'on' : 'off', rec2: engine.audRec ? 'STILL RUNNING' : 'none' });
-    /* monitor — the mic through the channel's strip (the mic is still on from the row above) */
-    S.presets[ch].au.mon = 1; micMonWire(); const w1 = Object.keys(MIC.monTo).length;
-    const mOn = await hit(ch, () => null, 300);
-    S.presets[ch].au.mon = 0; micMonWire(); const w0 = Object.keys(MIC.monTo).length;
-    const mOff = await hit(ch, () => null, 300);
-    rows.push({ k: 'monitor', on: mOn.rms, off: mOff.rms, wires: w1 + '→' + w0 });
+    /* erase — overdub keeps the bed under a short take; overwrite kills the
+       whole old loop (Gad: "just erase the previous"). Bed here: the full
+       2s ring take from the row above. */
+    CFG.overdub = 1;
+    K('keydown', 'Tab'); await sleep(450); K('keyup', 'Tab'); await sleep(150);
+    const o5 = onOf(engine.audBuf[ch].getChannelData(0));
+    CFG.overdub = 0;
+    K('keydown', 'Tab'); await sleep(450); K('keyup', 'Tab'); await sleep(150);
+    const o4 = onOf(engine.audBuf[ch].getChannelData(0));
+    rows.push({ k: 'erase', ovdubOnSec: r3(o5.n / sr), onSec: r3(o4.n / sr), loopSec: r3(cl / sr),
+                expect: 'ovdub ~2.0 · ovwrt ~0.45' });
+    /* mute — in overwrite the carrier goes down while a take records, and
+       comes back with the next cycle after the stop. The bed is re-laid
+       wall-to-wall first (a full-loop ring grab), so a 250ms bus window
+       cannot land in silence and read as a mute that is not there. */
+    audPlace(ch, micGrab(lane.len * spb()), gridNow() - lane.len, 'mic');
+    play(); await sleep(1300);
+    const carBefore = !!(engine.audCar || [])[ch];
+    const brms = async () => { const t9 = tap(busOf(ch)); await sleep(250); const [L9] = t9.stop();
+      let s9 = 0; for (let i = 0; i < L9.length; i++) s9 += L9[i] * L9[i];
+      return r3(Math.sqrt(s9 / Math.max(1, L9.length))); };
+    const busPlay = await brms();
+    engine.audRecStart(ch); await sleep(350);
+    const carDuring = !!(engine.audCar || [])[ch];
+    const busRec = await brms();
+    engine.audRecStop(true); await sleep(2600);
+    const carAfter = !!(engine.audCar || [])[ch];
+    stop(); await sleep(120);
+    rows.push({ k: 'mute', carBefore, busPlay, carDuring, busRec, carAfter,
+                expect: 'car t/f/t · bus >0 then ~0' });
+    /* monitor — one global switch, the mic into the master (still on from above) */
+    const mrms = async () => { const t9 = tap(engine.master); await sleep(300); const [L9] = t9.stop();
+      let s9 = 0; for (let i = 0; i < L9.length; i++) s9 += L9[i] * L9[i];
+      return r3(Math.sqrt(s9 / Math.max(1, L9.length))); };
+    CFG.micMon = 1; micMonWire(); const mOn = await mrms();
+    CFG.micMon = 0; micMonWire(); const mOff = await mrms();
+    rows.push({ k: 'monitor', on: mOn, off: mOff, gate: MIC.monG ? 'wired' : 'none' });
     /* device — the row steps the list and the stage follows */
     await micStepDev(1); const dv1 = CFG.micDevL + '/' + (MIC.on ? 'on' : 'off');
     await micStepDev(1); const dv2 = CFG.micDevL + '/' + (MIC.on ? 'on' : 'off');
     rows.push({ k: 'device', step1: dv1, step2: dv2, listed: (MIC.devs || []).length, row: micDevName() });
+    /* escmic — the dials ride the mic key: esc held past 200ms, -/= is the
+       gain (⇧ coarse), ; the monitor. None of it counts as chord-use, none
+       of it escapes, and the momentary release still closes the mic. */
+    if (MIC.on) micOff(); MIC.latched = false;
+    CFG.micDb = 0; CFG.micMon = 0; const lay0 = S.layer;
+    K('keydown', 'Escape'); await sleep(280);
+    const escMicOn = MIC.on;
+    K('keydown', 'Minus'); K('keyup', 'Minus'); K('keydown', 'Minus'); K('keyup', 'Minus');
+    KS('keydown', 'Equal', { shiftKey: true }); KS('keyup', 'Equal', { shiftKey: true });
+    K('keydown', 'Semicolon'); K('keyup', 'Semicolon');
+    await sleep(60);
+    K('keyup', 'Escape'); await sleep(120);
+    rows.push({ k: 'escmic', micDuring: escMicOn ? 'on' : 'off', db: CFG.micDb, mon: CFG.micMon,
+                expect: 'db -1-1+6=+4 · mon 1', layer: lay0 + '→' + S.layer,
+                micAfter: MIC.on ? 'on' : 'off', latched: MIC.latched });
+    CFG.micMon = 0; micMonWire();
+    /* tabloop — tab+↑↓ is loop length now; with fit on the speed dial
+       absorbs the ratio, the crop does not move, and no take lands from a
+       hold that was spent as a modifier */
+    lane.unit = 'B'; lane.count = 1; lane.auto = false;
+    const pau = S.presets[ch].au; pau.spd = 1; pau.rate = 1; pau.en = 1; pau.st = 0; pau.fit = 1;
+    const bufRef = engine.audBuf[ch];
+    K('keydown', 'Tab'); await sleep(60); K('keydown', 'ArrowUp'); await sleep(30); K('keyup', 'ArrowUp');
+    await sleep(30); K('keyup', 'Tab'); await sleep(150);
+    const up = { count: lane.count, spd: pau.spd, en: pau.en, sameBuf: engine.audBuf[ch] === bufRef };
+    K('keydown', 'Tab'); await sleep(60); K('keydown', 'ArrowDown'); await sleep(30); K('keyup', 'ArrowDown');
+    await sleep(30); K('keyup', 'Tab'); await sleep(150);
+    rows.push({ k: 'tabloop', upCount: up.count, upSpd: up.spd, downCount: lane.count, downSpd: pau.spd,
+                en: up.en + '/' + pau.en, sameBuf: up.sameBuf,
+                expect: '2/×2 → 1/×1 · en 1/1 · sameBuf true' });
   } finally {
     window.flash = flash0;
     md.getUserMedia = gum0; md.enumerateDevices = enu0;
     if (engine.audRec) engine.audRecStop(true);
     if (MIC.on) micOff(); MIC.stream = null; MIC.ring = null; MIC.devs = null;
     try { osc.stop(); } catch (_) {}
-    CFG.micDb = keep.micDb;
+    CFG.micDb = keep.micDb; CFG.overdub = keep.overdub; CFG.micMon = keep.micMon; micMonWire();
+    if (T.playing && !keep.playing) stop();
     if (keep.micDev) { CFG.micDev = keep.micDev; CFG.micDevL = keep.micDevL; } else { delete CFG.micDev; delete CFG.micDevL; }
     saveCfg();
     unstash(ch, keep.p);
@@ -1204,7 +1268,10 @@ async function probeMicRec() {
   }
   notes.push('flashes: ' + flashes.join(' | '));
   return { cols: ['rec', 'landed', 'peak', 'expect', 'onSec', 'heldSec', 'loopSec', 'firstAt', 'expAt', 'head', 'strokes',
-                  'micAfter', 'rec2', 'keysSeen', 'on', 'off', 'wires', 'step1', 'step2', 'listed', 'row'], rows };
+                  'micAfter', 'rec2', 'keysSeen', 'ovdubOnSec', 'carBefore', 'busPlay', 'carDuring', 'busRec', 'carAfter',
+                  'on', 'off', 'gate', 'step1', 'step2', 'listed', 'row',
+                  'micDuring', 'db', 'mon', 'layer', 'latched',
+                  'upCount', 'upSpd', 'downCount', 'downSpd', 'en', 'sameBuf'], rows };
 }
 
 const HELP = {
@@ -1222,7 +1289,7 @@ const HELP = {
     { k: 'trig',     args: 'ch=1 note=60 ph=90 — does an operator rtrg/free reach the sound, in both fm engines' },
     { k: 'matrix',   args: 'ch=8 take=nylonlick cues=4 — the seven cases + the cue jumps' },
     { k: 'modmatrix',args: 'only=filt — every mod SOURCE x every DESTINATION: reaches/anchor/live/tweak' },
-    { k: 'micrec',   args: 'ch=9 hold=900 db=-6 — tab records the mic on an audio channel (fake mic): take, picture, gain, keys, ring, monitor, device' },
+    { k: 'micrec',   args: 'ch=9 hold=900 db=-6 — mic on an audio channel (fake mic): take, picture, gain, keys, ring, erase/mute, monitor, device, esc dials, tab loop' },
     { k: '(any)',    args: '--ab <url> runs the same probe on a second build and diffs it' },
   ]
 };

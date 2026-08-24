@@ -1,6 +1,6 @@
 # WHERE THE AUDIO CHANNEL STANDS — 2026-08-23, branch `mic-rec`
 
-## MIC RECORDING ON AN AUDIO CHANNEL — on branch `mic-rec`, build 2026-08-23.0059, his ear next
+## MIC RECORDING ON AN AUDIO CHANNEL — on branch `mic-rec`, build 2026-08-24.1002, his ear next
 
 Gad, 2026-08-23: "i cant hear anything recorded, can you make my mic input
 controlable. also can you draw the incoming audio as its recorded and put a
@@ -94,27 +94,94 @@ getUserMedia — no permission dialog, the same numbers on any machine):
     `--headed` refuses plain calls ('headed mismatch'); probe.sh asks once
     and follows it. Killing a wedged daemon is fine; the CLI restarts it.
 
-QA, most likely to be wrong first (the fake mic measured everything; the
-REAL mic is the first test):
- 1. **A real take.** Audio channel, input=mic, hold tab ~2s and talk, let go.
-    The first time the browser asks for the mic, so that take starts late.
-    Right: '◉ audio: N bar loop' and you hear it (space if stopped, a key if
-    auto is off — the flash says which). Wrong: silence → is the `mic gain`
-    meter moving while you talk? No → `mic dev`.
- 2. **The meter.** Sound page of the channel, hold escape and talk: `mic
-    gain` grows ▎ bars. None → wrong device, or the Mac's device (above).
- 3. **The picture.** Layer 1, hold tab: the channel's column draws the take
-    as it lands under a solid line that writes down the loop and wraps.
- 4. **Keys under tab still make a keys take.** Hold tab, play cue keys, let
-    go: the keys recorded, flash 'keys take — the sound was dropped'.
- 5. **Tap = the past.** Escape held/latched (mic on), talk a loop, TAP tab:
-    the last loop lands, the mic stays on. Mic off + tap → the keys' retro.
- 6. **Latch.** Left win + tab: '● REC latched — recording mic, tab again to
-    keep it'; the next tab lands it.
- 7. **Monitor.** `monitor` on with the mic open: yourself through the
-    channel's strip. Feedback if the speakers are up — it warns.
- 8. **Device.** `mic dev` steps the list, the flash names it, it survives a
-    reload (ten-cfg). Not measured with real devices.
+### ROUND 2, same day — settings/Input · esc-held dials · overwrite=erase+mute · tab+↑↓=length
+
+His three: (1) "move the mic settings in global settings in settings/input -
+hold mic key (esc) and use -= to adjust mic gain and ; to toggle monitor";
+(2) overwrite must "not mix ... just erase the previous recording", and "mute
+the previous one when holding mic+rec"; (3) tab+↑↓ should "not affect pitch
+just shorten/enlarge the loop".
+
+- **The mic lives in settings/Input now** — mic dev · mic gain (live ▎ meter)
+  · monitor — and OFF the channel row. Monitor became ONE switch
+  (CFG.micMon): MIC.g → a gain → engine.master, not a channel strip, because
+  a global switch must not route by where the cursor stands. (It is inside
+  what 'resample the master' records — monitoring while bouncing prints the
+  mic, openly.) p.au.mon is gone.
+- **The dials ride the mic key**: esc (or Fn) held, -/= steps CFG.micDb
+  (⇧=6dB, repeats step), ; toggles the monitor. Deliberately NOT chord-use —
+  MIC._used stays false, so a win+esc latch still latches — and ESCH.used is
+  set so the release does not ALSO escape. Measured: esc 280ms → mic on,
+  −1−1+⇧6 → +4dB, ; → mon 1, layer 1→1, mic off at release, latched false.
+- **Overwrite erases.** audPlace pre-filled the canvas with the old buffer,
+  so a short take replaced only its own span and the rest of the old loop
+  played on around it — a mix wearing overwrite's name. Mode 0 starts from
+  silence now (overdub/smart still start from the bed — that is their
+  point). Measured, 0.45s take into a 2.0s loop: overdub bed survives
+  (1.955s on), overwrite leaves 0.455s.
+- **…and the bed is MUTED while you record over it.** audCycle neither joins
+  nor re-fires the carrier while a mode-0 take runs on that channel (audRec
+  or audRecPend), and audRecStart tset-kills the running carrier — the
+  carrier ONLY, so cue/pitch keys under the hold stay audible (they are the
+  keys take). Overdub/smart keep the bed. Measured: carrier t→f→t around a
+  recording, bus rms 0.058 playing → 0 under the take, back next cycle.
+- **tab+↑↓ is loop length on an audio channel too.** It CROPPED the take
+  here (×2/÷2 on au.en) since the crop-takeover — and with fit on a crop IS
+  a pitch move, which is what he heard. Gone; it falls through to loopOps,
+  and loopOps carries **audFitComp** now: any length change on a fitted
+  audio lane (↑↓ double/halve, ←→ count, ⇧←→ unit) scales the SPEED dial
+  (au.spd, mirrored to au.rate — audFoldPitch's own arithmetic) by
+  newLen/oldLen, so the take sounds IDENTICAL and the loop just gains or
+  loses room. The dial rails at ×4/×0.25: past it the take genuinely
+  stretches and the flash says 'speed at the rail'. tab+-/= stays the SPEED
+  pair (stretchLoop); ⇧⌫ reset stays a true reset (no comp). The quick
+  crop-×2 gesture has NO key now — the crop keeps its start/length dials on
+  the page; if his hands miss it, it needs a new key, not this pair back.
+  Measured: count 1→2 with spd ×1→×2 and back, en 1/1 untouched, no take
+  landed from the modifier-spent hold.
+- Probe run of record (micrec, ten rows, on this build): hold 0.300/0.787s
+  head 121→152 · gain −6dB 0.150 · keys drop · ring 1.957s · erase
+  1.955/0.455 · mute t/f/t 0.058→0 · monitor 0.17/0 · device A↔B · escmic
+  +4dB/mon1 · tabloop 2/×2→1/×1.
+- ⚠ Hygiene, worth remembering: mid-session my 3032 `serve` DIED and the
+  browse daemon's crash-restore left the fronted tab on a 3033 tab — the
+  GSTACK profile, not his Chrome, so his set was never reachable — and one
+  probe round ran there before the URL line gave it away. Scratch storage
+  at that origin cleared, ten-main restarted, everything re-measured on
+  3032 (same bytes, numbers stood). READ THE URL LINE OF EVERY PROBE
+  HEADER; a dead server turns "reload" into "restore whatever tab was
+  there".
+
+QA — most likely to be wrong first (fake-mic measured; the REAL mic still is
+not, and is test #1):
+ 1. **A real take, and you can hear yourself set it up.** Settings (⇧esc) →
+    Input: mic dev · mic gain · monitor. Or without the panel: HOLD esc —
+    after the one-time permission the meter runs — and while holding, -/=
+    moves the gain (⇧ = 6dB steps), ; toggles the monitor (you, in the
+    master — mind the speakers). Then on an audio channel hold tab ~2s and
+    talk. Right: '◉ audio: N bar loop' and you hear it. Wrong: silence →
+    hold esc and watch the mic gain meter in settings while you talk.
+ 2. **Overwrite = erase.** rec mode ovwrt, a loop with sound in it, hold tab
+    and record a SHORT bit: the old loop is gone everywhere, only the new
+    bit remains (before: the rest of the old loop kept playing around it).
+    Undo brings the old take back.
+ 3. **The bed goes quiet WHILE you record over it** (ovwrt only). Transport
+    running, loop sounding, hold tab: the old loop drops out under you, keys
+    still sound, the new take enters at the next bar after release. In
+    ovdub it keeps playing — layering.
+ 4. **tab+↑↓ = loop length, pitch stays.** Audio channel, sync on, loop
+    sounding: tab+↑ doubles the bars and it SOUNDS THE SAME (speed dial
+    reads ×2); tab+↓ halves back. The old crop ×2/÷2 gesture is gone (the
+    crop dials on the page remain). tab+-/= still doubles/halves SPEED.
+    ⇧ under tab unchanged (offset / unit).
+ 5. **Keys under tab still record keys** — 'keys take — the sound was
+    dropped'.
+ 6. **Tap and latch as round 1**: tap with the mic latched = the last loop
+    off the ring; win+tab latches the recorder, tab again keeps it.
+ 7. **Monitor is one switch**: settings/Input and esc+; flip the same thing;
+    it only sounds while the mic is open.
+ 8. **Device** steps survive a reload; an unplugged remembered device falls
+    back to default (not measured with real hardware).
 
 
 ## LIVE MOD-AMOUNT + META-MOD — FIXED on branch `live-mod`, build .2352, his ear next
