@@ -1103,7 +1103,7 @@ async function probeMicRec() {
                  gbuf: (engine.granBuf || [])[ch],
                  lane: { unit: lane.unit, count: lane.count, auto: lane.auto, events: lane.events.slice() },
                  micDb: CFG.micDb, micDev: CFG.micDev, micDevL: CFG.micDevL,
-                 overdub: CFG.overdub, micMon: CFG.micMon, layer: S.layer, playing: T.playing };
+                 overdub: CFG.overdub, micMon: CFG.micMon, layer: S.layer, playing: T.playing, bpm: T.bpm };
   /* the fake mic mints a FRESH stream per call off one feed node: micSetDev
      stops the old stream's tracks, and a stopped singleton was a dead mic
      for every row after the device one (sync heard 0/4 that way) */
@@ -1140,6 +1140,7 @@ async function probeMicRec() {
   const flash0 = window.flash; window.flash = m => { flashes.push(String(m)); return flash0(m); };
   try {
     delete CFG.micDev; delete CFG.micDevL;
+    setBpm(120);        // the rows quote seconds that assume it; scratch state had drifted to 287 once
     for (let w = 0; w < 25 && !POOL.length; w++) await sleep(200);   // let the pool land before the first take
     /* tab-alone — the sound recorder must NOT start without the mic key
        (Gad, 2026-08-24: "it should be mic+rec records audio input") */
@@ -1149,8 +1150,10 @@ async function probeMicRec() {
     K('keyup', 'Tab'); await sleep(120);
     rows.push({ k: 'tab-alone', rec: alone.rec + '/' + alone.pend, micAfter: (alone.mic || MIC.on) ? 'on' : 'off',
                 landed: !!engine.audBuf[ch], expect: 'none/none · off · false' });
-    /* hold — the chord: esc engages the mic, tab records; draw while held */
-    fresh(); CFG.micDb = 0;
+    /* hold — the chord: esc engages the mic, tab records; draw while held.
+       TRANSPORT PLAYING: a stopped take into an empty channel is the
+       tempo-setting path now, and this row asserts grid placement */
+    fresh(); CFG.micDb = 0; play(); await sleep(200);
     const beat0 = gridNow();
     K('keydown', 'Escape'); await sleep(30);
     K('keydown', 'Tab'); await sleep(hold * 0.35);
@@ -1165,6 +1168,7 @@ async function probeMicRec() {
     const b1 = engine.audBuf[ch], d1 = b1 ? b1.getChannelData(0) : null;
     const L = lane.len, cl = Math.max(256, Math.round(L * spb() * sr));
     const exp0 = ((Math.round(fmod(beat0 - editAnchor(), L) * spb() * sr - AUDLATC) % cl) + cl) % cl;
+    stop(); await sleep(120);
     const o1 = d1 ? onOf(d1) : { n: 0, first: -1 };
     rows.push({ k: 'hold', rec: mid.label + ' ch' + mid.pi + (mid.opened ? ' (opened mic)' : ''),
                 landed: !!b1, peak: d1 ? r3(pkOf(d1)) : null, expect: 0.3,
@@ -1173,9 +1177,9 @@ async function probeMicRec() {
                 head: y1 == null ? 'none' : r3(y1) + '→' + r3(y2), strokes: s1 + '→' + s2,
                 micAfter: MIC.on ? 'on' : 'off', rec2: engine.audRec ? 'STILL RUNNING' : 'none' });
     /* gain — the dial reaches the take */
-    fresh(); CFG.micDb = db;
+    fresh(); CFG.micDb = db; play(); await sleep(200);
     K('keydown', 'Escape'); await sleep(30); K('keydown', 'Tab'); await sleep(hold);
-    K('keyup', 'Tab'); K('keyup', 'Escape'); await sleep(220);
+    K('keyup', 'Tab'); K('keyup', 'Escape'); await sleep(220); stop(); await sleep(120);
     const b2 = engine.audBuf[ch], d2 = b2 ? b2.getChannelData(0) : null;
     rows.push({ k: 'gain ' + db + 'dB', landed: !!b2, peak: d2 ? r3(pkOf(d2)) : null,
                 expect: r3(0.3 * Math.pow(10, db / 20)) });
@@ -1220,9 +1224,12 @@ async function probeMicRec() {
     osc.frequency.value = 523; CFG.micDb = -6; micGainApply(); await sleep(150);
     K('keydown', 'Tab'); await sleep(450); K('keyup', 'Tab'); await sleep(150);
     const pw9 = cls(engine.audBuf[ch].getChannelData(0));
+    let mstep = 0; { const dd = engine.audBuf[ch].getChannelData(0);
+      for (let i = 1; i < dd.length; i++) { const v = Math.abs(dd[i] - dd[i - 1]); if (v > mstep) mstep = v; } }
     osc.frequency.value = 440; CFG.micDb = 0; micGainApply();
     rows.push({ k: 'punch', spanSec: pw9.span, bedSec: pw9.bed, mixSec: pw9.mix, ovdubMixSec: od9.mix,
-                loopSec: r3(cl / sr), expect: 'span~0.45 bed~1.5 mix 0 · ovdubMix >0.1' });
+                maxStep: r3(mstep), loopSec: r3(cl / sr),
+                expect: 'span~0.45 bed~1.5 mix 0 · ovdubMix >0.1 · maxStep <0.08 (xfade)' });
     /* repitch — a fresh take resets speed/pitch/crop to neutral, so it plays
        back as recorded; the dials only repitch when turned AFTER the take
        (Gad, 2026-08-24) */
@@ -1360,6 +1367,36 @@ async function probeMicRec() {
                 spread: errs.length ? (errs[errs.length - 1] - errs[0]) : null,
                 nowLATC: AUDLATC, implied: Emed === null ? null : AUDLATC + Emed,
                 expect: 'after calibration E ~0' });
+    /* stereo — input=mstr records BOTH master channels: a hard-left blip
+       lands left-only in a 2ch take */
+    fresh(); S.presets[ch].au.src = 1;
+    lane.unit = 'B'; lane.count = 1; lane.auto = false;
+    engine.audRecStart(ch);
+    const po = AC.createOscillator(); po.frequency.value = 660;
+    const pg = AC.createGain(); pg.gain.value = 0.4;
+    const pan9 = AC.createStereoPanner(); pan9.pan.value = -1;
+    po.connect(pg); pg.connect(pan9); pan9.connect(engine.master);
+    po.start(); await sleep(600); po.stop(); await sleep(120);
+    engine.audRecStop(); await sleep(200);
+    try { pg.disconnect(); pan9.disconnect(); } catch (_) {}
+    const sb2 = engine.audBuf[ch];
+    let eL = 0, eR = 0;
+    if (sb2 && sb2.numberOfChannels > 1) { const l9 = sb2.getChannelData(0), r9 = sb2.getChannelData(1);
+      for (let i = 0; i < l9.length; i += 3) { eL += l9[i] * l9[i]; eR += r9[i] * r9[i]; } }
+    rows.push({ k: 'stereo', nch: sb2 ? sb2.numberOfChannels : 0,
+                LtoR: eR > 1e-9 ? r3(eL / eR) : (eL > 1e-9 ? 'inf' : '0'), expect: '2ch · L≫R' });
+    /* tempo — a mic take into stopped silence sets the clock: ~1.75s of
+       signal reads as one bar in the 80-170 window, lands at 0, fills the
+       loop exactly */
+    fresh();
+    K('keydown', 'Escape'); await sleep(30); K('keydown', 'Tab'); await sleep(1850);
+    K('keyup', 'Tab'); K('keyup', 'Escape'); await sleep(250);
+    const tb9 = engine.audBuf[ch];
+    rows.push({ k: 'tempo', bpm: r3(T.bpm), lane: lane.count + '×' + lane.unit,
+                dur: tb9 ? r3(tb9.duration) : null,
+                fitRatio: tb9 ? r3(tb9.duration / (lane.len * spb())) : null,
+                expect: 'bpm ~125-140 · 1×B · fit 1.0' });
+    setBpm(keep.bpm);
   } finally {
     window.flash = flash0;
     md.getUserMedia = gum0; md.enumerateDevices = enu0;
@@ -1374,7 +1411,7 @@ async function probeMicRec() {
     Object.assign(lane, keep.lane);
     engine.audBuf[ch] = keep.buf; engine.audName[ch] = keep.name;
     if (engine.granBuf) engine.granBuf[ch] = keep.gbuf;
-    S.layer = keep.layer; dirty = true;
+    S.layer = keep.layer; try { setBpm(keep.bpm); } catch (_) {} dirty = true;
   }
   notes.push('flashes: ' + flashes.join(' | '));
   return { cols: ['rec', 'landed', 'peak', 'expect', 'onSec', 'heldSec', 'loopSec', 'firstAt', 'expAt', 'head', 'strokes',
@@ -1382,7 +1419,7 @@ async function probeMicRec() {
                   'on', 'off', 'bus', 'at', 'step1', 'step2', 'listed', 'row',
                   'micDuring', 'db', 'mon', 'layer', 'latched',
                   'down', 'up', 'full', 'l', 'r', 'rfull', 'sameBuf', 'spd', 'semis', 'crop',
-                  'onsets', 'E', 'Ems', 'spread', 'nowLATC', 'implied', 'trimMs', 'status',
+                  'onsets', 'E', 'Ems', 'spread', 'nowLATC', 'implied', 'trimMs', 'status', 'maxStep', 'nch', 'LtoR', 'bpm', 'lane', 'dur', 'fitRatio',
                   'spanSec', 'bedSec', 'mixSec', 'ovdubMixSec', 'dev', 'paramLeak', 'curParam', 'busResume'], rows };
 }
 

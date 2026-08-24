@@ -1234,7 +1234,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-24.1342';
+const BUILD='2026-08-24.1406';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -11640,19 +11640,27 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     const E=this;
     const tap=(srcNode,label,openedMic)=>{
       if(E.audRec)return;
-      const sp3=AC.createScriptProcessor(4096,1,1);
+      /* THE MASTER IS STEREO AND THE TAKE KEEPS IT (Gad, 2026-08-24: "record
+         the stereo out of master, rn its mono"): a mstr tap runs two channels
+         end to end — audPlace builds a 2ch canvas, granSend already ships
+         L/R, and `chan` picks at playback. The mic stays mono. */
+      const nch=label==='mstr'?2:1;
+      const sp3=AC.createScriptProcessor(4096,nch,nch);
       const sink=AC.createGain(); sink.gain.value=0;
-      const chunks=[], pks=[], SUB=512;
+      const chunks=[], chunksR=[], pks=[], SUB=512;
       sp3.onaudioprocess=ev=>{const d=ev.inputBuffer.getChannelData(0);
         chunks.push(new Float32Array(d));
+        const d2=nch>1?ev.inputBuffer.getChannelData(1):null;
+        if(d2)chunksR.push(new Float32Array(d2));
         for(let a=0;a<d.length;a+=SUB){let pk=0; const z=Math.min(d.length,a+SUB);
-          for(let i=a;i<z;i+=2){const v=d[i]<0?-d[i]:d[i]; if(v>pk)pk=v;}
+          for(let i=a;i<z;i+=2){let v=d[i]<0?-d[i]:d[i]; if(v>pk)pk=v;
+            if(d2){v=d2[i]<0?-d2[i]:d2[i]; if(v>pk)pk=v;}}
           pks.push(pk);}
         dirty=true;                                  // the column draws it as it lands
         if(chunks.length*4096>AC.sampleRate*120){flash('recording capped at 120s — takes belong in loops');
           try{audRecEnd();}catch(_){}}};
       srcNode.connect(sp3); sp3.connect(sink); sink.connect(AC.destination);
-      E.audRec={pi,src:srcNode,sp3,sink,chunks,pks,blk:SUB,startBeat:gridNow(),label,openedMic,keys:0,
+      E.audRec={pi,src:srcNode,sp3,sink,chunks,chunksR,pks,blk:SUB,startBeat:gridNow(),label,openedMic,keys:0,
         lat:audRecLat(label)};
       /* in overwrite the OLD loop goes quiet under the take — the carrier and
          only the carrier; a key played under the hold must stay audible,
@@ -11691,7 +11699,39 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     if(len<AC.sampleRate*0.05){flash(r.label+' take too short');this.audResume(r.pi);return;}
     const rec=new Float32Array(len); let o=0;
     for(const c2 of r.chunks){rec.set(c2,o);o+=c2.length;}
-    audPlace(r.pi,rec,r.startBeat,r.label,r.lat);
+    let recOut=rec;
+    if(r.chunksR&&r.chunksR.length){
+      const recR=new Float32Array(len); let o2=0;
+      for(const c2 of r.chunksR){recR.set(c2,o2);o2+=c2.length;}
+      recOut=[rec,recR];
+    }
+    /* A TAKE INTO SILENCE SETS THE CLOCK (Gad, 2026-08-24: "when playback is
+       stopped, and i start a new mic recording, it will start the recording
+       from 0, and will change the tempo to make the recording length match
+       the new tempo"). Stopped transport, a mic take, and a loop it may
+       define — the channel EMPTY, a truly new loop: guessTake picks the most
+       probable musical length — 16th to bars, bpm 80-170, bars and the
+       middle of the window preferred — the tempo is set EXACTLY so that
+       length IS the take, the lane is cut to it, and the take lands at 0.
+       A channel that already holds a take keeps the clock whatever the
+       mode: a stopped punch-in must never re-tempo the set. (Undo restores
+       the take but keeps the tempo — a dial, not a loss.) */
+    if(!T.playing&&r.label==='mic'&&!engine.audBuf[r.pi]){
+      const durS=len/AC.sampleRate, g9=guessTake(durS);
+      if(g9){
+        const bpmX=+(60*g9.beats/durS).toFixed(3);
+        setBpm(bpmX);
+        const lane9=S.patterns[S.editPat].lanes[r.pi], bars9=g9.beats/4;
+        if(bars9>=1&&Math.abs(bars9-Math.round(bars9))<1e-9){lane9.unit='B'; lane9.count=Math.round(bars9);}
+        else{lane9.unit='b'; lane9.count=g9.beats;}
+        lane9.auto=false;
+        audPlace(r.pi,recOut,editAnchor(),r.label,0);
+        flash('◉ '+(bars9>=1?Math.round(bars9)+' bar':g9.beats+' beat')+' take → '
+              +Math.round(bpmX*10)/10+'bpm — space plays it');
+        return;
+      }
+    }
+    audPlace(r.pi,recOut,r.startBeat,r.label,r.lat);
   }
   chokeSeq(pi){const n=AC.currentTime;for(const v of [...this.act[pi]])if(!v.live)v.kill(n);
     /* granular: the worklet may hold voices whose 'off' was lost — a choke is
@@ -18427,7 +18467,7 @@ function detectCuts(buf,st,en,n){
    than not. Returns null when nothing fits — a one-shot, a field recording,
    anything that is not a loop — and then nothing is assumed at all. */
 const TEMPOLO=80, TEMPOHI=170;
-const BEATCANDS=[1,2,3,4,6,8,12,16,24,32,48,64,96,128];
+const BEATCANDS=[0.25,0.5,1,2,3,4,6,8,12,16,24,32,48,64,96,128];   // 0.25/0.5: a 16th and an 8th can be a loop too (Gad, 2026-08-24)
 function guessTake(durSec){
   if(!(durSec>0.05))return null;
   const mid=Math.sqrt(TEMPOLO*TEMPOHI);
@@ -18536,7 +18576,8 @@ function audPlace(pi,rec,startBeat,name='mic',lat){
   /* SILENCE IS NOT A TAKE. A muted mic, a denied permission, a channel with
      nothing routed to it — all of them used to overwrite a loaded sample
      with a loop of nothing, and the sample was not coming back. */
-  let pk9=0; for(let i=0;i<rec.length;i+=17){const v=rec[i]<0?-rec[i]:rec[i]; if(v>pk9)pk9=v;}
+  const chs=Array.isArray(rec)?rec:[rec], recN=chs[0].length;
+  let pk9=0; for(const cD of chs)for(let i=0;i<cD.length;i+=17){const v=cD[i]<0?-cD[i]:cD[i]; if(v>pk9)pk9=v;}
   if(pk9<0.0015&&engine.audBuf[pi]){
     flash('that take is silent — '+(name==='mic'?'is the mic on?':'nothing came through')+
           ' — the sample is untouched');
@@ -18545,12 +18586,11 @@ function audPlace(pi,rec,startBeat,name='mic',lat){
   pushUndo('take: '+name);              // …and whatever it does replace comes back
   const lane=S.patterns[S.editPat].lanes[pi], sr=AC.sampleRate;
   if(lane.auto){                                    // fresh lane: loop length from the take
-    const bars=Math.max(0.25,(rec.length/sr)/spb()/4);
+    const bars=Math.max(0.25,(recN/sr)/spb()/4);
     let p2=1; while(p2*1.25<bars)p2*=2; p2=Math.min(p2,16);
     lane.unit='B'; lane.count=p2; lane.auto=false;
   }
   const L=lane.len, canvasLen=Math.max(256,Math.round(L*spb()*sr));
-  const cv=AC.createBuffer(1,canvasLen,sr), dst=cv.getChannelData(0);
   const mode=CFG.overdub||0;                        // 0 overwrite 1 overdub 2 smart
   /* OVERWRITE IS A PUNCH-IN (Gad, 2026-08-24: "it should overwrite only the
      part where rec was held and keep other areas of the previous layer
@@ -18563,20 +18603,32 @@ function audPlace(pi,rec,startBeat,name='mic',lat){
      replace stays one gesture away: the mic-latched TAP takes a full loop,
      and a hold longer than the loop covers it all. */
   const old=engine.audBuf[pi];
-  if(old){const os=old.getChannelData(0);
-    for(let i=0;i<canvasLen;i++)dst[i]=os[i%os.length]||0;}
+  const nch9=Math.max(chs.length,old?old.numberOfChannels:1);
+  const cv=AC.createBuffer(nch9,canvasLen,sr);
   const pos0=fmod(startBeat-editAnchor(),L)*spb()*sr-(lat??AUDLATC);
-  const W2=1024; let env=0;
-  for(let i=0;i<rec.length;i++){
-    const di=((Math.round(pos0+i)%canvasLen)+canvasLen)%canvasLen;
-    if(mode===2){                                   // smart: duck the old under the new
-      if(i%W2===0){let s2=0;const e2=Math.min(i+W2,rec.length);
-        for(let j=i;j<e2;j++)s2+=rec[j]*rec[j];
-        const tgt=Math.sqrt(s2/W2)>0.02?1:0;
-        env+=(tgt-env)*(tgt>env?0.5:0.12);}
-      dst[di]=dst[di]*(1-0.85*env)+rec[i];
-    }else if(mode===1)dst[di]+=rec[i];
-    else dst[di]=rec[i];
+  /* A PUNCH WITHOUT A CLICK (Gad, 2026-08-24: "put a little crossfade when
+     punching a recording to avoid clicks"): the take's first and last ~6ms
+     ramp, and in overwrite the old layer holds the complement, so both
+     joins are seams instead of steps. */
+  const F9=Math.max(1,Math.min(256,recN>>2));
+  for(let c9=0;c9<nch9;c9++){
+    const dst=cv.getChannelData(c9);
+    if(old){const os=old.getChannelData(Math.min(c9,old.numberOfChannels-1));
+      for(let i=0;i<canvasLen;i++)dst[i]=os[i%os.length]||0;}
+    const rc=chs[Math.min(c9,chs.length-1)];
+    const W2=1024; let env=0;
+    for(let i=0;i<recN;i++){
+      const di=((Math.round(pos0+i)%canvasLen)+canvasLen)%canvasLen;
+      const w9=Math.max(0,Math.min(1,i/F9,(recN-1-i)/F9));
+      if(mode===2){                                 // smart: duck the old under the new
+        if(i%W2===0){let s2=0;const e2=Math.min(i+W2,recN);
+          for(let j=i;j<e2;j++)s2+=rc[j]*rc[j];
+          const tgt=Math.sqrt(s2/W2)>0.02?1:0;
+          env+=(tgt-env)*(tgt>env?0.5:0.12);}
+        dst[di]=dst[di]*(1-0.85*env*w9)+rc[i]*w9;
+      }else if(mode===1)dst[di]+=rc[i]*w9;
+      else dst[di]=dst[di]*(1-w9)+rc[i]*w9;
+    }
   }
   engine.audBuf[pi]=cv; engine.audName[pi]=name;
   /* A FRESH TAKE PLAYS BACK AS IT WAS RECORDED (Gad, 2026-08-24: "the

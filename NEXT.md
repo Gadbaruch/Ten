@@ -1,6 +1,6 @@
 # WHERE THE AUDIO CHANNEL STANDS — 2026-08-23, branch `mic-rec`
 
-## MIC RECORDING ON AN AUDIO CHANNEL — on branch `mic-rec`, build 2026-08-24.1342, his ear next
+## MIC RECORDING ON AN AUDIO CHANNEL — on branch `mic-rec`, build 2026-08-24.1406, his ear next
 
 Gad, 2026-08-23: "i cant hear anything recorded, can you make my mic input
 controlable. also can you draw the incoming audio as its recorded and put a
@@ -193,6 +193,45 @@ Two more from his hands, minutes apart:
   keep a DEDICATED tab, front it BY ID (`browse tab N`) before every run,
   and read the url line of every probe header. Fronted-tab addressing in a
   shared window is a race.
+
+### ROUND 10 — stereo resample · crossfaded punches · a take into silence sets the clock
+
+Three asks, one scope decision:
+
+- **"when ch input is set to master, and chan is stereo, record the stereo
+  out of master, rn its mono."** The mstr tap runs ScriptProcessor(4096,2,2)
+  and audPlace builds an n-channel canvas (max of take and old bed; a mono
+  bed under a stereo take doubles to both sides). granSend already shipped
+  L/R and the worklet already stored both — only the recorder was mono. The
+  mic stays mono; `chan` still picks at playback. Measured: a hard-left
+  660Hz blip through the master → a 2-channel take, right channel energy 0.
+- **"put a little crossfade when punching a recording to avoid clicks."**
+  audPlace ramps the take's first and last ~6ms (F=256 samples, capped at a
+  quarter of a short take), and in overwrite the old layer holds the
+  complement — both joins are seams. Overdub/smart scale their sum/duck by
+  the same ramp. Measured on the punch buffer: max sample step 0.019 (a
+  hard edge between the two test tones would be ~0.45).
+- **"when playback is stopped, and i start a new mic recording, it will
+  start the recording from 0, and will change the tempo to make the
+  recording length match."** Done via guessTake — BEATCANDS gained 0.25/0.5
+  (his 16th and 8th), window already 80-170, bars and the middle preferred
+  — the bpm is set EXACTLY (60·beats/dur, 3 decimals) so the loop IS the
+  take, the lane is recut (unit b under a bar, B at and above), and the
+  take lands at position 0 with lat 0. Measured: 1.765s of signal → 1×B at
+  135.999bpm, fitRatio 1.000, from 0.
+  **SCOPE, decided by the probe itself: EMPTY CHANNEL ONLY.** The first cut
+  fired on every stopped overwrite take — and the suite's own hold row
+  (stopped, empty, mic) promptly re-clocked the set to 143bpm and every
+  loop-seconds assertion moved, which is exactly what a stopped punch-in
+  would have done to HIS set. A channel that already holds a take keeps the
+  clock in every mode; only a truly new loop defines it. (Undo restores the
+  take but keeps the tempo — a dial.) If his ear wants stopped FULL
+  re-records (overwrite over a bed) to also re-clock, it is one condition.
+- Probe hygiene that fell out: the suite pins bpm 120 at start (scratch
+  state had drifted once and every seconds-assert chased it), and the
+  hold/gain rows now run under a PLAYING transport — truer to life, and the
+  only way they stay out of the new tempo path. Grid placement under play:
+  firstAt−expAt ≈ 32ms (one SP block of scheduling jitter), loop 2.000s.
 
 ### ROUND 9 — trim confirmed at +87ms; the monitor goes through the strip
 
