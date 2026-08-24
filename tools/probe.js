@@ -978,6 +978,9 @@ async function probeSweep() {
   /* known ground: tape, position keys, autoloop off, no cloud, no sync, x1 */
   p.au.kmode = 0; p.au.auto = 0; p.au.cmode = 0; p.au.pmode = 0;
   p.au.spd = 1; p.au.semis = 0; p.au.st = 0; p.au.en = 1;
+  /* wnd=N lets the release-fade window ride the comparison — Gad's set runs
+     180 and the live-vs-replay length delta scales with it */
+  if (P.wnd) { p.au.wnd = clamp(num(P.wnd, 50), 5, 300); engine.audWnd(ch); }
   if (p.gr) p.gr.size = 1;
   (p.ply || []).forEach((_, i) => p.ply[i] = mkPly());
   try { applyCmode(ch); } catch (_) {}

@@ -1,5 +1,69 @@
 # WHERE THE AUDIO CHANNEL STANDS — 2026-08-24, branch `bugfixes`
 
+## HIS SET ARRIVED — ch5 FM diagnosed (crv was dead), ch9 cues measured (build 2026-08-24.2155)
+
+Export works for him now; the save dialog put the file in **Documents**, not
+Downloads: `~/Documents/ten-set-2026-08-24-23-22.json`. Copied into the repo
+as `tmp-gadset.json` (git-excluded via .git/info/exclude — his set does not
+get committed).
+
+**ch5 "grimy FM descent" — found, and the finding is a dead dial.** His
+patch: op0 sine carrier, op1 sine mode 1 (fm→op0), mod slot 2 = env
+(a 0.005 / d 2.18 / s 0 / r 8) → op1 LEVEL at +200%. Measured on the real
+patch (C3, bus capture): the descent is CLEAN linear FM — per-frame max
+sample delta falls 0.082→0.003 with no steps, no zipper, no aliasing floor.
+What he hears is the SHAPE: the op-level env decay was a hard-coded
+setTargetAtTime exponential (tau=d/5) that lingers exactly where 1:1 FM
+churns hardest (index 3→0, the fundamental flickering through the Bessel
+nulls at I≈2.4/5.5), and **the env crv dial was DEAD on op-level envelopes**
+(crv −2 vs +2 measured identical: diff 75-161 = counting noise; the amp env
+honors crv, this path never did). Fixed with the amp env's own recipe
+(exponent on time, exp(−5uᵖ) matching this path's tau, hard landing kept),
+guarded |crv|>1 so every crv-0 patch — including his, today — is
+byte-identical. Measured post-fix, zc trajectory at 300/500/800/1100ms:
+crv 0 → 26/15/9/3 (unchanged) · crv −100 → 45/46/41/30 (hangs at full
+index, then off the shelf — the "fixed FM position" feel) · crv +100 →
+2/3/3/3 (drops through the churn instantly). His move: dial crv NEGATIVE on
+that mod-slot env. Also found, reported, not changed: route amounts clamp
+at ±100% — his 200% plays as 100%.
+
+**Envs/LFOs audio-rate? (his question)** Yes in the voice: envs are
+scheduled AudioParam automation (sample-accurate), LFOs are real
+osc→gain→param nodes. Control-tick exceptions: pan, and the mod rack's
+press/flw live sources (glide-smoothed, tick-updated).
+
+**audSave bug found same session: {...r,...enc} let smpEnc's n (sample
+count) clobber the take's NAME** — embedded takes came back named "22050".
+Nested under `emb` now; restoreAudio reads r.emb; setio asserts the name
+(nameBack probe-take). Zero compat cost — the only new-format export in
+existence (his 23-22) carries no takes (he reloaded before exporting, so
+his RAM takes were gone; aud refs all null).
+
+**ch9 "recorded cue juggling shorter than performance / release mismatch" —
+measured, mechanism narrowed, needs his answer.** The recorder (lateAudWrite):
+t = quantized grid beat, dur = FULL keyup−keydown finger span — deliberate,
+matching midi ("a 40ms tap is a 40ms note wherever on the grid it lands").
+So live sounds grid→keyup, replay sounds grid→grid+dur: replay holds LONGER
+than what he heard by his press-early gap (up to a 16th = 123ms at his
+122.38). Sweep suite (pitch-is-position take, real recorder, replay
+compared): dPos ≤12ms always; dLen at wnd 50 = noise (±10-40ms), at his
+wnd 180 replay leans −30..−50ms SHORTER (release-fade edge). His lane in
+the set: 40 events, all t on 16ths (he quantizes), durs 0.118-0.166 beats
+(58-81ms taps), detached (40-65ms bed gaps between). Open question FOR HIM:
+when juggling, fingers overlapped or detached? and should recorded dur
+count from the GRID (what sounded) instead of the finger press? — that one
+change would make replay = live by construction, but it contradicts the
+stated midi-recorder design, so it is his call, not mine.
+`probe sweep` gained a wnd=N arg for this.
+
+Traps left for the next thread: audPlace onto a channel that holds a
+SHORTER bed produces a bed-sized canvas (punch-in semantics) — clear first
+or land takes through setChanBuf when probing; a raw audBuf[pi]=null wipe
+leaves the worklet holding the old tape — clear through the ⇧⌫ door or
+follow with granNode+setChanBuf+relock; a loaded set's null aud refs do NOT
+clear channels (leftover takes survive load); micrec2 can blow the 30s
+browse cap on a heavy tab — wipe ten-v1 and reload first.
+
 ## EXPORT — the vanishing file, and the takes that never traveled (build 2026-08-24.2117)
 
 Gad: "hmm indeed export is acting wierd, please check it." The evidence: his
