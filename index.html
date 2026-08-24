@@ -1234,7 +1234,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-24.1839';
+const BUILD='2026-08-24.1857';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -6355,7 +6355,16 @@ function fltChain(ac,p,at){
     const bq=ac.createBiquadFilter();
     bq.type=FTYPE_W[f.typ]||'lowpass';
     setFrq(bq.frequency,fFrq);
-    bq.Q.value=f.q; bq.gain.value=f.gn;
+    /* LOWPASS AND HIGHPASS READ Q IN dB — the WebAudio rule the dial never
+       knew (Gad, 2026-08-24: "anything under 1 is the same as 1, and i want
+       to have options for very soft filtering with no rez"). The dial's
+       0.1..1 was 0.1..1dB — indistinguishable — while the soft knees live
+       BELOW 0dB. Under 1 the dial now maps to −12..0dB: the bottom is a
+       gentle bumpless slope, 1 stays ~Butterworth, everything above is
+       exactly as it was. Linear-Q types (bandpass, notch, peaking) keep the
+       raw number — their sub-1 values were always genuinely broad. */
+    const qFor=(ty9,q9)=>((ty9==='lowpass'||ty9==='highpass')&&q9<1)?(q9-1)*12:q9;
+    bq.Q.value=qFor(bq.type,f.q); bq.gain.value=f.gn;
     /* 24dB = the same filter twice. Q is split between the stages (√ of the
        total) so doubling the slope does not also double the resonant peak —
        two biquads at Q=8 ring far harder than one. */
@@ -6365,7 +6374,7 @@ function fltChain(ac,p,at){
       bq2.type=bq.type;
       setFrq(bq2.frequency,fFrq);
       const qh=Math.sqrt(Math.max(0.0001,f.q));
-      bq.Q.value=qh; bq2.Q.value=qh; bq2.gain.value=f.gn;
+      bq.Q.value=qFor(bq.type,qh); bq2.Q.value=qFor(bq.type,qh); bq2.gain.value=f.gn;
       bq.connect(bq2); fOut=bq2;
       node2[i]=bq2; hasPol=true;
     }
@@ -11921,6 +11930,12 @@ function applyAudParam(pi,rack,spec,v){
   }else{
     p.au=p.au||{};
     if(spec.set)spec.set(p.au,v); else p.au[spec.key]=v;
+    /* THE CLOUD HEARS ITS OWN PITCH DIAL (Gad, 2026-08-24: "in grain mode
+       changing pitch doesnt work ... it should ALSO work on its own when
+       changing it from grain"). In grain the pitch spec writes gr.semis —
+       the carry made the two dials one — but only audLive fired here: the
+       tape cursors re-aimed and the grains never re-read. Push the cloud. */
+    if(spec.key==='semis'&&cmodeOf(p)===2)engine.granCfg(pi);
     if(spec.key==='wnd')engine.audWnd(pi); else engine.audLive(pi);
   }
   dirty=true;

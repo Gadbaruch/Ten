@@ -1673,6 +1673,78 @@ async function probeMicRec2() {
                   'spanSec', 'bedSec', 'mixSec', 'ovdubMixSec', 'dev', 'paramLeak', 'curParam', 'busResume'], rows };
 }
 
+/* GRAIN PITCH + FILTER Q (2026-08-24): the two bug fixes of the bugfixes
+   branch, held as regressions. lpq reads the lowpass response AT the cutoff
+   across the reso dial — under 1 the dial maps below 0dB now (LP/HP Q is in
+   dB per WebAudio; 0.1..1 used to be one indistinguishable decibel).
+   grainpitch dials the channel pitch in GRAIN mode through the real door
+   (applyAudParam) and expects the sounding cloud to follow — the write used
+   to land in gr.semis with nothing pushing the worklet. */
+async function probeGrainFlt() {
+  const ch = CH, sr = AC.sampleRate, rows = [];
+  const qFor = (ty9, q9) => ((ty9 === 'lowpass' || ty9 === 'highpass') && q9 < 1) ? (q9 - 1) * 12 : q9;
+  const resp = q => { const bq = AC.createBiquadFilter(); bq.type = 'lowpass'; bq.frequency.value = 1000;
+    bq.Q.value = qFor('lowpass', q);
+    const F = new Float32Array([1000]), M = new Float32Array(1), P = new Float32Array(1);
+    bq.getFrequencyResponse(F, M, P); return +(20 * Math.log10(M[0])).toFixed(1); };
+  rows.push({ k: 'lpq', q01: resp(0.1), q05: resp(0.5), q1: resp(1), q4: resp(4),
+              expect: '≈ −10.8 · −6 · +1 · +4 dB at fc — the bottom of the dial is real now' });
+  const md = navigator.mediaDevices, gum0 = md.getUserMedia;
+  const feed = AC.createGain(); feed.gain.value = 1;
+  const o0 = AC.createOscillator(), og = AC.createGain(); o0.frequency.value = 440; og.gain.value = 0.3;
+  o0.connect(og); og.connect(feed); o0.start();
+  md.getUserMedia = () => { const d9 = AC.createMediaStreamDestination(); feed.connect(d9); return Promise.resolve(d9.stream); };
+  const lane = S.patterns[S.editPat].lanes[ch];
+  const keep = { p: stash(ch), buf: engine.audBuf[ch], name: engine.audName[ch],
+                 gbuf: (engine.granBuf || [])[ch],
+                 lane: { unit: lane.unit, count: lane.count, auto: lane.auto, events: lane.events.slice() },
+                 bpm: T.bpm, playing: T.playing };
+  try {
+    setBpm(120); if (T.playing) stop();
+    if (engine.audRec) engine.audRecStop(true); if (MIC.on) micOff(); MIC.stream = null; MIC.ring = null;
+    pin(ch); if (!isAudioCh(ch)) setEngine(ch, 'audio');
+    const pr = S.presets[ch]; pr.cat = 'audio'; pr.au = pr.au || {}; pr.au.cmode = 0; pr.au.kmode = 0;
+    audDefaults(pr); pr.au.src = 0; CFG.overdub = 0; delete CFG.micTrimMs; CFG.micDb = 0; S.layer = 1;
+    engine.audBuf[ch] = null; if (engine.granBuf) engine.granBuf[ch] = null;
+    lane.unit = 'B'; lane.count = 1; lane.auto = false; lane.events = [];
+    await micOn(); MIC.latched = true; await sleep(2300);
+    audPlace(ch, micGrab(lane.len * spb()), gridNow() - lane.len, 'mic', 0);
+    pr.au.spd = 1; pr.au.rate = 1; pr.au.st = 0; pr.au.en = 1; pr.au.semis = 0;
+    pr.au.cmode = 2; applyCmode(ch); pr.gr.semis = 0; engine.granCfg(ch);
+    const freq = async () => { const nd = busOf(ch);
+      const sp = AC.createScriptProcessor(4096, 2, 2), L = [];
+      sp.onaudioprocess = e => L.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+      const sk = AC.createGain(); sk.gain.value = 0; nd.connect(sp); sp.connect(sk); sk.connect(AC.destination);
+      await sleep(500); try { nd.disconnect(sp); sp.disconnect(); sk.disconnect(); } catch (_) {}
+      const n = L.reduce((a, c) => a + c.length, 0), d = new Float32Array(n); let q = 0; for (const c of L) { d.set(c, q); q += c.length; }
+      let z = 0, first = -1, last = -1;
+      for (let i = 1; i < d.length; i++) if (d[i - 1] <= 0 && d[i] > 0) { z++; if (first < 0) first = i; last = i; }
+      return z > 2 ? +(((z - 1) / ((last - first) / sr))).toFixed(1) : 0; };
+    play(); await sleep(1000);
+    const base9 = await freq();
+    const spec9 = AUDALL().find(s9 => s9.key === 'semis');
+    applyAudParam(ch, 'aud', spec9, 12); await sleep(400);
+    const up9 = await freq(); const reads9 = spec9.get(pr.au);
+    applyAudParam(ch, 'aud', spec9, 0); await sleep(250);
+    const back9 = await freq();
+    stop(); await sleep(120);
+    rows.push({ k: 'grainpitch', base: base9, plus12: up9, back: back9, dial: reads9,
+                expect: '≈440 · ≈880 · ≈440 · dial 12 — the cloud follows its own pitch dial' });
+  } finally {
+    md.getUserMedia = gum0; try { o0.stop(); } catch (_) {}
+    if (engine.audRec) engine.audRecStop(true);
+    if (MIC.on) micOff(); MIC.stream = null; MIC.ring = null; MIC.devs = null;
+    if (T.playing && !keep.playing) stop();
+    unstash(ch, keep.p);
+    Object.assign(lane, keep.lane);
+    engine.audBuf[ch] = keep.buf; engine.audName[ch] = keep.name;
+    if (engine.granBuf) engine.granBuf[ch] = keep.gbuf;
+    try { setBpm(keep.bpm); } catch (_) {}
+    dirty = true;
+  }
+  return { cols: ['q01', 'q05', 'q1', 'q4', 'base', 'plus12', 'back', 'dial'], rows };
+}
+
 const HELP = {
   cols: ['args'],
   rows: [
@@ -1690,6 +1762,7 @@ const HELP = {
     { k: 'modmatrix',args: 'only=filt — every mod SOURCE x every DESTINATION: reaches/anchor/live/tweak' },
     { k: 'micrec',   args: 'ch=9 hold=900 db=-6 — the RECORDER rows (fake mic): chord, tab-alone, picture, gain, keys, ring, punch/xfade, repitch, mute/resume' },
     { k: 'micrec2',  args: 'ch=9 — the SESSION rows: monitor, device, mic sync, esc dials+arrows, tab loop, latc, stereo, tempo-from-take, nearend, headtrim, rshift-del clear' },
+    { k: 'grainflt', args: 'ch=9 — the cloud follows its own pitch dial (440→880 on +12) and the reso dial is real under 1 (LP/HP Q maps below 0dB)' },
     { k: '(any)',    args: '--ab <url> runs the same probe on a second build and diffs it' },
   ]
 };
@@ -1723,7 +1796,8 @@ try {
                    matrix: probeMatrix,
                    modmatrix: probeModMatrix,
                    micrec: probeMicRec,
-                   micrec2: probeMicRec2 };
+                   micrec2: probeMicRec2,
+                   grainflt: probeGrainFlt };
   const fn = PROBES[NAME];
   out = fn ? await fn() : (NAME === 'help' ? HELP : { cols: [], rows: [], err: 'no probe named ' + NAME });
 } catch (e) {

@@ -1,4 +1,36 @@
-# WHERE THE AUDIO CHANNEL STANDS — 2026-08-24, main
+# WHERE THE AUDIO CHANNEL STANDS — 2026-08-24, branch `bugfixes`
+
+## GRAIN PITCH + FILTER RESONANCE — on branch `bugfixes`, build 2026-08-24.1857, his ear next
+
+Two of his: "in grain mode changing pitch doesnt work ... it should ALSO
+work on its own when changing it from grain" and "anything under 1 is the
+same as 1, and i want to have options for very soft filtering with no rez".
+
+- **Grain pitch.** The carry had already made the dials one — in grain the
+  pitch spec writes gr.semis — but applyAudParam's aud branch only fired
+  audLive: the tape cursors re-aimed and the sounding cloud never re-read.
+  One push: `key==='semis' && cmode 2 → engine.granCfg(pi)`. Measured
+  through the real door (applyAudParam): cloud at 437.9Hz → dial +12 →
+  880.8Hz → back → 442Hz, dial reads 12.
+- **Filter resonance.** The WebAudio rule the dial never knew: LOWPASS and
+  HIGHPASS interpret Q in dB (bandpass/notch/peaking are linear). The reso
+  dial 0.1..24 went straight into Q, so 0.1..1 spanned one indistinguishable
+  decibel — and the soft, bumpless knees live BELOW 0dB. Under 1 the dial
+  now maps to −12..0dB (`qFor`, in the rack builder, 24dB split included);
+  1 stays ~Butterworth and everything above is byte-identical. Measured at
+  the cutoff: dial 0.1 → −10.8dB, 0.5 → −6dB, 1 → +1dB, 4 → +4dB. Existing
+  patches with reso ≥1 are untouched; sub-1 values previously sounded like
+  1, so the remap only makes the dial's bottom real.
+- Probe: `grainflt` (third suite, 2 rows) holds both as regressions;
+  preset probe confirms the rack still builds (SNR 0.638 peak); micrec 13 +
+  micrec2 12 green.
+
+QA: (1) grain channel, cloud sounding, turn the channel pitch dial — the
+cloud follows immediately, and it still carries over when walking
+tape↔stretch↔grain. (2) any synth, filter lowpass, reso at 0.3-0.7: the
+cutoff now rolls off soft with no bump — sweep the cutoff and hear a
+gentle slope instead of the old ringing edge; reso ≥1 unchanged.
+
 
 ## UNIT SNAP + TOP STEP — MERGED to main + LIVE 2026-08-24.1839 ("works well")
 
