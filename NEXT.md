@@ -1,6 +1,6 @@
 # WHERE THE AUDIO CHANNEL STANDS — 2026-08-24, branch `ux-fixes`
 
-## UNIT SNAP — on branch `ux-fixes`, build 2026-08-24.1711, his ear next
+## UNIT SNAP — on branch `ux-fixes`, build 2026-08-24.1722, his ear next
 
 Gad: "when changing any loop length unit size, midi or audio, snap the loop
 current length to the closest ... if current loop is 7 16th notes length and
@@ -14,9 +14,24 @@ existing ⇧←→ coupling (audFitComp compensates the snapped ratio on the
 speed dial). Measured (unitsnap row, midi lane): 16th→8th→beat→half→bar =
 7→8→8→8→16 sixteenths. micrec is 12 rows now.
 
+**ROUND 2 — "the snap to nearest unit size changes the pitch, and it
+shouldnt."** Measured three ways before touching anything: the engine was
+already holding rate through the walk (a spawn spy showed every cursor at
+2.286→2.28, even the mid-join in a canvas≠lane config; the wild ±octave
+readings of the first attempt were the zero-crossing estimator tripping on
+splice seams — estimator lesson, kept). The REAL movement was
+audFitComp's toFixed(2): the compensation is stored, re-read and
+compounded on the next length change, and two decimals cost −15 cents
+over one walk (442.7 → 438.9Hz), more on round trips. The spd is stored
+EXACT now (the dial still displays ×N.NN); only the ±4 rail and the 0.25
+detent may bend it, and they flash. Measured: the audible walk is flat —
+442.7Hz at every step — and the unitpitch probe row asserts 0.0 cents of
+rate deviation on every run. micrec is 13 rows.
+
 QA: any loop, tab+⇧→ up the units: the length re-grids to the nearest whole
-new unit each step; tab+⇧← back down stays whole. Audio channel: same, with
-the speed dial showing the fit ratio as before.
+new unit each step; tab+⇧← back down stays whole. Audio channel: same, and
+the PITCH DOES NOT MOVE — walk the units up and back with a take sounding;
+the speed dial's number changes, the sound does not.
 
 
 ## MIC RECORDING ON AN AUDIO CHANNEL — MERGED to main + LIVE 2026-08-24.1701 ("its tight")

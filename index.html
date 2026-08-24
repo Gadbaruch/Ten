@@ -1234,7 +1234,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-24.1711';
+const BUILD='2026-08-24.1722';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -3680,7 +3680,13 @@ function loopOps(e,c,lp){
     const au=S.presets[li].au=S.presets[li].au||{};
     if(!Math.round(au.fit||0)||!(L0>0)||!(lp.len>0)||Math.abs(lp.len-L0)<1e-9)return;
     const cur=audSpd(au), want=cur*(lp.len/L0);
-    let s2=clamp(+want.toFixed(2),-4,4);
+    /* EXACT, not toFixed(2): the compensation is stored, re-read and
+       compounded on the next length change, and two decimals lost 15 cents
+       over one unit walk (Gad, 2026-08-24: "the snap to nearest unit size
+       changes the pitch"). The dial still DISPLAYS ×N.NN; the number under
+       it keeps the whole ratio, so walks and round trips return to pitch
+       exactly. Only the rail and the detent still bend it — and say so. */
+    let s2=clamp(want,-4,4);
     if(Math.abs(s2)<0.25)s2=cur<0?-0.25:0.25;
     au.spd=s2; au.rate=s2;
     if(Math.abs(s2-want)>0.005)flash('speed at the rail — the take stretches from here');

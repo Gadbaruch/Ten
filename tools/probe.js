@@ -1328,6 +1328,25 @@ async function probeMicRec() {
     K('keyup', 'ShiftRight'); K('keyup', 'Tab'); await sleep(80);
     laneM.unit = keepM.u; laneM.count = keepM.c; laneM.auto = keepM.a; S.curPreset = keepCur;
     rows.push({ k: 'unitsnap', s16walk: walk.join('→'), expect: '7→8→8→8→16 (16th→8th→beat→half→bar)' });
+    /* unitpitch — on AUDIO the snap must never move the pitch: the
+       fit-compensated rate is invariant through the walk (exact spd now;
+       toFixed(2) compounded to −15 cents over one walk) */
+    pin(ch); S.layer = 1;
+    const pau2 = S.presets[ch].au; pau2.spd = 1; pau2.rate = 1; pau2.fit = 1;
+    pau2.st = 0; pau2.en = 1; pau2.semis = 0;
+    lane.unit = 's'; lane.count = 7; lane.auto = false;
+    const theo9 = () => { const au9 = Object.assign({}, pau2); const W9 = audWin(au9);
+      const D9 = engine.audBuf[ch].duration, dur9 = Math.max(1e-6, (W9.hi - W9.lo) * D9);
+      return audRate(au9, dur9, lane.len * spb()); };
+    const r0 = theo9(); let rDev = 0;
+    K('keydown', 'Tab'); await sleep(40); KS('keydown', 'ShiftRight', { shiftKey: true });
+    for (let k9 = 0; k9 < 4; k9++) {
+      KS('keydown', 'ArrowRight', { shiftKey: true }); KS('keyup', 'ArrowRight', { shiftKey: true });
+      await sleep(20); rDev = Math.max(rDev, Math.abs(theo9() / r0 - 1)); }
+    K('keyup', 'ShiftRight'); K('keyup', 'Tab'); await sleep(80);
+    lane.unit = 'B'; lane.count = 1; pau2.spd = 1; pau2.rate = 1;
+    rows.push({ k: 'unitpitch', cents: r3(1200 * Math.log2(1 + rDev)),
+                expect: '0 — the snap never moves the pitch' });
     /* (the session rows — monitor, device, sync, esc gestures, tab loop,
        latc, stereo, tempo, nearend, headtrim, clear — moved to micrec2:
        the browse CLI caps a command at 30s and the full suite outgrew it) */
@@ -1355,7 +1374,7 @@ async function probeMicRec() {
                   'on', 'off', 'bus', 'at', 'step1', 'step2', 'listed', 'row',
                   'micDuring', 'db', 'mon', 'layer', 'latched',
                   'down', 'up', 'full', 'l', 'r', 'rfull', 'sameBuf', 'spd', 'semis', 'crop',
-                  'onsets', 'E', 'Ems', 'spread', 'nowLATC', 'implied', 'trimMs', 'status', 'maxStep', 'nch', 'LtoR', 'bpm', 'lane', 'dur', 'fitRatio', 'playingAfterSeed', 'playDelayMs', 'seedHeadAt', 'punchAt', 'relPh', 'busBoundary', 'busNext', 'buf', 'auto', 'events', 'spanStartSec', 'press', 'release', 'span', 's16walk',
+                  'onsets', 'E', 'Ems', 'spread', 'nowLATC', 'implied', 'trimMs', 'status', 'maxStep', 'nch', 'LtoR', 'bpm', 'lane', 'dur', 'fitRatio', 'playingAfterSeed', 'playDelayMs', 'seedHeadAt', 'punchAt', 'relPh', 'busBoundary', 'busNext', 'buf', 'auto', 'events', 'spanStartSec', 'press', 'release', 'span', 's16walk', 'cents',
                   'spanSec', 'bedSec', 'mixSec', 'ovdubMixSec', 'dev', 'paramLeak', 'curParam', 'busResume'], rows };
 }
 
@@ -1644,7 +1663,7 @@ async function probeMicRec2() {
                   'on', 'off', 'bus', 'at', 'step1', 'step2', 'listed', 'row',
                   'micDuring', 'db', 'mon', 'layer', 'latched',
                   'down', 'up', 'full', 'l', 'r', 'rfull', 'sameBuf', 'spd', 'semis', 'crop',
-                  'onsets', 'E', 'Ems', 'spread', 'nowLATC', 'implied', 'trimMs', 'status', 'maxStep', 'nch', 'LtoR', 'bpm', 'lane', 'dur', 'fitRatio', 'playingAfterSeed', 'playDelayMs', 'seedHeadAt', 'punchAt', 'relPh', 'busBoundary', 'busNext', 'buf', 'auto', 'events', 'spanStartSec', 'press', 'release', 'span', 's16walk',
+                  'onsets', 'E', 'Ems', 'spread', 'nowLATC', 'implied', 'trimMs', 'status', 'maxStep', 'nch', 'LtoR', 'bpm', 'lane', 'dur', 'fitRatio', 'playingAfterSeed', 'playDelayMs', 'seedHeadAt', 'punchAt', 'relPh', 'busBoundary', 'busNext', 'buf', 'auto', 'events', 'spanStartSec', 'press', 'release', 'span', 's16walk', 'cents',
                   'spanSec', 'bedSec', 'mixSec', 'ovdubMixSec', 'dev', 'paramLeak', 'curParam', 'busResume'], rows };
 }
 
