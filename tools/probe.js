@@ -1639,13 +1639,30 @@ async function probeMicRec2() {
     const ht = cls(engine.audBuf[ch].getChannelData(0));
     rows.push({ k: 'headtrim', spanSec: ht.span, bedSec: ht.bed, mixSec: ht.mix,
                 expect: 'span ~0.5 (tone only) · bed ~1.45 · no hole' });
-    /* clear — rshift+⌫ empties the recording channel and re-arms the clock */
+    /* slices — rhythm is the default: a 1-bar take splits in 16 16ths, two
+       bars in 16 8ths; the toggle brings the transient detector back */
+    {const p9s = S.presets[ch]; p9s.au.cut = 0;
+     lane.unit = 'B'; lane.count = 1; lane.auto = false;
+     const n1 = (engine.audCuts(ch) || []).length;
+     lane.count = 2;
+     const n2 = (engine.audCuts(ch) || []).length;
+     p9s.au.cut = 1; const nT = (engine.audCuts(ch) || []).length;
+     p9s.au.cut = 0; lane.count = 1;
+     rows.push({ k: 'slices', bar1: n1, bar2: n2, transient: nT,
+                 expect: '16 · 16 (8ths) · detector ≥1' });}
+    /* clear — rshift+⌫ is TWO-STAGE on audio: keys first, the sample only
+       when the lane is already empty */
     pin(ch); S.layer = 1;
-    KS('keydown', 'ShiftRight', { shiftKey: true });
-    KS('keydown', 'Backspace', { shiftKey: true }); await sleep(60);
-    KS('keyup', 'Backspace', { shiftKey: true }); K('keyup', 'ShiftRight'); await sleep(120);
-    rows.push({ k: 'clear', buf: !!engine.audBuf[ch], auto: lane.auto, events: lane.events.length,
-                expect: 'buf false · auto true · 0 events' });
+    HOLD.dig = -1; HOLD.tab = false;      // a stray trusted digit once left dig stuck and re-routed the key
+    lane.events = [{ t: 0, cue: 0, vel: 0.9, dur: 0.25 }];
+    const zap = async () => { HOLD.dig = -1; KS('keydown', 'ShiftRight', { shiftKey: true });
+      KS('keydown', 'Backspace', { shiftKey: true }); await sleep(60);
+      KS('keyup', 'Backspace', { shiftKey: true }); K('keyup', 'ShiftRight'); await sleep(120); };
+    await zap();
+    const st1 = { ev: lane.events.length, buf: !!engine.audBuf[ch] };
+    await zap();
+    rows.push({ k: 'clear', stage1: st1.ev + '/' + st1.buf, buf: !!engine.audBuf[ch], auto: lane.auto,
+                expect: 'stage1 0/true (keys gone, take kept) · then buf false · auto true' });
   } finally {
     window.flash = flash0;
     md.getUserMedia = gum0; md.enumerateDevices = enu0;

@@ -1,6 +1,6 @@
 # WHERE THE AUDIO CHANNEL STANDS — 2026-08-24, branch `bugfixes`
 
-## GRAIN PITCH + FILTER RESONANCE — on branch `bugfixes`, build 2026-08-24.1958, his ear next
+## GRAIN PITCH + FILTER RESONANCE + SLICES + ⇧⌫ — on branch `bugfixes`, build 2026-08-24.2007, his ear next
 
 Two of his: "in grain mode changing pitch doesnt work ... it should ALSO
 work on its own when changing it from grain" and "anything under 1 is the
@@ -52,12 +52,44 @@ through detune-CENTS (exponential FM — index modulation shifts the pitch
 center), and the depth's 6(1+3a²) curve applies at build but LINEARLY under
 modulation.
 
+**ROUND 3 — the slices toggle and the two-stage ⇧⌫.**
+- **"an option between transient cue distribution like now, and splitting
+  into quantized regions like we had originally ... default to rhythm
+  divition."** New field `slices` on the audio channel's instrument row:
+  `rhythm` (DEFAULT) · `transient`. Rhythm divides the WINDOW evenly at a
+  unit picked from the loop's length — ≤1 bar in 16ths, ≤2 in 8ths, ≤4 in
+  beats, ≤8 in halves, longer in bars — so the letters always span the loop
+  at a countable grain (≤16 cues for power-of-2 lengths). Transient is the
+  detector, unchanged. Lives in audCuts (cache keyed by method + lane
+  length, so a loop resize re-slices by itself). Measured: 1 bar → 16 cues,
+  2 bars → 16 (8ths), transient → the detector's 26 on a sine bed.
+- **"shift+del on audio should first clear key recordings if any, only when
+  no cue or pitch keys recorded ... then clear the sample."** Two stages:
+  a lane with events → the first press empties the LANE only ('keys
+  cleared — ⇧⌫ again clears the sample'); an empty lane → the full channel
+  clear as before. Measured: stage 1 → 0 events, take kept; stage 2 → take
+  gone, lane auto.
+- ⚠ **A TRUSTED DIGIT NOBODY SENT ate an afternoon's measurement.** The
+  two-stage rows kept reading 'cleared' with the WRONG flashes — clearLane's
+  vocabulary, not the new branch's — because HOLD.dig sat stuck at 9: a
+  real keystroke had landed in the measurement tab (the headed browse
+  window is visible on the desktop; its keyup went elsewhere), and
+  `HOLD.dig>=0` re-routed ⌫ to the digit-hold branch. The flashes named the
+  wrong branch and THAT cracked it — read the flash, not just the state.
+  Standalone evals do not carry the probe harness's trusted-key swallow;
+  rows that depend on holds now pin them (HOLD.dig=-1).
+
 QA: (1) grain channel, cloud sounding, ARROW-dial the pitch row on the
 sound page — the cloud follows immediately; automation on the same dial
 also lands; the carry over tape↔stretch↔grain unchanged. (2) any synth,
 filter lowpass, reso at 0.3-0.7: the cutoff rolls off soft with no bump —
 sweep the cutoff and hear a gentle slope instead of the old ringing edge;
-reso ≥1 unchanged.
+reso ≥1 unchanged. (3) position keys on a take: default slicing is now the
+GRID — a 2-bar loop gives 16 8th-note cues under the letters; flip
+`slices` to transient on the instrument row for the detector. (4) ⇧⌫ on an
+audio channel with recorded keys: first press clears the keys and says so,
+second press clears the sample; with no keys recorded one press clears the
+sample as before.
 
 
 ## UNIT SNAP + TOP STEP — MERGED to main + LIVE 2026-08-24.1839 ("works well")
