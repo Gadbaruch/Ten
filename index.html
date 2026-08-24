@@ -1234,7 +1234,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-24.1038';
+const BUILD='2026-08-24.1202';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -18424,14 +18424,18 @@ function audPlace(pi,rec,startBeat,name='mic'){
   const L=lane.len, canvasLen=Math.max(256,Math.round(L*spb()*sr));
   const cv=AC.createBuffer(1,canvasLen,sr), dst=cv.getChannelData(0);
   const mode=CFG.overdub||0;                        // 0 overwrite 1 overdub 2 smart
-  /* OVERWRITE MEANS THE OLD LOOP DIES WITH THE NEW TAKE (Gad, 2026-08-23: "do
-     not mix the new recording with the old, just erase the previous"). The
-     canvas used to start as a copy of the old buffer, so a short take
-     replaced only the span it covered and the rest of the old loop played on
-     around it — a mix, wearing overwrite's name. Overdub and smart still
-     start from the old loop: starting from it is their whole point. */
+  /* OVERWRITE IS A PUNCH-IN (Gad, 2026-08-24: "it should overwrite only the
+     part where rec was held and keep other areas of the previous layer
+     intact" — refining 08-23's "just erase the previous", which one build
+     read as erase-the-whole-loop). The canvas starts from the old layer in
+     EVERY mode; the recorded span is where the modes differ: overwrite
+     REPLACES its samples outright (never sums — that is the no-mix half),
+     overdub sums, smart ducks. Outside the span nothing is touched. The old
+     loop still goes QUIET while the take runs (the mute), and a whole-loop
+     replace stays one gesture away: the mic-latched TAP takes a full loop,
+     and a hold longer than the loop covers it all. */
   const old=engine.audBuf[pi];
-  if(old&&mode!==0){const os=old.getChannelData(0);
+  if(old){const os=old.getChannelData(0);
     for(let i=0;i<canvasLen;i++)dst[i]=os[i%os.length]||0;}
   const pos0=fmod(startBeat-editAnchor(),L)*spb()*sr-AUDLATC;
   const W2=1024; let env=0;
@@ -19241,18 +19245,27 @@ const onKeyDown=e=>{
     arepStart(e.code);
   }
   if(arrowAlias(e,'keydown'))return;   // right alt is ←, menu is ↑, F13-F16 are all four
-  /* THE MIC'S OWN DIALS RIDE THE MIC KEY (Gad, 2026-08-23): while esc (or a
-     board's Fn) holds the mic open, -/= is the input gain and ; the monitor
-     — the hand is already on the mic. Deliberately NOT chord-use: operating
-     the mic is not borrowing its key for something else, so MIC._used stays
-     false and a win+esc latch still latches. ESCH.used is set so the release
-     does not ALSO escape. Repeats step the gain; a toggle must not repeat. */
-  if((ESCH||MIC._down)&&(e.code==='Minus'||e.code==='Equal'||e.code==='Semicolon')
+  /* THE MIC HOLD IS A SCOPE (Gad, 2026-08-24: "holding mic button and
+     up/down to change gain should not use updown for other params, it
+     should scope only on the mic"). While esc (or a board's Fn) holds the
+     mic open, the row is the mic's, exactly like a held param scope:
+         ↑↓  gain (⇧ = 6dB)     ←→  input device
+         -/= gain as well        ;   monitor
+     — and none of them reaches the page's params, the cursor, or the
+     settings rows underneath. Deliberately NOT chord-use: operating the mic
+     is not borrowing its key, so MIC._used stays false and a win+esc latch
+     still latches. ESCH.used is set so the release does not ALSO escape.
+     Repeats step the gain; a device swap and a toggle must not repeat. */
+  if((ESCH||MIC._down)
+     &&(e.code==='Minus'||e.code==='Equal'||e.code==='Semicolon'
+        ||e.code==='ArrowUp'||e.code==='ArrowDown'||e.code==='ArrowLeft'||e.code==='ArrowRight')
      &&!cmdOf(e)&&!e.ctrlKey&&!altOf(e)){
     e.preventDefault();
     if(ESCH)ESCH.used=true;
     if(e.code==='Semicolon'){if(!e.repeat)micMonToggle();}
-    else micGainStep((e.code==='Equal'?1:-1)*(e.shiftKey?6:1));
+    else if(e.code==='ArrowLeft'||e.code==='ArrowRight'){
+      if(!e.repeat)micStepDev(e.code==='ArrowRight'?1:-1);}
+    else micGainStep(((e.code==='Equal'||e.code==='ArrowUp')?1:-1)*(e.shiftKey?6:1));
     dirty=true; return;
   }
   /* BARE CONTROL (or a board's fn) IS THE MIC. Down opens it; a ctrl+letter

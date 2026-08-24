@@ -1191,17 +1191,34 @@ async function probeMicRec() {
     const o3 = d3 ? onOf(d3) : { n: 0 };
     rows.push({ k: 'tap+ring', landed: !!b3, peak: d3 ? r3(pkOf(d3)) : null, onSec: r3(o3.n / sr), loopSec: r3(cl / sr),
                 micAfter: MIC.on ? 'on' : 'off', rec2: engine.audRec ? 'STILL RUNNING' : 'none' });
-    /* erase — overdub keeps the bed under a short take; overwrite kills the
-       whole old loop (Gad: "just erase the previous"). Bed here: the full
-       2s ring take from the row above. */
+    /* punch — overwrite replaces ONLY the held span and never sums (Gad,
+       2026-08-24: "overwrite only the part where rec was held and keep other
+       areas of the previous layer intact"). Bed: the full 2s ring take at
+       0.3/440Hz. Punch: 0.45s at 0.15/523Hz — windows reading ~0.15 are the
+       replaced span, ~0.3 the surviving bed, >0.33 would be a SUM (overdub
+       shows those; overwrite must show none). */
+    const cls = d9 => { const win = 256; let span = 0, bed = 0, mix = 0;
+      for (let a = 0; a + win <= d9.length; a += win) { let pk = 0;
+        for (let i = a; i < a + win; i += 2) { const v = Math.abs(d9[i]); if (v > pk) pk = v; }
+        if (pk > 0.33) mix++; else if (pk > 0.21) bed++; else if (pk > 0.08) span++; }
+      return { span: r3(span * win / sr), bed: r3(bed * win / sr), mix: r3(mix * win / sr) }; };
+    osc.frequency.value = 523; CFG.micDb = -6; micGainApply();
     CFG.overdub = 1;
     K('keydown', 'Tab'); await sleep(450); K('keyup', 'Tab'); await sleep(150);
-    const o5 = onOf(engine.audBuf[ch].getChannelData(0));
+    const od9 = cls(engine.audBuf[ch].getChannelData(0));
+    /* the clean 440 bed back — in OVERWRITE, so the full-loop grab replaces
+       everything (same-frequency overdub would phase-cancel the bed) — then
+       the overwrite punch at 523 */
     CFG.overdub = 0;
+    osc.frequency.value = 440; CFG.micDb = 0; micGainApply();
+    await sleep(cl / sr * 1000 + 300);
+    audPlace(ch, micGrab(lane.len * spb()), gridNow() - lane.len, 'mic');
+    osc.frequency.value = 523; CFG.micDb = -6; micGainApply(); await sleep(150);
     K('keydown', 'Tab'); await sleep(450); K('keyup', 'Tab'); await sleep(150);
-    const o4 = onOf(engine.audBuf[ch].getChannelData(0));
-    rows.push({ k: 'erase', ovdubOnSec: r3(o5.n / sr), onSec: r3(o4.n / sr), loopSec: r3(cl / sr),
-                expect: 'ovdub ~2.0 · ovwrt ~0.45' });
+    const pw9 = cls(engine.audBuf[ch].getChannelData(0));
+    osc.frequency.value = 440; CFG.micDb = 0; micGainApply();
+    rows.push({ k: 'punch', spanSec: pw9.span, bedSec: pw9.bed, mixSec: pw9.mix, ovdubMixSec: od9.mix,
+                loopSec: r3(cl / sr), expect: 'span~0.45 bed~1.5 mix 0 · ovdubMix >0.1' });
     /* repitch — a fresh take resets speed/pitch/crop to neutral, so it plays
        back as recorded; the dials only repitch when turned AFTER the take
        (Gad, 2026-08-24) */
@@ -1255,6 +1272,21 @@ async function probeMicRec() {
                 expect: 'db -1-1+6=+4 · mon 1', layer: lay0 + '→' + S.layer,
                 micAfter: MIC.on ? 'on' : 'off', latched: MIC.latched });
     CFG.micMon = 0; micMonWire();
+    /* micscope — the held mic owns the arrows: ↑↓ gain, ←→ device, and NO
+       page param, cursor or layer moves underneath them */
+    if (MIC.on) micOff(); MIC.latched = false; CFG.micDb = 0;
+    pin(ch); S.layer = 2; S.curParam = 0; dirty = true; await sleep(80);
+    const snap0 = JSON.stringify(S.presets[ch]); const cp0 = S.curParam, dev0 = CFG.micDevL || 'unset';
+    K('keydown', 'Escape'); await sleep(280);
+    K('keydown', 'ArrowUp'); K('keyup', 'ArrowUp');
+    KS('keydown', 'ArrowDown', { shiftKey: true }); KS('keyup', 'ArrowDown', { shiftKey: true });
+    K('keydown', 'ArrowRight'); K('keyup', 'ArrowRight');
+    await sleep(150);
+    K('keyup', 'Escape'); await sleep(120);
+    rows.push({ k: 'micscope', db: CFG.micDb, expect: '+1-6=-5', dev: dev0 + '→' + (CFG.micDevL || 'unset'),
+                paramLeak: JSON.stringify(S.presets[ch]) === snap0 ? 'none' : 'MOVED',
+                curParam: cp0 + '→' + S.curParam, layer: S.layer, micAfter: MIC.on ? 'on' : 'off' });
+    S.layer = 1;
     /* tabloop — tab+↑↓ is loop length now; with fit on the speed dial
        absorbs the ratio, the crop does not move, and no take lands from a
        hold that was spent as a modifier */
@@ -1290,7 +1322,8 @@ async function probeMicRec() {
                   'micAfter', 'rec2', 'keysSeen', 'ovdubOnSec', 'carBefore', 'busPlay', 'carDuring', 'busRec', 'carAfter',
                   'on', 'off', 'gate', 'step1', 'step2', 'listed', 'row',
                   'micDuring', 'db', 'mon', 'layer', 'latched',
-                  'upCount', 'upSpd', 'downCount', 'downSpd', 'en', 'sameBuf', 'spd', 'semis', 'crop'], rows };
+                  'upCount', 'upSpd', 'downCount', 'downSpd', 'en', 'sameBuf', 'spd', 'semis', 'crop',
+                  'spanSec', 'bedSec', 'mixSec', 'ovdubMixSec', 'dev', 'paramLeak', 'curParam'], rows };
 }
 
 const HELP = {
@@ -1308,7 +1341,7 @@ const HELP = {
     { k: 'trig',     args: 'ch=1 note=60 ph=90 — does an operator rtrg/free reach the sound, in both fm engines' },
     { k: 'matrix',   args: 'ch=8 take=nylonlick cues=4 — the seven cases + the cue jumps' },
     { k: 'modmatrix',args: 'only=filt — every mod SOURCE x every DESTINATION: reaches/anchor/live/tweak' },
-    { k: 'micrec',   args: 'ch=9 hold=900 db=-6 — mic on an audio channel (fake mic): esc+tab chord, tab-alone, picture, gain, keys, ring, erase/mute/repitch, monitor, device, esc dials, tab loop' },
+    { k: 'micrec',   args: 'ch=9 hold=900 db=-6 — mic on an audio channel (fake mic): chord, tab-alone, picture, gain, keys, ring, punch/mute/repitch, monitor, device, esc scope (dials+arrows), tab loop' },
     { k: '(any)',    args: '--ab <url> runs the same probe on a second build and diffs it' },
   ]
 };

@@ -1,6 +1,6 @@
 # WHERE THE AUDIO CHANNEL STANDS — 2026-08-23, branch `mic-rec`
 
-## MIC RECORDING ON AN AUDIO CHANNEL — on branch `mic-rec`, build 2026-08-24.1038, his ear next
+## MIC RECORDING ON AN AUDIO CHANNEL — on branch `mic-rec`, build 2026-08-24.1202, his ear next
 
 Gad, 2026-08-23: "i cant hear anything recorded, can you make my mic input
 controlable. also can you draw the incoming audio as its recorded and put a
@@ -194,31 +194,64 @@ Two more from his hands, minutes apart:
   and read the url line of every probe header. Fronted-tab addressing in a
   shared window is a race.
 
+### ROUND 4, same morning — the mic hold is a SCOPE, and overwrite is a PUNCH-IN
+
+"much better", then two:
+
+- **"holding mic button and up/down to change gain should not use updown for
+  other params, it should scope only on the mic."** The mic hold is a held
+  scope now, the PARAM FOCUS shape exactly: while esc (or Fn) is down,
+  ↑↓ = gain (⇧ 6dB) · ←→ = input device · -/= = gain too · ; = monitor,
+  and NONE of it reaches the page's params, the cursor, the settings rows or
+  the layer. The ←→ device pair is the scope's second pair by the MAGPAIR
+  convention — he asked only for ↑↓; if ←→ on the mic annoys, it is one line.
+  A latched mic does NOT hold the scope — the key must be physically down, a
+  latch frees the keyboard (same rule as every held scope). Measured on the
+  sound page: esc-held ↑, ⇧↓, → gave db +1−6=−5 and Fake A→Fake B, with the
+  preset JSON byte-identical, curParam 0→0, layer parked, mic off at release.
+- **"recording a small area overwrites the whole loop, it should overwrite
+  only the part where rec was held and keep other areas of the previous
+  layer intact."** Overwrite is a punch-in now. This REFINES 08-23's "just
+  erase the previous" (which one build read as erase-the-whole-loop): the
+  no-mix half survives — inside the held span the new take REPLACES outright,
+  never sums — and outside the span the previous layer is untouched, in
+  every mode (the canvas starts from the old layer again; the modes differ
+  only inside the span: replace / sum / duck). A whole-loop replace is still
+  one gesture: the mic-latched TAP takes a full loop, and a hold longer than
+  the loop covers it all. The mute while recording stays as it was.
+  Measured (bed 2.0s @0.3/440Hz, punch 0.45s @0.15/523Hz): overwrite —
+  span 0.36s at punch level, bed 1.64s intact, ZERO windows above the sum
+  threshold; overdub — 0.35s of summed windows. If his ear finds the mute
+  fighting punch-in timing (you cannot hear the bed you are punching into),
+  that is the next dial to discuss — it was his ask and it stands.
+- ⚠ Probe trap for the file: re-laying a bed by OVERDUBBING the same
+  frequency phase-cancels (0.3+0.3 came out ~0.12 and read as the punch
+  band). Beds are re-laid in OVERWRITE, and any same-tone layering assert
+  should use two frequencies (440/523 here) so a sum is unmistakable.
+
 QA — most likely to be wrong first (fake-mic measured; the REAL mic still is
 not, and is test #1):
- 1. **The chord records; tab alone never does.** Hold esc (mic opens — first
-    time the browser asks), keep it, hold tab ~2s and talk, let go. Right:
-    '◉ audio: N bar loop' and it plays back AT THE PITCH YOU SPOKE — even if
-    the speed dial read ×2 from before. Plain tab (no esc): keys recorder
-    only, no prompt, no take. Mic latched (win+esc): plain tab records — the
-    latch IS the mic half of the chord.
- 2. **Repitch only after.** Record; then turn speed/pitch/crop — NOW it
-    repitches. Record again — back to your voice at ×1, dials neutral.
- 3. **Overwrite = erase.** rec ovwrt, loop with sound, chord-record a SHORT
-    bit: only the new bit remains anywhere in the loop. Undo restores.
- 4. **The bed mutes WHILE you record over it** (ovwrt, transport running):
-    the old loop drops out under the take, keys still audible, the new take
-    enters at the next bar. ovdub keeps the bed playing.
- 5. **tab+↑↓ = loop length, pitch stays** (sync on: tab+↑ doubles the bars,
-    sounds identical, speed dial shows ×2 — that ×2 clears on your next
-    recording). tab+-/= is still speed. The crop ×2 gesture is gone; crop
-    dials on the page remain.
- 6. **Keys under the chord = keys take** ('the sound was dropped').
- 7. **Tap with mic latched** = last loop off the ring; **win+tab** latches
-    the recorder, tab again keeps it.
- 8. **Settings/Input**: mic dev · mic gain (meter) · monitor — and on the
-    mic key: esc held, -/= gain (⇧ 6dB), ; monitor. One switch, in the
-    master, only audible while the mic is open.
+ 1. **The chord, at your pitch.** Hold esc, keep it, hold tab ~2s, talk, let
+    go: '◉ audio: N bar loop', played back exactly as spoken — dials neutral
+    after. Plain tab: keys recorder only, no prompt, no take. Mic latched:
+    plain tab records (the latch is the mic half).
+ 2. **Punch-in.** Loop with sound, rec ovwrt, chord-record a SHORT bit
+    mid-loop: only that span is replaced — clean, no doubling inside it —
+    and the rest of the layer is exactly as it was. While you hold, the old
+    loop is quiet; the patched loop returns on the next bar. Full replace:
+    mic-latched TAP (the ring takes a whole loop), or hold past the loop.
+ 3. **The mic scope.** Hold esc: ↑↓ walks the gain (⇧ = 6dB), ←→ steps the
+    input device, -/= also gain, ; monitor — and NOTHING else moves: no
+    param dials, no cursor, no settings row. Release: all keys back to
+    normal. (←→ on the device was not asked for — say if it should go.)
+ 4. **Repitch only after.** Record; turn speed/pitch/crop — now it
+    repitches; record again — neutral, your voice at ×1.
+ 5. **The bed mutes while you record over it** (ovwrt; ovdub keeps playing).
+ 6. **tab+↑↓ = loop length**, sound identical (dial shows the ratio, clears
+    on your next recording). tab+-/= is speed.
+ 7. **Keys under the chord = keys take** ('the sound was dropped').
+ 8. **Settings/Input** still the reference: mic dev · mic gain (meter) ·
+    monitor; esc+; and settings toggle the same monitor.
 
 
 ## LIVE MOD-AMOUNT + META-MOD — FIXED on branch `live-mod`, build .2352, his ear next
