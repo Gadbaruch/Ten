@@ -1104,9 +1104,13 @@ async function probeMicRec() {
                  lane: { unit: lane.unit, count: lane.count, auto: lane.auto, events: lane.events.slice() },
                  micDb: CFG.micDb, micDev: CFG.micDev, micDevL: CFG.micDevL,
                  overdub: CFG.overdub, micMon: CFG.micMon, layer: S.layer, playing: T.playing };
-  const osc = AC.createOscillator(), og = AC.createGain(), dst = AC.createMediaStreamDestination();
-  osc.frequency.value = 440; og.gain.value = 0.3; osc.connect(og); og.connect(dst); osc.start();
-  md.getUserMedia = () => Promise.resolve(dst.stream);
+  /* the fake mic mints a FRESH stream per call off one feed node: micSetDev
+     stops the old stream's tracks, and a stopped singleton was a dead mic
+     for every row after the device one (sync heard 0/4 that way) */
+  const osc = AC.createOscillator(), og = AC.createGain(), feed = AC.createGain();
+  osc.frequency.value = 440; og.gain.value = 0.3; feed.gain.value = 1;
+  osc.connect(og); og.connect(feed); osc.start();
+  md.getUserMedia = () => { const d9 = AC.createMediaStreamDestination(); feed.connect(d9); return Promise.resolve(d9.stream); };
   md.enumerateDevices = () => Promise.resolve([
     { kind: 'audioinput', deviceId: 'fakeA', label: 'Fake A (probe)' },
     { kind: 'audioinput', deviceId: 'fakeB', label: 'Fake B (probe)' }]);
@@ -1258,6 +1262,17 @@ async function probeMicRec() {
     await micStepDev(1); const dv1 = CFG.micDevL + '/' + (MIC.on ? 'on' : 'off');
     await micStepDev(1); const dv2 = CFG.micDevL + '/' + (MIC.on ? 'on' : 'off');
     rows.push({ k: 'device', step1: dv1, step2: dv2, listed: (MIC.devs || []).length, row: micDevName() });
+    /* sync — his click test as a button: the master wired into the fake mic,
+       micCalibrate plays 4 clicks and measures the chain; the loopback's own
+       buffering is all there is here, so the stored trim should be small */
+    if (MIC.on) micOff(); MIC.stream = null; MIC.ring = null; MIC.devs = null;
+    delete CFG.micTrimMs;
+    og.gain.value = 0; try { engine.master.connect(feed); } catch (_) {}
+    const st9 = await micCalibrate();
+    const trim1 = Number.isFinite(CFG.micTrimMs) ? CFG.micTrimMs : 'none';
+    try { engine.master.disconnect(feed); } catch (_) {}
+    og.gain.value = 0.3; delete CFG.micTrimMs;
+    rows.push({ k: 'sync', trimMs: trim1, status: st9, expect: 'ok, 0..40ms' });
     /* escmic — the dials ride the mic key: esc held past 200ms, -/= is the
        gain (⇧ coarse), ; the monitor. None of it counts as chord-use, none
        of it escapes, and the momentary release still closes the mic. */
@@ -1364,7 +1379,7 @@ async function probeMicRec() {
                   'on', 'off', 'gate', 'step1', 'step2', 'listed', 'row',
                   'micDuring', 'db', 'mon', 'layer', 'latched',
                   'down', 'up', 'full', 'l', 'r', 'rfull', 'sameBuf', 'spd', 'semis', 'crop',
-                  'onsets', 'E', 'Ems', 'spread', 'nowLATC', 'implied',
+                  'onsets', 'E', 'Ems', 'spread', 'nowLATC', 'implied', 'trimMs', 'status',
                   'spanSec', 'bedSec', 'mixSec', 'ovdubMixSec', 'dev', 'paramLeak', 'curParam', 'busResume'], rows };
 }
 

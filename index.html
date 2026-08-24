@@ -1234,7 +1234,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-24.1308';
+const BUILD='2026-08-24.1321';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1327,6 +1327,14 @@ const SETTINGS=[
  {n:'mic dev',g:'Input', v:()=>micDevName(),         a:d=>{micStepDev(d);}},
  {n:'mic gain',g:'Input',v:()=>micGainStr(),         a:d=>micGainStep(d)},
  {n:'monitor',g:'Input', v:()=>CFG.micMon?'on':'off',a:()=>micMonToggle()},
+ /* the chain measured on THIS machine (micCalibrate) and a hand dial over
+    the same number; 'auto' means the browser's reported guess is in use */
+ {n:'mic sync',g:'Input',v:()=>'▶ measure',          a:()=>{micCalibrate();}},
+ {n:'mic trim',g:'Input',
+   v:()=>Number.isFinite(CFG.micTrimMs)?((CFG.micTrimMs>0?'+':'')+Math.round(CFG.micTrimMs)+'ms'):'auto',
+   a:d=>{const b9=Number.isFinite(CFG.micTrimMs)?CFG.micTrimMs:micLatGuessMs();
+         CFG.micTrimMs=clamp(Math.round(b9+d*5),-250,500); saveCfg();
+         flash('mic trim '+(CFG.micTrimMs>0?'+':'')+CFG.micTrimMs+'ms — mic takes land this much earlier');}},
  {n:'vel',g:'Input', v:()=>String(Math.round(clamp(CFG.kvel??0.9,0.02,1)*127)), a:d=>EXP.bump(d*0.05)},
  /* THE KEYBOARD IS NOT A SETTING ANY MORE (Gad, 2026-08-17). tools key, scope
     key, win key, menu key, last key and the arrows mode selector all lived
@@ -18440,14 +18448,70 @@ const AUDLATC=0;      /* MEASURED, not assumed: six beat-locked blips through th
    master. A real mic adds the device's own delay on top, in and out, which
    the browser reports per stream — read at RECORD time, so a bluetooth
    headset pays its own bill and a rewire never needs a rebuild. */
+function micLatGuessMs(){
+  try{const t9=MIC.stream&&MIC.stream.getAudioTracks()[0];
+    const st9=t9&&t9.getSettings?t9.getSettings():{};
+    return Math.round(((st9.latency||0)+(AC.outputLatency||0))*1000);}catch(_){return 0;}
+}
 function audRecLat(label){
   let lat=AUDLATC;
-  if(label==='mic'){
-    try{const t9=MIC.stream&&MIC.stream.getAudioTracks()[0];
-      const st9=t9&&t9.getSettings?t9.getSettings():{};
-      lat+=Math.round(((st9.latency||0)+(AC.outputLatency||0))*AC.sampleRate);}catch(_){}
-  }
+  if(label==='mic')
+    lat+=Math.round((Number.isFinite(CFG.micTrimMs)?CFG.micTrimMs:micLatGuessMs())/1000*AC.sampleRate);
   return lat;
+}
+/* HIS TEST, AS A BUTTON (Gad, 2026-08-24: "set mic input>turn on metronome
+   click>record full loop>playback> notice the recording transient of the
+   click comes after the actual click" — the browser under-reported his chain
+   by ~100ms and no constant measured elsewhere can know his room). Four
+   clicks out the speakers at known clock times, the mic records the room
+   through the SAME tap chain a take uses, and the offset between played and
+   arrived is the whole path — output, air, mic, stream — on THIS machine
+   with THIS gear. The median goes to CFG.micTrimMs and audRecLat spends it
+   on every mic take. It refuses to store garbage: fewer than 3 of 4 clicks
+   heard (headphones, muted speakers) or a spread over 30ms flashes why and
+   stores nothing. */
+async function micCalibrate(){
+  const was=MIC.on;
+  if(!MIC.on)await micOn();
+  if(!MIC.on||!MIC.g){flash('mic did not open — no measurement');return 'no-mic';}
+  flash('▶ mic sync — 4 clicks through the speakers, keep the room quiet…');
+  const sr=AC.sampleRate, N=4, GAP=0.35;
+  const sp=AC.createScriptProcessor(4096,1,1), chunks=[];
+  sp.onaudioprocess=ev=>chunks.push(new Float32Array(ev.inputBuffer.getChannelData(0)));
+  const sink=AC.createGain(); sink.gain.value=0;
+  MIC.g.connect(sp); sp.connect(sink); sink.connect(AC.destination);
+  const tTap=AC.currentTime;
+  const bg=AC.createGain(); bg.gain.value=0.9; bg.connect(engine.master);
+  const tks=[];
+  for(let k=0;k<N;k++){const tk=tTap+0.3+k*GAP; tks.push(tk);
+    const o=AC.createOscillator(); o.frequency.value=2000;
+    const g=AC.createGain(); g.gain.value=0; o.connect(g); g.connect(bg);
+    g.gain.setValueAtTime(0,tk); g.gain.linearRampToValueAtTime(1,tk+0.002);
+    g.gain.setValueAtTime(1,tk+0.012); g.gain.linearRampToValueAtTime(0,tk+0.014);
+    o.start(tk); o.stop(tk+0.03);}
+  await new Promise(r=>setTimeout(r,(0.3+N*GAP+0.5)*1000));
+  try{MIC.g.disconnect(sp);}catch(_){}
+  try{sp.disconnect();sink.disconnect();bg.disconnect();}catch(_){}
+  if(!was&&MIC.on&&!MIC.latched)micOff();
+  const n=chunks.reduce((a,c)=>a+c.length,0), rec=new Float32Array(n);
+  {let q=0; for(const c of chunks){rec.set(c,q); q+=c.length;}}
+  const offs=[];
+  for(let k=0;k<N;k++){
+    const a=Math.max(0,Math.round((tks[k]-tTap)*sr)), z=Math.min(rec.length,a+Math.round(0.3*sr));
+    let mx=0; for(let i=a;i<z;i++){const v=Math.abs(rec[i]); if(v>mx)mx=v;}
+    if(mx<0.02)continue;
+    const thr=mx*0.35;
+    for(let i=a;i<z;i++)if(Math.abs(rec[i])>thr){offs.push((i-a)/sr*1000);break;}
+  }
+  if(offs.length<3){
+    flash('mic heard '+offs.length+' of 4 clicks — speakers audible? room quiet? nothing stored');
+    return 'heard '+offs.length+'/4';}
+  offs.sort((x,y)=>x-y);
+  const med=offs[Math.floor(offs.length/2)], spread=offs[offs.length-1]-offs[0];
+  if(spread>30){flash('unstable ('+Math.round(spread)+'ms spread) — nothing stored, try again in a quieter room');return 'spread '+Math.round(spread);}
+  CFG.micTrimMs=Math.round(med); saveCfg(); dirty=true;
+  flash('✓ mic sync '+Math.round(med)+'ms — every mic take lands that much earlier now');
+  return 'ok '+Math.round(med);
 }
 function audPlace(pi,rec,startBeat,name='mic',lat){
   /* SILENCE IS NOT A TAKE. A muted mic, a denied permission, a channel with

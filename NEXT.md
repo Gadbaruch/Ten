@@ -1,6 +1,6 @@
 # WHERE THE AUDIO CHANNEL STANDS — 2026-08-23, branch `mic-rec`
 
-## MIC RECORDING ON AN AUDIO CHANNEL — on branch `mic-rec`, build 2026-08-24.1308, his ear next
+## MIC RECORDING ON AN AUDIO CHANNEL — on branch `mic-rec`, build 2026-08-24.1321, his ear next
 
 Gad, 2026-08-23: "i cant hear anything recorded, can you make my mic input
 controlable. also can you draw the incoming audio as its recorded and put a
@@ -194,6 +194,37 @@ Two more from his hands, minutes apart:
   and read the url line of every probe header. Fronted-tab addressing in a
   shared window is a race.
 
+### ROUND 8 — his mic test is a BUTTON: settings/Input → mic sync
+
+"click test is better ... but with mic it is now lightly late like the
+recording is flaming about 100ms after the click, maybe you can do my test."
+His ~100ms is the REAL chain — speakers out, air, mic in, MediaStream
+buffering — which the browser under-reports (settings.latency was the whole
+guess) and which no constant measured on another machine can know. So his
+test ships as a button:
+
+- **settings/Input → `mic sync`**: plays 4 clicks through the master at
+  known clock times, records the room through the SAME tap chain a take
+  uses, finds each click's arrival, and stores the median in
+  **CFG.micTrimMs**. audRecLat spends it on every mic take (and the ring
+  grabs, and the live drawing). It refuses to store garbage: fewer than 3
+  of 4 clicks heard ('speakers audible? room quiet?') or spread >30ms
+  ('unstable') flashes why and keeps the old value. micCalibrate returns
+  its verdict, so the probe can assert it.
+- **`mic trim`**: the same number by hand, ±5ms a step (from the browser's
+  guess when unset — 'auto'), −250..+500ms, for a device that lies.
+- Probe: the sync row wires the master into the fake mic and runs the real
+  button — **'ok 22', trimMs 22** — which equals the loopback's own
+  buffering measured independently (22.4ms, spread 0, four clicks). The
+  first run heard 0/4 and exposed a PROBE defect worth keeping: the fake
+  getUserMedia returned one singleton stream, and micSetDev stops the old
+  stream's tracks — a stopped singleton was a dead mic for every row after
+  the device one. The fake mints a fresh stream per call off one feed now.
+- Still his ear's to confirm: run `mic sync` once with the speakers audible
+  (headphone-only monitoring cannot hear the clicks — it says so), then his
+  click test again: the transient should sit ON the click. Per-machine, per
+  origin; a gear change is one more press.
+
 ### ROUND 7 — ←→ joins the sample-length gesture, and AUDLATC was fiction
 
 Two more asks, both landed:
@@ -323,10 +354,11 @@ not, and is test #1):
     unit at a time (16th/8th/beat — ⇧←→ picks the unit) — same speed, same
     pitch, speed dial untouched, edges refuse with the flash naming keys.
     The loop ALONE (bars beyond the material) is right shift's dials.
- 0. **TIMING — his own test, by ear.** Click on, record it (mic to the air,
-    or input=mstr for the internal loop), play back: the recorded click sits
-    ON the live click now (was ~186ms early). If a real mic still lands off,
-    the device is lying about its latency — say so and a trim dial is next.
+ 0. **TIMING — press the button, then his test.** Settings/Input →
+    `mic sync`, speakers audible, room quiet: 4 clicks, then '✓ mic sync
+    NNms'. Now click on, chord-record a loop of it, play back: the recorded
+    transient sits ON the live click. Off by a hair → `mic trim` ±5ms.
+    Internal loop (input=mstr) needs no trim and is already sample-exact.
  7. **Keys under the chord = keys take** ('the sound was dropped').
  8. **Settings/Input** still the reference: mic dev · mic gain (meter) ·
     monitor; esc+; and settings toggle the same monitor.
