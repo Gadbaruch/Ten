@@ -1,6 +1,6 @@
 # WHERE THE AUDIO CHANNEL STANDS — 2026-08-23, branch `mic-rec`
 
-## MIC RECORDING ON AN AUDIO CHANNEL — on branch `mic-rec`, build 2026-08-24.1321, his ear next
+## MIC RECORDING ON AN AUDIO CHANNEL — on branch `mic-rec`, build 2026-08-24.1342, his ear next
 
 Gad, 2026-08-23: "i cant hear anything recorded, can you make my mic input
 controlable. also can you draw the incoming audio as its recorded and put a
@@ -193,6 +193,34 @@ Two more from his hands, minutes apart:
   keep a DEDICATED tab, front it BY ID (`browse tab N`) before every run,
   and read the url line of every probe header. Fronted-tab addressing in a
   shared window is a race.
+
+### ROUND 9 — trim confirmed at +87ms; the monitor goes through the strip
+
+**His chain measured +87ms and "its tight"** — the number lives in his
+ten-cfg (CFG.micTrimMs, origin 3033); a gear change is one more press of
+`mic sync`.
+
+- **"can you make monitor on go through the channel effects?"** — done. One
+  switch still (settings/Input, esc+;), but the wire lands in the STRIP of
+  the audio channel the mic would record: the one recording now, else the
+  one the cursor stands on; the master only when no audio channel has
+  focus. You hear yourself through its rack, fader and pan — the take in
+  place. Re-aimed from the 70ms cursor-ping interval, graph touched only on
+  a target change (MIC._monAt). Measured: monitor on → bus9 rms 0.202,
+  master 0.172 downstream, off 0.026 (strip tail in the window), at ch9.
+- **Retro, for the record** (he asked how it works): with the mic OPEN (esc
+  held or latched) a 32s ring hears everything; a TAP on tab grabs the last
+  loop-length of air (auto lane: 16 beats) and places it ending NOW, mic
+  trim applied. Without the mic, a tap is the KEYS retro (retroCapture /
+  tab+digit reveal), unchanged. Hold = forward recording; there is no
+  forward-armed "record the NEXT loop" — the ring makes it unnecessary.
+- **Quantize, for the record**: a take's placement is NEVER snapped —
+  startBeat is raw gridNow() through the trim, so the audio sits where it
+  actually sounded (that is what the calibration is for). Keys played under
+  the hold quantize like any notes when Q is on. Offer on the table: Q-on
+  snapping the take's START to the grid — declined by default because it
+  would move audio off where it sounded; his call if punch edges should
+  snap.
 
 ### ROUND 8 — his mic test is a BUTTON: settings/Input → mic sync
 

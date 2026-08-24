@@ -1234,7 +1234,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-24.1321';
+const BUILD='2026-08-24.1342';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -11736,6 +11736,7 @@ fetch('samples/manifest.json').then(r=>r.ok?r.json():null).then(man=>{
    than a blinking one. Channels with nothing sounding answer with two empty
    arrays and cost a message. */
 setInterval(()=>{
+  if(MIC.on&&CFG.micMon)micMonWire();     // the monitor follows the focus
   const gn=engine.gn; if(!gn)return;
   for(const i of CHANS()){
     const e=gn[i]; if(!e||!e.node||!isAudioCh(i))continue;
@@ -16575,20 +16576,37 @@ const micMeter=()=>!MIC.on?'':MIC.pk>0.5?'▎▎▎▎':MIC.pk>0.25?'▎▎▎'
 const micGainStr=()=>{const db=Math.round(CFG.micDb||0), m=micMeter();
   return (db>0?'+':'')+db+'dB'+(m?' '+m:'');};
 function micGainApply(){if(MIC.g)MIC.g.gain.setTargetAtTime(micLin(),AC.currentTime,0.01);}
-/* THE MONITOR IS ONE SWITCH FOR THE WHOLE INSTRUMENT (Gad, 2026-08-23: it
-   moved to settings/Input with the rest of the mic). MIC.g feeds one gain
-   into the master; CFG.micMon opens or shuts it. The master and not a
-   channel strip, because a global switch must not route by where the cursor
-   happens to stand. (It is inside what 'resample the master' records —
-   monitoring while you bounce prints the mic. A feature, worn openly.) */
-function micMonWire(){ if(MIC.monG)MIC.monG.gain.value=CFG.micMon?1:0; }
+/* THE MONITOR IS ONE SWITCH, HEARD THROUGH THE CHANNEL (Gad, 2026-08-24:
+   "can you make monitor on go through the channel effects?"). CFG.micMon
+   still owns on/off — settings and esc+; — but the wire lands in the strip
+   of the audio channel the mic would record: the one recording now, else
+   the one you stand on. You hear yourself through its rack, fader and pan —
+   the take in place — and only when no audio channel is in focus does it
+   fall back to the master. Re-aimed from the cursor-ping interval: compare
+   the target, touch the graph only on a change. (Through a strip it is
+   still inside what 'resample the master' records — worn openly.) */
+function micMonTarget(){
+  if(engine.audRec&&engine.audRec.label==='mic'&&isAudioCh(engine.audRec.pi))return engine.audRec.pi;
+  const f=S.layer>=2?S.editSnd:S.curPreset;
+  return (S.presets[f]&&isAudioCh(f))?f:0;          // 0 = the master
+}
+function micMonWire(){
+  if(!MIC.monG)return;
+  MIC.monG.gain.value=CFG.micMon?1:0;
+  const want=CFG.micMon?micMonTarget():(MIC._monAt??0);
+  if(want===MIC._monAt&&MIC._monWired)return;
+  try{MIC.monG.disconnect();}catch(_){}
+  const bus=want>0&&engine.buses&&engine.buses[want];
+  try{if(bus)MIC.monG.connect(bus.vIn); else MIC.monG.connect(engine.master);}catch(_){}
+  MIC._monAt=want; MIC._monWired=true;
+}
 function micGainStep(d){
   CFG.micDb=clamp(Math.round((CFG.micDb||0)+d),-24,24); saveCfg(); micGainApply();
   flash('mic gain '+(CFG.micDb>0?'+':'')+CFG.micDb+'dB'+(MIC.on?'  '+micMeter():''));
 }
 function micMonToggle(){
   CFG.micMon=CFG.micMon?0:1; saveCfg(); micMonWire();
-  flash(CFG.micMon?'monitor on — the mic in the master'+(MIC.on?'':' once the mic is open')+' — mind the speakers'
+  flash(CFG.micMon?'monitor on — you, through this channel\u2019s strip'+(MIC.on?'':' once the mic is open')+' — mind the speakers'
                   :'monitor off');
 }
 async function micSetDev(id,label){
@@ -16643,10 +16661,11 @@ async function micOn(){
       if(S.layer===-1)dirty=true;               // the meter lives in settings/Input
     };
     src.connect(g); g.connect(sp); sp.connect(sink); sink.connect(AC.destination);
-    /* the monitor: one tap into the master, open or shut by CFG.micMon */
+    /* the monitor: one tap, aimed by micMonWire at the channel's strip */
     const monG=AC.createGain(); monG.gain.value=0;
-    g.connect(monG); monG.connect(engine.master);
-    MIC.node={src,g,sp,sink,monG}; MIC.g=g; MIC.monG=monG; MIC.on=true;
+    g.connect(monG);
+    MIC.node={src,g,sp,sink,monG}; MIC.g=g; MIC.monG=monG;
+    MIC._monWired=false; MIC._monAt=null; MIC.on=true;
     micMonWire();
     for(let i9=1;i9<10;i9++)if((S.presets[i9].gr||{}).live)engine.granLiveWire(i9);
     flash('● mic ON — the ring hears you · tab on an audio channel grabs the last loop');
@@ -16657,7 +16676,7 @@ async function micOn(){
 function micOff(){
   if(!MIC.on)return;
   const n=MIC.node; MIC.node=null; MIC.on=false; MIC.latched=false;
-  MIC.g=null; MIC.monG=null; MIC.pk=0;
+  MIC.g=null; MIC.monG=null; MIC._monWired=false; MIC._monAt=null; MIC.pk=0;
   if(n){try{n.src.disconnect();n.g.disconnect();n.sp.disconnect();n.sink.disconnect();
             if(n.monG)n.monG.disconnect();}catch(_){}}
   /* the monitor tap and the live wires into gran channels are part of the

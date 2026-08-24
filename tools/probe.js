@@ -1251,13 +1251,16 @@ async function probeMicRec() {
     stop(); await sleep(120);
     rows.push({ k: 'mute', carBefore, busPlay, carDuring, busRec, busResume, carAfter,
                 expect: 'car t/f/t · bus >0 · ~0 · >0 at once' });
-    /* monitor — one global switch, the mic into the master (still on from above) */
-    const mrms = async () => { const t9 = tap(engine.master); await sleep(300); const [L9] = t9.stop();
+    /* monitor — one switch, heard through the focused audio channel's STRIP:
+       the bus carries it and the master hears it downstream */
+    const nrms = async nd => { const t9 = tap(nd); await sleep(300); const [L9] = t9.stop();
       let s9 = 0; for (let i = 0; i < L9.length; i++) s9 += L9[i] * L9[i];
       return r3(Math.sqrt(s9 / Math.max(1, L9.length))); };
-    CFG.micMon = 1; micMonWire(); const mOn = await mrms();
-    CFG.micMon = 0; micMonWire(); const mOff = await mrms();
-    rows.push({ k: 'monitor', on: mOn, off: mOff, gate: MIC.monG ? 'wired' : 'none' });
+    CFG.micMon = 1; micMonWire();
+    const mBus = await nrms(busOf(ch)), mOn = await nrms(engine.master);
+    CFG.micMon = 0; micMonWire(); const mOff = await nrms(engine.master);
+    rows.push({ k: 'monitor', bus: mBus, on: mOn, off: mOff, at: 'ch' + (MIC._monAt ?? '?'),
+                expect: 'bus>0 · master>0 · ~0 · ch9' });
     /* device — the row steps the list and the stage follows */
     await micStepDev(1); const dv1 = CFG.micDevL + '/' + (MIC.on ? 'on' : 'off');
     await micStepDev(1); const dv2 = CFG.micDevL + '/' + (MIC.on ? 'on' : 'off');
@@ -1376,7 +1379,7 @@ async function probeMicRec() {
   notes.push('flashes: ' + flashes.join(' | '));
   return { cols: ['rec', 'landed', 'peak', 'expect', 'onSec', 'heldSec', 'loopSec', 'firstAt', 'expAt', 'head', 'strokes',
                   'micAfter', 'rec2', 'keysSeen', 'ovdubOnSec', 'carBefore', 'busPlay', 'carDuring', 'busRec', 'carAfter',
-                  'on', 'off', 'gate', 'step1', 'step2', 'listed', 'row',
+                  'on', 'off', 'bus', 'at', 'step1', 'step2', 'listed', 'row',
                   'micDuring', 'db', 'mon', 'layer', 'latched',
                   'down', 'up', 'full', 'l', 'r', 'rfull', 'sameBuf', 'spd', 'semis', 'crop',
                   'onsets', 'E', 'Ems', 'spread', 'nowLATC', 'implied', 'trimMs', 'status',
