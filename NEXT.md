@@ -1,5 +1,36 @@
 # WHERE THE AUDIO CHANNEL STANDS — 2026-08-25
 
+## PITCH IS 3 OCTAVES + AUDIO CHANNELS RIDE THE CLIPBOARD (on main)
+
+His morning verdict on the batch: "works great this morning." Two new asks,
+both landed on main:
+
+- **Audio pitch dial spans ±36st (was ±24).** The whole family widened:
+  dial spec + mod-addr spec, gr.semis clamp, spdToSemis/semisToSpd
+  (floor 0.25→0.125, band ×0.25-4 → ×0.125-8), the cmode-0 free-tape write,
+  the fit-preserving writers, and the SPEED carrier audSpd/audFitComp rails
+  ±4→±8 (free-mode pitch IS spd, so the family had to carry ×8).
+  **The trap that ate the bottom octave: audSpd's legacy sync-detent guard
+  `|v|<0.25 → 1` — narrowed to <0.1** (the old detent sat at 0; 0.125 is a
+  real speed now). Measured, all three cmodes, 440Hz take: +36 → 3521Hz,
+  −36 → 54Hz, back → 441Hz. The SPEED dial itself still walks ±4 (its
+  display shows the true value if pitch pushed beyond; widening its walk was
+  not asked).
+- **c/x/v carries audio channels WITH their takes.** The single-channel
+  refusal ("clip its file, not its state") is gone. The take rides the
+  clipboard as a same-session AudioBuffer REFERENCE (no encoding, no
+  budget) — grabbed at the clipboard layer ONLY, never inside grabClip,
+  because grabClip also feeds the CLIP SLOTS which serialize into the set.
+  All three paths carry it: single channel, channel block, whole desk.
+  Paste lands through granNode+setChanBuf+audRelockAll (restoreAudio's
+  door). Cut keeps the house rule: lane leaves, sound stays. Measured
+  (probe `audclip`, 5 rows): pasted buffer === source buffer, name/cat/
+  events/cues carried, cut leaves the buffer and the clipboard holds it.
+
+Suites all green after: micrec 13, micrec2 13, grainflt 2, setio 4,
+audclip 5, sweep; unitsnap 7→8→8→8→16 and unitpitch cents=0 hold under the
+widened ±8 fit rails.
+
 **The whole `bugfixes` batch is MERGED TO MAIN and LIVE, build
 2026-08-24.2220** (his word 2026-08-25: "merge"). That covers: grain pitch
 at both doors, filter reso real under 1, slices toggle, two-stage ⇧⌫, the

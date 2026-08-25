@@ -1847,6 +1847,92 @@ async function probeSetIO() {
                   'cancelFellBack', 'expect'], rows };
 }
 
+/* audclip — the two 2026-08-25 asks: the audio pitch dial spans 3 octaves
+   (±36, was ±24) in every cmode, and c/x/v carries an audio channel WITH its
+   take (same-session buffer refs on the clipboard). */
+async function probeAudClip() {
+  const ch = CH, sr = AC.sampleRate, rows = [];
+  const dst = ch === 9 ? 8 : 9;
+  const keep = { p: stash(ch), pd: stash(dst),
+    buf: engine.audBuf[ch], gbuf: (engine.granBuf || [])[ch], name: engine.audName[ch],
+    bufD: engine.audBuf[dst], gbufD: (engine.granBuf || [])[dst], nameD: engine.audName[dst],
+    laneJ: S.patterns[S.editPat].lanes[ch].toJSON(),
+    laneD: S.patterns[S.editPat].lanes[dst].toJSON(),
+    clip: typeof CLIP !== 'undefined' ? CLIP : null };
+  try {
+    if (T.playing) stop();
+    pin(ch); if (!isAudioCh(ch)) setEngine(ch, 'audio');
+    const pr = S.presets[ch]; pr.cat = 'audio'; audDefaults(pr);
+    pr.au.cmode = 0; pr.au.kmode = 0; pr.au.auto = 1; pr.au.src = 0;
+    const lane = S.patterns[S.editPat].lanes[ch];
+    lane.unit = 'B'; lane.count = 1; lane.auto = false; lane.events = [];
+    setBpm(120);
+    /* a 440 tone take, landed clean */
+    const n = Math.round(lane.len * spb() * sr), buf = AC.createBuffer(1, n, sr);
+    { const d = buf.getChannelData(0);
+      for (let i = 0; i < n; i++) d[i] = 0.45 * Math.sin(2 * Math.PI * 440 * i / sr); }
+    engine.granNode(ch); engine.setChanBuf(ch, buf, 'clip-tone');
+    pr.au.spd = 1; pr.au.rate = 1; pr.au.st = 0; pr.au.en = 1; pr.au.semis = 0;
+    /* the pitch dial spec straight off the page — its set() is what clamps */
+    const pitchSpec = () => AUDPAGE().find(x9 => x9.key === 'semis');
+    const hzOf = async () => { const an = AC.createAnalyser(); an.fftSize = 2048;
+      engine.buses[ch].pan.connect(an); await sleep(420);
+      const td = new Float32Array(2048); let best = 0, hz = 0;
+      for (let r9 = 0; r9 < 4; r9++) { an.getFloatTimeDomainData(td);
+        let c9 = 0, pk = 0;
+        for (let i = 1; i < 2048; i++) { if ((td[i] >= 0) !== (td[i - 1] >= 0)) c9++;
+          const v = Math.abs(td[i]); if (v > pk) pk = v; }
+        if (pk > best) { best = pk; hz = c9 * sr / (2 * 2048); } await sleep(60); }
+      try { engine.buses[ch].pan.disconnect(an); } catch (_) { }
+      return { hz: Math.round(hz), pk: +best.toFixed(3) }; };
+    for (const cm of [0, 1, 2]) {
+      pr.au.cmode = cm; applyCmode(ch); await sleep(150);
+      const sp9 = pitchSpec(); if (!sp9) { rows.push({ k: 'cmode' + cm, err: 'no pitch spec' }); continue; }
+      const r9 = { k: 'cmode' + cm };
+      for (const v of [36, -36, 0]) {
+        sp9.set(pr.au, v); engine.audLive(ch); if (cm === 2) engine.granCfg(ch);
+        play(); const m9 = await hzOf(); stop(); await sleep(120);
+        if (v === 36) { r9.up36 = m9.hz; r9.upPk = m9.pk; }
+        else if (v === -36) { r9.dn36 = m9.hz; } else { r9.back0 = m9.hz; }
+      }
+      r9.dial = Math.round(sp9.get(pr.au));
+      rows.push(Object.assign(r9, { expect: 'up ~3520 · dn ~55 · back ~440' }));
+    }
+    /* ---- the clipboard: copy ch → paste dst carries the take by ref ---- */
+    pr.au.cmode = 0; applyCmode(ch);
+    lane.events = [{ t: 0, cue: 3, dur: 0.4, born: 1 }, { t: 2, cue: 5, dur: 0.3, born: 2 }];
+    S.curPreset = S.editSnd = ch; if (typeof CHSEL !== 'undefined') CHSEL.clear && CHSEL.clear();
+    clipboardOp('copy');
+    S.curPreset = S.editSnd = dst;
+    clipboardOp('paste');
+    const laneD = S.patterns[S.editPat].lanes[dst];
+    rows.push({ k: 'copypaste',
+      sameBuf: (engine.audBuf[dst] || (engine.granBuf || [])[dst]) === buf,
+      name: engine.audName[dst], cat: S.presets[dst].cat,
+      events: laneD.events.length, cue0: laneD.events[0] && laneD.events[0].cue,
+      expect: 'sameBuf true · clip-tone · audio · 2 events · cue 3' });
+    /* cut: lane leaves, the sound stays (the house cut rule) */
+    S.curPreset = S.editSnd = ch;
+    clipboardOp('cut');
+    rows.push({ k: 'cut', laneAfter: lane.events.length,
+      bufStays: !!(engine.audBuf[ch] || (engine.granBuf || [])[ch]),
+      clipHasAud: !!(CLIP && CLIP.aud && (CLIP.aud.buf || CLIP.aud.gbuf)),
+      expect: '0 · true · true' });
+  } finally {
+    engine.audBuf[ch] = keep.buf; if (engine.granBuf) engine.granBuf[ch] = keep.gbuf;
+    engine.audName[ch] = keep.name;
+    engine.audBuf[dst] = keep.bufD; if (engine.granBuf) engine.granBuf[dst] = keep.gbufD;
+    engine.audName[dst] = keep.nameD;
+    S.patterns[S.editPat].lanes[ch] = Looper.from(keep.laneJ);
+    S.patterns[S.editPat].lanes[dst] = Looper.from(keep.laneD);
+    unstash(ch, keep.p); unstash(dst, keep.pd);
+    if (typeof CLIP !== 'undefined') CLIP = keep.clip;
+    if (T.playing) stop();
+  }
+  return { cols: ['k', 'up36', 'dn36', 'back0', 'dial', 'upPk', 'sameBuf', 'name', 'cat',
+                  'events', 'cue0', 'laneAfter', 'bufStays', 'clipHasAud', 'err', 'expect'], rows };
+}
+
 const HELP = {
   cols: ['args'],
   rows: [
@@ -1866,6 +1952,7 @@ const HELP = {
     { k: 'micrec2',  args: 'ch=9 — the SESSION rows: monitor, device, mic sync, esc dials+arrows, tab loop, latc, stereo, tempo-from-take, nearend, headtrim, rshift-del clear' },
     { k: 'grainflt', args: 'ch=9 — the cloud follows its own pitch dial (440→880 on +12) and the reso dial is real under 1 (LP/HP Q maps below 0dB)' },
     { k: 'setio',    args: 'ch=9 — the set file: takes travel embedded, no-audio fallback holes them, local stamps, exportSet via stubbed save picker' },
+    { k: 'audclip',  args: 'ch=9 — pitch dial spans ±36 in all three cmodes (sounding Hz), and c/x/v carries an audio channel with its take' },
     { k: '(any)',    args: '--ab <url> runs the same probe on a second build and diffs it' },
   ]
 };
@@ -1901,7 +1988,8 @@ try {
                    micrec: probeMicRec,
                    micrec2: probeMicRec2,
                    grainflt: probeGrainFlt,
-                   setio: probeSetIO };
+                   setio: probeSetIO,
+                   audclip: probeAudClip };
   const fn = PROBES[NAME];
   out = fn ? await fn() : (NAME === 'help' ? HELP : { cols: [], rows: [], err: 'no probe named ' + NAME });
 } catch (e) {

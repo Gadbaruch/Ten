@@ -1234,7 +1234,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-24.2220';
+const BUILD='2026-08-25.0857';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -2496,7 +2496,7 @@ function resolveDest(pre,a){
     return [{voice:true,key:a.key,spec:sp,si:0,slot:a.key==='pan'?(pre.mix||{}):{}}];
   }
   if(a.rack==='aud'){
-    const sp=a.key==='semis'?SP('pitch','semis','lin',{min:-24,max:24,step:1,fmt:v=>v+'st'})
+    const sp=a.key==='semis'?SP('pitch','semis','lin',{min:-36,max:36,step:1,fmt:v=>v+'st'})
       :AUDF.find(x=>x.key===a.key&&x.lbl===a.lbl);
     return sp?[{aud:true,key:a.key,spec:sp,si:0,slot:pre.au||{}}]:[];
   }
@@ -3686,7 +3686,7 @@ function loopOps(e,c,lp){
        changes the pitch"). The dial still DISPLAYS ×N.NN; the number under
        it keeps the whole ratio, so walks and round trips return to pitch
        exactly. Only the rail and the detent still bend it — and say so. */
-    let s2=clamp(want,-4,4);
+    let s2=clamp(want,-8,8);
     if(Math.abs(s2)<0.25)s2=cur<0?-0.25:0.25;
     au.spd=s2; au.rate=s2;
     if(Math.abs(s2-want)>0.005)flash('speed at the rail — the take stretches from here');
@@ -11620,7 +11620,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
          tempo reaches the cloud without it knowing what a beat is */
       dens:clamp(Math.round(gr.dsync||0)===1
         ?(gr.dens??4)/Math.max(1e-6,spb()) : (gr.dens??20),0.5,120),
-      semis:clamp(gr.semis??0,-24,24), jit:clamp(gr.jit??0,0,12),
+      semis:clamp(gr.semis??0,-36,36), jit:clamp(gr.jit??0,0,12),
       shape:clamp(gr.shape??0.5,0,1), rev:clamp(gr.rev??0.1,0,1),
       width:clamp(gr.width??0.5,0,1), scan:clamp(gr.scan??1,-4,4),
       gain:clamp(gr.gain??0.8,0,1.5), fade:clamp(gr.fade??0.06,0.005,0.5),
@@ -13413,6 +13413,25 @@ function modLearnOp(op){
   }
   return false;
 }
+/* THE TAKE RIDES THE CLIPBOARD (Gad, 2026-08-25: "allow cut copy paste of
+   audio channels"). The clipboard lives and dies with the session, so it can
+   hold the AudioBuffer itself by reference — no encoding, no budget. Grabbed
+   at the clipboard layer only, never inside grabClip: grabClip also feeds the
+   CLIP SLOTS, which serialize into the set, and a live buffer must not ride
+   into localStorage. Paste lands it through the same door restoreAudio uses. */
+function audClipGrab(pi){
+  if(!isAudioCh(pi))return null;
+  return {buf:engine.audBuf[pi]||null, gbuf:(engine.granBuf||[])[pi]||null,
+          name:engine.audName[pi]||null};
+}
+function audClipPut(pi,a9){
+  if(!a9)return;
+  const buf=a9.buf||a9.gbuf;
+  if(buf){engine.granNode(pi); engine.setChanBuf(pi,buf,a9.name||'take');}
+  else{engine.audBuf[pi]=null; if(engine.granBuf)engine.granBuf[pi]=null;
+       engine.audName[pi]=null;}
+  try{engine.audRelockAll();}catch(_){ }
+}
 function clipboardOp(op){
   /* ONE thing on the clipboard: a channel, whole — its sound, its racks, its
      mix, its pitch and its lane. Parts and single slots had their own kinds,
@@ -13425,10 +13444,10 @@ function clipboardOp(op){
     if(op==='paste'){
       if(!CLIP||CLIP.kind!=='desk'){flash('clipboard holds no desk');return;}
       pushUndo('paste desk');
-      CLIP.chans.forEach((c,n)=>putClip(CHANS()[n],c));
+      CLIP.chans.forEach((c,n)=>{const d9=CHANS()[n]; putClip(d9,c); audClipPut(d9,c.aud);});
       flash('▣ pasted all '+CLIP.chans.length+' channels');
     }else{
-      CLIP={kind:'desk',chans:CHANS().map(i=>grabClip(i))};
+      CLIP={kind:'desk',chans:CHANS().map(i=>Object.assign(grabClip(i),{aud:audClipGrab(i)}))};
       if(op==='cut'){pushUndo('cut desk');
         CHANS().forEach(i=>{const l=S.patterns[S.editPat].lanes[i];l.clear();delete l._cap;});
         flash('✂ all lanes cut — the desk is on the clipboard');}
@@ -13455,14 +13474,14 @@ function clipboardOp(op){
         setPresetData(dst,c.name,c.cat,c.data);
         if(c.prep)S.presets[dst].prep=JSON.parse(JSON.stringify(c.prep));
         pat.lanes[dst]=Looper.from(c.lane);
-        engine.rebuildRack(dst); engine.refresh(dst); n++;
+        engine.rebuildRack(dst); engine.refresh(dst); audClipPut(dst,c.aud); n++;
       });
       chSay('▣ pasted onto ch '+start+'…',n);
     }else{
       CLIP={kind:'chans',chans:tg.map(i=>{const p=S.presets[i];
         return {name:p.name,cat:p.cat,data:Object.assign(presetData(p),{__chan:1}),
                 prep:p.prep?JSON.parse(JSON.stringify(p.prep)):null,
-                lane:pat.lanes[i].toJSON()};})};
+                lane:pat.lanes[i].toJSON(), aud:audClipGrab(i)};})};
       if(op==='cut'){pushUndo('cut channels');
         tg.forEach(i=>{const l=pat.lanes[i]; l.clear(); delete l._cap;});
         chSay('✂ cut',tg.length);}
@@ -13472,7 +13491,6 @@ function clipboardOp(op){
   }
   const pi=tg[0];
   const lane=S.patterns[S.editPat].lanes[pi];
-  if(isAudioCh(pi)&&op!=='copy'){flash('audio channel — clip its file, not its state');return;}
   if(op==='paste'){
     if(!CLIP||CLIP.kind!=='chan'){flash('clipboard is empty');return;}
     pushUndo('paste channel');
@@ -13480,12 +13498,13 @@ function clipboardOp(op){
     if(CLIP.prep)S.presets[pi].prep=JSON.parse(JSON.stringify(CLIP.prep));
     S.patterns[S.editPat].lanes[pi]=Looper.from(CLIP.lane);
     engine.rebuildRack(pi); engine.refresh(pi);
+    audClipPut(pi,CLIP.aud);
     flash('▣ pasted → ch '+pi+((S.clipAt||{})[pi]!=null?CLIPKEYS[S.clipAt[pi]]:''));
   }else{
     const p=S.presets[pi];
     CLIP={kind:'chan',name:p.name,cat:p.cat,data:Object.assign(presetData(p),{__chan:1}),
       prep:p.prep?JSON.parse(JSON.stringify(p.prep)):null,
-      lane:lane.toJSON()};
+      lane:lane.toJSON(), aud:audClipGrab(pi)};
     if(op==='cut'){pushUndo('cut channel'); lane.clear(); delete lane._cap;
       flash('✂ ch '+pi+' cut — sound and lane on the clipboard');}
     else flash('▣ copied ch '+pi+' — sound and lane');
@@ -14043,9 +14062,12 @@ const GRANF=[
 const audSpd=au=>{
   const o=au||{}, v=o.spd;
   if(!Number.isFinite(v))
-    return (Number.isFinite(o.rate)&&!Math.round(o.fit||0))?clamp(o.rate,-4,4):1;
-  if(Math.abs(v)<0.25)return 1;                     // the old sync detent
-  return clamp(v,-4,4);
+    return (Number.isFinite(o.rate)&&!Math.round(o.fit||0))?clamp(o.rate,-8,8):1;
+  /* the old sync detent sat at 0; 0.25 as the cutoff also ate the new
+     bottom octave of the pitch dial (x0.125 = -36st) — 0.1 keeps the detent
+     and admits the dial's whole range */
+  if(Math.abs(v)<0.1)return 1;
+  return clamp(v,-8,8);
 };
 /* ONE PLACE THE TAPE'S RATE IS DECIDED, and every reader goes through it.
    sync says whether the LOOP sets the rate; speed multiplies whatever that
@@ -14089,7 +14111,7 @@ const audWin=au=>{
    whichever one you think in. The ranges map exactly, which is what makes this
    honest rather than a fudge: +-24 semitones IS x0.25..x4 (2^(24/12) = 4). The
    SIGN stays on speed, because reverse is not a pitch. */
-const spdToSemis=s=>clamp(Math.round(12*Math.log2(Math.max(0.25,Math.abs(s)))),-24,24);
+const spdToSemis=s=>clamp(Math.round(12*Math.log2(Math.max(0.125,Math.abs(s)))),-36,36);
 /* WHAT SYNC IS DOING TO THE PITCH RIGHT NOW. The rate is fit × speed and the
    fit is not stored anywhere — it is the take's length over the loop's — so
    the one dial that has to report the whole rate has to be able to ask. The au
@@ -14112,7 +14134,7 @@ const audFitR=au=>{
   const W=audWin(au), dur=(W.hi-W.lo)*buf.duration, loopSec=L*spb();
   return (dur>1e-6&&loopSec>1e-6)?dur/loopSec:1;
 };
-const semisToSpd=(semis,sgn)=>(sgn<0?-1:1)*clamp(+Math.pow(2,clamp(semis,-24,24)/12).toFixed(2),0.25,4);
+const semisToSpd=(semis,sgn)=>(sgn<0?-1:1)*clamp(+Math.pow(2,clamp(semis,-36,36)/12).toFixed(3),0.125,8);
 const audRate=(au,dur,loopSec,ov)=>{
   const spd=Number.isFinite(ov)?ov:audSpd(au);
   const fitR=Math.round((au||{}).fit||0)?(loopSec>1e-9?dur/loopSec:1):1;
@@ -14157,7 +14179,7 @@ const AUDF=[
    get:o=>audSpd(o),
    set:(o,v)=>{let s=+(+v).toFixed(2);
      if(Math.abs(s)<0.25)s=audSpd(o)>0?-0.25:0.25;
-     o.spd=clamp(s,-4,4);
+     o.spd=clamp(s,-8,8);
      /* au.rate is what every legacy reader reaches for; keep it saying what
         speed says, so an old session and a new build are never two numbers in
         a fight over one knob */
@@ -14196,7 +14218,7 @@ const AUDTAKE=[
     alone: reverse is not a pitch.
     Stretch and grain keep them apart, where they genuinely differ — there the
     rate is speed and the pitch rides the shifter. */
- SP('pitch','semis','lin',{min:-24,max:24,step:1,big:12,fmt:v=>(v>0?'+':'')+v+'st',
+ SP('pitch','semis','lin',{min:-36,max:36,step:1,big:12,fmt:v=>(v>0?'+':'')+v+'st',
    /* THE DIAL WRITES SPEED AND RESTS `semis` AT ZERO — it does not stop the
       rate from reading semis. That distinction is the whole design: the rate
       is still fit × speed × 2^(semis/12) everywhere, so a MOD ROUTE or an
@@ -14221,17 +14243,17 @@ const AUDTAKE=[
       channel dial has to write that one there or it would move nothing and the
       page would carry two pitches again — which is the pair gpitch and this
       were. cloudOf finds the gr object beside this au. */
-   get:o=>Math.round(o.cmode??0)===2?clamp(Math.round((cloudOf(o)||{}).semis??0),-24,24)
+   get:o=>Math.round(o.cmode??0)===2?clamp(Math.round((cloudOf(o)||{}).semis??0),-36,36)
          :Math.round(o.cmode??0)===0?spdToSemis(audFitR(o)*audSpd(o))
-                                    :clamp(Math.round(o.semis??0),-24,24),
+                                    :clamp(Math.round(o.semis??0),-36,36),
    set:(o,v)=>{
-     if(Math.round(o.cmode??0)===2){const g=cloudOf(o); if(g)g.semis=clamp(Math.round(v),-24,24); return;}
+     if(Math.round(o.cmode??0)===2){const g=cloudOf(o); if(g)g.semis=clamp(Math.round(v),-36,36); return;}
      if(Math.round(o.cmode??0)===0){
        /* the speed that LANDS that pitch once the fit has had its say */
        const f=audFitR(o)||1, sgn=audSpd(o)<0?-1:1;
-       const s=sgn*clamp(+(Math.pow(2,clamp(v,-24,24)/12)/Math.abs(f)).toFixed(2),0.25,4);
+       const s=sgn*clamp(+(Math.pow(2,clamp(v,-36,36)/12)/Math.abs(f)).toFixed(3),0.125,8);
        o.spd=s; o.rate=s; o.semis=0;}
-     else o.semis=clamp(Math.round(v),-24,24);}}),
+     else o.semis=clamp(Math.round(v),-36,36);}}),
 ];
 /* ONE LEVEL HERE, NOT TWO. There were two faders side by side — one for the
    loop rolling underneath, one for the cursors your fingers spawn — and a
@@ -14300,7 +14322,7 @@ function audFoldPitch(au){
   if(!au)return;
   const s=au.semis??0; if(!s)return;
   const cur=audSpd(au), want=cur*Math.pow(2,s/12);
-  const spd=clamp(+want.toFixed(2),-4,4)||cur;
+  const spd=clamp(+want.toFixed(2),-8,8)||cur;
   au.spd=spd; au.rate=spd;
   const rest=+(12*Math.log2(Math.abs(want)/Math.max(1e-6,Math.abs(spd)))).toFixed(2);
   au.semis=Math.abs(rest)<0.005?0:rest;
@@ -14329,12 +14351,12 @@ function applyCmode(pi){
       /* what the channel already gives before the cloud's dial has a say */
       const base=Math.abs(audFitR(p.au))*Math.abs(audSpd(p.au))*
                  Math.pow(2,(p.au.semis??0)/12);
-      p.gr.semis=clamp(+(12*Math.log2(Math.max(1e-6,want)/Math.max(1e-6,base))).toFixed(2),-24,24);
+      p.gr.semis=clamp(+(12*Math.log2(Math.max(1e-6,want)/Math.max(1e-6,base))).toFixed(2),-36,36);
     }
-    else if(m===1)p.au.semis=clamp(+(12*Math.log2(Math.max(1e-6,want))).toFixed(2),-24,24);
+    else if(m===1)p.au.semis=clamp(+(12*Math.log2(Math.max(1e-6,want))).toFixed(2),-36,36);
     else{
       const f0=Math.abs(audFitR(p.au))||1, sg=audSpd(p.au)<0?-1:1;
-      const s0=sg*clamp(+(want/f0).toFixed(2),0.25,4);
+      const s0=sg*clamp(+(want/f0).toFixed(3),0.125,8);
       p.au.spd=s0; p.au.rate=s0;
       /* whatever the speed range could not reach stays on semis, so a fit
          further out than two octaves is still heard where it was */
