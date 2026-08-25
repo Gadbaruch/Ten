@@ -2,6 +2,9 @@
 
 ## PHASE ENGINE FIXED + MIDI DUR FROM THE GRID (on main)
 
+**His ear, 2026-08-25, on the phase/budget fix: "oh shit sounds much
+better." The FM thread is closed as fixed, not just measured.**
+
 His word on the audit: "not a compressor issue" (dropped), "fix what you
 mentioned if you found a bug in phase mode", and yes to the midi half of
 dur-from-grid.
