@@ -1,5 +1,53 @@
 # WHERE THE AUDIO CHANNEL STANDS — 2026-08-25
 
+## THE FM HEALTH AUDIT (report only — his word decides the fixes)
+
+Gad: "TENs fm a bit too clicky… compare your code to analogue or best
+practice fm." Deep-dived the whole voice path and MEASURED each stage on
+his actual ch5 patch. The FM core is CLEAN; the culprits are around it.
+
+**Verified healthy (numbers, his patch, B5 + A1):**
+- TRUE through-zero linear FM: constant −600Hz into a 200Hz carrier plays
+  a clean backwards 400Hz sine (pk 1.0); modulated through zero, max
+  slope = 1.00× the theoretical bound. This is the analog-TZFM ideal —
+  linear Hz into `frequency`, not exponential cents.
+- ZERO waveform discontinuities anywhere: held note worst-slope 0.62 of
+  the FM bound; 8-note rapid retriggers poly 0.26 / mono 0.28, zero click
+  frames. Envelopes are a-rate automation, live edits slewed
+  (setTargetAtTime+GL), steals cancelAndHold + tau-1.5ms fade, oscillators
+  stop at −104dB.
+- Native aliasing floor at full index: −63dB in 18–21k. Fine.
+
+**Found — ordered by likely share of "clicky/unhealthy":**
+1. **THE ALWAYS-ON MASTER DynamicsCompressor WITH BROWSER DEFAULTS**
+   (engine.comp, master→destination): threshold −24dB, knee 30 (so it
+   engages from ~−39dB — literally never transparent), ratio 12:1, attack
+   3ms, release 250ms, Chrome auto-makeup. Measured on ONE moderate bass
+   note: −1.4dB constant reduction and rms 0.188→0.250 (auto-makeup).
+   In a mix it pumps against drums at 12:1/250ms and grabs FM transients
+   at 3ms. Patchworld/Operator have no such device in the path. The prime
+   suspect — the FM is clean, what it goes THROUGH is not. Fix candidate:
+   safety limiter (thr −1..−3dB, ratio 20, knee ≤6) or a settings dial —
+   HIS CALL, the whole instrument has been mixed through the current one.
+2. **Index ceiling 24 ≈ 2× a DX7's max (~13.2)**: kIdx=6(1+3a²). The top
+   ~40% of the level dial is beyond-DX click-train territory (at his B5
+   full level, inst freq sweeps to ~17kHz every mod cycle). At matched
+   knob fraction TEN is far more index than Operator — "clickier at the
+   same position" by design ("that is a scream"). Option: a taper.
+3. **His patch's mod-level attack a=5ms**: every note chirps 0→full index
+   in 5ms — a per-note tick. Patch-level, not engine.
+4. **Phase engine (fm eng: phase) — two real defects**: top-band aliasing
+   −40dB vs native −63dB (23dB dirtier), and per-op env routes barely
+   drive it (his env→op2 descent measures flat: h1 0.058→0.061 vs native
+   0.021→0.037 — the old "does not carry per-op modulation" comment is
+   still mostly true). His patch needs native today; fix before anyone
+   trusts that dial.
+5. Route amounts beyond ±100% clamp silently (his +200% plays as 100%) —
+   known, reported 08-25.
+
+No code changed in this round — he asked for the report. The compressor
+decision especially is a sound-of-the-instrument decision.
+
 ## PITCH IS 3 OCTAVES + AUDIO CHANNELS RIDE THE CLIPBOARD (on main)
 
 His morning verdict on the batch: "works great this morning." Two new asks,
