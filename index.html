@@ -1234,7 +1234,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-25.0857';
+const BUILD='2026-08-25.1253';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -6487,9 +6487,12 @@ class Voice{
         const dep2=nd._ix.map((ix,k2)=>{
           const o2=ops[ix]||{}, md2=ix===0?0:Math.round(o2.mode||0);
           if(md2!==1&&md2!==4)return nd._dep[k2];
-          const a2=clamp(nd._b0[k2]||0,0,1), kI=6*(1+3*a2*a2);
+          /* through fmDepth's Nyquist budget, same as the builder — the raw
+             a0*kIdx expression here was the phase engine's index overshoot
+             surviving into every retune */
+          const a2=clamp(nd._b0[k2]||0,0,1);
           const tg2=nd._tg[k2], carF2=(tg2>=0&&f2[tg2])?f2[tg2]:f2[k2];
-          return a2*kI*((md2===4?f2[k2]:carF2)/Math.max(1,f2[k2]))/(2*Math.PI);
+          return a2*fmDepth(a2,carF2,f2[k2],md2===4)/Math.max(1,f2[k2])/(2*Math.PI);
         });
         try{nd.port.postMessage({t:'ret',f:f2,dep:dep2,gl:GL});}catch(_){}
       }
@@ -6922,12 +6925,20 @@ class Voice{
           return 0;
         };
         const cfg=list.map(b=>{
-          const a0=clamp(b.o.amt,0,1), kIdx=6*(1+3*a0*a0);
+          const a0=clamp(b.o.amt,0,1);
           const md=b.i===0?0:Math.round(b.o.mode||0);
           const carF=(list[tgtIx(b)]||b).f;
-          /* fm scaled the deviation by the CARRIER's frequency, pm by the
-             modulator's own — the only difference between the two modes */
-          const ix=(md===1||md===4)?a0*kIdx*((md===4?b.f:carF)/Math.max(1,b.f)):0;
+          /* fm scales the deviation by the CARRIER's frequency, pm by the
+             modulator's own — and BOTH go through fmDepth's Nyquist budget,
+             exactly as the native path does. This block used the raw
+             a0*kIdx*f and skipped the tanh, so the phase engine ran a bigger
+             index than native for the same patch (measured on Gad's ch5 at
+             B5: deviation 1.43x native, zc 12220 vs 8882) and its Carson
+             edge crossed Nyquist — the 23dB dirtier top band was fold the
+             budget exists to prevent. fmDepth(a0,...) applies the level
+             curve itself; index = a0*depth/f_mod, same as fg.gain/modHz on
+             the native side. */
+          const ix=(md===1||md===4)?a0*fmDepth(a0,carF,b.f,md===4)/Math.max(1,b.f):0;
           /* RING is its own mode, not a modulator with no depth — mapping it to
              1 gave it dep 0, so it neither summed NOR modulated and the
              operator silently vanished. sync and scan never get here: the
@@ -22226,7 +22237,17 @@ function endNote(c){
      note to stop before it had started, and it came out as a stub. */
   const lp=livePress[c]; delete livePress[c];
   const heldSec=lp?Math.max(0.02,AC.currentTime-lp.press):0;
-  if(lp)relAt=Math.max(relAt,lp.start+heldSec);
+  /* THE NOTE ENDS AT THE FINGER, NOT THE FINGER PLUS THE QUANTIZE (Gad,
+     2026-08-25: "count dur from the grid, recording should match what i
+     heard" — the midi half of yesterday's audio-cue ruling). Extending the
+     release by heldSec from the quantized start made every early-pressed
+     note ring past the keyup by exactly the quantize displacement, live and
+     in the lane both. Now the release is the keyup itself, floored at
+     start+AUDMINMS so a tap released before its own deferred start still
+     gets to speak (the stub bug that forced the old compromise). Q off:
+     start==press, the floor is the old 20ms, nothing changes. */
+  const minS9=(lp&&lp.start-lp.press>0.002)?(AUDMINMS/1000):0.02;
+  if(lp)relAt=Math.max(relAt,lp.start+minS9);
   if(pend[c]){
     const p=pend[c], lane=S.patterns[S.editPat].lanes[p.lane];
     spanUnmark(lane);                 // the hold is over; nothing ahead of it was covered
@@ -22240,16 +22261,13 @@ function endNote(c){
        is the only honest length. Recording held time for everything docked
        every quantized note-off late by exactly the quantize delay. */
     const spanD=relG-p.ts;
-    /* THE LENGTH IS THE GESTURE, and it is what the monitor already plays:
-       release() holds the live note for heldSec from the quantized start.
-       Recording the grid-to-finger span instead docked every early-pressed
-       note by the quantize displacement — a staccato 60ms tap that crossed
-       the grid point by 10ms recorded as a 10ms stub while you HEARD 60ms.
-       Recorded and monitored are now the same number. The span only wins
-       when it is LONGER (the key outlived the wall-clock hold across a
-       transport pause or tempo drop). */
-    const heldB=lp?heldSec/spb():0;
-    const dur=Math.max(0.05,heldB,spanD);
+    /* FROM THE GRID, one number for ear and lane (the audio-cue rule, on
+       midi). The 60ms-tap-records-10ms stub that killed the previous
+       from-grid attempt is handled by the AUDMINMS floor above instead of
+       by falling back to the finger span — so a staccato tap still records
+       something that speaks, and a note held past the grid records exactly
+       the span that sounded: grid to keyup. */
+    const dur=Math.max(0.05,minS9/spb(),spanD);
     lane.clear(ev=>ev.midi===p.midi&&Math.abs(ev.t-p.qt)<1e-6);
     lane.events.push({t:p.qt,midi:p.midi,vel:p.vel??0.9,dur,born:performance.now()});
     if(lane._cap)lane._cap.lastEnd=Math.max(lane._cap.lastEnd,p.qt+dur);

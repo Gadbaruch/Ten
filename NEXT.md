@@ -1,5 +1,38 @@
 # WHERE THE AUDIO CHANNEL STANDS — 2026-08-25
 
+## PHASE ENGINE FIXED + MIDI DUR FROM THE GRID (on main)
+
+His word on the audit: "not a compressor issue" (dropped), "fix what you
+mentioned if you found a bug in phase mode", and yes to the midi half of
+dur-from-grid.
+
+- **The phase engine skipped fmDepth's Nyquist budget** — `ix=a0*kIdx*f`
+  raw, in BOTH the builder and the retune path. Same patch ran a 1.47x
+  bigger index than native (measured: deviation zc 12220 vs 8882 at B5) and
+  its Carson edge crossed Nyquist — the "23dB dirtier top band" was fold
+  the budget exists to prevent. Both sites now route through
+  fmDepth(a0,carF,modF,isPM)/modF exactly like the native fg.gain. After:
+  index within ~12% of native (estimator noise), top band −63.6dB vs
+  native −68.3 (was −39.9), and the env→op2 descent MOVES under phase
+  (h1 0.059→0.026; was flat — the overshoot was drowning it; the opGains
+  shims were wired correctly all along). trig suite: both engines rtrg
+  same=1, free decorrelated. Table interp was innocent (2048 ≈ −100dB).
+- **MIDI notes count from the grid now** (endNote): dur =
+  max(0.05, AUDMINMS-floor, gridNow()−p.ts) and the monitored release is
+  the KEYUP floored at start+AUDMINMS — not start+heldSec, which rang every
+  early-pressed note past the finger by the quantize displacement, live and
+  in the lane. The stub bug that killed the previous from-grid attempt
+  (60ms tap crossing the grid by 10ms recording 10ms) is handled by the
+  AUDMINMS floor instead of by falling back to the finger span. Q off:
+  start==press, nothing changes. Measured: press 73/40ms early, release at
+  grid+304/303ms → recorded 304/303 exactly (was 377/342). The chord-prep
+  path (recSpots) already counted from the grid; plain notes went through
+  endNote — found by trapping lane.events with a defineProperty setter.
+  Generators (arp/euc/cyc) still write step-derived durs — their output IS
+  the take.
+
+Suites: micrec 13, grainflt 2, audclip 5, trig 4 — green.
+
 ## THE FM HEALTH AUDIT (report only — his word decides the fixes)
 
 Gad: "TENs fm a bit too clicky… compare your code to analogue or best
