@@ -2213,6 +2213,15 @@ async function probeFxMod() {
       ['gate', 'p1', { p1: 0.5, p2: 1, mix: 1 }, 'node', L9 => L9.flw.thr],
       ['verb', 'p2', { p1: 0.4, p2: 0.5, p3: 0.5, mix: 1 }, 'node', L9 => L9.vtone.frequency.value],
       ['clip', 'p1', { p1: 0.5, p2: 0.2, p3: 0.3, mix: 0.5 }, 'aud'],
+      /* the distortion family — his 2026-08-26 report was `sat` tone (p2).
+         p3 picks the curve: 0 = soft (has a tone filter), 5 = crush (p2 is a
+         sample-rate divider on a worklet param instead). */
+      ['sat', 'p2', { p1: 0.6, p2: 0.3, p3: 0, p5: 0.5, p7: 0.5, mix: 1 }, 'node', L9 => L9.stone.frequency.value],
+      ['sat', 'p5', { p1: 0.6, p2: 0.5, p3: 0, p5: 0.5, p7: 0.5, mix: 1 }, 'node', L9 => L9.satIn.gain.value],
+      ['sat', 'p7', { p1: 0.6, p2: 0.5, p3: 0, p5: 0.5, p7: 0.5, mix: 1 }, 'node', L9 => L9.satOut.gain.value],
+      ['sat', 'p2c', { p1: 0.6, p2: 0.4, p3: 5, p5: 0.5, p7: 0.5, mix: 1 }, 'node', L9 => L9.deci.parameters.get('red').value],
+      ['tape', 'p2', { p1: 0.4, p2: 0.4, mix: 1 }, 'node', L9 => L9.wlp.frequency.value],
+      ['drv', 'p2', { p1: 0.6, p2: 0.4, mix: 1 }, 'node', L9 => L9.dtone.frequency.value],
     ];
     for (const [t9, key, cfg, judge, get9] of CASES) {
       p.fx = rack(mkFx);
@@ -2221,12 +2230,13 @@ async function probeFxMod() {
       engine.rebuildRack(ch); await sleep(200);
       /* the ADDRESS comes off the picker, exactly as a finger would pick it —
          resolveDest matches key AND label, so a guessed label is a dead route */
-      const dz = destList(p).find(x => x.rack === 'fx' && x.slot === 0 && x.key === key);
+      const key9 = key === 'p2c' ? 'p2' : key;   // p2c = the crush curve's p2 (a divider, not a tone)
+      const dz = destList(p).find(x => x.rack === 'fx' && x.slot === 0 && x.key === key9);
       const w0 = judge === 'aud' ? wobble(await cap(400)) : 0;
       p.mod[0] = Object.assign(mkMod(0), { src: 2, wav: 0, rate: 5, syn: 0, ltr: 1,
         routes: [{ dst: 0, idx: 0, amt: 100, tgt: null,
           addr: dz ? { rack: dz.rack, slot: dz.slot, key: dz.key, lbl: dz.lbl }
-                   : { rack: 'fx', slot: 0, key, lbl: key } }] });
+                   : { rack: 'fx', slot: 0, key: key9, lbl: key9 } }] });
       await sleep(250);
       if (judge === 'aud') {
         const w1 = wobble(await cap(400));
@@ -2237,8 +2247,13 @@ async function probeFxMod() {
         const L9 = engine.buses[ch].fxLive[0], vals = [];
         for (let q = 0; q < 4; q++) { vals.push(get9(L9)); await sleep(90); }
         const lo9 = Math.min(...vals), hi9 = Math.max(...vals);
+        /* RELATIVE, not absolute: a phaser's depth param spans 0..0.006, so an
+           absolute floor called a param that DOUBLED under the lfo dead. These
+           are AudioParam.value reads — exact, no jitter — so a 5% swing is a
+           real move and a dead param reads hi===lo. */
+        const span9 = Math.max(Math.abs(hi9), Math.abs(lo9), 1e-9);
         rows.push({ k: t9 + '.' + key, judge, w0: r3(lo9), w1: r3(hi9),
-          gain2: r3(hi9 - lo9), ok: (hi9 - lo9) > 0.02 * (Math.abs(hi9) + Math.abs(lo9) + 0.1),
+          gain2: r3(hi9 - lo9), ok: (hi9 - lo9) > 0.05 * span9,
           addr: dz ? 'listed' : 'MISSING' });
       }
     }

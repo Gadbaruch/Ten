@@ -1,3 +1,72 @@
+# WHERE THE AUDIO CHANNEL STANDS — 2026-08-26 (third batch)
+
+## THE KEYBOARD THAT NEVER WOKE · DISTORTION MODS · THE STALE DEST CACHE
+
+His verdict on the second batch: **1 sounds good · 2 works good · 4 good ·
+5 good**, and one gap — "i tried to lfo mod a distortion tone" — plus
+"having issues loading the monsgeek keyboard".
+
+- **THE MONSGEEK: `wake()` refused to wake.** The guard was
+  `if(this.on||!this._slept)return`, and `_slept` is set ONLY by `sleep()`,
+  which itself returns early unless the board was already on. So a tab that
+  BOOTED HIDDEN — opened in the background, restored by a browser restart,
+  or simply not the front tab at load — skipped the 600ms boot reconnect
+  (`if(!document.hidden)`), never slept, and then refused to wake when he
+  switched to it. The board silently never loaded and nothing said why; the
+  only cure was re-picking it through the chooser by hand. Now `wake()`
+  reconnects whenever the tab is not already holding the board; reconnect()
+  is still gated on the WebHID grant and on `autoOn`, so a board turned off
+  on purpose stays off and an unplugged one costs one getDevices().
+  Ruled OUT by measurement first, so the fix is not a guess: no vendor
+  driver process running; the gstack browser holds the grant for
+  :3033 but every interface read `closed` (it was not stealing the board);
+  the page boots with zero JS errors and the syntax check passes.
+  **WebHID grants are PER ORIGIN — measured: :3033 lists three MonsGeek
+  interfaces, :3032 lists none.** That is the two-port split protecting his
+  keyboard for free: Claude's port can never open his board.
+- **The distortion family answers its modulators.** The curve is baked into
+  a WaveShaper and cannot ramp — but the tone filter after it and the in/out
+  gains around it are ordinary nodes. Wired on `sat`: tone (p2), in (p5),
+  out (p7), and on the crush curve the sample-rate divider that p2 becomes;
+  on `drv`: the lowpass after the shaper; on `tape`: the wow rate/depth and
+  the darkening. FXMODOK grew the family, so the picker offers exactly
+  these and still refuses drive/curve. Measured: tone 2609→3314Hz, in
+  0.33→3.21, out 0.84→1.46, crush divider 1→28, tape 8304→10708Hz, drv
+  1999→8169Hz.
+- **AND THE BUG UNDER IT — the destination cache went stale on a sub-type.**
+  `destList`'s signature was built from the fx TYPE alone (`M.abbr`), but an
+  fx slot's p3 picks the CURVE on sat and the FILTER KIND on filt, and both
+  change what the other dials ARE: sat's p2 is `tone` on every curve except
+  crush, where it is `rate`; filt only has a `gain` dial on the shelving
+  kinds. A route addresses by key AND label, so after switching the curve
+  the picker handed out an address resolveDest could never match — **the
+  route died silently, the dial moved and nothing followed it.** The
+  signature carries p3 per fx slot now. Caught by the crush row reading
+  7/7/7/7 while calling the applier by hand gave 7→33: the engine was right
+  and the ADDRESS was stale. One number per slot.
+- Probe judge repaired while it was in hand: node rows compared against an
+  absolute floor, which called a phaser depth that DOUBLED under the lfo
+  dead (its whole range is 0..0.006). Relative now — these are exact
+  AudioParam reads, so 5% is a real move and a dead param reads hi===lo.
+
+Wall after: fxmod **23/23** · resamp 4 (alpha 1.001 · resid 0.022 · hf
+−0.16dB · strip clean) · micrec 13 · audclip 5 · trig canonical.
+
+QA:
+1. **The keyboard** — open TEN in a background tab (or restore a window with
+   TEN not in front), then switch to it: the board should come up by itself,
+   no chooser. If it still does not, say what the message bar says when you
+   click `hid` in settings/Input, and whether another TEN tab is open — only
+   one tab can hold it.
+2. **LFO → distortion tone** — sat curve on a channel fx, aim an lfo at
+   `tone`: audible now. Same for `in`/`out` (in is drive into the curve, the
+   analog move), and on the crush curve `rate` steps under the lfo. Drive
+   and curve stay unmodulatable on purpose — they rebuild a lookup table.
+3. **Switch a distortion's curve while a mod points at its tone** — the
+   route used to die silently; the picker is honest again. Worth one look:
+   aim an lfo at `tone`, flip curve to crush, check the route re-reads as
+   `rate` or shows `?` rather than pretending.
+
 # WHERE THE AUDIO CHANNEL STANDS — 2026-08-26 (second batch)
 
 ## RESAMPLE'S GHOST STRIP · OPS 9-10 UNDER PHASE · FX/PLY MODS LIVE · GAIN LIVE · THE MOUSE
