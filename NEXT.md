@@ -1,4 +1,91 @@
-# WHERE THE AUDIO CHANNEL STANDS — 2026-08-25
+# WHERE THE AUDIO CHANNEL STANDS — 2026-08-26
+
+## ENV LOOP REMOVED · LFO TRIG DEFAULTS FREE · MASTER RESAMPLE IS PRE-FX (his 3-item batch)
+
+His three, 2026-08-26: "remove the envelope loop feature", "make lfo default
+trig toggle set to free", "master resampling to audio channel: record pre
+master effects, make a test so that the resampled channel sound exactly like
+the live sound from the channels, right now i think it does double
+processing."
+
+- **Envelope loop is GONE** — the whole family: the loop/lsync/lrate/ldiv/
+  lmode dials, envLoopP, _loopEnv, every lp> branch (amp, filter, pitch ×2,
+  op level, learned-address), the release's _loopPs cancel, the shape row's
+  loop drawing, and lp|lrate|lrdiv out of the mod-key regex. No factory
+  preset used it (grep: zero lp: in mod slots), so no LIBV bump; saved sets
+  that carry lp fields load fine and the env simply plays one-shot — the
+  fields sit inert. Regression net: modmatrix amp/pitch/filt/op diffed
+  row-for-row IDENTICAL against live .1253 (the env scheduling paths were
+  the ones edited).
+- **LFO trig defaults to free** — mkMod ltr:0→1, and every reader's fallback
+  moved with it (`m.ltr??1`, 4 sites) because slotDef makes the factory the
+  DISPLAY fallback for a missing field: factory and engine must agree or a
+  field-less slot shows free and plays retrig. Saved slots all carry ltr
+  explicitly (serialize is wholesale; the fold backfills via
+  Object.assign(mkMod)), so only truly ancient v13-era sets could flip —
+  and they flip TO the default he now wants. Fresh slot measured: dial
+  shows 'free', engine free flag true.
+- **THE MSTR TAP MOVED this.master → mSum** (pre master rack, pre dj chain,
+  pre master fader). The old tap recorded rack+dj+0.8-fader INTO the take
+  and then played back through all three again — with a sat on the master
+  the A/B measured the old take at 8.8× the channel sum (tanh drive boosts
+  small signals) with the sat's harmonics printed (dirt 0.021), and the old
+  replay at alpha 0.475 / resid 0.282 vs live. Bonus kept on purpose: the
+  metronome click feeds this.master directly and no longer prints into a
+  bounce. Edge shifted, noted: a mic monitor aimed at a CHANNEL strip still
+  prints into a bounce (the normal case — the monitor follows the recording
+  channel); aimed at the master (no audio channel focused) it no longer
+  does.
+- **A mstr take lands at UNITY** — audPlace (mstr only): au.gain 0.9→1,
+  lvol→1, fader→1, pan→0 + refresh. Same doctrine as the recording pitch
+  reset, level edition: without it a virgin bounce replayed at 0.72×
+  (0.9 gain × 0.8 fader) and "exactly like live" was unreachable. Mic takes
+  keep their gain staging. THIS MOVES FOUR DIALS on the destination channel
+  when a master bounce lands — deliberate, flagged.
+- **rebuildMaster re-attaches a live mstr tap** — it mSum.disconnect()s on
+  every master knob turn, which silently severed a running bounce from
+  there on. Guard measured: rebuild fired mid-bounce, take aliveFrac 0.995.
+- **The test he asked for: `tools/probe.sh resamp ch=9`** (4 rows, isolates
+  the desk by muting every other fader). Live and replay are both measured
+  at mSum — everything downstream is shared, so mSum equality IS ear
+  equality. A hot sat sits on the master rack as the control. This build:
+  take ratio 0.96 / pkRatio 1.000 / dirt 0 vs dirtMaster 0.017 (fx hot,
+  not printed) · unity 1/1/1/0 · replay ratio 0.994, corr 0.984, envDev
+  0.04, **alpha 1.001, resid 0.022** (sample-aligned gain fit — the
+  waveform itself) · rebuild aliveFrac 0.995. The same suite on live .1253:
+  take 8.806/4.479 with dirt 0.021, stale dials 0.9/0.32/0.2, replay alpha
+  0.475 resid 0.282 — it fails loudly on exactly the bug he suspected.
+- **micrec2's latc row is self-sufficient now** — it starts (and stops) the
+  transport itself and mutes the desk. A STOPPED take anchors its first
+  sound at 0 by design (round-12 from0 + head trim), which erases the
+  absolute timing the row measures; it had been inheriting `playing` from
+  its neighbours and read E +6872 / spread 22050 (the nearest-onset matcher
+  wrapping) the day the neighbourhood changed. Under its own transport:
+  **E = 2 samples, spread 0** at the new tap point — AUDLATC 0 stands. The
+  latc/stereo blip feeds moved to engine.mSum with the tap.
+
+Wall after the batch, all on this working tree: micrec 13 · micrec2 13
+(latc E2/spread0) · grainflt 2 · setio 4 · audclip 5 · trig 4 (ch4 — ch8 in
+scratch is audio; all-zero trig/modmatrix output means WRONG CHANNEL, not a
+dead engine) · sweep dPos ≤6ms · modmatrix ×4 identical to live · resamp 4.
+
+QA (ordered by what to trust least first):
+1. **Resample the master** (audio ch, input=master, esc+tab) with fx ON the
+   master rack and the metronome clicking: the bounce must play back
+   INDISTINGUISHABLE from the live channels — no double fx, no level drop,
+   no click printed. Note the channel's gain/loop-vol/fader/pan land at
+   unity when the take does (deliberate). Turn a master knob MID-bounce:
+   the tail must keep recording. Alpha/resid measured; his ear decides.
+2. **New LFO defaults to free** — fresh mod slot, src lfo: trig reads
+   'free'; existing patches unchanged (their stored value wins). Not
+   measured beyond the flag: play a pad with a slow filter LFO across
+   retriggered notes — the drift should carry through note-ons.
+3. **Envelope loop is gone** — mod env slot shows time/atk/dec/sus/rel/
+   curve and nothing after; any patch that used a looping env now plays it
+   one-shot (expected, the feature is removed, the saved fields are inert).
+4. Everything else in the wall above is regression-covered; the FM audit
+   items (compressor call, index taper, phase-engine per-op depth) still
+   wait on his word from the 08-25 report.
 
 ## PHASE ENGINE FIXED + MIDI DUR FROM THE GRID (on main)
 

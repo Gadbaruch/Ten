@@ -528,7 +528,7 @@ function lfoSrcNode(ac,wav,rate,free,seed,at,skw){
   const w=Math.round(wav||0);
   if(w<4&&Math.abs(skw||0)>1){
     /* a skewed wave has no OscillatorNode shape — schedule it as ramps,
-       32 points a cycle, same horizon the loop envelopes use */
+       32 points a cycle over a 16s horizon */
     const cs=ac.createConstantSource();
     const P=1/Math.max(0.05,rate), NP=32;
     cs.offset.setValueAtTime(lfoShapeVal(w,lfoWarp(0,skw)),at);
@@ -722,8 +722,10 @@ const mkRoute=()=>({dst:0,idx:0,amt:100,tgt:null});
 /* SUSTAIN 0 BY DEFAULT (Gad, 2026-08-16): a fresh envelope is a HIT, and a
    hold is the thing you ask for. Only the DEFAULT moves — every saved slot
    keeps whatever it was given. */
+/* TRIG DEFAULTS TO FREE (Gad, 2026-08-26). Only the DEFAULT moves — every
+   saved slot keeps whatever it was given, same rule as sustain above. */
 const mkMod =i=>({src:0,rsel:0,routes:[mkRoute()],a:0.005,d:0.15,s:0,r:0.2,crv:0,
-                  wav:0,rate:5,ph:0,syn:0,rdiv:4,ltr:0,
+                  wav:0,rate:5,ph:0,syn:0,rdiv:4,ltr:1,
                   fch:1,fa:0.01,fr:0.15,fg:4});
 /* tempo divisions for a synced LFO, in beats */
 const LFODIV=[['4 bar',16],['2 bar',8],['1 bar',4],['1/2.',3],['1/2',2],['1/4.',1.5],
@@ -734,15 +736,6 @@ const lfoHz=m=>{
   if(Math.round(m.syn||0)!==1)return clamp(m.rate||5,0.01,60);
   const d=LFODIV[clamp(Math.round(m.rdiv??4),0,LFODIV.length-1)][1];
   return clamp(1/(d*spb()),0.01,60);      // one cycle per that many beats
-};
-/* one loop cycle of a looping envelope, in seconds — same free/sync split as
-   the LFO's rate, own keys so an env can loop at 1/8 while an LFO drifts free */
-const envLoopP=m=>{
-  if(Math.round(m.lsyn||0)===1){
-    const d=LFODIV[clamp(Math.round(m.lrdiv??6),0,LFODIV.length-1)][1];
-    return clamp(d*spb(),0.025,20);
-  }
-  return clamp(1/clamp(m.lrate??2,0.05,40),0.025,20);
 };
 const modRt=m=>{m.routes=m.routes||[mkRoute()];return m.routes[clamp(Math.round(m.rsel||0),0,m.routes.length-1)];};
 const ENV2MD={1:1,2:2,3:3,4:5};   // engine env-dst → MDST (amp/pitch/filt/op)
@@ -1234,7 +1227,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-25.1253';
+const BUILD='2026-08-26.0949';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1723,26 +1716,7 @@ const MOD_P=sl=>{                    // unified: source picks which extra fields
     SP('atk','a','time'),SP('dec','d','time'),
     SP('sus','s','lin',{min:0,max:1,step:0.05}),SP('rel','r','time'),
     SP('curve','crv','lin',{min:-200,max:200,step:10,big:50,
-       fmt:v=>v?(v>0?'+':'')+Math.round(v):'lin'}),
-    /* LOOP: 0 = one shot, 1 = cycles forever, in between each repeat is
-       scaled by the loop amount — 50% halves every pass, a bounce dying out.
-       Rate and mode only exist while the loop does. */
-    SP('loop','lp','lin',{min:0,max:1,step:0.05,
-       fmt:v=>v<=0?'off':v>=0.999?'∞':Math.round(v*100)+'%',
-       get:m=>m.lp||0,set:(m,v)=>m.lp=v})],
-    +(sl.lp||0)>0?[
-      SP('lsync','lsyn','enum',{opts:['free','sync'],
-         get:m=>Math.round(m.lsyn||0),set:(m,v)=>m.lsyn=Math.round(v)}),
-      Math.round(sl.lsyn||0)===1
-        ? SP('ldiv','lrdiv','lin',{min:0,max:LFODIV.length-1,step:1,
-            fmt:v=>LFODIV[clamp(Math.round(v),0,LFODIV.length-1)][0],
-            get:m=>Math.round(m.lrdiv??6),set:(m,v)=>m.lrdiv=Math.round(v)})
-        : SP('lrate','lrate','time',{min:0.05,max:40,fmt:fHz,
-            get:m=>m.lrate??2,set:(m,v)=>m.lrate=v}),
-      /* fit compresses attack+decay into one loop period, whatever they say;
-         norm keeps their clock and the period just cuts or leaves air */
-      SP('lmode','lfit','enum',{opts:['fit','norm'],
-         get:m=>Math.round(m.lfit||0),set:(m,v)=>m.lfit=Math.round(v)})]:[]);
+       fmt:v=>v?(v>0?'+':'')+Math.round(v):'lin'})]);
   if(s===2)return base.concat([SP('wave','wav','enum',{opts:LFOW}),
     /* SYNC swaps what `rate` means: free-running Hz, or a division of the bar
        that follows the tempo. One dial, because a rate in Hz and a rate in
@@ -2321,7 +2295,7 @@ const destRate=(rack,key)=>
      read once, when a note starts. So the modulator parks its value and the
      voice builder reads that instead of the slot; the change lands on the next
      note you play, which is the only moment it could ever mean anything. */
-  :(rack==='mod'&&/^(a|d|s|r|crv|tmul|lp|lrate|lrdiv|skw|ph)$/.test(key))?'next'
+  :(rack==='mod'&&/^(a|d|s|r|crv|tmul|skw|ph)$/.test(key))?'next'
   :(rack==='vox')?'next'
   :(rack==='ply')?'next'
   :null;
@@ -6656,16 +6630,14 @@ class Voice{
           /* mi/ri ride along so a scheduled envelope can leave a live handle
              and be re-aimed mid-note, the way a connected source is */
           envs.push({dst:MD2ENV[rt.dst],idx:rt.idx,amt:rt.amt,mi:mi2,ri,
-                     a:me.a*T3,d:me.d*T3,s:me.s,r:me.r*T3,crv:me.crv,
-                     lp:clamp(me.lp||0,0,1),lsyn:me.lsyn,lrate:me.lrate,
-                     lrdiv:me.lrdiv,lfit:me.lfit});
+                     a:me.a*T3,d:me.d*T3,s:me.s,r:me.r*T3,crv:me.crv});
         }
         else if(m.src===2&&MD2LFO[rt.dst]&&Math.abs(rt.amt)>0.5)
           /* `rt` rides along so the LFO resolves its destination through the
              SAME _destOf every other source uses — the MD2LFO number is kept
              only for the pan check, which the control tick still owns */
           lfoList.push({dst:MD2LFO[rt.dst],idx:rt.idx,wav:m.wav,rate:lfoHz(me),skw:me.skw||0,
-                        amt:rt.amt,ph:me.ph??m.ph,free:Math.round(m.ltr||0)===1,mi:mi2,
+                        amt:rt.amt,ph:me.ph??m.ph,free:Math.round(m.ltr??1)===1,mi:mi2,
                         rt,ri});
       }
     }
@@ -6738,13 +6710,7 @@ class Voice{
        point of it. Ramps and setTarget are both things cancelAndHoldAtTime
        handles correctly — it holds the exact value it had reached. */
     const shaped=Math.abs(crvN)>1&&(aA+aD)>0.006;
-    if(ampEnv&&ampEnv.lp>0.001){
-      /* looping amp: the cycle scheduler owns the gain. oneShot is off even
-         at sustain 0 — an env that repeats forever NEEDS the release to end it */
-      this.oneShot=false;
-      this._loopEnv(vca.gain,0,aPeak,aS,ampEnv,at);
-    }
-    else if(shaped){
+    if(shaped){
       const sus=aPeak*aS;
       if(aA>0.002){const NA=8;                        // power-law attack, in segments
         for(let i=1;i<=NA;i++){const x=i/NA;
@@ -6817,12 +6783,9 @@ class Voice{
         const peak=clamp(e2.amt*60,-9600,9600);   // amt/100 · 5 octaves · 1200
         for(const pm of ps){
           pm.cancelScheduledValues(at);
-          if(e2.lp>0.001)this._loopEnv(pm,0,peak,e2.s,e2,at);
-          else{
-            pm.setValueAtTime(0,at);
-            pm.linearRampToValueAtTime(peak,at+a);
-            pm.setTargetAtTime(peak*e2.s,at+a,Math.max(0.005,e2.d/3));
-          }
+          pm.setValueAtTime(0,at);
+          pm.linearRampToValueAtTime(peak,at+a);
+          pm.setTargetAtTime(peak*e2.s,at+a,Math.max(0.005,e2.d/3));
           this.fEnvs.push({node:pm,base:0,r:e2.r});
           /* an envelope SCHEDULES, so its handle carries what it takes to
              recompute the sustain it is holding — modReaim re-aims to it */
@@ -7505,7 +7468,6 @@ class Voice{
           if(dt&&dt.sc>=1){                       // an oscillator: cents on detune
             const pm=dt.pm;
             pm.cancelScheduledValues(at);
-            if(pe.lp>0.001){this._loopEnv(pm,0,cents,pe.s,pe,at);continue;}
             if(a<=0.003)pm.setValueAtTime(cents,at);
             else{pm.setValueAtTime(0,at);pm.linearRampToValueAtTime(cents,at+a);}
             pm.setTargetAtTime(cents*pe.s,at+Math.max(a,0.001),Math.max(0.005,pe.d/3));
@@ -7515,7 +7477,6 @@ class Voice{
             const tg=pl[j], peak=Math.max(tg.base*R,0.01);
             const sus=Math.max(tg.base*Math.pow(2,cents*pe.s/1200),0.01);
             tg.pm.cancelScheduledValues(at);
-            if(pe.lp>0.001){this._loopEnv(tg.pm,tg.base,peak,pe.s,pe,at);continue;}
             if(a<=0.003)tg.pm.setValueAtTime(peak,at);
             else{tg.pm.setValueAtTime(tg.base,at);tg.pm.linearRampToValueAtTime(peak,at+a);}
             tg.pm.setTargetAtTime(sus,at+Math.max(a,0.001),Math.max(0.005,pe.d/3));
@@ -7543,7 +7504,6 @@ class Voice{
       for(const g of gls.flat()){
         const base=g.gain.value;
         const lo=w>0?base*(1-w):base, hi=w>0?base:base*(1+w);
-        if(e2.lp>0.001){this._loopEnv(g.gain,lo,hi,e2.s,e2,at);continue;}
         const sus=lo+(hi-lo)*e2.s;
         if(shapedO){
           const pO=Math.pow(2,-crvO/55), D=Math.max(0.01,e2.d);
@@ -7705,21 +7665,16 @@ class Voice{
             const T4=clamp(m.tmul??1,0.1,4);
             const base=rp.cents?0:param.value, peak=base+dep, a=Math.max(0.001,m.a*T4);
             param.cancelScheduledValues(at);
-            if((m.lp||0)>0.001){
-              this._loopEnv(param,base,peak,m.s,
-                {a:m.a*T4,d:m.d*T4,lp:m.lp,lsyn:m.lsyn,lrate:m.lrate,lrdiv:m.lrdiv,lfit:m.lfit},at);
-            }else{
-              param.setValueAtTime(base,at);
-              param.linearRampToValueAtTime(peak,at+a);
-              param.setTargetAtTime(base+(peak-base)*m.s,at+a,Math.max(0.005,m.d*T4/3));
-            }
+            param.setValueAtTime(base,at);
+            param.linearRampToValueAtTime(peak,at+a);
+            param.setTargetAtTime(base+(peak-base)*m.s,at+a,Math.max(0.005,m.d*T4/3));
             /* `span` is the depth PER UNIT of A, so modReaim just multiplies by
                the new amt/100. The learned path is LINEAR in amt (it predates
                MODTAPER), so `lin` says so rather than the handle guessing. */
             (this.modN=this.modN||[]).push({p:param,mi:mi6,ri:ri6,kind:'env',
                                             base,span:dep/(A||1e-9),lin:true,aT:a});
           }else if(m.src===2){                       // lfo → param
-            const sl2=lfoSrcNode(ac,m.wav,m.rate,Math.round(m.ltr||0)===1,mi6,at,m.skw);
+            const sl2=lfoSrcNode(ac,m.wav,m.rate,Math.round(m.ltr??1)===1,mi6,at,m.skw);
             const lo=sl2.node, lg=ac.createGain(); lg.gain.value=dep*0.5;
             lo.connect(lg); lg.connect(param); lo.start(at); this.nodes.push(lo);
             /* THE HANDLE THE LEARNED PATH NEVER LEFT. A learned route carries
@@ -7750,7 +7705,7 @@ class Voice{
     for(let mi3=0;mi3<md.length;mi3++){
       const m=md[mi3];
       if(!m||m.off||m.src!==2||!m.routes)continue;
-      if(Math.round(m.ltr||0)===1)continue;              // free: bus owns it
+      if(Math.round(m.ltr??1)===1)continue;              // free: bus owns it
       const me3=E.ovObj(pi,'mod',mi3,m);
       for(const rt of m.routes){
         const a=rt.addr;
@@ -7803,27 +7758,6 @@ class Voice{
     if(g.cancelAndHoldAtTime){try{g.cancelAndHoldAtTime(t);return true;}catch(_){}}
     g.cancelScheduledValues(t); return false;
   }
-  /* A LOOPING ENVELOPE: attack up, decay down, again — each repeat scaled by
-     the loop amount (1 = forever, 0.5 = halves every pass, a bounce dying
-     out). fit squeezes A+D into one period; norm keeps their own clock and
-     the period cuts or leaves air. Scheduled ahead as plain ramps — bounded
-     by a horizon and by the decay reaching silence — and the release cancels
-     whatever is still queued. */
-  _loopEnv(pm,base,peak,sus,env,at){
-    const P=envLoopP(env), fit=Math.round(env.lfit||0)===0;
-    let A=Math.max(0.001,env.a), D=Math.max(0.01,env.d);
-    if(fit){const c=P/(A+D); A*=c; D*=c;}
-    else{A=Math.min(A,P*0.9); D=Math.min(D,Math.max(0.01,P-A));}
-    const dec=clamp(env.lp,0,1);
-    try{pm.setValueAtTime(base,at);}catch(_){return;}
-    for(let k=0;k<128;k++){
-      const tk=at+k*P; if(tk>at+16)break;               // 16s of cycles is plenty
-      const pk=dec>=0.999?1:Math.pow(dec,k); if(pk<0.003)break;
-      pm.linearRampToValueAtTime(base+(peak-base)*pk,tk+A);
-      pm.linearRampToValueAtTime(base+(peak-base)*sus*pk,tk+A+D);
-    }
-    (this._loopPs=this._loopPs||[]).push({pm,base});
-  }
   release(at){
     if(this._sib)for(const s of this._sib)s.release(at);
     if(this.released)return; this.released=true; this.relAt=at;
@@ -7845,13 +7779,6 @@ class Voice{
     if(!this._cancelAt(g,at)&&at<aEnd)
       g.setValueAtTime(this.amp*Math.max(0,at-this.startAt)/this.aA,at);
     g.setTargetAtTime(0,at,Math.max(0.005,this.rel/3));
-    /* looped envelopes have ramps queued far ahead — cancel them or the loop
-       keeps cycling straight through the release */
-    for(const lpp of this._loopPs||[]){
-      if(lpp.pm===g)continue;                        // the amp was cancelled above
-      this._cancelAt(lpp.pm,at);
-      lpp.pm.setTargetAtTime(lpp.base,at,Math.max(0.005,this.rel/3));
-    }
     for(const fe of this.fEnvs)fe.node.setTargetAtTime(fe.base,at,Math.max(0.005,fe.r/3));
     /* FREE A PHASE VOICE WHEN ITS TAIL IS INAUDIBLE, NOT LATER (Gad,
        2026-08-22: the ch7 supersaw cut on the phase engine). The vca decays as
@@ -8585,6 +8512,10 @@ class Engine{
     this.amixCfg=null;
     const keep=n=>{this.mRack.push(n);return n;};
     try{this.mSum.disconnect();}catch(_){}
+    /* that disconnect severs a running mstr resample's tap — re-attach it,
+       or a master knob turned mid-bounce records silence from there on */
+    if(this.audRec&&this.audRec.label==='mstr'&&this.audRec.sp3)
+      try{this.mSum.connect(this.audRec.sp3);}catch(_){}
     S.master.forEach((fx,i)=>{                     // send slots: bus -> unit(wet) -> sum
       try{this.sendIns[i].disconnect();}catch(_){}
       if(fx.typ&&Math.round(fx.rt)===1)this.fxUnit(fx,this.sendIns[i],keep,'m',true).connect(this.mSum);
@@ -9268,7 +9199,7 @@ class Engine{
           const a=rt.addr; if(!a||rt.dst)continue;
           /* a RETRIG lfo on pan is per-voice now — each note carries its own
              panner. Driving the bus too would pan everything twice. */
-          if(a.rack==='voice'&&a.key==='pan'&&m.src===2&&Math.round(m.ltr||0)!==1)continue;
+          if(a.rack==='voice'&&a.key==='pan'&&m.src===2&&Math.round(m.ltr??1)!==1)continue;
           const rate=destRate(a.rack,a.key);
           if(rate!=='ctrl'&&rate!=='next')continue;   // 'audio' is wired at note-on
           const hits=resolveDest(p,a); if(!hits.length)continue;   // unresolved: nothing happens
@@ -11788,7 +11719,16 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
       }
       flash('● recording '+label+'… let go of tab to keep it'); dirty=true;
     };
-    if(Math.round((S.presets[pi].au||{}).src||0)===1){tap(this.master,'mstr',false);return;}
+    /* THE MSTR TAP IS PRE-MASTER-EFFECTS (Gad, 2026-08-26: "make it record
+       pre master effects ... right now i think it does double processing").
+       It sat on this.master — post master rack, post dj chain, post the
+       master fader — and the take then PLAYED BACK through all three again:
+       fader alone made a resample 0.8x of live, and any master fx printed
+       twice. mSum is the channels' sum before any of that, so the replayed
+       take walks the identical downstream a live channel does, once. Bonus
+       kept on purpose: the metronome click feeds this.master directly and no
+       longer prints into a bounce. */
+    if(Math.round((S.presets[pi].au||{}).src||0)===1){tap(this.mSum,'mstr',false);return;}
     if(MIC.on&&MIC.g){tap(MIC.g,'mic',false);return;}
     /* the stage is down: raise it, and remember the take did, so it goes down
        again with the take. The first time, this is the permission prompt. */
@@ -18902,7 +18842,17 @@ function audPlace(pi,rec,startBeat,name='mic',lat){
      overdub the bed comes back at ITS recorded pitch too — the layers keep
      their own pitches, not the repitched mix you happened to sing over. */
   {const au9=S.presets[pi].au=S.presets[pi].au||{};
-   au9.spd=1; au9.rate=1; au9.semis=0; au9.st=0; au9.en=1;}
+   au9.spd=1; au9.rate=1; au9.semis=0; au9.st=0; au9.en=1;
+   /* …AND A MASTER BOUNCE PLAYS BACK AT THE LEVEL IT WAS RECORDED (Gad,
+      2026-08-26: "the resampled channel sound exactly like the live sound
+      from the channels"). The tap is pre-master-fx now, so the only thing
+      left between the take and "exactly live" is this channel's own replay
+      chain: au.gain rests at 0.9 and the fader at 0.8 — a virgin bounce came
+      back at 0.72x. Same doctrine as the pitch reset above, level edition;
+      mic takes keep their gain staging. */
+   if(name==='mstr'){au9.gain=1; au9.lvol=1;
+     const mx9=S.presets[pi].mix=S.presets[pi].mix||{lvl:0.8,pan:0};
+     mx9.lvl=1; mx9.pan=0; engine.refresh(pi);}}
   poolAdd(cv,name+' ch'+pi,{k:'r'});
   if(engineGranP(S.presets[pi])){engine.granBuf=engine.granBuf||[];
     engine.granBuf[pi]=cv; engine.granSend(pi);}
@@ -24263,7 +24213,7 @@ function rackParams(L,pre,specs){
   S.slotParam=clamp(S.slotParam|0,0,Math.max(0,specs.length-1+extra));
   /* CELLS ARE NOT ALL THE SAME SIZE ANY MORE. A spec can ask for more width
      with `w`, and the rest share what is left. And a slot can now have more
-     params than one row holds (a looping envelope) — it WRAPS to a second
+     params than one row holds (a full lfo) — it WRAPS to a second
      label/value pair instead of crushing every cell to nothing. */
   const items=specs.map((sp2,i)=>({sp:sp2,i}));
   if(extra)items.push({plus:true,i:specs.length});
@@ -24297,7 +24247,7 @@ function rackParams(L,pre,specs){
     L.push(lr); L.push(vr);
   }
   /* DEV VISUALIZER: the shape an env or lfo slot describes, as one quiet row.
-     Cheap to render, honest about loop/tmul/random waves — may not ship. */
+     Cheap to render, honest about tmul/random waves — may not ship. */
   const M=MODULES[S.curMod];
   if(M&&M.id==='mod'){
     const sl=modHolder(pre,'mod').mod[S.curSlot];
@@ -24305,30 +24255,17 @@ function rackParams(L,pre,specs){
     if(s3===1||s3===2)L.push('   '+sp('d',modShapeRow(sl,84)));
   }
 }
-/* 84 columns of ▁▂▃▄▅▆▇█: an env draws attack→decay→sustain→release (or three
-   loop cycles when looping); an lfo draws two cycles, hashed steps included. */
+/* 84 columns of ▁▂▃▄▅▆▇█: an env draws attack→decay→sustain→release; an lfo
+   draws two cycles, hashed steps included. */
 function modShapeRow(m,W){
   const s=Math.round(m.src||0), BL='▁▂▃▄▅▆▇█', out=[];
   if(s===1){
     const T3=clamp(m.tmul??1,0.1,4), a=Math.max(0.001,(m.a||0)*T3), d=Math.max(0.01,(m.d||0.1)*T3);
-    const sus=clamp(m.s??0,0,1), r=Math.max(0.01,(m.r||0.05)*T3), lp=clamp(m.lp||0,0,1);
-    if(lp>0.001){
-      const P=envLoopP(m), fit=Math.round(m.lfit||0)===0;
-      let A=a,D=d;
-      if(fit){const c=P/(A+D);A*=c;D*=c;}
-      else{A=Math.min(A,P*0.9);D=Math.min(D,Math.max(0.01,P-A));}
-      for(let i=0;i<W;i++){
-        const t=i/W*P*3, k=Math.floor(t/P), u=t-k*P;
-        const pk=lp>=0.999?1:Math.pow(lp,k);
-        const v=u<A?u/A:u<A+D?1-(1-sus)*((u-A)/D):sus;
-        out.push(v*pk);
-      }
-    }else{
-      const hold=(a+d)*0.25+0.05, T=a+d+hold+r;
-      for(let i=0;i<W;i++){const t=i/W*T;
-        out.push(t<a?t/a:t<a+d?1-(1-sus)*((t-a)/d)
-          :t<a+d+hold?sus:Math.max(0,sus*(1-(t-a-d-hold)/r)));}
-    }
+    const sus=clamp(m.s??0,0,1), r=Math.max(0.01,(m.r||0.05)*T3);
+    const hold=(a+d)*0.25+0.05, T=a+d+hold+r;
+    for(let i=0;i<W;i++){const t=i/W*T;
+      out.push(t<a?t/a:t<a+d?1-(1-sus)*((t-a)/d)
+        :t<a+d+hold?sus:Math.max(0,sus*(1-(t-a-d-hold)/r)));}
   }else{
     const w=Math.round(m.wav||0);
     const h=n=>{const x=Math.sin((n+2)*127.1+(S.curSlot+1)*311.7)*43758.5453;

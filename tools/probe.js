@@ -1539,22 +1539,34 @@ async function probeMicRec2() {
     rows.push({ k: 'tabloop', down: dn, up, full, l: lft, r: rgt, rfull, clampUp: cUp, clampFull: cFull,
                 sameBuf: engine.audBuf[ch] === bufRef,
                 expect: 'dn .5/.5/1 up 1/1/1 full 1/1/1 · l 3/.75/1 r 4/1/1 rfull 4/1/1 · clamp 4/1/1 then refuse · true' });
-    /* latc — his calibration: blips at known clock times through the master,
-       recorded by the take path (src=mstr, no MediaStream in the chain).
-       Where they LAND vs the beat grid = the placement error E; the correct
-       AUDLATC is the current one PLUS the median E. */
+    /* latc — his calibration: blips at known clock times into the take path
+       (src=mstr, no MediaStream in the chain). Where they LAND vs the beat
+       grid = the placement error E; the correct AUDLATC is the current one
+       PLUS the median E. UNDER A PLAYING TRANSPORT, and the row starts it
+       itself: a STOPPED take anchors its first sound at 0 by design (round
+       12 from0 + the head trim), which erases absolute timing — the row used
+       to inherit `playing` from its neighbours and read garbage the day the
+       neighbourhood changed. The desk is muted so the blips are the only
+       onsets the detector can see. */
     fresh(); S.presets[ch].au.src = 1;
     lane.unit = 'B'; lane.count = 2; lane.auto = false;
+    const mut9 = []; for (let c9 = 0; c9 < S.presets.length; c9++) { if (c9 === ch) continue;
+      const mx = S.presets[c9] && S.presets[c9].mix; if (!mx) continue;
+      mut9.push([c9, mx.lvl]); mx.lvl = 0; try { engine.refresh(c9); } catch (_) {} }
+    play(); await sleep(300);
     const tCall = AC.currentTime;
     engine.audRecStart(ch);
     const sb9 = engine.audRec.startBeat, anc9 = editAnchor(), Lb9 = lane.len;
     const cl9 = Math.max(256, Math.round(Lb9 * spb() * sr));
     const t0 = tCall + 0.35;
-    const bg = AC.createGain(); bg.gain.value = 0.5; bg.connect(engine.master);
+    const bg = AC.createGain(); bg.gain.value = 0.5; bg.connect(engine.mSum);   // the tap moved pre-master-fx: feed what it records
     for (let k = 0; k < 6; k++) { const o9 = AC.createOscillator(); o9.frequency.value = 1000;
       o9.connect(bg); o9.start(t0 + k * 0.5); o9.stop(t0 + k * 0.5 + 0.03); }
     await sleep(3600);
     engine.audRecStop(); await sleep(250); try { bg.disconnect(); } catch (_) {}
+    stop();
+    for (const [c9, v] of mut9) { const mx = S.presets[c9] && S.presets[c9].mix;
+      if (mx) mx.lvl = v; try { engine.refresh(c9); } catch (_) {} }
     const dbf = engine.audBuf[ch].getChannelData(0);
     const on9 = [];
     for (let i = 1; i < dbf.length; i++) if (Math.abs(dbf[i]) > 0.1 && Math.abs(dbf[i - 1]) <= 0.1) { on9.push(i); i += 4000; }
@@ -1581,7 +1593,7 @@ async function probeMicRec2() {
     const po = AC.createOscillator(); po.frequency.value = 660;
     const pg = AC.createGain(); pg.gain.value = 0.4;
     const pan9 = AC.createStereoPanner(); pan9.pan.value = -1;
-    po.connect(pg); pg.connect(pan9); pan9.connect(engine.master);
+    po.connect(pg); pg.connect(pan9); pan9.connect(engine.mSum);   // same: the mstr tap records mSum now
     po.start(); await sleep(600); po.stop(); await sleep(120);
     engine.audRecStop(); await sleep(200);
     try { pg.disconnect(); pan9.disconnect(); } catch (_) {}
@@ -1933,6 +1945,176 @@ async function probeAudClip() {
                   'events', 'cue0', 'laneAfter', 'bufStays', 'clipHasAud', 'err', 'expect'], rows };
 }
 
+/* resamp — 2026-08-26: "master resampling records PRE master effects, and the
+   resampled channel sounds exactly like the live sound from the channels."
+   The mstr tap moved this.master → mSum (pre master rack, pre dj, pre fader)
+   and audPlace lands a mstr take with the replay chain at unity. Live and
+   replay are both measured at mSum: everything downstream (rack, dj, fader,
+   comp) is SHARED, so mSum equality is ear equality. A hot sat on the master
+   rack is the control — dirtMaster proves the fx is loud while the take and
+   the replay stay clean of it (the old tap printed it, then played through
+   it again). */
+async function probeResamp() {
+  const B = CH, A = B === 9 ? 8 : 9, sr = AC.sampleRate, rows = [];
+  const keep = { pA: stash(A), pB: stash(B),
+    bufA: engine.audBuf[A], gbufA: (engine.granBuf || [])[A], nameA: engine.audName[A],
+    bufB: engine.audBuf[B], gbufB: (engine.granBuf || [])[B], nameB: engine.audName[B],
+    laneA: S.patterns[S.editPat].lanes[A].toJSON(),
+    laneB: S.patterns[S.editPat].lanes[B].toJSON(),
+    master: JSON.parse(JSON.stringify(S.master)), mLvl: S.mLvl,
+    bpm: T.bpm, ovd: CFG.overdub };
+  const rms = x => { let s = 0; for (let i = 0; i < x.length; i++) s += x[i] * x[i]; return Math.sqrt(s / (x.length || 1)); };
+  const goe = (x, f) => { const w = 2 * Math.PI * f / sr, cw = 2 * Math.cos(w); let s1 = 0, s2 = 0;
+    for (let i = 0; i < x.length; i++) { const s0 = x[i] + cw * s1 - s2; s2 = s1; s1 = s0; }
+    return (s1 * s1 + s2 * s2 - cw * s1 * s2) / x.length; };
+  /* no member is a 2x/3x harmonic of another — 330/660 was, and the dirt
+     metric read beat 4's fundamental as beat 1's distortion */
+  const F4 = [331, 419, 523, 601];
+  const dirt = x => { let f = 0, h = 0; for (const f0 of F4) { f += goe(x, f0); h += goe(x, 2 * f0) + goe(x, 3 * f0); }
+    return f > 1e-12 ? r3(h / f) : null; };
+  const envOf = x => { const Bz = Math.round(sr * 0.01), o = []; for (let i = 0; i + Bz <= x.length; i += Bz) {
+    let s = 0; for (let j = i; j < i + Bz; j++) s += x[j] * x[j]; o.push(Math.sqrt(s / Bz)); } return o; };
+  const pk = x => { let p = 0; for (let i = 0; i < x.length; i++) { const v = x[i] < 0 ? -x[i] : x[i]; if (v > p) p = v; } return p; };
+  /* sample-level verdict: align a 1s window of `a` into `b` (b doubled — the
+     signal is loop-periodic), fit the one gain α that best maps b onto a,
+     report α and the residual. α≈1 and resid≈0 IS "sounds exactly like". */
+  const refine = (a, b, gB) => {
+    const W = Math.round(sr * 1.0), s0 = Math.round(sr * 0.4);
+    if (a.length < s0 + W) return { alpha: null, resid: null };
+    const aw = a.subarray(s0, s0 + W);
+    const b2 = new Float32Array(b.length * 2); b2.set(b, 0); b2.set(b, b.length);
+    const c0 = s0 + gB * Math.round(sr * 0.01);
+    let best = -Infinity, bs = c0;
+    for (let s = -600; s <= 600; s += 4) { const off = ((c0 + s) % b.length + b.length) % b.length;
+      let d = 0; for (let i = 0; i < W; i += 8) d += aw[i] * b2[off + i];
+      if (d > best) { best = d; bs = off; } }
+    let best2 = -Infinity, bs2 = bs;
+    for (let s = bs - 4; s <= bs + 4; s++) { const off = (s % b.length + b.length) % b.length;
+      let d = 0; for (let i = 0; i < W; i++) d += aw[i] * b2[off + i];
+      if (d > best2) { best2 = d; bs2 = off; } }
+    const bw = b2.subarray(bs2, bs2 + W);
+    let dab = 0, dbb = 0, daa = 0;
+    for (let i = 0; i < W; i++) { dab += aw[i] * bw[i]; dbb += bw[i] * bw[i]; daa += aw[i] * aw[i]; }
+    const al = dbb > 0 ? dab / dbb : 0;
+    let e = 0; for (let i = 0; i < W; i++) { const r = aw[i] - al * bw[i]; e += r * r; }
+    return { alpha: r3(al), resid: r3(Math.sqrt(e / (daa || 1e-9))) };
+  };
+  const mutes = [];
+  try {
+    if (T.playing) stop();
+    setBpm(120); CFG.overdub = 0;                       // overwrite: the canvas starts from silence
+    pin(A);
+    /* ISOLATE: live-vs-replay compares mSum, and any OTHER channel with
+       material plays into BOTH passes — and during replay it plays AGAIN on
+       top of its own copy inside the take. Mute every fader but A and B. */
+    for (let c9 = 0; c9 < S.presets.length; c9++) { if (c9 === A || c9 === B) continue;
+      const mx = S.presets[c9] && S.presets[c9].mix; if (!mx) continue;
+      mutes.push([c9, mx.lvl]); mx.lvl = 0; try { engine.refresh(c9); } catch (_) {} }
+    for (const c of [A, B]) { if (!isAudioCh(c)) setEngine(c, 'audio');
+      const p = S.presets[c]; p.cat = 'audio'; audDefaults(p);
+      p.au.cmode = 0; p.au.kmode = 0; p.au.auto = 1;
+      const ln = S.patterns[S.editPat].lanes[c];
+      ln.unit = 'B'; ln.count = 1; ln.auto = false; ln.events = []; }
+    S.presets[A].au.src = 0; S.presets[B].au.src = 1;
+    engine.audBuf[B] = null; if (engine.granBuf) engine.granBuf[B] = null;   // stopped, no carrier: safe to empty
+    /* the source: four decaying pure tones, one per beat — Goertzel-friendly,
+       an envelope distinctive enough to align on */
+    const laneA = S.patterns[S.editPat].lanes[A];
+    const n = Math.round(laneA.len * spb() * sr), src = AC.createBuffer(1, n, sr);
+    { const d = src.getChannelData(0), q = Math.round(n / 4), E = Math.round(sr * 0.005);
+      for (let k = 0; k < 4; k++) for (let i = 0; i < q && k * q + i < n; i++) { const t = i / sr;
+        const w9 = Math.min(1, i / E, (q - 1 - i) / E);       // 5ms edges: no broadband clicks
+        d[k * q + i] = 0.45 * w9 * Math.exp(-t * 6) * Math.sin(2 * Math.PI * F4[k] * t); } }
+    engine.granNode(A); engine.setChanBuf(A, src, 'resamp-src');
+    Object.assign(S.presets[A].au, { spd: 1, rate: 1, st: 0, en: 1, semis: 0 });
+    const satI = XTYPES.indexOf('sat');
+    S.master = S.master.map((s, i) => i === 0 ? { typ: satI, rt: 0, p1: 0.9, p2: 0.5, p3: 0, mix: 1 }
+                                              : { typ: 0, rt: 0, p1: 0, p2: 0, p3: 0, mix: 1 });
+    engine.rebuildMaster(); await sleep(150);
+    /* ---- live: A plays, mSum + master captured, the bounce lands on B ---- */
+    play(); await sleep(500);
+    const tSum = tap(engine.mSum), tMst = tap(engine.master);
+    engine.audRecStart(B);
+    const started = !!engine.audRec;
+    await sleep(2600);
+    engine.audRecStop();
+    let landed = false;
+    for (let i = 0; i < 150; i++) { if (engine.audBuf[B]) { landed = true; break; } await sleep(20); }
+    const [liveL] = tSum.stop(), [mstL] = tMst.stop();
+    stop(); await sleep(150);
+    const take = engine.audBuf[B];
+    const tk0 = take ? take.getChannelData(0) : new Float32Array(1);
+    rows.push({ k: 'take', started, landed, nch: take ? take.numberOfChannels : 0,
+      ratio: r3(rms(tk0) / (rms(liveL) || 1e-9)), pkRatio: r3(pk(tk0) / (pk(liveL) || 1e-9)),
+      dirtTake: dirt(tk0), dirtLive: dirt(liveL), dirtMaster: dirt(mstL),
+      expect: '2ch · ratio ~1 · pkRatio ~1 · dirtTake≈dirtLive tiny · dirtMaster ≫ (sat hot, not printed)' });
+    const auB = S.presets[B].au, mxB = S.presets[B].mix || {};
+    rows.push({ k: 'unity', gain: r3(auB.gain), lvol: r3(auB.lvol),
+      fader: r3(mxB.lvl), pan: r3(mxB.pan), expect: '1 · 1 · 1 · 0' });
+    /* ---- replay: A muted, B alone must put the same signal into mSum ---- */
+    S.presets[A].mix.lvl = 0; engine.refresh(A); await sleep(100);
+    play(); await sleep(500);
+    const tSum2 = tap(engine.mSum);
+    await sleep(2600);
+    const [playL] = tSum2.stop();
+    stop(); await sleep(150);
+    const cut = x => x.subarray(Math.round(sr * 0.3), Math.min(x.length, Math.round(sr * 0.3) + Math.round(sr * 2.0)));
+    const eA = envOf(cut(liveL)), eB = envOf(cut(playL));
+    const N9 = Math.min(eA.length, eB.length);
+    let bg = 0, bc = -2;
+    for (let g = 0; g < N9; g++) { let sxy = 0, sx = 0, sy = 0, sxx = 0, syy = 0;
+      for (let i = 0; i < N9; i++) { const a = eA[i], b = eB[(i + g) % N9];
+        sxy += a * b; sx += a; sy += b; sxx += a * a; syy += b * b; }
+      const den = Math.sqrt((sxx - sx * sx / N9) * (syy - sy * sy / N9)) || 1e-9;
+      const c = (sxy - sx * sy / N9) / den; if (c > bc) { bc = c; bg = g; } }
+    /* MAD, not max: a sharp attack split across a 10ms block boundary puts one
+       whole block of deviation at the edge — the mean is the honest number */
+    let mad = 0, mA = 0;
+    for (let i = 0; i < N9; i++) { mad += Math.abs(eA[i] - eB[(i + bg) % N9]); mA += eA[i]; }
+    const fine = refine(cut(liveL), cut(playL), bg);
+    rows.push({ k: 'replay', ratio: r3(rms(playL) / (rms(liveL) || 1e-9)),
+      corr: r3(bc), envDev: r3(mad / (mA || 1e-9)), alpha: fine.alpha, resid: fine.resid,
+      dirtPlay: dirt(playL),
+      expect: 'ratio ~1 · corr >0.97 · envDev <0.1 · alpha ~1 resid ~0 (the waveform itself) · dirtPlay≈dirtLive' });
+    /* ---- a master knob mid-bounce: rebuildMaster() disconnects mSum — the
+       re-attach guard must keep the tail of the take alive ---- */
+    S.presets[A].mix.lvl = 0.8; engine.refresh(A); await sleep(100);
+    play(); await sleep(400);
+    engine.audRecStart(B);
+    await sleep(900);
+    engine.rebuildMaster();                              // the knob turn
+    await sleep(900);
+    engine.audRecStop();
+    let landed2 = false;
+    for (let i = 0; i < 150; i++) { const b9 = engine.audBuf[B]; if (b9 && b9 !== take) { landed2 = true; break; } await sleep(20); }
+    stop(); await sleep(100);
+    let aliveFrac = null;
+    if (landed2) { const d2 = engine.audBuf[B].getChannelData(0), e2 = envOf(d2);
+      let on = 0; for (const v of e2) if (v > 0.01) on++;
+      aliveFrac = r3(on / (e2.length || 1)); }
+    rows.push({ k: 'rebuild', landed2, aliveFrac,
+      expect: 'landed · aliveFrac >0.8 (rec spans ~90% of the loop; no silent half after the knob)' });
+  } finally {
+    try { if (engine.audRec) engine.audRecStop(); } catch (_) {}
+    try { if (T.playing) stop(); } catch (_) {}
+    S.master = keep.master; S.mLvl = keep.mLvl; CFG.overdub = keep.ovd;
+    try { engine.rebuildMaster(); } catch (_) {}
+    for (const [c9, v] of mutes) { const mx = S.presets[c9] && S.presets[c9].mix;
+      if (mx) mx.lvl = v; try { engine.refresh(c9); } catch (_) {} }
+    engine.audBuf[A] = keep.bufA; if (engine.granBuf) engine.granBuf[A] = keep.gbufA;
+    engine.audName[A] = keep.nameA;
+    engine.audBuf[B] = keep.bufB; if (engine.granBuf) engine.granBuf[B] = keep.gbufB;
+    engine.audName[B] = keep.nameB;
+    S.patterns[S.editPat].lanes[A] = Looper.from(keep.laneA);
+    S.patterns[S.editPat].lanes[B] = Looper.from(keep.laneB);
+    unstash(A, keep.pA); unstash(B, keep.pB);
+    try { setBpm(keep.bpm); } catch (_) {}
+  }
+  return { cols: ['k', 'started', 'landed', 'nch', 'ratio', 'pkRatio', 'dirtTake', 'dirtLive', 'dirtMaster',
+                  'gain', 'lvol', 'fader', 'pan', 'corr', 'envDev', 'alpha', 'resid', 'dirtPlay',
+                  'landed2', 'aliveFrac', 'err', 'expect'], rows };
+}
+
 const HELP = {
   cols: ['args'],
   rows: [
@@ -1953,6 +2135,7 @@ const HELP = {
     { k: 'grainflt', args: 'ch=9 — the cloud follows its own pitch dial (440→880 on +12) and the reso dial is real under 1 (LP/HP Q maps below 0dB)' },
     { k: 'setio',    args: 'ch=9 — the set file: takes travel embedded, no-audio fallback holes them, local stamps, exportSet via stubbed save picker' },
     { k: 'audclip',  args: 'ch=9 — pitch dial spans ±36 in all three cmodes (sounding Hz), and c/x/v carries an audio channel with its take' },
+    { k: 'resamp',   args: 'ch=9 — master resample is pre-master-fx and replays exactly like live at mSum: take clean of a hot sat, unity dials, replay ratio ~1, mid-bounce rebuild survives' },
     { k: '(any)',    args: '--ab <url> runs the same probe on a second build and diffs it' },
   ]
 };
@@ -1989,7 +2172,8 @@ try {
                    micrec2: probeMicRec2,
                    grainflt: probeGrainFlt,
                    setio: probeSetIO,
-                   audclip: probeAudClip };
+                   audclip: probeAudClip,
+                   resamp: probeResamp };
   const fn = PROBES[NAME];
   out = fn ? await fn() : (NAME === 'help' ? HELP : { cols: [], rows: [], err: 'no probe named ' + NAME });
 } catch (e) {
