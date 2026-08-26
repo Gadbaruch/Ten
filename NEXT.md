@@ -51,17 +51,26 @@ answered either by fakes (as above) or by his own Chrome.
 serving the working tree. Worth checking `lsof` at the top of any round
 where he says "nothing works".
 
-QA:
-1. **Grant Chrome Input Monitoring** — System Settings ▸ Privacy & Security
-   ▸ Input Monitoring ▸ Google Chrome ON (if it is already on, toggle it off
-   and back and RESTART Chrome; a Chrome update re-signs the binary and
-   silently drops the grant, which is the shape of "it worked last week").
-   Then reconnect `hid`. If the ⚠ line in settings/Input is gone, velocity
-   is back and fn→right works again.
-2. If the ⚠ line is STILL there with Input Monitoring on, the next thing to
-   try is the other connection mode (cable ↔ 2.4G dongle) — they enumerate
-   differently — and then say so, because that would be a genuinely
-   different finding from anything measured today.
+**HIS VERDICT, 2026-08-26: "ok we're good now." THE KEYBOARD ROUND IS
+CLOSED** — board loads, the right cluster dials, velocity is back. So the
+whole chain is confirmed end to end: the wake guard, the interface pick,
+the retry that re-prompted, the arrow guard that had been eating the
+cluster, and the filter that was the velocity wall.
+
+If it ever goes quiet again, the order that solved it:
+1. **Are the dev servers even up?** Both had died in the middle of this
+   round (`lsof -nP -iTCP:3033 -sTCP:LISTEN`), which looks exactly like
+   "everything is broken".
+2. **macOS Input Monitoring for Chrome** — System Settings ▸ Privacy &
+   Security ▸ Input Monitoring. If it is already on, toggle it off and back
+   and RESTART Chrome: a Chrome update re-signs the binary and silently
+   drops the grant, which is the shape of "it worked last week and I
+   changed nothing".
+3. **The ⚠ line in settings/Input** answers which half is wrong — present
+   means the OS refused the analog interface (velocity only); absent with
+   velocity still flat would be a genuinely new finding.
+4. Only then the other connection mode (cable ↔ 2.4G dongle): they
+   enumerate differently.
 
 # WHERE THE AUDIO CHANNEL STANDS — 2026-08-26 (fifth batch)
 
