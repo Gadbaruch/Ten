@@ -1,3 +1,77 @@
+# WHERE THE AUDIO CHANNEL STANDS — 2026-08-26 (fourth batch)
+
+## THE MONSGEEK: A VENDOR COLLECTION WEARING A KEYBOARD
+
+His report, and it was precise enough to solve: "it gives me the popup to
+connect, i do, then it shows the popup again but this time it says its
+already paired, i click connect again and the hid slot still says off
+through the whole thing."
+
+**MEASURED FIRST, on his actual board, before a line changed.** All three
+granted interfaces, opened one at a time and closed again:
+
+    0xFFFF/0x2                                   opens
+    0xC/0x1 0x1/0x80 0x1/0x6 0x1/0x2 0xFFFF/0x1  NotAllowedError
+    0x1/0x6                                      NotAllowedError
+
+WebHID refuses any interface carrying a PROTECTED usage — keyboard, mouse,
+pointer, consumer control — however many other collections sit beside it.
+And the middle one has a **vendor collection (0xFFFF/0x1) sitting next to
+the keyboard collections**, so `vend()` answered true and it was chosen as
+the stream device. Every open failed NotAllowedError; the `||cfgDev`
+fallback that would have given the right answer was never reached, because
+a blocked interface got there first. On the FUN60 the CONFIG interface IS
+the stream interface.
+
+- **The picker filters protected interfaces out BEFORE choosing** (`PROT`),
+  and if the chosen one still refuses, the open loop takes the first that
+  DOES open rather than failing with the answer sitting in the list.
+- **The retry no longer re-prompts.** It called `this.connect(pre)`, and
+  `pre` is undefined when the settings row calls it — so the retry ran
+  `requestDevice()` a SECOND time. That is his second popup, and Chrome
+  labelled it "already paired" because the grant was already there. It
+  retries with the devices in hand now, straight into `_connect`.
+- **One connect at a time** (`_opening`). Last round's eager `wake()`
+  reconnects on every return to the tab, so an automatic attempt and a
+  hand-clicked one could land together and fight over the same open().
+- Measured after, through the real `HE.connect()` on his board:
+  **ok true · hid on · "MonsGeek Keyboard" · kind 2 · firmware 0x8F
+  answered, id 2600** · only the openable interface claimed · disconnect
+  hands all three back. Frames were 0 because nobody pressed a key while
+  the probe held it for 600ms — **key streaming is the one part his hands
+  have to confirm.**
+  ⚠ The probe borrowed his keyboard for under a second and released it; the
+  gstack profile's `autoOn` was checked back to 0 afterwards, so Claude's
+  browser never auto-claims his board. Grants are per ORIGIN: :3033 lists
+  three MonsGeek interfaces, :3032 none.
+
+## "DO I HAVE TO TEST THE FX PARAMS ONE BY ONE" — NO: `fxwire`, 60/60
+
+His question after the distortion fix. New suite `tools/probe.sh fxwire`
+drives **every (type, param) pair FXMODOK claims** through the real applier
+and checks three things: `offered` (the dest picker lists it), `claimed`
+(fxLive returned true for a low and a high value), `moved` (a node behind
+that slot actually changed). No audio, no lfo to wait on — all 60 pairs
+across **19 fx types in one call**. Result: **60/60**.
+`fxmod` stays the tier above it: 23 hand-picked rows that prove the change
+reaches the SOUND (bus wobble or node motion under a real 5Hz lfo).
+Probe lesson kept: `snap()` first read only gain/frequency/Q/delayTime, so
+comp and limit read "claimed but nothing moved" — a DynamicsCompressor's
+dials are threshold/knee/ratio/attack/release and none of them is called
+gain. fxmod's audio judge had them right all along.
+
+Wall: fxwire 60/60 · fxmod 23/23 · resamp 4 · micrec 13 · audclip 5 · trig
+canonical · boots with no console errors.
+
+QA:
+1. **The keyboard** — click `hid` in settings/Input: ONE chooser, pick the
+   board, the slot should read the board's name. Then play: analog velocity
+   is the part only your hands can confirm. If the slot still says off,
+   quote the message bar — it now names the reason.
+2. **Any fx param mod** — no need to go one by one; fxwire covers all 60.
+   Worth one ear check on something with a big range (filt freq, delay
+   time) to confirm the automated tier matches what you hear.
+
 # WHERE THE AUDIO CHANNEL STANDS — 2026-08-26 (third batch)
 
 ## THE KEYBOARD THAT NEVER WOKE · DISTORTION MODS · THE STALE DEST CACHE

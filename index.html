@@ -1245,7 +1245,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-26.1459';
+const BUILD='2026-08-26.1523';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -15530,7 +15530,16 @@ const HE={
     if(!devs.some(d=>VID.includes(d.vendorId)))return false;
     return this.connect(devs);
   },
+  /* ONE CONNECT AT A TIME. wake() reconnects on every return to the tab now,
+     so an automatic attempt and a hand-clicked one can land together and
+     fight over the same open(). The internal retry calls _connect directly,
+     so it is never blocked by its own parent. */
   async connect(pre){
+    if(this._opening)return false;
+    this._opening=1;
+    try{return await this._connect(pre);}finally{this._opening=0;}
+  },
+  async _connect(pre){
     if(!navigator.hid){flash('no WebHID here — use Chrome or Edge');return false;}
     const filters=[{vendorId:0x3151},                    // RongYuan: MonsGeek/Akko/Attack Shark
                    {vendorId:0x3434},{vendorId:0x362D},  // Keychron HE, Lemokey
@@ -15559,17 +15568,39 @@ const HE={
 
     const has=(d,pg,us)=>(d.collections||[]).some(c=>c.usagePage===pg&&(us==null||c.usage===us));
     const vend=d=>(d.collections||[]).some(c=>(c.usagePage&0xFF00)===0xFF00);
+    /* THE BROWSER WILL NEVER HAND OVER A TYPING INTERFACE — and on this board
+       one of them is wearing a vendor collection. MEASURED on Gad's FUN60
+       (2026-08-26), all three granted interfaces:
+           0xFFFF/0x2                                   opens
+           0xC/0x1 0x1/0x80 0x1/0x6 0x1/0x2 0xFFFF/0x1  NotAllowedError
+           0x1/0x6                                      NotAllowedError
+       WebHID refuses any interface carrying a PROTECTED usage — keyboard,
+       mouse, pointer, consumer control — however many other collections sit
+       beside it. The middle one has 0xFFFF/0x1 next to the keyboard, so
+       `vend()` was true and it was chosen as the stream device; the open
+       failed NotAllowedError every time and connect gave up with a perfectly
+       good board sitting right there. That is "the hid slot still says off
+       through the whole thing". Filter them out BEFORE choosing, and let the
+       browser be the judge of anything left over. */
+    const PROT=d=>(d.collections||[]).some(c=>
+      (c.usagePage===0x01&&(c.usage===0x06||c.usage===0x02||c.usage===0x01))
+      ||c.usagePage===0x0C);
+    const usable=pool.filter(d=>!PROT(d));
     const kind=pool.some(d=>d.vendorId===0x3151)?2:1;
     let cfgDev,inDev;
     if(kind===2){
-      cfgDev=pool.find(d=>has(d,0xFFFF,0x02));
-      inDev =pool.find(d=>d!==cfgDev&&vend(d))||cfgDev;
+      cfgDev=usable.find(d=>has(d,0xFFFF,0x02))||usable.find(vend)||usable[0];
+      /* on the FUN60 the config interface IS the stream interface — the
+         `||cfgDev` fallback was always the right answer here and never got
+         reached, because a blocked interface answered `vend()` first */
+      inDev =usable.find(d=>d!==cfgDev&&vend(d))||cfgDev;
       cfgDev=cfgDev||inDev;
     }else{
-      inDev=pool.find(d=>has(d,0xFF60))||pool.find(vend)||pool[0];
+      inDev=usable.find(d=>has(d,0xFF60))||usable.find(vend)||usable[0];
       cfgDev=inDev;
     }
-    if(!inDev){flash('hid: no vendor collection on that device — pick the keyboard itself, not a sub-entry');return false;}
+    if(!inDev){flash('hid: every interface on that board is a typing interface the browser refuses to open '
+      +'— TEN needs the analog/vendor one, so check the board is in its analog mode');return false;}
 
     /* Open what we can; only the stream interface is fatal. An interface that
        refuses to open is usually one macOS has claimed, not a reason to give up
@@ -15579,6 +15610,14 @@ const HE={
       if(d.opened)continue;
       try{await d.open();}catch(err){oerr=err; if(d===inDev)break;}
     }
+    /* the pick can still be wrong on a board nobody here has ever held: if the
+       chosen stream interface refuses, take the first one that DOES open
+       rather than failing with the answer sitting in the list */
+    if(!inDev.opened)for(const d of usable){
+      if(d===inDev)continue;
+      if(d.opened){inDev=d; break;}
+      try{await d.open(); inDev=d; break;}catch(err){oerr=err;}
+    }
     if(!inDev.opened){
       /* the commonest cause by far, now that a tab reclaims the board on load:
          ANOTHER TEN TAB still holds it. Say that first, and try once more —
@@ -15587,7 +15626,13 @@ const HE={
       if(!this._retried){
         this._retried=1;
         await new Promise(r=>setTimeout(r,400));
-        const ok=await this.connect(pre);
+        /* THE RETRY USED TO RE-PROMPT. `pre` is undefined when the settings
+           row calls connect(), so retrying through connect(pre) ran
+           requestDevice() a SECOND time — Gad, 2026-08-26: "it shows the
+           popup again but this time it says its already paired". Retry with
+           the devices already in hand, and go straight to the body so the
+           one-at-a-time guard does not refuse its own retry. */
+        const ok=await this._connect(pool);
         this._retried=0;
         if(ok)return true;
       }

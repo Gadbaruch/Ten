@@ -2293,6 +2293,82 @@ async function probeFxMod() {
   return { cols: ['k', 'w0', 'w1', 'gain2', 'ok', 'addr', 'err', 'expect'], rows };
 }
 
+/* fxwire — the EXHAUSTIVE half of fxmod, and the answer to "do I have to test
+   them one by one": every (type, param) pair FXMODOK claims is wired gets
+   driven through the real applier and checked three ways —
+     offered  the dest picker lists it (modDests agrees with the table)
+     claimed  engine.fxLive() returned true for both a low and a high value
+     moved    some node behind that slot actually changed value
+   No audio and no waiting on an lfo, so all ~60 pairs run in one call. The
+   hand-picked rows in `fxmod` stay as the tier above this: they prove the
+   change reaches the SOUND. This one proves nothing is silently unwired. */
+async function probeFxWire() {
+  const ch = CH === 9 ? 8 : CH, rows = [];
+  const keep = { p: stash(ch) };
+  const snap = L => {
+    const o = [];
+    const pushNode = nd => {
+      if (!nd || typeof nd !== 'object') return;
+      /* a DynamicsCompressor's dials are threshold/knee/ratio/attack/release —
+         none of them called `gain`, which is why comp and limit first read as
+         "claimed but nothing moved" while fxmod's audio judge heard them
+         plainly. Read every AudioParam a unit in this file can own. */
+      for (const k of ['gain', 'frequency', 'Q', 'delayTime', 'detune',
+                       'threshold', 'knee', 'ratio', 'attack', 'release'])
+        if (nd[k] && typeof nd[k].value === 'number') o.push(nd[k].value);
+      if (nd.parameters && typeof nd.parameters.forEach === 'function')
+        nd.parameters.forEach(prm => { if (prm && typeof prm.value === 'number') o.push(prm.value); });
+    };
+    for (const k in L) {
+      const v = L[k];
+      if (v == null) continue;
+      if (typeof v === 'number') o.push(v);
+      else if (Array.isArray(v)) v.forEach(pushNode);
+      else if (typeof v === 'object') pushNode(v);
+    }
+    if (L.flw) o.push(L.flw.thr, L.flw.depth);   // the gate's follower is plain numbers
+    return o;
+  };
+  const diff = (a, b) => a.length === b.length && a.some((v, i) => Math.abs(v - b[i]) > 1e-9);
+  try {
+    if (T.playing) stop();
+    pin(ch);
+    const p = S.presets[ch];
+    for (const t of Object.keys(FXMODOK)) {
+      const ti = XTYPES.indexOf(t);
+      if (ti < 0 || !FXMODOK[t].length) continue;
+      for (const key of FXMODOK[t]) {
+        /* p3 is a TYPE selector on two families, so a param that only exists
+           on one kind needs that kind built: filt's gain is a shelving-only
+           dial, sat's tone only exists off the crush curve. */
+        let p3 = 0;
+        if (t === 'filt') p3 = key === 'p4' ? XFT.indexOf('peq') : 0;
+        p.fx = rack(mkFx);
+        p.fx[0] = { typ: ti, rt: 0, p1: 0.5, p2: 0.5, p3, p4: 0.5, p5: 0.5, p7: 0.5, mix: 0.5 };
+        engine.rebuildRack(ch);
+        await sleep(120);
+        const L = engine.buses[ch].fxLive && engine.buses[ch].fxLive[0];
+        if (!L) { rows.push({ k: t + '.' + key, err: 'no live handle' }); continue; }
+        const offered = destList(p).some(x => x.rack === 'fx' && x.slot === 0 && x.key === key);
+        const a = snap(L);
+        const r1 = engine.fxLive(ch, 0, key, 0.12);
+        await sleep(70);                      // setTargetAtTime ramps; give it a tau
+        const b = snap(L);
+        const r2 = engine.fxLive(ch, 0, key, 0.88);
+        await sleep(70);
+        const c = snap(L);
+        const moved = diff(a, c) || diff(b, c);
+        rows.push({ k: t + '.' + key, offered, claimed: !!(r1 && r2), moved,
+                    ok: !!(offered && r1 && r2 && moved) });
+      }
+    }
+  } finally {
+    try { if (T.playing) stop(); } catch (_) {}
+    unstash(ch, keep.p);
+  }
+  return { cols: ['k', 'offered', 'claimed', 'moved', 'ok', 'err'], rows };
+}
+
 const HELP = {
   cols: ['args'],
   rows: [
@@ -2314,6 +2390,7 @@ const HELP = {
     { k: 'setio',    args: 'ch=9 — the set file: takes travel embedded, no-audio fallback holes them, local stamps, exportSet via stubbed save picker' },
     { k: 'audclip',  args: 'ch=9 — pitch dial spans ±36 in all three cmodes (sounding Hz), and c/x/v carries an audio channel with its take' },
     { k: 'resamp',   args: 'ch=9 — master resample is pre-master-fx and replays exactly like live at mSum: take clean of a hot sat, unity dials, replay ratio ~1, mid-bounce rebuild survives' },
+    { k: 'fxwire',   args: 'ch=8 — EXHAUSTIVE: every (fx type, param) FXMODOK claims, driven through the real applier — offered/claimed/moved. No audio, one call.' },
     { k: 'fxmod',    args: 'ch=8 — every wired fx (type,param) wobbles under a 5Hz lfo through the real ctrl path; arp rate mod moves note density' },
     { k: '(any)',    args: '--ab <url> runs the same probe on a second build and diffs it' },
   ]
@@ -2353,7 +2430,8 @@ try {
                    setio: probeSetIO,
                    audclip: probeAudClip,
                    resamp: probeResamp,
-                   fxmod: probeFxMod };
+                   fxmod: probeFxMod,
+                   fxwire: probeFxWire };
   const fn = PROBES[NAME];
   out = fn ? await fn() : (NAME === 'help' ? HELP : { cols: [], rows: [], err: 'no probe named ' + NAME });
 } catch (e) {
