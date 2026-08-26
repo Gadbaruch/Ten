@@ -1245,7 +1245,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-26.1539';
+const BUILD='2026-08-26.1605';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -15582,35 +15582,32 @@ const HE={
        good board sitting right there. That is "the hid slot still says off
        through the whole thing". Filter them out BEFORE choosing, and let the
        browser be the judge of anything left over. */
+    /* PROT marks an interface the OS MAY refuse — one carrying a keyboard,
+       mouse, pointer or consumer usage. It is a PREFERENCE, NOT A BAN, and
+       this morning's build had it as a ban, which was my error: on macOS such
+       an interface opens perfectly well once Chrome holds Input Monitoring,
+       and on THIS board the analog stream lives on exactly one of them
+       (0xFFFF/0x1 sitting beside 0x1/0x6). Filtering it out guarantees no
+       velocity even on a machine that would have granted it.
+       The NotAllowedError behind that decision was measured in the AUTOMATION
+       browser — a different app bundle with its own Input Monitoring grant —
+       so it never said anything about the browser Gad plays in. Prefer the
+       stream interface; fall back only when the open actually refuses. */
     const PROT=d=>(d.collections||[]).some(c=>
       (c.usagePage===0x01&&(c.usage===0x06||c.usage===0x02||c.usage===0x01))
       ||c.usagePage===0x0C);
-    const usable=pool.filter(d=>!PROT(d));
     const kind=pool.some(d=>d.vendorId===0x3151)?2:1;
     let cfgDev,inDev;
     if(kind===2){
-      cfgDev=usable.find(d=>has(d,0xFFFF,0x02))||usable.find(vend)||usable[0];
-      /* on the FUN60 the config interface IS the stream interface — the
-         `||cfgDev` fallback was always the right answer here and never got
-         reached, because a blocked interface answered `vend()` first */
-      inDev =usable.find(d=>d!==cfgDev&&vend(d))||cfgDev;
+      cfgDev=pool.find(d=>has(d,0xFFFF,0x02))||pool.find(d=>vend(d)&&!PROT(d))||pool[0];
+      inDev =pool.find(d=>d!==cfgDev&&vend(d))||cfgDev;
       cfgDev=cfgDev||inDev;
     }else{
-      inDev=usable.find(d=>has(d,0xFF60))||usable.find(vend)||usable[0];
+      inDev=pool.find(d=>has(d,0xFF60))||pool.find(vend)||pool[0];
       cfgDev=inDev;
     }
-    if(!inDev){flash('hid: every interface on that board is a typing interface the browser refuses to open '
-      +'— TEN needs the analog/vendor one, so check the board is in its analog mode');return false;}
-    /* AND SAY SO WHEN THE STREAM'S OWN INTERFACE IS THE BLOCKED ONE. Measured
-       on Gad's FUN60, 2026-08-26: the analog reports come back on a vendor
-       collection that shares its interface with the keyboard (0xFFFF/0x1
-       beside 0x1/0x6), and that interface refuses with NotAllowedError — by
-       POLICY, not exclusivity: it fails the same way opened first, alone,
-       with nothing else claimed. So connect SUCCEEDS on the config interface,
-       the board answers 0x8F, the row shows its name — and no analog frame
-       ever arrives, which reads as "velocity is gone" with nothing anywhere
-       saying why. Remember it, and let the readout be honest. */
-    this.streamBlocked=pool.some(d=>PROT(d)&&vend(d))&&inDev===cfgDev;
+    if(!inDev){flash('hid: no vendor collection on that device — pick the keyboard itself, not a sub-entry');return false;}
+
 
     /* Open what we can; only the stream interface is fatal. An interface that
        refuses to open is usually one macOS has claimed, not a reason to give up
@@ -15623,11 +15620,18 @@ const HE={
     /* the pick can still be wrong on a board nobody here has ever held: if the
        chosen stream interface refuses, take the first one that DOES open
        rather than failing with the answer sitting in the list */
-    if(!inDev.opened)for(const d of usable){
+    if(!inDev.opened)for(const d of pool.slice().sort((a,b)=>(PROT(a)?1:0)-(PROT(b)?1:0))){
       if(d===inDev)continue;
       if(d.opened){inDev=d; break;}
       try{await d.open(); inDev=d; break;}catch(err){oerr=err;}
     }
+    /* DID WE END UP ON THE CONFIG INTERFACE WITH A STREAM INTERFACE GOING
+       BEGGING? Then the board will answer 0x8F, the row will show its name,
+       and not one analog frame will arrive — "velocity is gone", with nothing
+       anywhere saying why. On macOS the cause is almost always Input
+       Monitoring: that interface carries a keyboard collection, and the OS
+       will not hand one to an app that has not been granted it. */
+    this.streamBlocked=inDev===cfgDev&&pool.some(d=>d!==cfgDev&&vend(d));
     if(!inDev.opened){
       /* the commonest cause by far, now that a tab reclaims the board on load:
          ANOTHER TEN TAB still holds it. Say that first, and try once more —
@@ -15678,7 +15682,7 @@ const HE={
     this.watch=setInterval(()=>this.tick(),60);
     this.set('autoOn',1);      // a reload should find the board already here
     flash('hid: '+this.srcName+(this.map?'':' — run `h keys` to map the keys')
-      +(this.streamBlocked?'  ⚠ analog interface blocked by the browser — no velocity; see `board`':''));
+      +(this.streamBlocked?'  ⚠ no analog interface — velocity is off; macOS Input Monitoring for Chrome is the usual cause':''));
     dirty=true; return true;
   },
   /* HAND THE BOARD BACK WHEN YOU ARE NOT THE TAB IN FRONT. Only one page can
@@ -26343,9 +26347,9 @@ function settingsRack(L){
    /* …AND WHEN THE STREAM'S INTERFACE IS ONE THE BROWSER WILL NOT OPEN, that
       is not a mapping problem and no amount of looking at slots will show it.
       Name it once, here, where the frames counter he is staring at sits. */
-   if(HE.on&&HE.streamBlocked)L.push('   '+sp('r','   ⚠ analog interface blocked by the browser')
-     +sp('d','  (its vendor collection shares an interface with the keyboard, so WebHID refuses it) — '
-             +'config works, velocity cannot: try the other connection mode (cable ↔ dongle) or the board\u2019s analog mode'));
+   if(HE.on&&HE.streamBlocked)L.push('   '+sp('r','   ⚠ connected on the config interface only — no velocity')
+     +sp('d','  the analog stream shares an interface with the keyboard and the OS refused it: grant '
+             +'Input Monitoring to Chrome (System Settings ▸ Privacy & Security), then reconnect'));
    /* CONNECTED IS NOT STREAMING. A board that opened and never spoke reads the
       same as a board playing into a slot nothing is mapped to, so say which:
       reports in, the last slot that moved, and whether that slot has a key. */

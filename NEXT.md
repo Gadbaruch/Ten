@@ -1,3 +1,68 @@
+# WHERE THE AUDIO CHANNEL STANDS — 2026-08-26 (sixth batch)
+
+## THE VELOCITY WALL WAS MY OWN FILTER — and a correction worth keeping
+
+He offered to check out a commit from last week and test the keyboard there.
+**The archaeology says that would prove nothing:** `git log --since` over
+`index.html` shows the ONLY commits touching the HID device-picking code in
+the last two weeks are today's two (80a7726, 86cd1a0). The path that picks
+and opens an interface is byte-identical to what he ran last week.
+
+**THE CORRECTION, and it is the whole entry.** This morning I concluded the
+analog interface was refused "by POLICY, not exclusivity" — measured by
+opening it first, alone, with nothing else claimed. That measurement was
+real but it was taken in the WRONG BROWSER: the gstack automation profile
+is *Google Chrome for Testing*, a different app bundle with its **own macOS
+Input Monitoring grant**. On macOS an interface carrying a keyboard
+collection needs Input Monitoring for THAT app; without it, `open()` throws
+NotAllowedError no matter what Chrome's blocklist says. So the finding said
+nothing about the browser Gad plays in — TEN's own error text has named
+Input Monitoring all along.
+
+And the consequence was worse than a wrong note: the morning build turned
+that conclusion into a **ban**, filtering every protected interface out
+before choosing. On this board the analog stream lives on exactly such an
+interface (0xFFFF/0x1 sitting beside 0x1/0x6), so the filter guaranteed no
+velocity **even on a machine that would have granted it**. That is my bug,
+not the browser's.
+
+Now: PROT is a PREFERENCE. The stream interface is tried first, and the
+fallback to the config-only one runs only when the open actually refuses —
+so a board still connects (name, keymap, 0x8F, lights) when velocity
+cannot. Verified with fake interfaces shaped exactly like his, both ways:
+
+    no Input Monitoring   → chose config,          opened 0 only, streamBlocked true
+    Input Monitoring on   → chose stream+keyboard, opened 0 and 1, streamBlocked false
+
+The morning build could never reach the second row.
+
+`streamBlocked` is decided AFTER the opens now, and both messages name the
+actionable cause: the connect flash says *no analog interface — velocity is
+off; macOS Input Monitoring for Chrome is the usual cause*, and the hid
+readout carries *connected on the config interface only — no velocity …
+grant Input Monitoring to Chrome (System Settings ▸ Privacy & Security),
+then reconnect*.
+
+⚠ **I can no longer drive his board from here**: the automation profile's
+WebHID grant went with a browse-daemon restart, and re-granting needs a
+picker gesture I cannot make. Interface-level questions now have to be
+answered either by fakes (as above) or by his own Chrome.
+⚠ **Both servers had died** (3033 and 3032 both refusing) — restarted, both
+serving the working tree. Worth checking `lsof` at the top of any round
+where he says "nothing works".
+
+QA:
+1. **Grant Chrome Input Monitoring** — System Settings ▸ Privacy & Security
+   ▸ Input Monitoring ▸ Google Chrome ON (if it is already on, toggle it off
+   and back and RESTART Chrome; a Chrome update re-signs the binary and
+   silently drops the grant, which is the shape of "it worked last week").
+   Then reconnect `hid`. If the ⚠ line in settings/Input is gone, velocity
+   is back and fn→right works again.
+2. If the ⚠ line is STILL there with Input Monitoring on, the next thing to
+   try is the other connection mode (cable ↔ 2.4G dongle) — they enumerate
+   differently — and then say so, because that would be a genuinely
+   different finding from anything measured today.
+
 # WHERE THE AUDIO CHANNEL STANDS — 2026-08-26 (fifth batch)
 
 ## FIXING THE CONNECTION WOKE A DORMANT GUARD — and velocity is a BROWSER wall
