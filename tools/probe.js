@@ -332,6 +332,49 @@ function unstash(ch, s) {
   try { engine.rebuildRack(ch); engine.refresh(ch); } catch (_) {}
 }
 
+/* ISOLATION MUTES THAT SURVIVE A RELOAD. Three rows drop every other fader to
+   0 so one channel can be measured alone, and all three restore in a finally —
+   but a reload or a killed run in the middle skips the finally, the autosave
+   keeps the zeros, and the NEXT probe measures silence and blames the app.
+   That cost two rounds in one session (trig read all-zero peaks, grainflt read
+   0Hz, both with nothing wrong). The levels are parked in sessionStorage now
+   and any orphan is put back before the next run mutes anything. */
+const MUTEKEY = 'ten-probe-mutes';
+function muteRestoreOrphans() {
+  let rec = null;
+  try { rec = JSON.parse(sessionStorage.getItem(MUTEKEY) || 'null'); } catch (_) {}
+  if (!Array.isArray(rec)) return 0;
+  for (const [c, v] of rec) {
+    const mx = S.presets[c] && S.presets[c].mix;
+    if (mx) mx.lvl = v;
+    try { engine.refresh(c); } catch (_) {}
+  }
+  try { sessionStorage.removeItem(MUTEKEY); } catch (_) {}
+  notes.push('restored ' + rec.length + ' fader(s) an interrupted probe had left muted');
+  return rec.length;
+}
+function muteOthers(keep) {
+  muteRestoreOrphans();
+  const rec = [];
+  for (let c = 0; c < S.presets.length; c++) {
+    if (keep.indexOf(c) >= 0) continue;
+    const mx = S.presets[c] && S.presets[c].mix;
+    if (!mx) continue;
+    rec.push([c, mx.lvl]); mx.lvl = 0;
+    try { engine.refresh(c); } catch (_) {}
+  }
+  try { sessionStorage.setItem(MUTEKEY, JSON.stringify(rec)); } catch (_) {}
+  return rec;
+}
+function muteRestore(rec) {
+  for (const [c, v] of rec || []) {
+    const mx = S.presets[c] && S.presets[c].mix;
+    if (mx) mx.lvl = v;
+    try { engine.refresh(c); } catch (_) {}
+  }
+  try { sessionStorage.removeItem(MUTEKEY); } catch (_) {}
+}
+
 async function probeMatrix() {
   const keep = stash(CH);
   const rows = [];
@@ -1550,9 +1593,7 @@ async function probeMicRec2() {
        onsets the detector can see. */
     fresh(); S.presets[ch].au.src = 1;
     lane.unit = 'B'; lane.count = 2; lane.auto = false;
-    const mut9 = []; for (let c9 = 0; c9 < S.presets.length; c9++) { if (c9 === ch) continue;
-      const mx = S.presets[c9] && S.presets[c9].mix; if (!mx) continue;
-      mut9.push([c9, mx.lvl]); mx.lvl = 0; try { engine.refresh(c9); } catch (_) {} }
+    const mut9 = muteOthers([ch]);
     play(); await sleep(300);
     const tCall = AC.currentTime;
     engine.audRecStart(ch);
@@ -1565,8 +1606,7 @@ async function probeMicRec2() {
     await sleep(3600);
     engine.audRecStop(); await sleep(250); try { bg.disconnect(); } catch (_) {}
     stop();
-    for (const [c9, v] of mut9) { const mx = S.presets[c9] && S.presets[c9].mix;
-      if (mx) mx.lvl = v; try { engine.refresh(c9); } catch (_) {} }
+    muteRestore(mut9);
     const dbf = engine.audBuf[ch].getChannelData(0);
     const on9 = [];
     for (let i = 1; i < dbf.length; i++) if (Math.abs(dbf[i]) > 0.1 && Math.abs(dbf[i - 1]) <= 0.1) { on9.push(i); i += 4000; }
@@ -2007,9 +2047,7 @@ async function probeResamp() {
     /* ISOLATE: live-vs-replay compares mSum, and any OTHER channel with
        material plays into BOTH passes — and during replay it plays AGAIN on
        top of its own copy inside the take. Mute every fader but A and B. */
-    for (let c9 = 0; c9 < S.presets.length; c9++) { if (c9 === A || c9 === B) continue;
-      const mx = S.presets[c9] && S.presets[c9].mix; if (!mx) continue;
-      mutes.push([c9, mx.lvl]); mx.lvl = 0; try { engine.refresh(c9); } catch (_) {} }
+    mutes.push(...muteOthers([A, B]));
     for (const c of [A, B]) { if (!isAudioCh(c)) setEngine(c, 'audio');
       const p = S.presets[c]; p.cat = 'audio'; audDefaults(p);
       p.au.cmode = 0; p.au.kmode = 0; p.au.auto = 1;
@@ -2121,8 +2159,7 @@ async function probeResamp() {
     try { if (T.playing) stop(); } catch (_) {}
     S.master = keep.master; S.mLvl = keep.mLvl; CFG.overdub = keep.ovd;
     try { engine.rebuildMaster(); } catch (_) {}
-    for (const [c9, v] of mutes) { const mx = S.presets[c9] && S.presets[c9].mix;
-      if (mx) mx.lvl = v; try { engine.refresh(c9); } catch (_) {} }
+    muteRestore(mutes);
     engine.audBuf[A] = keep.bufA; if (engine.granBuf) engine.granBuf[A] = keep.gbufA;
     engine.audName[A] = keep.nameA;
     engine.audBuf[B] = keep.bufB; if (engine.granBuf) engine.granBuf[B] = keep.gbufB;
@@ -2170,9 +2207,7 @@ async function probeFxMod() {
   try {
     if (T.playing) stop();
     setBpm(120); pin(ch);
-    for (let c = 0; c < S.presets.length; c++) { if (c === ch) continue;
-      const mx = S.presets[c] && S.presets[c].mix; if (!mx) continue;
-      mutes.push([c, mx.lvl]); mx.lvl = 0; try { engine.refresh(c); } catch (_) {} }
+    mutes.push(...muteOthers([ch]));
     if (!isAudioCh(ch)) setEngine(ch, 'audio');
     const p = S.presets[ch]; p.cat = 'audio'; audDefaults(p);
     p.au.cmode = 0; p.au.auto = 1; p.au.src = 0;
@@ -2286,8 +2321,7 @@ async function probeFxMod() {
     engine.audName[ch] = keep.name;
     S.patterns[S.editPat].lanes[ch] = Looper.from(keep.laneJ);
     unstash(ch, keep.p); unstash(4, keep.p4);
-    for (const [c, v] of mutes) { const mx = S.presets[c] && S.presets[c].mix;
-      if (mx) mx.lvl = v; try { engine.refresh(c); } catch (_) {} }
+    muteRestore(mutes);
     try { setBpm(keep.bpm); } catch (_) {}
   }
   return { cols: ['k', 'w0', 'w1', 'gain2', 'ok', 'addr', 'err', 'expect'], rows };

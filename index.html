@@ -1245,7 +1245,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-26.1523';
+const BUILD='2026-08-26.1539';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -15601,6 +15601,16 @@ const HE={
     }
     if(!inDev){flash('hid: every interface on that board is a typing interface the browser refuses to open '
       +'— TEN needs the analog/vendor one, so check the board is in its analog mode');return false;}
+    /* AND SAY SO WHEN THE STREAM'S OWN INTERFACE IS THE BLOCKED ONE. Measured
+       on Gad's FUN60, 2026-08-26: the analog reports come back on a vendor
+       collection that shares its interface with the keyboard (0xFFFF/0x1
+       beside 0x1/0x6), and that interface refuses with NotAllowedError — by
+       POLICY, not exclusivity: it fails the same way opened first, alone,
+       with nothing else claimed. So connect SUCCEEDS on the config interface,
+       the board answers 0x8F, the row shows its name — and no analog frame
+       ever arrives, which reads as "velocity is gone" with nothing anywhere
+       saying why. Remember it, and let the readout be honest. */
+    this.streamBlocked=pool.some(d=>PROT(d)&&vend(d))&&inDev===cfgDev;
 
     /* Open what we can; only the stream interface is fatal. An interface that
        refuses to open is usually one macOS has claimed, not a reason to give up
@@ -15667,7 +15677,8 @@ const HE={
     else this.kcProbe();
     this.watch=setInterval(()=>this.tick(),60);
     this.set('autoOn',1);      // a reload should find the board already here
-    flash('hid: '+this.srcName+(this.map?'':' — run `h keys` to map the keys'));
+    flash('hid: '+this.srcName+(this.map?'':' — run `h keys` to map the keys')
+      +(this.streamBlocked?'  ⚠ analog interface blocked by the browser — no velocity; see `board`':''));
     dirty=true; return true;
   },
   /* HAND THE BOARD BACK WHEN YOU ARE NOT THE TAB IN FRONT. Only one page can
@@ -19896,7 +19907,24 @@ const onKeyDown=e=>{
   if(fingerArrow&&e.repeat&&(AREP.code||arepStepped(e.code)))return;
   if(fingerArrow&&!e.repeat){
     if(AREP.stopT&&AREP.code===e.code){clearTimeout(AREP.stopT); AREP.stopT=null;}  // that was a bounce
-    if(arrowRefire(e.code)){e.preventDefault(); return;}
+    /* THE WOBBLE GUARD IS FOR HALL KEYS ONLY, and ARROWSYN dragged the whole
+       right cluster into it (Gad, 2026-08-26: "a lot of my mappings … don't
+       work", "the dial behavior on the menu and control"). arrowRefire exists
+       to absorb RAPID TRIGGER re-fires on an analog key, and it re-arms from
+       the sensor's own homeAt/pressAt — but menu (slot 77), right ctrl (83)
+       and fn (71) are not in RY_SLOTS at all, so the sensor never speaks for
+       them and the only way back is the 250ms clock. The cluster arrives as
+       an ordinary OS keycode, is already debounced, and is then SYNTHESIZED
+       into an arrow here — so it can never wobble, and it was being eaten:
+       measured with the sensor silent, five presses of one key 100ms apart
+       read passes/SWALLOWED/SWALLOWED/passes/SWALLOWED, while alternating
+       keys passed every time (which is why it felt random rather than
+       broken). It only started biting when the board began connecting again
+       — arrowRefire opens with `if(!HE.on)return false`, so it lay dormant
+       for the whole stretch the keyboard would not load.
+       ARROWSYN still counts as a FINGER arrow, so the pressure dial and the
+       shift step stay; it just stops counting as a bouncing hall switch. */
+    if(e.isTrusted&&arrowRefire(e.code)){e.preventDefault(); return;}
     arepStart(e.code);
   }
   if(arrowAlias(e,'keydown'))return;   // right alt is ←, menu is ↑, F13-F16 are all four
@@ -26312,6 +26340,12 @@ function settingsRack(L){
        +sp((HE.noteSrc&&HE.noteSrc.k)?'r':'d','/'+((HE.noteSrc&&HE.noteSrc.k)||0)+' kbd')+
      sp('d','  '+(heEnds().win?'window '+(+(C.wait||4).toFixed(1))+'ms ':'peak ')
        +heEnds().soft.toFixed(4)+'…'+heEnds().hard.toFixed(3)+(C.auto?' (auto)':'')));
+   /* …AND WHEN THE STREAM'S INTERFACE IS ONE THE BROWSER WILL NOT OPEN, that
+      is not a mapping problem and no amount of looking at slots will show it.
+      Name it once, here, where the frames counter he is staring at sits. */
+   if(HE.on&&HE.streamBlocked)L.push('   '+sp('r','   ⚠ analog interface blocked by the browser')
+     +sp('d','  (its vendor collection shares an interface with the keyboard, so WebHID refuses it) — '
+             +'config works, velocity cannot: try the other connection mode (cable ↔ dongle) or the board\u2019s analog mode'));
    /* CONNECTED IS NOT STREAMING. A board that opened and never spoke reads the
       same as a board playing into a slot nothing is mapped to, so say which:
       reports in, the last slot that moved, and whether that slot has a key. */

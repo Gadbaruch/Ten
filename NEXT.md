@@ -1,3 +1,89 @@
+# WHERE THE AUDIO CHANNEL STANDS — 2026-08-26 (fifth batch)
+
+## FIXING THE CONNECTION WOKE A DORMANT GUARD — and velocity is a BROWSER wall
+
+His report once the board loaded: "a lot of my mappings, like the right fn
+button to go right, or the dial behavior on the menu and control … don't
+work", then "velocity is gone now, probably same issue". It is TWO causes,
+and only one of them is ours.
+
+**1. THE ARROW GUARD HAD BEEN ASLEEP FOR THE WHOLE BROKEN STRETCH.**
+`arrowRefire` opens with `if(!HE.on)return false` — it exists to absorb
+RAPID TRIGGER re-fires on an analog key, so with no board connected it did
+nothing at all. Fixing the connection re-armed it, and it started eating
+the right cluster. Measured, sensor silent, five presses of ONE key 100ms
+apart:
+
+    passes · SWALLOWED · SWALLOWED · passes · SWALLOWED     (2 of 5)
+    alternating keys                                        5 of 5
+    same key at 300ms                                       3 of 3
+
+Alternating passing every time is why it felt random rather than broken:
+`ASTEP.code` holds one code, so ←→←→ never trips it and ↓↓↓ dies. And the
+cluster can NEVER re-arm from the sensor branch, because **menu (slot 77),
+right ctrl (83) and fn (71) are not in RY_SLOTS** — the sensor never speaks
+for them, so only the 250ms clock can, which is slower than dialling.
+The cluster arrives as an ordinary OS keycode, is already debounced, and is
+then SYNTHESIZED into an arrow by `arrowAlias` — it cannot wobble. A later
+fix had made ARROWSYN count as a finger arrow (to get the pressure dial and
+the shift step back) and dragged it into the guard as a side effect.
+**The guard now runs only for TRUSTED arrows** — real hall keys, which is
+what it was written for. ARROWSYN still counts as a finger arrow, so the
+dial and shift step stay. Measured after, through the real key path:
+**menu 5/5 · right ctrl 5/5 · F14 5/5 · right alt 5/5**, guard not called
+once for them, still live for trusted arrows.
+
+**2. VELOCITY: THE ANALOG INTERFACE IS ONE THE BROWSER WILL NOT OPEN.**
+Not the same cause, and not fixable from here. His FUN60 enumerates three
+interfaces; the analog stream's vendor collection **shares its interface
+with the keyboard**:
+
+    0xFFFF/0x2                                   opens   ← config only
+    0xC/0x1 0x1/0x80 0x1/0x6 0x1/0x2 0xFFFF/0x1  NotAllowedError
+    0x1/0x6                                      NotAllowedError
+
+**By POLICY, not exclusivity — proved: opened FIRST, alone, with nothing
+else claimed, both still refuse.** So connect succeeds on the config
+interface, the board answers 0x8F, the row shows its name — and `rx` is 0
+after three seconds. Connected, and silent. TEN cannot open what Chrome
+refuses; nothing in this file can change that.
+It WORKED before (HE_HARD carries 26 labelled hard hits measured on this
+board), so something outside TEN moved: a Chrome blocklist tightening, a
+firmware/mode change, or a different CONNECTION MODE — a 2.4G dongle and a
+cable enumerate differently, and that is the first thing to try.
+What shipped is honesty, not a fix: `HE.streamBlocked` is set when the
+stream's interface was filtered out as protected, the connect flash says
+`⚠ analog interface blocked by the browser — no velocity`, and the hid
+readout carries a line naming the cause and what to try. A board that
+opened and never speaks used to look exactly like a working one.
+**`fn → ArrowRight` is a casualty of the same wall**, not of the guard:
+slot 71 is sensor-only, so it cannot fire while the stream is dead.
+
+**3. Probe hygiene, because this trap has now bitten twice in one session.**
+Three rows mute every other fader to measure one channel alone and restore
+in a `finally` — but a reload mid-run skips the finally and the autosave
+keeps the zeros, so the NEXT probe measures silence and blames the app
+(trig read all-zero peaks; grainflt read 0Hz; both with nothing wrong).
+The levels are parked in `sessionStorage` now and any orphan is put back
+before the next run mutes anything, with a note saying it happened.
+
+Wall: fxwire 60/60 · fxmod 23/23 · resamp 4 (alpha 1.001 · resid .022 · hf
+−0.16dB · strip clean) · micrec 13 · grainflt 2 (441→877→444) · faders
+restore clean.
+
+QA:
+1. **The right cluster** — menu, right ctrl, right alt, F13–F16: tap the
+   SAME one repeatedly to dial a value. Every press should count now; it
+   used to take roughly two in five. Shift as the coarse step and the
+   pressure dial should still work.
+2. **Velocity** — read settings/Input: if the ⚠ line is there, the browser
+   is refusing the analog interface and no setting will help. **Try the
+   other connection mode first (cable ↔ 2.4G dongle), then the board's
+   analog/web-driver mode.** If the ⚠ line is NOT there and velocity is
+   still flat, that is a different bug and worth saying so.
+3. **fn → right arrow** — will stay dead until the analog stream is back;
+   it is sensor-only.
+
 # WHERE THE AUDIO CHANNEL STANDS — 2026-08-26 (fourth batch)
 
 ## THE MONSGEEK: A VENDOR COLLECTION WEARING A KEYBOARD
