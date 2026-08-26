@@ -583,6 +583,20 @@ const XHIDE=new Set([XTYPES.indexOf('drv'),XTYPES.indexOf('crush'),XTYPES.indexO
   XTYPES.indexOf('tape'),                                              // sat's kind
   XTYPES.indexOf('grs8'),XTYPES.indexOf('gate'),                       // retired outright
   XTYPES.indexOf('plate')]);   // plate is verb's mode 1 now, not its own slot
+/* WHICH FX PARAMS A MODULATOR CAN ACTUALLY REACH LIVE — fxLive's coverage,
+   written down once so the dest picker offers exactly what answers (a
+   destination you can pick that then does nothing is worse than one not
+   offered). Curve-baked params (drv/crush/sat drive, a verb's size, any
+   topology) stay off this list on purpose: they rebuild, they do not ramp. */
+const FXMODOK={
+  dly:['p1','p2','p5','mix'],dub:['p1','p2','p5','mix'],tec:['p1','p2','p5','mix'],
+  res:['p1','p2','p5','mix'],wob:['p1','p2','p5','mix'],
+  phase:['p1','p2','mix'],fla:['p1','p2','mix'],pha:['p1','p2','mix'],
+  trm:['p1','p2','mix'],
+  filt:['p1','p2','p4','mix'],
+  verb:['p2','mix'],
+  comp:['p1','p2','p3','p4','mix'],limit:['p1','p2','mix'],clip:['p1'],
+  gate:['p1','p2','mix'],send:[],amix:[]};   // unlisted types: mix only (generic dry/wet)
 const XDIST=XTYPES.indexOf('sat');
 /* reverb size: squared so the short end has real resolution — 50ms rooms to 4.5s halls */
 const vrbSec=v=>0.05+4.45*Math.pow(clamp(v,0,1),2);
@@ -1227,7 +1241,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-26.0949';
+const BUILD='2026-08-26.1047';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -2415,7 +2429,9 @@ function modDests_(pre){
       if(M.abbr(sl)==='···')return;
       const ty=M.abbr(sl);
       slotId(pre,M.id,i);                 // so anything picked here is identified
+      const okFx=M.id==='fx'?(FXMODOK[XTYPES[Math.round(sl.typ||0)]]||['mix']):null;
       for(const sp of paramsFor(mi,sl)){
+        if(okFx&&!okFx.includes(sp.key))continue;   // only what fxLive can actually drive
         add(M.id,i,sp,ty);
         const k=sp.key+'|'+sp.lbl; if(!seen.has(k))seen.set(k,sp);
       }
@@ -5505,7 +5521,11 @@ let fxwReady=false;
        operator levels. a-rate, so an audio-rate LFO is audio-rate here too. */
     static get parameterDescriptors(){
       var ps=[];
-      for(var i=0;i<8;i++){
+      /* TEN pairs, one per osc slot — this was 8 while the rack grew to 10,
+         so ops 9 and 10 sounded but every mod aimed at them wrote to a param
+         that did not exist (Gad, 2026-08-26: "the last op slots dont get
+         processed by mods"). Native reached all 10 all along. */
+      for(var i=0;i<10;i++){
         ps.push({name:'d'+i,defaultValue:0,minValue:-9600,maxValue:9600,automationRate:'a-rate'});
         ps.push({name:'g'+i,defaultValue:1,minValue:0,maxValue:8,automationRate:'a-rate'});
       }
@@ -5586,7 +5606,7 @@ let fxwReady=false;
          a length-1 array and an a-rate one as a full block, so each is read
          with its own index rather than assuming either */
       var dP=this.dP||(this.dP=[]), gP=this.gP||(this.gP=[]);
-      for(i=0;i<8;i++){dP[i]=P['d'+i]; gP[i]=P['g'+i];}   // eight pairs, read by pix
+      for(i=0;i<10;i++){dP[i]=P['d'+i]; gP[i]=P['g'+i];}   // ten pairs, read by pix
       if(this.glk){                                  // a retune in flight
         var still=true;
         for(i=0;i<this.N;i++){
@@ -7031,7 +7051,7 @@ class Voice{
            entries register or the rack would write each param uniN times */
         const nPer9=Math.max(1,Math.round(list.length/Math.max(1,uniN)));
         list.forEach((b,k2)=>{
-          if(k2>7||k2>=nPer9)return;            // 8 param pairs exist
+          if(k2>9||k2>=nPer9)return;            // 10 param pairs exist
           const dPar=nd.parameters.get('d'+k2), gPar=nd.parameters.get('g'+k2);
           if(!dPar||!gPar)return;
           (this.opDet[b.i]=this.opDet[b.i]||[]).push({pm:dPar,sc:200});
@@ -8183,6 +8203,7 @@ class Engine{
       const base=t==='phase'?0.018:0.004, depth=(t==='phase'?0.006:0.002)*(t==='phase'?fx.p2:1);
       const width=clamp(fx.p3??0,0,1);
       const mrg=keep(ac.createChannelMerger(2));
+      const los=[],lgs=[],fbs=[];
       const build=(phase,chan)=>{                    // one voice; two in anti-phase = stereo
         const dl=keep(ac.createDelay(0.1)); dl.delayTime.value=base;
         const lo=keep(ac.createOscillator()), lg=keep(ac.createGain());
@@ -8190,15 +8211,18 @@ class Engine{
         lo.connect(lg); lg.connect(dl.delayTime);
         try{lo.start(ac.currentTime+phase/rate);}catch(_){lo.start();}
         cur.connect(dl);
-        if(t==='fla'){const fb=keep(ac.createGain()); fb.gain.value=fx.p2; dl.connect(fb); fb.connect(dl);}
+        if(t==='fla'){const fb=keep(ac.createGain()); fb.gain.value=fx.p2; dl.connect(fb); fb.connect(dl); fbs.push(fb);}
         dl.connect(mrg,0,chan);
+        los.push(lo); lgs.push(lg);
       };
       if(width>0.02){build(0,0); build(0.5,1);}       // L / R, half-cycle apart
       else{build(0,0); build(0,1);}
       mrg.connect(wet);
+      if(LIVE)Object.assign(LIVE,{los,lgs,fbs});
     }else if(t==='pha'){
       const width=clamp(fx.p3??0,0,1);
       const mrg=keep(ac.createChannelMerger(2));
+      const los=[],lgs=[];
       const branch=(lfoPhase,chan)=>{
       let ph=cur;
       const lo=keep(ac.createOscillator()), lg=keep(ac.createGain());
@@ -8209,16 +8233,19 @@ class Engine{
         lg.connect(ap.detune); ph.connect(ap); ph=ap;
       }
       ph.connect(mrg,0,chan);
+      los.push(lo); lgs.push(lg);
       };
       if(width>0.02){branch(0,0); branch(0.5,1);}     // stereo: LFOs half-cycle apart
       else{branch(0,0); branch(0,1);}
       mrg.connect(wet);
+      if(LIVE)Object.assign(LIVE,{los,lgs});
     }else if(t==='trm'){
       const g=keep(ac.createGain()); g.gain.value=1-fx.p2*0.9;
       const lo=keep(ac.createOscillator()), lg=keep(ac.createGain());
       lo.frequency.value=0.5+fx.p1*15; lg.gain.value=fx.p2*0.45;
       lo.connect(lg); lg.connect(g.gain); lo.start();
       cur.connect(g); g.connect(wet);
+      if(LIVE)Object.assign(LIVE,{tg:g,tlo:lo,tlg:lg});
     }else if(t==='drv'||t==='crush'){
       const sh=keep(ac.createWaveShaper());
       sh.curve=distCurve(t==='drv'?1:6,fx.p1); sh.oversample='4x';
@@ -8276,15 +8303,17 @@ class Engine{
         const fs=ty==='vowel'?vowelAt(fx.p1??0.5)
                              :vowelAt(0.5).map((f,i)=>f*(0.35+ (fx.p1??0.5)*1.9));
         const sum=keep(ac.createGain()); sum.gain.value=1;
-        const amp=[1,0.55,0.28];
+        const amp=[1,0.55,0.28], bps=[];
         fs.forEach((f,i)=>{
           const bp=keep(ac.createBiquadFilter()); bp.type='bandpass';
           bp.frequency.value=clamp(f,60,12000);
           bp.Q.value=clamp((f/95)*(0.5+rz*1.8),1,26);      // sharp = narrower throat
           const g=keep(ac.createGain()); g.gain.value=amp[i]*2.2;
           cur.connect(bp); bp.connect(g); g.connect(sum);
+          bps.push(bp);
         });
         sum.connect(wet);
+        if(LIVE)Object.assign(LIVE,{fk:'bank',fN:bps,fty:ty});
       }else if(ty==='tilt'){
         /* p1 is the position: 0.5 flat, up sweeps a highpass across the band,
            down sweeps a lowpass. A shelf pair at the same time keeps the ends
@@ -8301,6 +8330,7 @@ class Engine{
         sh2.frequency.value=pos>0?400:3000;
         sh2.gain.value=-amt*12;
         cur.connect(f2); f2.connect(sh2); sh2.connect(wet);
+        if(LIVE)Object.assign(LIVE,{fk:'tilt',fN:[f2,sh2],fty:ty});
       }else{
         const f2=keep(ac.createBiquadFilter());
         f2.type=XFT_W[ty]||'lowpass';
@@ -8308,6 +8338,7 @@ class Engine{
         f2.Q.value=ty==='peq'||ty==='bp'||ty==='ntc'?0.7+rz*12:0.5+rz*8;
         if(ty==='peq'||ty==='lsh'||ty==='hsh')f2.gain.value=((fx.p4??0.5)-0.5)*36;
         cur.connect(f2); f2.connect(wet);
+        if(LIVE)Object.assign(LIVE,{fk:'plain',fN:[f2],fty:ty});
       }
     }else if(t==='clip'){
       /* MAXIMISE, DO NOT COLOUR. A distortion is a curve you can hear; this is
@@ -8334,6 +8365,7 @@ class Engine{
       dcb2.type='highpass'; dcb2.frequency.value=12; dcb2.Q.value=0.707;
       cur.connect(cp); cp.connect(mk); mk.connect(dcb2); dcb2.connect(wet);
       dry.gain.value=0; wet.gain.value=1;             // a ceiling is not a parallel effect
+      if(LIVE)Object.assign(LIVE,{cp,mk});
     }else if(t==='grain'){
       if(!fxwReady)cur.connect(wet);           // module still compiling: pass audio through
       else{
@@ -8384,6 +8416,7 @@ class Engine{
       sp2.connect(ll,0); sp2.connect(lr,1); ll.connect(mg,0,0); lr.connect(mg,0,0);
       sp2.connect(rl,0); sp2.connect(rr,1); rl.connect(mg,0,1); rr.connect(mg,0,1);
       mg.connect(wet);
+      if(LIVE)Object.assign(LIVE,{vtone:tone});
     }else if(t==='limit'){
       const cp=keep(ac.createDynamicsCompressor());
       cp.threshold.value=-30+(fx.p1??0.75)*30; cp.ratio.value=20; cp.knee.value=2;
@@ -8391,6 +8424,7 @@ class Engine{
       const mk=keep(ac.createGain()); mk.gain.value=1+(fx.mix??0)*1.5;
       dry.gain.value=0; wet.gain.value=1;
       cur.connect(cp); cp.connect(mk); mk.connect(wet);
+      if(LIVE)Object.assign(LIVE,{cp,mk});
     }else if(t==='comp'){
       /* THE DEFAULTS WERE A BRICK WALL. p1 and p2 both default to 0.3, which
          read as -42dB threshold at 6.7:1 — everything, squashed — and there
@@ -8404,11 +8438,14 @@ class Engine{
       cp.release.value=clamp(0.02+Math.pow(fx.p4??0.35,2)*0.9,0.02,1);
       const mk=keep(ac.createGain()); mk.gain.value=1+fx.mix*2;
       cur.connect(cp); cp.connect(mk); mk.connect(wet);
+      if(LIVE)Object.assign(LIVE,{cp,mk});
     }else if(t==='gate'){
       const g=keep(ac.createGain());
       const an=keep(ac.createAnalyser()); an.fftSize=256;
       cur.connect(an); cur.connect(g); g.connect(wet);
-      this.followers.push({an,g,thr:fx.p1*0.25,depth:fx.p2,buf:new Float32Array(256),owner});
+      const flw9={an,g,thr:fx.p1*0.25,depth:fx.p2,buf:new Float32Array(256),owner};
+      this.followers.push(flw9);
+      if(LIVE)Object.assign(LIVE,{flw:flw9});
     }else if(t==='roll'){
       const dl=keep(ac.createDelay(2));
       dl.delayTime.value=[1,0.5,0.25,0.125][clamp(Math.round(fx.p1),0,3)]*spb();
@@ -9060,16 +9097,104 @@ class Engine{
     const fx0=S.presets[pi].fx[si], n=AC.currentTime;
     const fx=val===undefined?fx0:Object.assign({},fx0,{[key]:val});
     if(XTYPES[fx.typ]!==L.t)return false;                    // type changed under us
-    if(val!==undefined&&!(key==='mix'||L.t==='dly'))return false;   // no applier yet
+    /* APPLIERS PER TYPE (2026-08-26, Gad: "their params can be added to mods
+       but the mod doesnt affect them audibly"). The gate used to refuse every
+       modulator except mix and the delay — every other fx param was offered
+       by the picker and dropped here. Each builder now registers its
+       ramp-safe nodes on LIVE and the coverage lives in FXMODOK, which the
+       picker consults, so what is offered is exactly what answers. */
     if(key==='mix'){
-      if(L.full)return false;                                // comp/clip: mix is makeup gain
+      if(L.full){                                  // comp/limit: mix is makeup gain
+        if(!L.mk||L.t==='clip')return false;       // clip's builder never reads mix
+        L.mk.gain.setTargetAtTime(L.t==='limit'?1+(fx.mix??0)*1.5:1+fx.mix*2,n,0.02);
+        return true;
+      }
       L.dry.gain.setTargetAtTime(1-fx.mix,n,0.02);
       L.wet.gain.setTargetAtTime(fx.mix,n,0.02);
       return true;
     }
-    if(L.t==='dly'&&L.dls){
+    if(L.los){                                     // phase · fla · pha: lfo rate / depth / feedback
       if(key==='p1'){
-        let sec=0.02+fx.p1*1.3;
+        const r9=L.t==='phase'?0.1+fx.p1*4:L.t==='fla'?0.05+fx.p1*2:0.05+fx.p1*3;
+        for(const o of L.los)o.frequency.setTargetAtTime(r9,n,0.05);
+        return true;
+      }
+      if(key==='p2'){
+        if(L.t==='pha'){for(const g9 of L.lgs)g9.gain.setTargetAtTime(fx.p2*2000,n,0.04); return true;}
+        if(L.t==='phase'){for(const g9 of L.lgs)g9.gain.setTargetAtTime(0.006*fx.p2,n,0.04); return true;}
+        if(L.t==='fla'&&L.fbs){for(const g9 of L.fbs)g9.gain.setTargetAtTime(clamp(fx.p2,0,0.95),n,0.02); return true;}
+      }
+      return false;
+    }
+    if(L.t==='trm'&&L.tlo){
+      if(key==='p1'){L.tlo.frequency.setTargetAtTime(0.5+fx.p1*15,n,0.04); return true;}
+      if(key==='p2'){L.tg.gain.setTargetAtTime(1-fx.p2*0.9,n,0.02);
+        L.tlg.gain.setTargetAtTime(fx.p2*0.45,n,0.02); return true;}
+      return false;
+    }
+    if((L.t==='comp'||L.t==='limit'||L.t==='clip')&&L.cp){
+      if(L.t==='comp'){
+        if(key==='p1'){L.cp.threshold.setTargetAtTime(-60+clamp(fx.p1,0,1)*60,n,0.02); return true;}
+        if(key==='p2'){L.cp.ratio.setTargetAtTime(1+clamp(fx.p2,0,1)*19,n,0.02); return true;}
+        if(key==='p3'){L.cp.attack.setTargetAtTime(clamp(0.0005+Math.pow(fx.p3??0.25,2)*0.2,0.0005,0.2),n,0.02); return true;}
+        if(key==='p4'){L.cp.release.setTargetAtTime(clamp(0.02+Math.pow(fx.p4??0.35,2)*0.9,0.02,1),n,0.02); return true;}
+      }
+      if(L.t==='limit'){
+        if(key==='p1'){L.cp.threshold.setTargetAtTime(-30+clamp(fx.p1??0.75,0,1)*30,n,0.02); return true;}
+        if(key==='p2'){L.cp.release.setTargetAtTime(0.02+clamp(fx.p2??0.3,0,1)*0.12,n,0.02); return true;}
+      }
+      if(L.t==='clip'&&key==='p1'){
+        const ceil9=clamp(fx.p1??0.35,0,1);
+        L.cp.threshold.setTargetAtTime(-1-ceil9*23,n,0.02);
+        if(L.mk)L.mk.gain.setTargetAtTime(Math.pow(10,(ceil9*23*0.85)/20),n,0.02);
+        return true;
+      }
+      return false;
+    }
+    if(L.t==='gate'&&L.flw){
+      if(key==='p1'){L.flw.thr=clamp(fx.p1,0,1)*0.25; return true;}
+      if(key==='p2'){L.flw.depth=clamp(fx.p2,0,1); return true;}
+      return false;
+    }
+    if(L.t==='verb'&&L.vtone){
+      if(key==='p2'){L.vtone.frequency.setTargetAtTime(clamp(800*Math.pow(20,fx.p2??0.5),100,18000),n,0.04); return true;}
+      return false;
+    }
+    if(L.t==='filt'&&L.fN){
+      const rz9=clamp(fx.p2??0.3,0,1);
+      if(L.fk==='plain'){
+        const f2=L.fN[0];
+        if(key==='p1'){f2.frequency.setTargetAtTime(xFreq(fx.p1??0.5),n,0.03); return true;}
+        if(key==='p2'){f2.Q.setTargetAtTime(L.fty==='peq'||L.fty==='bp'||L.fty==='ntc'?0.7+rz9*12:0.5+rz9*8,n,0.03); return true;}
+        if(key==='p4'&&(L.fty==='peq'||L.fty==='lsh'||L.fty==='hsh')){
+          f2.gain.setTargetAtTime(((fx.p4??0.5)-0.5)*36,n,0.03); return true;}
+      }
+      if(L.fk==='bank'){                           // formant / vowel: the peaks glide
+        const fs9=L.fty==='vowel'?vowelAt(clamp(fx.p1??0.5,0,1))
+                 :vowelAt(0.5).map(f9=>f9*(0.35+clamp(fx.p1??0.5,0,1)*1.9));
+        if(key==='p1'||key==='p2'){
+          L.fN.forEach((bp,i9)=>{const f9=clamp(fs9[i9]||fs9[0],60,12000);
+            bp.frequency.setTargetAtTime(f9,n,0.04);
+            bp.Q.setTargetAtTime(clamp((f9/95)*(0.5+rz9*1.8),1,26),n,0.04);});
+          return true;
+        }
+      }
+      if(L.fk==='tilt'&&key==='p1'){
+        const pos9=(clamp(fx.p1??0.5,0,1)-0.5)*2, amt9=Math.abs(pos9);
+        const f2=L.fN[0], sh2=L.fN[1];
+        const ty9=pos9>0?'highpass':'lowpass';
+        const fq9=pos9>0?clamp(30*Math.pow(340,amt9),30,12000):clamp(20000/Math.pow(340,amt9),60,20000);
+        if(f2.type!==ty9){f2.type=ty9; f2.frequency.value=fq9;   // crossing lp<->hp cannot ramp
+          sh2.type=pos9>0?'lowshelf':'highshelf'; sh2.frequency.value=pos9>0?400:3000;}
+        else f2.frequency.setTargetAtTime(fq9,n,0.03);
+        sh2.gain.setTargetAtTime(-amt9*12,n,0.03);
+        return true;
+      }
+      return false;
+    }
+    if(L.dls){                                     // the whole delay family: dly · dub · tec · res · wob
+      if(key==='p1'){
+        let sec=L.t==='res'?0.002+fx.p1*0.06:0.02+fx.p1*1.3;
         if(L.mode===1||L.mode===3){                          // the same snap the builder does
           let best=spb()*0.25;
           for(const dv of [0.125,0.25,1/3,0.375,0.5,0.75,1,1.5].map(x=>x*spb()))
@@ -10483,7 +10608,12 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
       if(pool.length>64)pool.splice(0,pool.length-64);
       if(!pool.length)continue;
       /* kits: the arp lives on the PAD of the notes in the pool, not the channel */
-      const rack=isKit(p)?((kitSlot(p,pool[0].pad??pool[0].midi)||{}).ply||[]):p.ply;
+      /* …and THROUGH THE MOD OVERLAY (Gad, 2026-08-26: "play fx … can be
+         added to mods but the mod doesnt affect them audibly"): noteOn read
+         ovRack and this per-step read did not, so an lfo on an arp's rate or
+         a euclid's fill was parked in the overlay and never consulted. */
+      const rack=this.ovRack(pi,'ply',
+        isKit(p)?((kitSlot(p,pool[0].pad??pool[0].midi)||{}).ply||[]):p.ply);
       const ai=rack.findIndex(sl=>sl.typ===2&&!sl.off), arp=ai>=0?rack[ai]:null;
       const postChords=ai>=0?rack.filter((sl,i2)=>sl.typ===1&&!sl.off&&i2>ai):[];
       /* EUC, LIVE: a euclidean gate on the notes you are holding. Sixteen
@@ -14672,7 +14802,11 @@ function _prsAction(d){
       flash('chan → '+['stereo','left','right'][p.au.chan]);}
     else if(f==='loop vol'){p.au.lvol=clamp(+((p.au.lvol??1)+d*0.05).toFixed(2),0,1);
       engine.audLive(pi); flash('loop vol '+Math.round(p.au.lvol*100)+'%');}
-    else if(f==='gain')p.au.gain=clamp((p.au.gain??0.9)+d*0.05,0,1);
+    else if(f==='gain'){p.au.gain=clamp((p.au.gain??0.9)+d*0.05,0,1);
+      /* LIVE, like loop vol above — the carrier's gain rides tset, so without
+         this push the dial waited for the next spawn (Gad, 2026-08-26:
+         "changing gain on audio ch should be applied live during playback") */
+      engine.audLive(pi);}
     dirty=true; dirtySave=true; return;
   }
 
@@ -18852,7 +18986,22 @@ function audPlace(pi,rec,startBeat,name='mic',lat){
       mic takes keep their gain staging. */
    if(name==='mstr'){au9.gain=1; au9.lvol=1;
      const mx9=S.presets[pi].mix=S.presets[pi].mix||{lvl:0.8,pan:0};
-     mx9.lvl=1; mx9.pan=0; engine.refresh(pi);}}
+     mx9.lvl=1; mx9.pan=0;
+     /* …AND THE STRIP ITSELF GOES NEUTRAL (Gad, 2026-08-26: the bounce came
+        back "noticably louder … and less punchy, like its still going
+        through some native web page limiter"). The channel he bounces onto
+        keeps whatever racks its synth life left behind — measured on this
+        desk's own scratch: a leftover flt[0] lowpass 4.3kHz Q2 read the bus
+        at −12dB@8k/−20dB@11k while the worklet output measured flat ±0.7dB
+        to 17k. A leftover comp/limit fx is his exact "louder, less punchy".
+        A master print replays through NOTHING it did not sound through. */
+     const P9=S.presets[pi];
+     P9.flt=rack(mkFlt); P9.fx=rack(mkFx); P9.mod=rack(mkMod);
+     /* the FACTORY flt[0] is a 9kHz lowpass, ON — right for a fresh synth,
+        wrong for a print: even a virgin bounce target was shaving the top
+        end. A master print carries no filter at all. */
+     P9.flt[0].typ=0;
+     engine.rebuildRack(pi); engine.refresh(pi);}}
   poolAdd(cv,name+' ch'+pi,{k:'r'});
   if(engineGranP(S.presets[pi])){engine.granBuf=engine.granBuf||[];
     engine.granBuf[pi]=cv; engine.granSend(pi);}
@@ -18862,6 +19011,7 @@ function audPlace(pi,rec,startBeat,name='mic',lat){
   engine.granCfg(pi);
   engine.audResume(pi);         // the loop carries on from where the bar is, take and all
   flash('◉ audio: '+(L/4)+' bar loop ('+['overwrite','overdub','smart'][mode]+')'
+        +(name==='mstr'?' · strip at unity':'')
         +(T.playing?(autoCur(S.presets[pi])?'':' — auto is off: a key plays it'):' — space plays it'));
   dirty=true; dirtySave=true;
 }
@@ -23800,9 +23950,20 @@ function mouseFocus(kind,i){
     const first=setVis().find(x=>x.g===g);
     if(first)S.setSel=SETTINGS.indexOf(first);
   }
+  /* a chain-row cell: module AND slot in one tag, through the keyboard's door */
+  else if(kind==='chip')gotoChip({mi:Math.floor(i/100),si:i%100===99?-1:i%100});
+  /* the saved-set slots in the picker — emitted forever, answered never */
+  else if(kind==='sess'){ if(typeof PICK!=='undefined'&&PICK)PICK.sel=i; }
   /* picking a channel leaves the master — clicking ch 5 while the master strip
      is up used to move a cursor you could not see */
-  else if(kind==='ch'){ S.mSel=false; if(S.layer>=2)S.editSnd=i; else S.curPreset=i; }
+  /* …and it moves BOTH selections, exactly as the keyboard's digit does
+     (21249: "the view follows"). Setting only editSnd left the desk's
+     highlight — keyed to curPreset — standing still: Gad, 2026-08-26, "i can
+     click on different channels, but the UI doesnt change the selected ch". */
+  else if(kind==='ch'){ S.mSel=false; S.curPreset=i; if(S.layer>=2)S.editSnd=i; }
+  else if(kind==='mtr'){ S.mSel=false; S.curPreset=i; if(S.layer>=2)S.editSnd=i; }
+  /* the master column header — emitted as mst0 forever, answered never */
+  else if(kind==='mst0')S.mSel=true;
   /* the desk rows: pick the channel, then the drag replays the real binding
      (alt+↑↓ level, alt+←→ pan) rather than growing a second way to set them */
   else if(kind==='lvl'||kind==='pan'){ S.curPreset=i; if(S.layer>=2)S.editSnd=i; }
@@ -23810,7 +23971,24 @@ function mouseFocus(kind,i){
   dirty=true;
 }
 /* tabs and rows are selections, not values — dragging one should not spin it */
-const MOUSE_SELECT_ONLY=new Set(['mod','sl','msl','dj','ch','cell']);
+const MOUSE_SELECT_ONLY=new Set(['mod','sl','msl','dj','ch','cell','chip','sess','mst0']);
+/* THE METER IS A FADER AND A PAN POT IN ONE PICTURE, so it drags on both axes
+   (Gad, 2026-08-26: "change volume and pan from the channel meter like up down
+   is volume left right is pan just click and drag"). It cannot replay
+   alt-arrows — alt is the fine step everywhere but the desk — so it writes
+   the mixer through the desk's own arithmetic: fader units on the VOLT curve,
+   pan in 0.05s, refresh per nudge. */
+function meterNudge(i,dv,dh){
+  const pc=S.presets[i]; if(!pc)return;
+  pc.mix=pc.mix||{lvl:0.8,pan:0};
+  if(dv){const f=clamp(Math.round((volToF(pc.mix.lvl)+dv)*10)/10,0,100);
+    pc.mix.lvl=+fToVol(f).toFixed(4);}
+  if(dh)pc.mix.pan=clamp(Math.round((pc.mix.pan+dh*0.05)*100)/100,-1,1);
+  try{engine.refresh(i);}catch(_){}
+  flash('ch '+i+'  vol '+volToF(pc.mix.lvl).toFixed(0)+' · pan '+
+        (pc.mix.pan===0?'C':(pc.mix.pan<0?'L':'R')+Math.abs(Math.round(pc.mix.pan*100))));
+  dirty=true; dirtySave=true;
+}
 function mouseArrow(code,o){
   onKeyDown({code,key:code,shiftKey:false,altKey:false,metaKey:false,ctrlKey:false,
     repeat:false,preventDefault(){},...o});
@@ -23830,7 +24008,9 @@ screen.addEventListener('pointerdown',e=>{
   e.preventDefault();                       // focus stays on body: keys keep working
   mouseFocus(hit.kind,hit.i);
   MOUSE.on=!MOUSE_SELECT_ONLY.has(hit.kind);
-  MOUSE.acc=0; MOUSE.y=e.clientY; MOUSE.x=e.clientX; MOUSE.kind=hit.kind; MOUSE.moved=false;
+  MOUSE.acc=0; MOUSE.accX=0; MOUSE.y=e.clientY; MOUSE.x=e.clientX;
+  MOUSE.kind=hit.kind; MOUSE.i=hit.i; MOUSE.moved=false;
+  if(hit.kind==='mtr')pushUndo('mix');      // one undo per drag, not per pixel
   try{screen.setPointerCapture(e.pointerId);}catch(_){}
 });
 screen.addEventListener('pointermove',e=>{
@@ -23841,9 +24021,18 @@ screen.addEventListener('pointermove',e=>{
   /* pan is a horizontal control, so drag it horizontally — dragging a pan pot
      up and down would be a lie about what it does */
   if(MOUSE.kind==='pan'){ MOUSE.acc+=e.clientX-MOUSE.x; }
+  else if(MOUSE.kind==='mtr'){ MOUSE.acc+=MOUSE.y-e.clientY; MOUSE.accX+=e.clientX-MOUSE.x; }
   else MOUSE.acc+=MOUSE.y-e.clientY;        // up = increase, like the arrow keys
   MOUSE.y=e.clientY; MOUSE.x=e.clientX;
   const STEP=6;                             // px per increment
+  if(MOUSE.kind==='mtr'){                   // both axes at once: vol up/down, pan left/right
+    const SM=4;                             // finer: a fader unit per 4px
+    while(Math.abs(MOUSE.acc)>=SM){const d=MOUSE.acc>0?1:-1;
+      MOUSE.acc-=d*SM; MOUSE.moved=true; meterNudge(MOUSE.i,d*(rs(e)?10:1),0);}
+    while(Math.abs(MOUSE.accX)>=SM){const d=MOUSE.accX>0?1:-1;
+      MOUSE.accX-=d*SM; MOUSE.moved=true; meterNudge(MOUSE.i,0,d*(rs(e)?5:1));}
+    return;
+  }
   while(Math.abs(MOUSE.acc)>=STEP){
     const d=MOUSE.acc>0?1:-1;
     MOUSE.acc-=d*STEP; MOUSE.moved=true;
@@ -23863,6 +24052,7 @@ screen.addEventListener('wheel',e=>{
   const hit=hitOf(e.target); if(!hit)return;
   e.preventDefault();
   mouseFocus(hit.kind,hit.i);
+  if(hit.kind==='mtr'){meterNudge(hit.i,e.deltaY<0?1:-1,0);return;}   // wheel = volume
   if(!MOUSE_SELECT_ONLY.has(hit.kind))mouseBump(e.deltaY<0?1:-1,rs(e),e.altKey);
 },{passive:false});
 screen.addEventListener('contextmenu',e=>{if(hitOf(e.target))e.preventDefault();});
@@ -24166,7 +24356,12 @@ function chainRow(L,pre,groups){
     let used=0;
     for(const c of all){
       const on=c.mi===S.curMod&&(c.si===S.curSlot||c.si===-1);
-      cells+=spH(on?'i':(c.empty||c.off?'d k':'v k'),ctrIn(c.label,lit),'mod',c.mi)
+      /* mi AND si travel in the tag (mi*100+si; 99 = the whole module). It
+         carried only the module, so clicking any slot cell landed on whatever
+         slot the cursor already held — Gad, 2026-08-26: "i cant click on
+         different slots within racks". gotoChip is the keyboard's own door. */
+      cells+=spH(on?'i':(c.empty||c.off?'d k':'v k'),ctrIn(c.label,lit),
+                 'chip',c.mi*100+(c.si>=0?c.si:99))
             +' '.repeat(cw-lit);
       used+=cw;
     }
@@ -24797,7 +24992,11 @@ function gridHTML(pat,pos,anc,chans){
            through it is the playhead's business, not the shading's */
         const W9=audWin(au9);
         const st9=W9.lo, en9=W9.hi;
-        const key2=i+'|'+bufId(wb)+'|'+H;
+        /* the picture carries the GAIN dial (Gad, 2026-08-26: "should be
+           visualized on the waveform") — the amplitude you see is the
+           amplitude the carrier plays, and the cache key moves with the dial */
+        const g9=clamp(au9.gain??0.9,0,1);
+        const key2=i+'|'+bufId(wb)+'|'+H+'|'+g9.toFixed(2);
         let wsvg=WAVEC.get(key2);
         if(!wsvg){
           const d0=wb.getChannelData(0), rows=Math.max(16,Math.round(H/2));
@@ -24807,8 +25006,8 @@ function gridHTML(pat,pos,anc,chans){
             let mn=0,mx=0; const step2=Math.max(1,Math.floor((b2-a2)/48));
             for(let q2=a2;q2<b2;q2+=step2){const v2=d0[q2]; if(v2<mn)mn=v2; if(v2>mx)mx=v2;}
             const y2=(r2+0.5)/rows*H;
-            path+='M'+((0.5+mn*0.48)*CW).toFixed(1)+','+y2.toFixed(1)+
-                  'L'+((0.5+mx*0.48)*CW).toFixed(1)+','+y2.toFixed(1);
+            path+='M'+((0.5+mn*0.48*g9)*CW).toFixed(1)+','+y2.toFixed(1)+
+                  'L'+((0.5+mx*0.48*g9)*CW).toFixed(1)+','+y2.toFixed(1);
           }
           wsvg='<svg class="wlay" width="'+CW.toFixed(1)+'" height="'+H+'"><path d="'+path+'"/></svg>';
           WAVEC.set(key2,wsvg); if(WAVEC.size>20)WAVEC.delete(WAVEC.keys().next().value);
@@ -25110,16 +25309,17 @@ function gridHTML(pat,pos,anc,chans){
 /* One row, one cell per channel, lined up with the grid columns above it.
    Anything that is better SEEN than read gets built with this rather than
    with characters. */
-function colRow(cls,cellFn,gut,mst){
+function colRow(cls,cellFn,gut,mst,hk){
   /* gutter keeps its character width; the channel cells are measured in pixels */
   let h='<div class="crow"><div class="ccell" style="width:calc('+(GUTW+1)+
         'ch + var(--bleed));margin-right:0">'+(gut||'')+'</div>';
   /* +1px because the cell bleeds 1px left, exactly as the strip's do — without
      it every column owes a pixel and the ninth is ten short */
-  const cell=body=>'<div class="ccell '+cls+
-    '" style="width:var(--cellw);margin-right:calc(var(--gapw) + var(--bleed))">'+
+  const cell=(body,tag)=>'<div class="ccell '+cls+'"'+
+    (tag?' data-h="'+tag+'"':'')+
+    ' style="width:var(--cellw);margin-right:calc(var(--gapw) + var(--bleed))">'+
     (body||'')+'</div>';
-  for(const i of CHANS())h+=cell(cellFn(i));
+  for(const i of CHANS())h+=cell(cellFn(i),hk?hk+':'+i:null);
   if(mst!=null)h+=cell(mst);              // the master is a column like any other
   return h+'</div>';
 }
@@ -25170,7 +25370,8 @@ function meterRow(LN,PR,peeking){
     const mx=PR(i).mix||{lvl:0.8,pan:0};
     return mixCell(mx.lvl,mx.pan,audible?chLevel(i):0,audible);
   }, sp('d',pad('Mix',GUTW)),
-     mixCell(S.mLvl??0.8,0,peeking?0:masterLevel(),!peeking));
+     mixCell(S.mLvl??0.8,0,peeking?0:masterLevel(),!peeking),
+     'mtr');   // the meter drags: vertical = volume, horizontal = pan
 }
 /* WHERE EACH AUTOMATED KNOB STARTS THE BAR. One small dot per automated
    parameter, sitting at the top of that channel's own column at the x its

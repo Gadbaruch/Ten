@@ -2017,6 +2017,15 @@ async function probeResamp() {
       ln.unit = 'B'; ln.count = 1; ln.auto = false; ln.events = []; }
     S.presets[A].au.src = 0; S.presets[B].au.src = 1;
     engine.audBuf[B] = null; if (engine.granBuf) engine.granBuf[B] = null;   // stopped, no carrier: safe to empty
+    /* GHOST RACKS: the channel a bounce lands on keeps its synth life's
+       filter/fx/mods, and they process the replay invisibly (measured:
+       a leftover lowpass 4.3k read the bus −12dB@8k while the worklet was
+       flat). Plant junk and let the landing prove it clears the strip. */
+    Object.assign(S.presets[B].flt[0], { typ: 1, frq: 2000, q: 4 });
+    S.presets[B].fx[0] = { typ: XTYPES.indexOf('comp'), rt: 0, p1: 0.8, p2: 0.5, p3: 0, mix: 1 };
+    S.presets[B].mod[0] = Object.assign(mkMod(0), { src: 2, rate: 3,
+      routes: [{ dst: 0, idx: 0, amt: 100, tgt: null, addr: { rack: 'mix', slot: 0, key: 'lvl', lbl: 'level' } }] });
+    engine.rebuildRack(B); engine.refresh(B);
     /* the source: four decaying pure tones, one per beat — Goertzel-friendly,
        an envelope distinctive enough to align on */
     const laneA = S.patterns[S.editPat].lanes[A];
@@ -2024,9 +2033,17 @@ async function probeResamp() {
     { const d = src.getChannelData(0), q = Math.round(n / 4), E = Math.round(sr * 0.005);
       for (let k = 0; k < 4; k++) for (let i = 0; i < q && k * q + i < n; i++) { const t = i / sr;
         const w9 = Math.min(1, i / E, (q - 1 - i) / E);       // 5ms edges: no broadband clicks
-        d[k * q + i] = 0.45 * w9 * Math.exp(-t * 6) * Math.sin(2 * Math.PI * F4[k] * t); } }
+        d[k * q + i] = 0.45 * w9 * Math.exp(-t * 6) * Math.sin(2 * Math.PI * F4[k] * t); }
+      /* …plus a steady quiet 11kHz: a filter anywhere in the replay path
+         (the factory flt[0] is a 9k lowpass) shows up as hf loss in dB */
+      for (let i = 0; i < n; i++) d[i] += 0.06 * Math.sin(2 * Math.PI * 11000 * i / sr); }
     engine.granNode(A); engine.setChanBuf(A, src, 'resamp-src');
     Object.assign(S.presets[A].au, { spd: 1, rate: 1, st: 0, en: 1, semis: 0 });
+    /* the SOURCE strip is neutral too — its scratch filter would eat the 11k
+       reference on the live side and blind the hf metric */
+    S.presets[A].flt = rack(mkFlt); S.presets[A].flt[0].typ = 0;
+    S.presets[A].fx = rack(mkFx); S.presets[A].mod = rack(mkMod);
+    engine.rebuildRack(A); engine.refresh(A);
     const satI = XTYPES.indexOf('sat');
     S.master = S.master.map((s, i) => i === 0 ? { typ: satI, rt: 0, p1: 0.9, p2: 0.5, p3: 0, mix: 1 }
                                               : { typ: 0, rt: 0, p1: 0, p2: 0, p3: 0, mix: 1 });
@@ -2044,13 +2061,18 @@ async function probeResamp() {
     stop(); await sleep(150);
     const take = engine.audBuf[B];
     const tk0 = take ? take.getChannelData(0) : new Float32Array(1);
+    const hfdB = (x, ref) => r3(10 * Math.log10((goe(x, 11000) + 1e-12) / (goe(ref, 11000) + 1e-12)));
     rows.push({ k: 'take', started, landed, nch: take ? take.numberOfChannels : 0,
       ratio: r3(rms(tk0) / (rms(liveL) || 1e-9)), pkRatio: r3(pk(tk0) / (pk(liveL) || 1e-9)),
-      dirtTake: dirt(tk0), dirtLive: dirt(liveL), dirtMaster: dirt(mstL),
-      expect: '2ch · ratio ~1 · pkRatio ~1 · dirtTake≈dirtLive tiny · dirtMaster ≫ (sat hot, not printed)' });
+      dirtTake: dirt(tk0), dirtLive: dirt(liveL), dirtMaster: dirt(mstL), hf: hfdB(tk0, liveL),
+      expect: '2ch · ratio ~1 · pkRatio ~1 · dirt tiny · hf ~0dB · dirtMaster ≫ (sat hot, not printed)' });
     const auB = S.presets[B].au, mxB = S.presets[B].mix || {};
     rows.push({ k: 'unity', gain: r3(auB.gain), lvol: r3(auB.lvol),
-      fader: r3(mxB.lvl), pan: r3(mxB.pan), expect: '1 · 1 · 1 · 0' });
+      fader: r3(mxB.lvl), pan: r3(mxB.pan),
+      strip: (S.presets[B].flt.some(f => f && f.typ) ? 'FLT' : '') +
+             (S.presets[B].fx.some(f => f && f.typ) ? 'FX' : '') +
+             (S.presets[B].mod.some(m => m && m.src) ? 'MOD' : '') || 'clean',
+      expect: '1 · 1 · 1 · 0 · clean (planted junk cleared by the landing)' });
     /* ---- replay: A muted, B alone must put the same signal into mSum ---- */
     S.presets[A].mix.lvl = 0; engine.refresh(A); await sleep(100);
     play(); await sleep(500);
@@ -2074,8 +2096,8 @@ async function probeResamp() {
     const fine = refine(cut(liveL), cut(playL), bg);
     rows.push({ k: 'replay', ratio: r3(rms(playL) / (rms(liveL) || 1e-9)),
       corr: r3(bc), envDev: r3(mad / (mA || 1e-9)), alpha: fine.alpha, resid: fine.resid,
-      dirtPlay: dirt(playL),
-      expect: 'ratio ~1 · corr >0.97 · envDev <0.1 · alpha ~1 resid ~0 (the waveform itself) · dirtPlay≈dirtLive' });
+      dirtPlay: dirt(playL), hf: hfdB(playL, liveL),
+      expect: 'ratio ~1 · corr >0.97 · envDev <0.1 · alpha ~1 resid ~0 · hf ~0dB (no ghost filter) · dirtPlay tiny' });
     /* ---- a master knob mid-bounce: rebuildMaster() disconnects mSum — the
        re-attach guard must keep the tail of the take alive ---- */
     S.presets[A].mix.lvl = 0.8; engine.refresh(A); await sleep(100);
@@ -2111,8 +2133,149 @@ async function probeResamp() {
     try { setBpm(keep.bpm); } catch (_) {}
   }
   return { cols: ['k', 'started', 'landed', 'nch', 'ratio', 'pkRatio', 'dirtTake', 'dirtLive', 'dirtMaster',
-                  'gain', 'lvol', 'fader', 'pan', 'corr', 'envDev', 'alpha', 'resid', 'dirtPlay',
+                  'hf', 'gain', 'lvol', 'fader', 'pan', 'strip', 'corr', 'envDev', 'alpha', 'resid', 'dirtPlay',
                   'landed2', 'aliveFrac', 'err', 'expect'], rows };
+}
+
+/* fxmod — 2026-08-26: "many fx and play fx … their params can be added to
+   mods but the mod doesnt affect them audibly." fxLive used to refuse every
+   modulator except mix and the delay; each wired (type,param) is measured
+   here through the REAL ctrl path: a 5Hz lfo on the address, and the bus
+   must wobble (std of block rms + zc) well beyond its unmodulated floor.
+   The last row runs the arp: an lfo on its rate must move the note density
+   (arpTick used to read the rack raw, never the overlay). */
+async function probeFxMod() {
+  const ch = CH === 9 ? 8 : CH, sr = AC.sampleRate, rows = [];
+  const keep = { p: stash(ch), buf: engine.audBuf[ch], gbuf: (engine.granBuf || [])[ch],
+    name: engine.audName[ch], laneJ: S.patterns[S.editPat].lanes[ch].toJSON(),
+    p4: stash(4), bpm: T.bpm };
+  const mutes = [];
+  const wobble = x => {                       // block rms + zero-cross spread over 20ms blocks
+    const B = Math.round(sr * 0.02), rs = [], zs = [];
+    for (let i = 0; i + B <= x.length; i += B) { let s = 0, z = 0;
+      for (let j = i; j < i + B; j++) { s += x[j] * x[j]; if (j > i && (x[j] >= 0) !== (x[j - 1] >= 0)) z++; }
+      rs.push(Math.sqrt(s / B)); zs.push(z); }
+    const sd = a => { if (!a.length) return 0; const m = a.reduce((q, w) => q + w, 0) / a.length;
+      return Math.sqrt(a.reduce((q, w) => q + (w - m) * (w - m), 0) / a.length); };
+    const mr = rs.reduce((q, w) => q + w, 0) / (rs.length || 1);
+    return sd(rs) / Math.max(0.01, mr) + sd(zs) / Math.max(1, zs.reduce((q, w) => Math.max(q, w), 1)); };
+  const cap = async ms => { const sp = AC.createScriptProcessor(4096, 1, 1); const Lz = [];
+    sp.onaudioprocess = e => Lz.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+    const sk = AC.createGain(); sk.gain.value = 0; sp.connect(sk); sk.connect(AC.destination);
+    engine.buses[ch].pan.connect(sp);
+    await sleep(ms);
+    try { engine.buses[ch].pan.disconnect(sp); } catch (_) {} sp.disconnect(); sk.disconnect();
+    const o = new Float32Array(Lz.reduce((a, x) => a + x.length, 0)); let i = 0;
+    for (const x of Lz) { o.set(x, i); i += x.length; } return o; };
+  try {
+    if (T.playing) stop();
+    setBpm(120); pin(ch);
+    for (let c = 0; c < S.presets.length; c++) { if (c === ch) continue;
+      const mx = S.presets[c] && S.presets[c].mix; if (!mx) continue;
+      mutes.push([c, mx.lvl]); mx.lvl = 0; try { engine.refresh(c); } catch (_) {} }
+    if (!isAudioCh(ch)) setEngine(ch, 'audio');
+    const p = S.presets[ch]; p.cat = 'audio'; audDefaults(p);
+    p.au.cmode = 0; p.au.auto = 1; p.au.src = 0;
+    Object.assign(p.au, { spd: 1, rate: 1, st: 0, en: 1, semis: 0, gain: 1, lvol: 1 });
+    p.mix.lvl = 1; p.mix.pan = 0;
+    p.flt = rack(mkFlt); p.flt[0].typ = 0; p.fx = rack(mkFx); p.mod = rack(mkMod);
+    const lane = S.patterns[S.editPat].lanes[ch];
+    lane.unit = 'B'; lane.count = 1; lane.auto = false; lane.events = [];
+    lane.mute = false; lane.solo = false;
+    const n = Math.round(lane.len * spb() * sr), src = AC.createBuffer(1, n, sr);
+    { const d = src.getChannelData(0);   // two steady tones: deterministic, near-zero wobble floor
+      for (let i = 0; i < n; i++) d[i] = 0.3 * Math.sin(2 * Math.PI * 220 * i / sr)
+        + 0.15 * Math.sin(2 * Math.PI * 2900 * i / sr); }
+    engine.granNode(ch); engine.setChanBuf(ch, src, 'fxmod-src');
+    engine.rebuildRack(ch); engine.refresh(ch);
+    play(); await sleep(500);
+    /* two judges. 'aud': the bus must wobble well past its unmodulated floor
+       — for effects that are QUIET until the param moves. 'node': the
+       registered target param must MOVE under the lfo — for effects that
+       wobble constantly by nature (a delay's echoes, a tremolo), where
+       modulating the rate changes the wobble's shape, not its amount, and an
+       amplitude metric is blind. A moving delayTime or lfo rate IS the sound
+       changing; the node is the honest witness there. */
+    const CASES = [
+      ['filt', 'p1', { p1: 0.5, p2: 0.3, p3: 0, mix: 1 }, 'aud'],
+      ['filt', 'p2', { p1: 0.45, p2: 0.5, p3: 2, mix: 1 }, 'aud'],
+      ['dly', 'p1', { p1: 0.25, p2: 0.4, p3: 0, mix: 0.8 }, 'node', L9 => L9.dls[0].delayTime.value],
+      ['dly', 'p2', { p1: 0.2, p2: 0.4, p3: 0, mix: 0.8 }, 'node', L9 => L9.fb.gain.value],
+      ['dly', 'p5', { p1: 0.2, p2: 0.4, p3: 0, p5: 0, mix: 0.8 }, 'node', L9 => L9.cols[0].frequency.value],
+      ['phase', 'p1', { p1: 0.3, p2: 0.8, p3: 0, mix: 1 }, 'node', L9 => L9.los[0].frequency.value],
+      ['phase', 'p2', { p1: 0.3, p2: 0.5, p3: 0, mix: 1 }, 'node', L9 => L9.lgs[0].gain.value],
+      ['fla', 'p2', { p1: 0.3, p2: 0.5, p3: 0, mix: 1 }, 'node', L9 => L9.fbs[0].gain.value],
+      ['pha', 'p2', { p1: 0.3, p2: 0.5, p3: 0, mix: 1 }, 'node', L9 => L9.lgs[0].gain.value],
+      ['trm', 'p1', { p1: 0.3, p2: 0.8, mix: 1 }, 'node', L9 => L9.tlo.frequency.value],
+      ['trm', 'p2', { p1: 0.3, p2: 0.5, mix: 1 }, 'node', L9 => L9.tlg.gain.value],
+      ['comp', 'p1', { p1: 0.5, p2: 0.6, p3: 0.1, p4: 0.2, mix: 0.5 }, 'aud'],
+      ['limit', 'p1', { p1: 0.4, p2: 0.3, mix: 0.5 }, 'aud'],
+      ['gate', 'p1', { p1: 0.5, p2: 1, mix: 1 }, 'node', L9 => L9.flw.thr],
+      ['verb', 'p2', { p1: 0.4, p2: 0.5, p3: 0.5, mix: 1 }, 'node', L9 => L9.vtone.frequency.value],
+      ['clip', 'p1', { p1: 0.5, p2: 0.2, p3: 0.3, mix: 0.5 }, 'aud'],
+    ];
+    for (const [t9, key, cfg, judge, get9] of CASES) {
+      p.fx = rack(mkFx);
+      p.fx[0] = Object.assign({ typ: XTYPES.indexOf(t9), rt: 0, p1: 0.5, p2: 0.3, p3: 0, mix: 1 }, cfg);
+      p.mod = rack(mkMod);
+      engine.rebuildRack(ch); await sleep(200);
+      /* the ADDRESS comes off the picker, exactly as a finger would pick it —
+         resolveDest matches key AND label, so a guessed label is a dead route */
+      const dz = destList(p).find(x => x.rack === 'fx' && x.slot === 0 && x.key === key);
+      const w0 = judge === 'aud' ? wobble(await cap(400)) : 0;
+      p.mod[0] = Object.assign(mkMod(0), { src: 2, wav: 0, rate: 5, syn: 0, ltr: 1,
+        routes: [{ dst: 0, idx: 0, amt: 100, tgt: null,
+          addr: dz ? { rack: dz.rack, slot: dz.slot, key: dz.key, lbl: dz.lbl }
+                   : { rack: 'fx', slot: 0, key, lbl: key } }] });
+      await sleep(250);
+      if (judge === 'aud') {
+        const w1 = wobble(await cap(400));
+        rows.push({ k: t9 + '.' + key, judge, w0: r3(w0), w1: r3(w1),
+          gain2: r3(w1 / Math.max(0.001, w0)), ok: w1 > Math.max(w0 * 2, 0.04),
+          addr: dz ? 'listed' : 'MISSING' });
+      } else {
+        const L9 = engine.buses[ch].fxLive[0], vals = [];
+        for (let q = 0; q < 4; q++) { vals.push(get9(L9)); await sleep(90); }
+        const lo9 = Math.min(...vals), hi9 = Math.max(...vals);
+        rows.push({ k: t9 + '.' + key, judge, w0: r3(lo9), w1: r3(hi9),
+          gain2: r3(hi9 - lo9), ok: (hi9 - lo9) > 0.02 * (Math.abs(hi9) + Math.abs(lo9) + 0.1),
+          addr: dz ? 'listed' : 'MISSING' });
+      }
+    }
+    stop(); await sleep(120);
+    /* ---- the generators: an lfo on the ratchet's divisions must move the
+       note DENSITY per step (arpTick reads the rack THROUGH the overlay now;
+       the arp's own rate is an enum and enums are not mod dests by design) ---- */
+    pin(4);
+    const p4 = S.presets[4];
+    p4.ply = rack(mkPly); p4.mod = rack(mkMod);
+    p4.ply[0] = Object.assign(mkPly(0), { typ: 15, p1: 3, p2: 0 });   // ratchet, 3 divs
+    let count = 0; const on0 = engine.noteOn.bind(engine);
+    engine.noteOn = (...a) => { count++; return on0(...a); };
+    try {
+      const dst9 = destList(p4).find(x => x.rack === 'ply' && x.key === 'p1' && x.slot === 0);
+      play(); await sleep(200);
+      engine.arpPool[4].push({ midi: 60, vel: 0.8, until: gridNow() + 64, born: gridNow() });
+      count = 0; await sleep(1300); const base9 = count;
+      p4.mod[0] = Object.assign(mkMod(0), { src: 2, wav: 2, rate: 0.05, syn: 0, ltr: 1, ph: 90,
+        routes: [{ dst: 0, idx: 0, amt: 100, tgt: null,
+          addr: dst9 ? { rack: dst9.rack, slot: dst9.slot, key: dst9.key, lbl: dst9.lbl }
+                     : { rack: 'ply', slot: 0, key: 'p1', lbl: 'p1' } }] });
+      await sleep(300); count = 0; await sleep(1300); const mod9 = count;
+      rows.push({ k: 'ply.rtc', w0: base9, w1: mod9, gain2: r3(mod9 / Math.max(1, base9)),
+        ok: Math.abs(mod9 - base9) > Math.max(2, base9 * 0.3), addr: dst9 ? 'listed' : 'MISSING' });
+    } finally { engine.noteOn = on0; engine.arpPool[4].length = 0; stop(); }
+  } finally {
+    try { if (T.playing) stop(); } catch (_) {}
+    engine.audBuf[ch] = keep.buf; if (engine.granBuf) engine.granBuf[ch] = keep.gbuf;
+    engine.audName[ch] = keep.name;
+    S.patterns[S.editPat].lanes[ch] = Looper.from(keep.laneJ);
+    unstash(ch, keep.p); unstash(4, keep.p4);
+    for (const [c, v] of mutes) { const mx = S.presets[c] && S.presets[c].mix;
+      if (mx) mx.lvl = v; try { engine.refresh(c); } catch (_) {} }
+    try { setBpm(keep.bpm); } catch (_) {}
+  }
+  return { cols: ['k', 'w0', 'w1', 'gain2', 'ok', 'addr', 'err', 'expect'], rows };
 }
 
 const HELP = {
@@ -2136,6 +2299,7 @@ const HELP = {
     { k: 'setio',    args: 'ch=9 — the set file: takes travel embedded, no-audio fallback holes them, local stamps, exportSet via stubbed save picker' },
     { k: 'audclip',  args: 'ch=9 — pitch dial spans ±36 in all three cmodes (sounding Hz), and c/x/v carries an audio channel with its take' },
     { k: 'resamp',   args: 'ch=9 — master resample is pre-master-fx and replays exactly like live at mSum: take clean of a hot sat, unity dials, replay ratio ~1, mid-bounce rebuild survives' },
+    { k: 'fxmod',    args: 'ch=8 — every wired fx (type,param) wobbles under a 5Hz lfo through the real ctrl path; arp rate mod moves note density' },
     { k: '(any)',    args: '--ab <url> runs the same probe on a second build and diffs it' },
   ]
 };
@@ -2173,7 +2337,8 @@ try {
                    grainflt: probeGrainFlt,
                    setio: probeSetIO,
                    audclip: probeAudClip,
-                   resamp: probeResamp };
+                   resamp: probeResamp,
+                   fxmod: probeFxMod };
   const fn = PROBES[NAME];
   out = fn ? await fn() : (NAME === 'help' ? HELP : { cols: [], rows: [], err: 'no probe named ' + NAME });
 } catch (e) {

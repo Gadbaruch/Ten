@@ -1,4 +1,116 @@
-# WHERE THE AUDIO CHANNEL STANDS — 2026-08-26
+# WHERE THE AUDIO CHANNEL STANDS — 2026-08-26 (second batch)
+
+## RESAMPLE'S GHOST STRIP · OPS 9-10 UNDER PHASE · FX/PLY MODS LIVE · GAIN LIVE · THE MOUSE
+
+His six, 2026-08-26 morning. Five fixed and measured; the resample
+difference he heard has a found mechanism and a fix — his ear rules next.
+
+- **"still an audible difference … louder … less punchy, like a native web
+  page limiter? sample rate or resolution reduced?" — the WORKLET IS CLEAN,
+  the STRIP was the filter.** Measured with white noise through the tape
+  path: worklet output flat ±0.7dB to 17kHz (no interp loss at spd 1, no
+  clamp, no downsample, Float32 end to end — both his hypotheses ruled out
+  by numbers). The BUS read −12dB@8k/−20@11k/−37@17k — a leftover synth
+  flt (4.3k Q2 in my scratch) still built into the audio channel's strip.
+  The channel a bounce lands on keeps its synth life's racks INVISIBLY —
+  and even a virgin one carries the FACTORY flt[0]: a 9kHz lowpass, ON.
+  A leftover comp/limit fx is his exact "louder, less punchy". Fix: a mstr
+  take now lands on a NEUTRAL strip — flt/fx/mod racks cleared, flt[0] typ
+  0 (the factory 9k LP is right for a synth, wrong for a print) — on top of
+  the unity dials. Flash says "strip at unity". resamp suite grew teeth: an
+  11kHz reference in the source (hf ~0dB proves no ghost filter), junk
+  planted on the target pre-bounce (strip must read "clean" after). This
+  build: hf −0.16dB, alpha 1.001, resid 0.022, strip clean.
+  **If his ear STILL hears a difference on this build: export the set and
+  check (a) CFG.overdub — bouncing twice in overdub STACKS takes, louder
+  and smeared by construction; (b) his master rack for duck/amix whose
+  behavior differs when one channel carries the mix.**
+- **Ops 9 and 10 were dead to mods on the PHASE engine** (his "last 3 op
+  slots dont get processed"). ten-fmop exposed 8 d/g param pairs while the
+  rack holds 10 — ops 9-10 sounded but their mod params did not exist.
+  Three constants 8→10 (descriptors, gather loop, k2 guard). Measured
+  per-op env→pitch and env→level, both engines: native 1-10 (was already),
+  phase 1-10 (was 1-8). trig suite still canonical after (rtrg 1.000 both
+  engines, free decorrelated).
+- **FX PARAM MODS ARE REAL NOW** ("their params can be added to mods but
+  the mod doesnt affect them audibly"). Root cause one line in fxLive:
+  every modulator except mix and the delay was refused ("no applier yet").
+  Wired: filt (freq/reso/gain, all three kinds — plain biquad, formant/
+  vowel bank, tilt), the whole delay family (dly/dub/tec/res/wob — time,
+  feedback, color; res gets its own 2-62ms law), phase/fla/pha (rate +
+  depth/feedback), trm (rate/depth), comp (thr/ratio/atk/rel), limit
+  (thr/rel), clip (ceiling+makeup), gate (thr/depth), verb (color), and
+  mix-as-makeup on comp/limit. Deliberately NOT wired: curve-baked params
+  (drv/crush/sat drive, verb size, topologies/widths) — they rebuild, they
+  do not ramp. THE PICKER IS HONEST NOW: FXMODOK gates modDests so only
+  what answers is offered (their own doctrine: "a destination you can pick
+  that then does nothing is worse than one not offered").
+  **And the generators**: arpTick read the ply rack RAW — noteOn honored
+  the mod overlay, the per-step scheduler never did — so lfo→arp/euc/rtc/
+  cyc params parked in the overlay unread. One wrap: ovRack at the tick.
+  Suite `tools/probe.sh fxmod`: 17/17 — 16 fx (aud-wobble or node-motion
+  judge per row) + ratchet density 17→28 under a ply-rate lfo.
+- **Audio gain is LIVE and DRAWN** ("changing gain on audio ch should be
+  applied live during playback … visualized on the waveform"). The
+  instrument-row gain handler wrote the value and never pushed audLive —
+  the worklet applies tset gain live, the dial just never sent it (loop
+  vol right above it did). Measured through the real field door: rms
+  0.255→0.057→0.252 as the dial walked 0.9→0.2→0.9 mid-carrier (ratio
+  0.222 = exactly 0.2/0.9). The column waveform scales by the gain now
+  (cache keyed on it), so the picture is the amplitude the carrier plays.
+- **THE MOUSE, four dead zones found by DOM-level clicking** (his "deeper
+  investigation"):
+  1. **Rack slots were unclickable** — the chain row tagged every slot cell
+     'mod',mi and threw the slot half away, so a click landed on whatever
+     slot the cursor already held. Cells carry mi*100+si now ('chip') and
+     land through gotoChip — the keyboard's own door. Measured: click chip
+     201 → curMod 2, curSlot 1.
+  2. **Clicking a channel didn't move the visible selection** — mouseFocus
+     set editSnd only on layer≥2 while the desk highlights curPreset. Now
+     mirrors the keyboard digit rule (21249, "the view follows"): mSel
+     false, curPreset AND editSnd. Measured: click ch7 → 7/7.
+  3. **The saved-set slots ('sess') and the master column ('mst0') were
+     emitted forever, answered never** — handlers added (PICK.sel / mSel).
+  4. **THE METER DRAGS** (his ask): vertical = volume, horizontal = pan,
+     both axes in one gesture, wheel = volume. It cannot replay alt-arrows
+     (alt is the fine step everywhere but the desk) so meterNudge writes
+     the mixer through the desk's own arithmetic (VOLT-curve fader units,
+     0.05 pan steps, refresh per nudge, one undo per drag, ⇧ = coarse).
+     Measured on a real drag: 40px up = vol 76→86, 40px right = pan 0→0.5.
+     Settings rows measured working as they were ('set' spans respond) —
+     his "settings slots" read as the set-slot picker row, which is fix 3.
+
+Wall on this build: micrec 13 · resamp 4 (hf −0.16dB · alpha 1.001 · strip
+clean) · fxmod 17/17 · trig canonical · audclip 5 · preset sounds. Traps
+hit and worth keeping: the ISOLATION MUTES of a probe die with a reload —
+mid-session my scratch tab reloaded between mute and restore, the autosave
+kept lvl 0 on eight channels, and trig read all-zero peaks on ch4 until the
+faders were put back (all-zero trig/modmatrix = WRONG CHANNEL STATE, not a
+dead engine); and a scratch channel's leftover mod slots (a follower on
+ch4) decorrelate the trig probe's rtrg rows — clear mod/ply/fx racks before
+correlation measurements.
+
+QA (ordered by what to trust least first):
+1. **Resample the master again on this build** — the bounce lands with the
+   strip cleared + unity dials ("strip at unity" in the flash). A/B against
+   the live channels: if it is STILL louder/less punchy, say whether
+   overdub is on, and export the set — the next suspects are stacked
+   overdub bounces and duck/amix on the master rack.
+2. **Mouse sweep** — click rack slot cells in the chain row (each slot
+   selects), click channels with the desk up (highlight follows), drag a
+   channel meter (up/down volume, left/right pan, wheel volume, shift
+   coarse), click the master column header (master strip selects), click
+   set slots in the picker. Not every surface is measured — report any
+   cell that still ignores the mouse.
+3. **Mod an fx param** — e.g. lfo → filt freq on a channel fx, env → comp
+   threshold, lfo → delay time: audible now. The picker only offers params
+   that actually answer; drive-curve params are gone from the list on
+   purpose (their mix stays). An lfo on a euclid/ratchet/arp numeric param
+   moves the pattern.
+4. **Ops 9/10 under phase engine** — aim an env/lfo at op 9 or 10 pitch or
+   level with fm eng: phase — it lands now.
+5. **Audio gain while the loop plays** — dial gain on an audio channel:
+   level follows the dial immediately and the waveform picture scales.
 
 ## ENV LOOP REMOVED · LFO TRIG DEFAULTS FREE · MASTER RESAMPLE IS PRE-FX (his 3-item batch)
 
