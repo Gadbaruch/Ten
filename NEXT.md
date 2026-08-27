@@ -1,3 +1,128 @@
+# WHERE THE INSTRUMENT STANDS — 2026-08-27 (afternoon, branch `sound-library`)
+
+## STILL A BRANCH. Live and `main` have none of this.
+
+Gad pruned the library by hand (294 -> 250) and flagged four misplaced files
+with a "this is a ..." prefix. Then: normalise, trim the dead air, build drum
+kits from the classic sounds, carry on with navigation, and make drum rolls
+use samples.
+
+## THE POLISH  (bd524e1)
+
+A FIXED THRESHOLD CANNOT FIND THE CUT, and three files proved it. 100ms RMS
+windows, dB below each file's own peak:
+
+    tr8-shaker-01   -21 then -77 -77 ... for 2.1s      a flat FLOOR
+    rx5-kick-09     -12 -29 -44 then -86 -86 ...       a flat FLOOR, lower
+    rx5-cymbal-01   -12 -15 -17 ... -74 -76 -76        real DECAY, then floor
+
+The dead air is a NOISE FLOOR, every file sits at a different one, and the
+cymbal's genuine tail goes quieter than the shaker's noise. So the floor is
+found PER FILE (5th percentile of windowed RMS), the cut sits 8dB above it,
+and a cap makes sure nothing above -60dB relative to peak is ever cut. Then
+40ms of headroom and a 12ms RAISED-COSINE fade — cosine because a linear ramp
+leaves a slope discontinuity you can hear on a low sine, and a kick nearly is
+one. Every output ends at exactly 0.000000.
+
+    cymbal 4.40 -> 3.00s (decay kept) · ride 5.00 -> 3.36 · shaker 2.22 -> 0.07
+    short hits untouched · 205s of dead air gone · 15.3MB -> 9.2MB
+
+Normalised to -1.0dBFS PEAK (verified: all 250 land on -1.00 exactly). Peak and
+not loudness deliberately — loudness normalising makes a hat as loud as a kick,
+and per-hit balance is the KIT's job. Leading silence measured and left alone:
+worst file starts 0.7ms late, and moving a drum's hit is the worse crime.
+`tools/polish_oneshots.py --dry-run` reports before touching anything.
+
+## SAMPLED KITS  (17a4e79) — three separate blockers, none the obvious one
+
+1. **A KIT COULD ONLY HOLD ONE SAMPLE.** `opSamples` was keyed
+   channel:operator and a kit is TWELVE pad chains on one channel index, so
+   all twelve collided on `pi:0`. `smpKey` adds the pad's pitch class, ONLY
+   for a kit, so a plain channel's key is byte-identical and nothing migrates.
+2. **A PRESET COULD NOT NAME ITS SAMPLE.** A slot carries
+   `smp:{f:'oneshots/kick/tr808-kick-06.flac'}` now and `applySmpRefs`
+   resolves it, re-runnably, because the shelf lands asynchronously.
+3. **THE LIBRARY WAS FULL** — 2,152,103 bytes stored, a 1MB test write
+   throwing QuotaExceededError, and the kits' 831KB failing into an EMPTY
+   CATCH so the library silently did not change. Racks store sparsely now
+   (one kit was 92,315 bytes with 885 of 1,040 slots at factory default) and
+   the read tolerates both shapes. **LIBV 31.** library 2564KB -> 845KB.
+   ⚠ `ten-bak-v1`, the undo ring, was 2.77MB of a ~5MB origin. Whole origin
+   is 2143KB now, but the backup ring is still the biggest single consumer
+   and is the next thing to hit this wall.
+
+Ten kits: KT808 KTTR8 KTLIN KTC78 KT505 KTRX5 KTDR5 KTMRK KTMX1 KTMX2.
+`tools/probe.sh smpkit name=KT808` — 12/12 distinct takes, 12/12 distinct
+centroids: kick 652Hz · tom 340 · conga 1501 · cowbell 3033 · clave 4805 ·
+rim 5112 · clap 5269 · snare 6220 · hat-open 10540 · cymbal 11628 ·
+hat-closed 11869 · shaker 14623.
+
+## DRUM ROLLS REACH FOR THE SHELF, ~half the time, in three shapes
+
+`pure` the take gated so the SAMPLE is the envelope · `layer` the take over a
+synth body (the only shape that swaps the gate for a drum envelope) · `mangle`
+driven, cropped, sometimes reversed. All `pure` at wild 20%, `layer` from 50%,
+`mangle` at 90%.
+
+**And the sampled half exposed two broken SYNTH recipes** — every sampled perc
+in a run measured 0.26-0.44 while every DUD was a synth one:
+
+    perc  a BANDPASS at 2.4-3.6kHz over a root near 130Hz. PIS9 peak 0.005.
+          The rule the kicks/snares/hats keep and this one never did.  7->9/10
+    cymb  ring-modulated metal then highpassed at 7kHz — which is where ring
+          modulation has just moved the energy FROM. Four of ten at
+          0.025-0.058 vs 0.15-0.19, every mix level inside 0.38..0.47, so it
+          was never the fader.                                        6->9/10
+
+Every drum category at wild 60%, ten each: kik 10 · snr 10 · wood 10 · zap 10 ·
+cymb 9 · tom 9 · perc 9 · hh 8 = **75/80**.
+
+## NAVIGATION  (c5a6967)
+
+`jump` is `big`'s semantic sibling in adjust(): the coarse step as a PLACE
+rather than a number of places. Shift walks the instrument groups —
+**21 stops to cross a 275-entry shelf**, against 296 presses. Backwards lands
+on the HEAD of the previous group.
+
+⚠ **TWO BUGS IT EXPOSED, both compounding:** poolAdd deduped by BUFFER
+IDENTITY, and a re-fetch makes a new AudioBuffer — so every restore of a set
+using library samples added duplicates (14 after one load, growing each
+reload). A factory take is its PATH. And a set restores BEFORE the shelf
+loads, so its takes entered with a session `ord` and no instrument and then
+sat stranded when the manifest arrived; the manifest reclaims them now.
+
+## ⚠ THE TRAP THIS FILE KEEPS WARNING ABOUT, SPRUNG THREE TIMES IN ONE DAY
+
+None of these are visible to `node --check`, and two of them produced NO
+console output at all:
+1. `applySmpRefs` guarded with `if(!engine)` and is called from `rebuildRack`,
+   which runs DURING `const engine = new Engine()`. Reading a const from
+   inside its own initialiser THROWS — it killed the whole script at that
+   line, silently. The engine is an argument now.
+2. `packRacks`/`unpackRacks` as const arrows below `libAll`, which `libInit`
+   calls during module init: the throw landed in libAll's catch, which returns
+   `[]`, so **the entire preset library read as EMPTY**. Declarations hoist.
+3. The read order was the write order instead of its MIRROR — `portPreset`
+   over packed racks walks objects as arrays.
+
+**The rule: anything called during module init must be a function declaration,
+and must not close over a const declared later.** Load the page.
+
+Also: the 808 kit was first named `K808`, which is already a factory KICK
+beside S808 and H808 — the duplicate guard skipped it silently and it simply
+never appeared. Kits are on `KT*`.
+
+## WHAT IS OPEN
+
+- **`_bass-round1.json` still has no verdict from Gad** — the ten-bass round
+  from this morning. His ear drives the next trim pass.
+- `_similar/` (312 files) still waiting on his ear; nothing there loads.
+- **Only bass and the drum categories have numbers.** No listening round on
+  lead/pad/keys/chord/plk/fx.
+- The backup ring is the next storage wall.
+- `hh` sits at 8/10 and `cymb`/`tom`/`perc` at 9/10 — the remaining duds are
+  all QUIET, all in the synth recipes, none in the sampled path.
+
 # WHERE THE INSTRUMENT STANDS — 2026-08-27  (branch `sound-library`)
 
 ## THIS IS A BRANCH. Live is untouched; `main` has none of it.
