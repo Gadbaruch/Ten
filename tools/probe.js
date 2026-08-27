@@ -2517,6 +2517,13 @@ async function probeGenQual() {
   const seed = Math.round(num(P.seed, 1));
   const ch = CH;
   const low = /bass|kik|kick/.test(cat);
+  /* BRIGHT IS NOT HARSH ON A HAT. The first run of this called 7 of 10 hi-hats
+     HARSH for a centroid over 6kHz — and a real TR-808 closed hat measures
+     11869Hz, which is what a hi-hat IS. A verdict that fires on the instrument
+     working correctly is worse than no verdict. Hats, cymbals and zaps are
+     exempt; snares get a higher bar than tonal patches do. */
+  const bright = /hh|cymb|zap/.test(cat);
+  const harshAt = bright ? Infinity : /snr/.test(cat) ? 9000 : 6000;
   const rows = [];
   let prev = null, flat = 0;
   for (let i = 0; i < n; i++) {
@@ -2531,15 +2538,16 @@ async function probeGenQual() {
     const v = [];
     if (!(r.peak > 0.02)) v.push('SILENT');
     else if (!(r.peak > 0.08)) v.push('QUIET');
-    if (r.centroid > 6000) v.push('HARSH');
-    if (!low && r.centroid < 250) v.push('MUD');
+    if (r.centroid > harshAt) v.push('HARSH');
+    if (!low && !bright && r.centroid < 250) v.push('MUD');
     if (prev && ['peak', 'rms', 'centroid', 'hz'].every(k =>
         Math.abs((r[k] || 0) - (prev[k] || 0)) <= 0.03 * Math.max(Math.abs(r[k] || 0), 1e-9))) {
       v.push('FLAT'); flat++;
     }
     prev = r;
     const G = pre._gen || {};
-    rows.push({ k: pre.name, i, rung: G.rung, arch: G.arch,
+    rows.push({ k: pre.name, i, rung: G.rung, arch: G.arch || (G.smp ? G.smp.split(':')[0] : ''),
+                src: G.smp ? 'smp' : 'synth',
                 ops: (pre.osc || []).filter(o => o && o.amt > 0.01).length,
                 flt: (pre.flt[0] || {}).typ || 0, fq: Math.round((pre.flt[0] || {}).frq || 0),
                 fx: (pre.fx[0] || {}).typ || 0,
@@ -2560,7 +2568,7 @@ async function probeGenQual() {
   const arch = {};
   for (const r of rows) if (r.arch) arch[r.arch] = (arch[r.arch] || 0) + 1;
   notes.push('archetypes: ' + Object.entries(arch).map(([k, v]) => k + ' x' + v).join(' '));
-  return { cols: ['i', 'rung', 'arch', 'ops', 'flt', 'fq', 'peak', 'rms', 'hz', 'centroid', 'verdict'], rows };
+  return { cols: ['i', 'src', 'rung', 'arch', 'ops', 'flt', 'fq', 'peak', 'rms', 'centroid', 'verdict'], rows };
 }
 
 /* ---------------- archlvl: how loud is each archetype, really -----------
@@ -2719,6 +2727,55 @@ async function probePatQual() {
   return { cols: ['notes', 'b1', 'b4', 'barvar'], rows };
 }
 
+/* ---------------- smpkit: twelve pads, twelve DIFFERENT sounds ----------
+ * `opSamples` was keyed channel:operator, with no pad in it, so every pad of a
+ * kit collided on `pi:0` and a sampled kit could hold exactly ONE sound
+ * however many pads you gave it. smpKey puts the pad's pitch class in the key.
+ * This is the test for that, and the failure it looks for is not "silent" but
+ * "all the same": twelve pads reading one centroid.
+ *
+ *     tools/probe.sh smpkit name=KT808 ch=8
+ */
+async function probeSmpKit() {
+  if (typeof sampleKit !== 'function') return { cols: [], rows: [], err: 'no sampleKit on this build' };
+  const nm = str(P.name, 'KT808');
+  const ch = CH;
+  const en = libAll().find(e => e && e.name === nm && e.cat === 'kit');
+  if (!en) return { cols: [], rows: [], err: 'no kit named ' + nm + ' in the library' };
+  const keep = presetData(S.presets[ch]);
+  setP(ch, en.name, 'kit', en.data);
+  engine.rebuildRack(ch);
+  await sleep(120);
+  const rows = [];
+  for (let pc = 0; pc < 12; pc++) {
+    const midi = 60 + pc;
+    const pad = (S.presets[ch].kit || [])[pc] || {};
+    const ref = ((pad.osc || [])[0] || {}).smp;
+    const key = smpKey(ch, 0, pc);
+    const buf = engine.opSamples.get(key);
+    const r = await hit(ch, () => engine.noteOn(AC.currentTime + 0.02, ch, midi, VEL), MS);
+    rows.push({ k: NN[pc] + ' ' + (pad.cat || '?'),
+                take: ref ? String(ref.f).split('/').pop().replace('.flac', '') : '—',
+                wired: buf ? 'yes' : 'NO',
+                dur: buf ? r3(buf.duration) : null,
+                peak: r.peak, centroid: r.centroid });
+    try { engine.allOff(); } catch (_) {}
+    await sleep(50);
+  }
+  setP(ch, keep.name || 'tmp', keep.cat || 'misc', keep);
+  engine.rebuildRack(ch);
+  const cents = rows.map(r => r.centroid).filter(Number.isFinite);
+  const uniq = new Set(cents.map(c => Math.round(c))).size;
+  const takes = new Set(rows.map(r => r.take)).size;
+  const silent = rows.filter(r => !(r.peak > 0.01)).map(r => r.k);
+  const unwired = rows.filter(r => r.wired === 'NO').map(r => r.k);
+  notes.push(nm + ': ' + takes + '/12 distinct takes, ' + uniq + '/12 distinct centroids' +
+             (uniq <= 2 ? '  <-- THE PADS ARE ALL ONE SOUND' : ''));
+  if (unwired.length) notes.push('NOT WIRED: ' + unwired.join(' '));
+  if (silent.length) notes.push('SILENT: ' + silent.join(' '));
+  return { cols: ['take', 'wired', 'dur', 'peak', 'centroid'], rows };
+}
+
 const HELP = {
   cols: ['args'],
   rows: [
@@ -2745,6 +2802,7 @@ const HELP = {
     { k: 'patqual',  args: 'n=6 \u2014 generated patterns: velocity spread, bar-4-vs-bar-1 difference, cross-lane onset agreement' },
     { k: 'archlvl',  args: 'cat=bass k=6 \u2014 mean peak of every ARCHETYPE, and the trim that would level them' },
     { k: 'genqual',  args: 'cat=bass n=10 wild=35 seed=1 \u2014 roll N patches, play each, and name the duds: SILENT/QUIET/HARSH/MUD/FLAT' },
+    { k: 'smpkit',   args: 'name=KT808 ch=8 \u2014 load a sampled kit and play all twelve pads: distinct takes, distinct sounds, none unwired' },
     { k: 'smplib',   args: 'ch=8 names=tr808-kick-01,linn-snare-01 \u2014 point a synth op at named library one-shots and hear whether they sound' },
     { k: 'poolkind', args: 'want=loop — every pool take: measured onsets/centroid, the kind it was called, and both dial views in order' },
     { k: '(any)',    args: '--ab <url> runs the same probe on a second build and diffs it' },
@@ -2789,6 +2847,7 @@ try {
                    fxwire: probeFxWire,
                    poolkind: probePoolKind,
                    smplib: probeSmpLib,
+                   smpkit: probeSmpKit,
                    genqual: probeGenQual,
                    archlvl: probeArchLvl,
                    patqual: probePatQual };

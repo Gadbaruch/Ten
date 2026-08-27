@@ -1245,7 +1245,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-27.1249';
+const BUILD='2026-08-27.1312';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1508,6 +1508,56 @@ function kitSlot(p,midi,make){
   }
   return p.kit[i];
 }
+/* WHERE A SYNTH OP'S SAMPLE LIVES. The key has been channel:operator since it
+   was written, which is right for every channel EXCEPT a kit — and a kit is
+   TWELVE complete pad chains sharing one channel index, so all twelve of its
+   op-0 samples collided on `pi:0` and a sampled kit could only ever hold one
+   sound. Twelve pads, one sample. The pad's pitch class joins the key, and
+   ONLY for a kit: a plain channel's key is byte-identical to what it always
+   was, so every set ever saved still loads without a migration. */
+const smpKey=(pi,op,pad)=>pad==null?pi+':'+op:pi+':p'+pcOf(pad)+':'+op;
+/* the key the SOUND PAGE is pointing at: a kit edits its focused pad, and with
+   no pad focused it edits the channel — the same rule modHolder already uses */
+const smpKeyUI=()=>smpKey(S.editSnd,S.curSlot,
+  (isKit(S.presets[S.editSnd])&&S.prepFocus!=null)?S.prepFocus:null);
+/* A SAMPLE OP CARRIES A REFERENCE, and this is what turns a sampled patch into
+   a PRESET rather than one channel's private state. `opSamples` is a Map keyed
+   by channel that no preset ever knew about, so a kit of twelve 808 hits could
+   be saved, loaded somewhere else, and arrive with all of its settings and
+   none of its sounds. The slot names its take instead —
+   `smp:{f:'oneshots/kick/tr808-kick-06.flac'}` — presetData carries that like
+   any other field, and this resolves it against the pool.
+   Deliberately RE-RUNNABLE: the library arrives asynchronously, so a preset
+   applied in the first second names files that are still in flight. poolAdd
+   calls back here as they land. */
+let SMPWAIT=false;
+/* declared HERE and not down with the pool: applySmpRefs is called from
+   rebuildRack, which runs while the Engine is still being constructed —
+   thousands of lines before the pool block. It survives today only because a
+   default preset has no sample reference to look up, which is luck. */
+const POOLBYF=new Map();             // src.f -> entry, so a preset's sample ref is O(1)
+/* THE ENGINE ARRIVES AS AN ARGUMENT and is never read from the outer const.
+   `rebuildRack` runs while `const engine = new Engine()` is still evaluating,
+   and reading a const from inside its own initialiser is a ReferenceError, not
+   undefined — so a guard written `if(!engine)` THREW, killed the whole script
+   at that line, and left every declaration after it in its dead zone with
+   nothing at all in the console. node --check cannot see this; only loading
+   the page can. */
+function applySmpRefs(pi,eng){
+  const E=eng||(typeof engine==='undefined'?null:engine);
+  const p=S.presets[pi]; if(!p||!E||!E.opSamples)return;
+  const racks=isKit(p)?(p.kit||[]).map((k,i)=>[k,i]):[[p,null]];
+  for(const [rk,pad] of racks){
+    if(!rk||!rk.osc)continue;
+    for(let i=0;i<rk.osc.length;i++){
+      const sl=rk.osc[i]; if(!sl||!sl.smp||!sl.smp.f)continue;
+      const e=POOLBYF.get(sl.smp.f);
+      if(!e){SMPWAIT=true; continue;}
+      const key=smpKey(pi,i,pad);
+      if(E.opSamples.get(key)!==e.buf)E.opSamples.set(key,e.buf);
+    }
+  }
+}
 const kitHas=(p,midi)=>!!(isKit(p)&&p.kit&&p.kit[pcOf(midi)]);
 /* which preset the sound layer is editing: a kit's focused slot, else the channel */
 function edKit(p){return isKit(p)&&S.prepFocus!=null?kitSlot(p,S.prepFocus,true):null;}
@@ -1615,7 +1665,7 @@ const OSC_P=sl=>[
      set:(o,v)=>{const n=Math.round(v);
        if(n<=0){o.amt=0;}                      // none: silence it, keep the settings
        else{o.wav=n-1; if(o.amt<=0.001)o.amt=1;
-         if(n-1===9&&!engine.opSamples.get(S.editSnd+':'+S.curSlot))
+         if(n-1===9&&!engine.opSamples.get(smpKeyUI()))
            flash('smp: drop an audio file on this op to give it a sample');}}}),
   SP('mode','mode','enum',{opts:OPMODE}),
   SP('dest','dst','enum',{opts:DEST}),
@@ -1633,13 +1683,16 @@ const OSC_P=sl=>[
   ...(Math.round((sl&&sl.wav)||0)===9?[poolSP(SP('smpl','_pool','lin',{min:0,max:31,step:1,w:2,
      fmt:v=>{const V=poolView('one'), e2=POOL[V[Math.round(v)]];
        return e2?KINDMK(e2.kind)+e2.name:'—';},
-     get:()=>{const k=S.editSnd+':'+S.curSlot, V=poolView('one');
+     get:()=>{const k=smpKeyUI(), V=poolView('one');
        const j=V.indexOf(POOL.findIndex(p2=>p2.buf===engine.opSamples.get(k)));
        return j<0?0:j;},
      set:(o,v)=>{const V=poolView('one');
        const e2=POOL[V[clamp(Math.round(v),0,Math.max(0,V.length-1))]];
        if(!e2){flash('pool is empty — record (esc+tab) or drop audio first');return;}
-       engine.opSamples.set(S.editSnd+':'+S.curSlot,e2.buf);
+       engine.opSamples.set(smpKeyUI(),e2.buf);
+       /* record WHICH take on the slot, so this patch can be saved, loaded on
+          another channel, and still be this sound */
+       if(e2.src&&e2.src.f)o.smp={f:e2.src.f}; else delete o.smp;
        engine.rebuildRack(S.editSnd);}}),'one'),
    /* the CLIP half: crop the take per slot, loop it or fire it once */
    SP('start','sst','lin',{min:0,max:0.98,step:0.01,get:o=>o.sst??0,set:(o,v)=>o.sst=v,
@@ -6593,6 +6646,9 @@ class Voice{
     const p=preOverride||prepEffective(S.presets[pi],midi), ac=AC;
     this.pi=pi; this.midi=midi; this.baseMidi=midi;
     this.pad=padMidi==null?midi:padMidi; this.p=p;
+    /* this voice's sample key — the pad only counts on a KIT channel, and `p`
+       above is already the pad's own rack, so the CHANNEL is what gets asked */
+    this.smpK=(op)=>smpKey(pi,op,isKit(S.presets[pi])?this.pad:null);
     this.released=false; this.killed=false; this.nodes=[]; this.startAt=at;
     this.legato=!!legato;
     /* kill() has to take itself out of the channel's voice list, and `E` is a
@@ -7152,7 +7208,7 @@ class Voice{
          so `sample in op1, sine in op2 set to scan` computed the pairing and
          then silently did nothing, which is exactly what Gad hit. */
       else if(isS&&(scanDriver[0]!==undefined||fmDriver[0]!==undefined)&&fxwReady){
-        const bufR=E.opSamples.get(pi+':0')||E.noiseBuf;
+        const bufR=E.opSamples.get(this.smpK(0))||E.noiseBuf;
         const nscR=new AudioWorkletNode(ac,'ten-scan',{numberOfInputs:1,outputChannelCount:[2]});
         const lR=new Float32Array(bufR.getChannelData(0));
         const rR=bufR.numberOfChannels>1?new Float32Array(bufR.getChannelData(1)):lR;
@@ -7166,7 +7222,7 @@ class Voice{
         /* the crop decides WHICH buffer, so it has to be resolved before the
            assignment — `.buffer` may only be written once */
         const W9=isS?smpWin(E.ovObj(pi,'osc',0,ops[0])):null;
-        const b9=isS?(E.opSamples.get(pi+':0')||E.noiseBuf):E.nbuf(rootW,ops[0].pw);
+        const b9=isS?(E.opSamples.get(this.smpK(0))||E.noiseBuf):E.nbuf(rootW,ops[0].pw);
         src.buffer=(W9&&W9.rev)?E.revBuf(b9):b9;
         src._rev=!!(W9&&W9.rev);
         src.loop=true;pitchParam=src.playbackRate;
@@ -7263,7 +7319,7 @@ class Voice{
              BufferSource at all — a worklet reads wherever the driver says.
              (the buffer crosses the port per note: audition build; a shared
              pool is the follow-up if this earns its keep) */
-          const buf=E.opSamples.get(pi+':'+i)||E.noiseBuf;
+          const buf=E.opSamples.get(this.smpK(i))||E.noiseBuf;
           const nsc=new AudioWorkletNode(ac,'ten-scan',{numberOfInputs:1,outputChannelCount:[2]});
           const sl2=new Float32Array(buf.getChannelData(0));
           const sr3=buf.numberOfChannels>1?new Float32Array(buf.getChannelData(1)):sl2;
@@ -7278,7 +7334,7 @@ class Voice{
         else if(wv===9){                              // sampler op: pitch via playbackRate
           s2=ac.createBufferSource();
           const W9=smpWin(E.ovObj(pi,'osc',i,op));
-          const b9=E.opSamples.get(pi+':'+i)||E.noiseBuf;
+          const b9=E.opSamples.get(this.smpK(i))||E.noiseBuf;
           s2.buffer=W9.rev?E.revBuf(b9):b9; s2.loop=true; s2._rev=W9.rev;
           {const d9=s2.buffer.duration;
            const st9=(W9.rev?1-W9.hi:W9.lo)*d9, en9=(W9.rev?1-W9.lo:W9.hi)*d9;
@@ -9031,6 +9087,7 @@ class Engine{
   }
   /* per-preset bus: voices -> AMP rack -> FX chain -> gain -> pan -> master */
   rebuildRack(pi){
+    applySmpRefs(pi,this);   // a slot that names its take gets handed it — see applySmpRefs
     if(!this._inPrep&&this.prepSig)delete this.prepSig[pi];   // outside edits invalidate note-shaping
     const ac=AC, p=S.presets[pi], b=this.buses[pi];
     const oldRack=b.rack, oldOut=b.rackOut, oldIn=b.rackIn;
@@ -12127,7 +12184,12 @@ function loadShelf(url,ord0){
   }).catch(()=>0);
 }
 loadShelf('samples/manifest.json',0);
-loadShelf('samples/oneshots/manifest.json',1e4);
+loadShelf('samples/oneshots/manifest.json',1e4).then(()=>{
+  /* the manifest has resolved, but the BUFFERS are still landing — give them a
+     moment, then lay the factory sampled kits down. They only need the pool
+     ENTRIES, which arrive with each decode. */
+  setTimeout(()=>{try{const k=libSampleKits(); if(k)dirty=true;}catch(_){}} ,2500);
+});
 setTimeout(()=>seedCloud(true),4000);   // whatever landed, rather than silence
 /* WHERE THE CURSORS ARE. The worklet is the only one who knows — the tape
    voices and the grains live in it — so every audio channel that has a node
@@ -12576,7 +12638,12 @@ function libAll(){
   /* the library holds presets too, so it is written in the same portable form
      — a saved sound must survive a list being reordered exactly as a set does */
   return libCache=((x&&!Array.isArray(x)&&(x.v||0)>=21)
-    ? items.map(en=>en&&en.data?{...en,data:portPreset(en.data,false)}:en)
+    /* UNPACK FIRST, then port. The write is packRacks(portPreset(d,true)) —
+       ported, then packed — so the read has to be its mirror. Running
+       portPreset over packed racks hands it objects where it walks arrays; it
+       threw, libAll caught it, and libAll's catch returns [] — so the whole
+       library read as EMPTY while 787KB of it sat in storage untouched. */
+    ? items.map(en=>en&&en.data?{...en,data:portPreset(unpackRacks(en.data),false)}:en)
     : items);}catch(_){return libCache=[];}}
 /* preset -> its number within its category, which is what the Inst row shows.
    Built once per library change instead of scanned per channel per frame. */
@@ -12590,13 +12657,84 @@ function libNos(){
   }
   return libNoCache=m;
 }
-const LIBV=30;   // bump BOTH: libStore writes it, libAll checks it
+/* ---- THE LIBRARY WAS AT ITS CEILING ----------------------------------
+   Measured, not suspected: the stored library was 2,152,103 bytes and a 1MB
+   test write to localStorage threw QuotaExceededError outright. Adding nine
+   sampled kits needed another 831KB and the setItem simply failed — into the
+   empty catch that has always been there, so the library silently did not
+   change and nothing said a word.
+
+   Almost all of it is nothing. A preset serialises EIGHT RACKS OF TEN SLOTS
+   and hardly any of them are ever touched: one sampled kit measured 92,315
+   bytes, of which 885 of its 1,040 slots were untouched factory defaults.
+   Stored sparsely — an object keyed by index holding only the slots that
+   differ — the same kit is 19,942 bytes. 4.6x, and the whole library comes
+   down with it.
+
+   READ TOLERATES BOTH SHAPES, so nothing has to be migrated: a rack that is
+   still an Array is old and passes straight through, a rack that is an Object
+   is expanded. Nothing outside these two functions ever sees the compact
+   shape, so no other code in the app has to know this happened. */
+/* FUNCTION DECLARATIONS, NOT CONST ARROWS, and that is not a style choice:
+   libInit() runs during module init, long before this line is reached, so as
+   consts these two sat in their own temporal dead zone. Reading one threw, the
+   throw landed in libAll's catch, and libAll returns [] there — the entire
+   preset library came back EMPTY with nothing logged anywhere. Declarations
+   hoist; this is the third time today this same trap has been sprung. */
+/* THE DEFAULT HAS TO BE IN THE SAME REPRESENTATION AS THE DATA. libStore packs
+   what portPreset has already been over, and portPreset rewrites every enum
+   from a number to a name — so comparing a ported slot against the raw
+   RACK_MK default found NOTHING equal and dropped nothing. Measured: a kit
+   went 92,315 -> 79KB, a 1.15x "saving", when the same comparison done right
+   is 4.6x. Built once, through portPreset, and cached. */
+let RACKDEF=null;
+function rackDefaults(){
+  if(RACKDEF)return RACKDEF;
+  const one={};
+  for(const id in RACK_MK)one[id]=[RACK_MK[id]()];
+  const q=portPreset(one,true);
+  RACKDEF={};
+  for(const id in RACK_MK)RACKDEF[id]=JSON.stringify(q[id][0]);
+  return RACKDEF;
+}
+function packRacks(d){
+  if(!d||typeof d!=='object')return d;
+  const D=rackDefaults(), q={...d};
+  for(const id in RACK_MK){
+    if(!Array.isArray(q[id]))continue;
+    const sp={};
+    q[id].forEach((sl,i)=>{if(sl&&JSON.stringify(sl)!==D[id])sp[i]=sl;});
+    q[id]=sp;
+  }
+  if(Array.isArray(q.kit))q.kit=q.kit.map(k=>k?packRacks(k):null);
+  return q;
+}
+function unpackRacks(d){
+  if(!d||typeof d!=='object')return d;
+  const q={...d};
+  for(const id in RACK_MK){
+    const v=q[id];
+    if(!v||Array.isArray(v))continue;                 // absent, or the old full array
+    const arr=[]; for(let i=0;i<10;i++)arr.push(v[i]||RACK_MK[id]());
+    q[id]=arr;
+  }
+  if(Array.isArray(q.kit))q.kit=q.kit.map(k=>k?unpackRacks(k):null);
+  return q;
+}
+const LIBV=31;   // bump BOTH: libStore writes it, libAll checks it
 function libStore(a){libMigrated=true; libCache=null; libNoCache=null;
-  const out=(a||[]).map(en=>en&&en.data?{...en,data:portPreset(en.data,true)}:en);
-  try{localStorage.setItem(LIBKEY,JSON.stringify({v:LIBV,items:out}));}catch(_){} if(typeof prepCache!=='undefined')prepCache.clear();}
+  const out=(a||[]).map(en=>en&&en.data?{...en,data:packRacks(portPreset(en.data,true))}:en);
+  /* AND SAY SO WHEN IT FAILS. This catch was empty, which is how 831KB of
+     kits went missing without a word — a write that cannot happen is a thing
+     the person using it has to be told about. */
+  try{localStorage.setItem(LIBKEY,JSON.stringify({v:LIBV,items:out}));}
+  catch(e){try{flash('the preset library is FULL — '+
+    Math.round(JSON.stringify(out).length/1024)+'KB will not fit in this '+
+    'browser\u2019s storage, so that change was not saved');}catch(_){}
+    console.warn('libStore failed',e);} if(typeof prepCache!=='undefined')prepCache.clear();}
 /* `_gen` is what a ROLL did — its rung, its archetype — and it is diagnostic
    only: dropped here so it never reaches the library or a saved set. */
-function presetData(p){const {modLoop,_gen,...rest}=p;return JSON.parse(JSON.stringify(rest));}
+function presetData(p){const {modLoop,_gen,_smp,...rest}=p;return JSON.parse(JSON.stringify(rest));}
 function mulberry32(a){return function(){let t=a+=0x6D2B79F5;t=Math.imul(t^t>>>15,t|1);
   t^=t+Math.imul(t^t>>>7,t|61);return((t^t>>>14)>>>0)/4294967296;}}
 function libInit(){
@@ -12798,6 +12936,65 @@ function genSpice(p,cat,wild,H){
 const TONEHZ = 440 * Math.pow(2, (48 - 69) / 12);   // 130.81Hz — KBBASE, the home key
 let ARCHNAMES = null;                              // diagnostic only: see genTonal
 
+/* A DRUM CAN BE A RECORDING (Gad, 2026-08-27: "you should def use samples
+   either mixed in with synths or as they are when doing rnd roll on drum
+   types"). There are 250 classic machine hits on the shelf and no amount of
+   modelling gets you a LinnDrum, so a drum roll reaches for one about half the
+   time. Three shapes, and wildness chooses between them:
+
+     as it is   the take, gated so the SAMPLE is the envelope, lightly tuned
+     layered    the take over a synth body — a sine under a kick, noise under a
+                snare — which is how a production drum is actually built, and
+                the only shape that swaps the gate for a drum envelope, because
+                a sine sustaining for two seconds under a kick is not a layer
+     mangled    driven, cropped, sometimes read backwards
+
+   Returns false when the library has not landed and the synth recipes take the
+   roll instead: this must never be the reason a drum is silent. */
+function drumSample(p,cat,rnd,wild,H){
+  const {R,RI,P,pick}=H;
+  const cands=POOL.filter(e=>e&&e.src&&e.src.f&&e.cat===cat&&e.kind!=='loop');
+  if(!cands.length)return false;
+  const e=cands[Math.floor(rnd()*cands.length)];
+  const shape=wild<0.3?'pure'
+    :wild<0.65?(rnd()<0.45&&['kik','snr','tom'].includes(cat)?'layer':'pure')
+    :(rnd()<0.4?'mangle':rnd()<0.6&&['kik','snr','tom'].includes(cat)?'layer':'pure');
+  const smp={wav:9,mode:0,dst:0,rat:1,amt:1,fine:0,ph:0,phm:0,
+             sst:0,sen:1,lps:1,smp:{f:e.src.f}};
+  /* TUNING A SAMPLE MOVES ITS LENGTH TOO, which is what tuning a drum machine
+     has always done — kept inside a fourth either way so a kick stays a kick */
+  if(wild>0.35)smp.rat=pick([1,1,1,0.75,0.84,1.19,1.33]);
+  p.osc[0]=smp;
+  p.flt[0]={typ:0,frq:18000,q:0.7,gn:0};
+  p.vox.mode=1;
+  p.mix={...(MIXT[cat]||MIXT.misc)};
+  p.name=p.name.slice(0,3)+(e.style||'SM').slice(0,2).toUpperCase();
+  if(shape==='layer'){
+    /* a drum envelope, not the gate: it has to shape the body as well */
+    Object.assign(p.env[0],{a:0.0005,d:+R(0.18,0.5).toFixed(3),s:0,r:0.06});
+    const body=cat==='kik'?{wav:0,rat:pick([0.25,0.3,0.35])}
+              :cat==='tom'?{wav:0,rat:pick([0.5,0.6])}
+              :{wav:4,rat:1};
+    p.osc[1]={...body,mode:0,dst:0,amt:+R(0.25,0.6).toFixed(2),fine:0,ph:90,phm:0};
+    if(cat==='kik')p.env[2]={dst:2,idx:2,amt:RI(30,70),a:0.001,d:+R(0.03,0.09).toFixed(3),s:0,r:0.05};
+  }else{
+    /* THE SAMPLE IS THE ENVELOPE. Sustain 1 and a release longer than any
+       sequenced note, so nothing here truncates a 3s cymbal; `lps:1` ends the
+       voice at the end of the take, which is where a one-shot ends. */
+    Object.assign(p.env[0],{a:0.0005,d:0.01,s:1,r:2});
+  }
+  if(shape==='mangle'){
+    p.amp[0]={typ:pick([1,2,4,5,7]),drv:+R(0.25,0.6).toFixed(2),mix:+R(0.35,0.7).toFixed(2),par:0};
+    if(rnd()<0.4)p.osc[0].sen=+R(0.25,0.7).toFixed(2);        // cut it short
+    if(rnd()<0.18)p.osc[0].sen=-1;                            // read it backwards
+    if(rnd()<0.35)p.fx[0]={typ:pick([XDIST,12,8]),p1:+R(0.2,0.5).toFixed(2),
+      p2:+R(0.2,0.5).toFixed(2),p3:5,mix:+R(0.15,0.4).toFixed(2)};
+  }else if(wild>0.45&&P(0.3)){
+    p.amp[0]={typ:pick([4,7]),drv:+R(0.12,0.3).toFixed(2),mix:+R(0.25,0.45).toFixed(2),par:0};
+  }
+  p._smp=shape+':'+e.name;
+  return e;
+}
 function genTonal(p, cat, wild, H, force) {
   const { R, RI, P, pick, rnd } = H;
   const rung = wild < 0.25 ? 0 : wild < 0.55 ? 1 : wild < 0.8 ? 2 : 3;
@@ -13246,13 +13443,31 @@ function genPreset(cat,rnd,wild=0.5,force){
         p.mix.lvl=+R(0.32,0.45).toFixed(2);
       }
       if(p.mix.lvl===0.8)p.mix.lvl=+R(0.35,0.52).toFixed(2);},
-    cymb:()=>{p.osc[0].wav=pick([4,8]);
-      p.osc[1]={wav:8,mode:pick([0,2]),dst:0,rat:+R(3,7).toFixed(2),amt:0.5,fine:RI(-30,30),ph:0,phm:1};
+    /* A RING-MODULATED METAL WAVE UNDER A HIGH HIGHPASS IS THE QUIET CASE.
+       Measured, ten synth cymbals at wild 60%: four came out at peak 0.025 to
+       0.058 against 0.15 to 0.19 for the rest — a 3x gap with every mix level
+       inside 0.38..0.47, so it was never the fader. Ring modulation moves the
+       energy to sum and difference frequencies and then a highpass at 7kHz
+       takes what is left; add is the safer pairing and the highpass sits lower
+       now, with the level lifted to match. */
+    cymb:()=>{p.osc[0].wav=pick([4,4,8]);
+      p.osc[1]={wav:8,mode:pick([0,0,0,2]),dst:0,rat:+R(3,7).toFixed(2),amt:0.5,fine:RI(-30,30),ph:0,phm:1};
       Object.assign(p.env[0],{a:0.001,d:R(0.5,1.6),s:0,r:R(0.3,0.9)});
-      p.flt[0]={typ:2,frq:RI(4000,8000),q:0.8,gn:0}; p.mix.lvl=+R(0.32,0.48).toFixed(2);},
-    perc:()=>{p.osc[0].wav=pick([0,1,4,6]);
+      p.flt[0]={typ:2,frq:RI(2500,6000),q:0.8,gn:0}; p.mix.lvl=+R(0.42,0.6).toFixed(2);},
+    perc:()=>{const pw=pick([0,1,4,6]); p.osc[0].wav=pw;
       Object.assign(p.env[0],{a:0.001,d:R(0.05,0.2),s:0,r:0.06});
-      p.flt[0]={typ:pick([1,3]),frq:RI(800,4000),q:+R(1,6).toFixed(1),gn:0};
+      /* A BANDPASS ONLY EVER GOES WHERE THE TONE IS — the rule the kicks, the
+         snares and the hats all keep, and the one recipe it was never applied
+         to. Measured, ten perc rolls at wild 60%: EVERY dud was a synth perc
+         with a bandpass at 2.4-3.6kHz over a root near 130Hz — PIS9 at peak
+         0.005, VAM2 0.062, VOD8 0.034 — while every SAMPLED perc in the same
+         run measured 0.26 to 0.44. Noise has no fundamental, so a bandpass on
+         it is how you tune it and it stays; a tonal root gets a lowpass placed
+         above its note instead. */
+      p.flt[0]=isNoiseW(pw)
+        ?{typ:3,frq:RI(800,4000),q:+R(1,6).toFixed(1),gn:0}
+        :{typ:1,frq:Math.round(clamp(TONEHZ*(p.osc[0].rat||1)*R(4,20),300,16000)),
+          q:+R(0.8,2).toFixed(1),gn:0};
       if(P(0.4))p.env[2]={dst:2,idx:1,amt:RI(-60,80),a:0.001,d:0.05,s:0,r:0.05};
       p.mix.lvl=+R(0.55,0.75).toFixed(2);},
     tom:()=>{
@@ -13311,6 +13526,18 @@ function genPreset(cat,rnd,wild=0.5,force){
   };
   DRGEN.drum=DRGEN.perc;   // legacy cat
   if(DRGEN[cat]){
+    /* THE SHELF FIRST, about half the time — see drumSample. It answers false
+       when the library has not landed, and then the synth recipes below take
+       the roll exactly as they always did. */
+    const useSmp=rnd()<(cat==='zap'?0.2:0.5)&&drumSample(p,cat,rnd,wild,{R,RI,P,pick});
+    if(useSmp){
+      p.vox.mode=1;
+      foldMod(p);
+      p._addr=false; addrMod(p);
+      p._gen={smp:p._smp};
+      if(DRUMCATS.includes(cat))drumUp(p);
+      return p;
+    }
     DRGEN[cat]();
     if(P(0.25)&&!p.amp[0].typ)p.amp[0]={typ:RI(1,9),drv:+R(0.1,0.2+0.4*wild).toFixed(2),mix:+R(0.2,0.5).toFixed(2),par:0};
     if(wild>0.45&&P(0.3)&&!p.fx[0].typ){const xt=pick([XDIST,8,12]);
@@ -14285,6 +14512,105 @@ function drumCatOf(d){        // guess a subtype for a legacy 'drum' preset
   if(isNoiseW(o.wav))return (a0.d||0.2)<0.06?'hh':'snr';
   if(pd)return 'tom';
   return 'perc';
+}
+/* ---- SAMPLED KITS, BUILT FROM THE ONE-SHOT LIBRARY --------------------
+   The twelve pads in the order a drum machine lays them out, each with the
+   fallbacks that keep a pad USEFUL when a given machine never had that voice:
+   the CR-78 has no clap, the Maestro Rhythm King has no cowbell, and a kit
+   with holes in it is worse than a kit that borrows. First entry is what the
+   pad wants; the rest are what it will settle for, nearest first. */
+const KITMAP=[
+  {inst:'kick',      cat:'kik',  alt:['sub']},
+  {inst:'snare',     cat:'snr',  alt:['clap','rim']},
+  {inst:'hat-closed',cat:'hh',   alt:['shaker','hat-open']},
+  {inst:'hat-open',  cat:'hh',   alt:['cymbal','hat-closed']},
+  {inst:'clap',      cat:'snr',  alt:['snare','rim']},
+  {inst:'tom',       cat:'tom',  alt:['conga','timbale']},
+  {inst:'rim',       cat:'snr',  alt:['clave','wood','clap']},
+  {inst:'cymbal',    cat:'cymb', alt:['ride','hat-open']},
+  {inst:'cowbell',   cat:'perc', alt:['clave','wood','bongo']},
+  {inst:'conga',     cat:'perc', alt:['bongo','timbale','tom']},
+  {inst:'shaker',    cat:'perc', alt:['perc','hat-closed']},
+  {inst:'clave',     cat:'wood', alt:['wood','rim','perc']},
+];
+/* ONE SAMPLED PAD. The envelope is deliberately a GATE and not a shape: the
+   sample already has an attack and a decay, and putting a second one over it
+   is how a sampled kick ends up sounding like a synth kick. So sustain 1, and
+   a release long enough that a sequenced note of 0.15s cannot truncate a 3s
+   cymbal — `lps:1` (play once) is what actually ends the voice, at the end of
+   the take, which is where a one-shot ends.
+   Poly, not mono: twelve pads share one channel, and mono here would have a
+   hat cutting off a kick. */
+function smpPad(nm,cat,e){
+  const kp=basePreset(nm); kp.cat=cat; delete kp.kit;
+  kp.osc[0]={wav:9,mode:0,dst:0,rat:1,amt:1,fine:0,ph:0,phm:0,
+             sst:0,sen:1,lps:1,smp:{f:e.src.f}};
+  Object.assign(kp.env[0],{a:0.0005,d:0.01,s:1,r:2});
+  kp.flt[0]={typ:0,frq:18000,q:0.7,gn:0};
+  kp.vox.mode=0;
+  kp.mix={...(MIXT[cat]||MIXT.misc)};
+  return kp;
+}
+/* Pick a take for one pad: this machine's own voice first, a near-enough voice
+   from the same machine next, and only then anybody's. `rnd` chooses among
+   equals so two 808 kits are not the same 808 kit. */
+function kitPick(style,slot,rnd){
+  const pool=POOL.filter(e=>e&&e.src&&e.src.f&&e.inst);
+  const tryOne=(inst,st)=>{
+    const c=pool.filter(e=>e.inst===inst&&(!st||e.style===st));
+    return c.length?c[Math.floor(rnd()*c.length)]:null;
+  };
+  for(const inst of [slot.inst,...slot.alt]){const e=tryOne(inst,style); if(e)return e;}
+  for(const inst of [slot.inst,...slot.alt]){const e=tryOne(inst,null);  if(e)return e;}
+  return null;
+}
+/* A WHOLE KIT. `style` names a machine, or is null for a kit drawn from the
+   lot — which is the one people actually reach for, and the reason the pick is
+   per pad rather than per kit. Returns null when the library has not landed
+   yet; the caller decides whether to wait. */
+function sampleKit(style,rnd){
+  rnd=rnd||Math.random;
+  const pads=KITMAP.map((slot,i)=>{
+    const e=kitPick(style,slot,rnd);
+    return e?smpPad(NN[i],slot.cat,e):null;
+  });
+  return pads.every(x=>!x)?null:pads.map((k,i)=>k||smpPad(NN[i],KITMAP[i].cat,
+    POOL.find(e=>e&&e.src&&e.src.f)||{src:{f:''}}));
+}
+/* THE FACTORY SAMPLED KITS. These cannot be laid down by libInit(): it runs at
+   boot and the one-shot shelf arrives over the network a moment later, so at
+   libInit time there is nothing to build a kit OUT of. They are added once the
+   shelf lands instead, idempotently — a kit already in the library is left
+   exactly as it is, so anything edited stays edited. */
+/* NAMES ON THE `KT` PREFIX, like the synth kits already there — and that is a
+   correction, not a style choice: the first pass called the 808 kit `K808` and
+   the library ALREADY had a factory KICK named K808, beside S808 and H808. The
+   duplicate-name guard did its job and skipped it silently, and the kit simply
+   never appeared. Every name here is five characters and begins KT, where a
+   drum preset cannot reach. */
+const SMPKITS=[['tr808','KT808'],['tr8','KTTR8'],['linn','KTLIN'],['cr78','KTC78'],
+               ['tr505','KT505'],['rx5','KTRX5'],['dr5','KTDR5'],['mrk2','KTMRK'],
+               ['lofi','KTLOF'],[null,'KTMX1'],[null,'KTMX2']];
+let smpKitsLaid=false;
+function libSampleKits(){
+  if(smpKitsLaid||!POOL.some(e=>e&&e.inst))return false;
+  const have=new Set(libAll().map(en=>en&&en.name));
+  const add=[];
+  SMPKITS.forEach(([style,nm],ki)=>{
+    if(have.has(nm))return;
+    if(style&&!POOL.some(e=>e&&e.style===style))return;      // that machine was pruned away
+    const pads=sampleKit(style,mulberry32(9000+ki*77));
+    if(!pads)return;
+    const p=basePreset(nm); p.cat='kit';
+    Object.assign(p.osc[0],{wav:0,rat:0.5});
+    Object.assign(p.env[0],{a:0.001,d:0.25,s:0,r:0.05});
+    p.vox.mode=1; p.kit=pads;
+    add.push({name:nm,cat:'kit',factory:true,data:presetData(p)});
+  });
+  if(!add.length){smpKitsLaid=true; return false;}
+  libStore(libAll().concat(add));
+  smpKitsLaid=true;
+  return add.length;
 }
 function kitPads(rnd,wild){    // 12 complete pad chains, one per pitch class
   const lanes=['kik','snr','hh','hh','perc','tom','cymb','wood','zap','perc','snr','kik'];
@@ -17340,7 +17666,7 @@ let POOLORD=1e6;                     // session takes sort after every manifest 
 function poolAdd(buf,name,src,hint){
   if(!buf)return -1;
   const i=POOL.findIndex(p2=>p2.buf===buf);
-  if(i>=0){if(src&&!POOL[i].src)POOL[i].src=src; return i;}
+  if(i>=0){if(src&&!POOL[i].src){POOL[i].src=src; if(src.f)POOLBYF.set(src.f,POOL[i]);} return i;}
   if(POOL.length>=POOLMAX){
     const k=POOL.findIndex(p2=>!p2.src||p2.src.k!=='f');
     POOL.splice(k<0?0:k,1);
@@ -17352,7 +17678,13 @@ function poolAdd(buf,name,src,hint){
        MACHINE it came out of — see tools/build_oneshots.py */
     inst:(hint&&hint.inst)||null, style:(hint&&hint.style)||null,
     cat:(hint&&hint.cat)||null});
+  const added=POOL[POOL.length-1];
+  if(added.src&&added.src.f)POOLBYF.set(added.src.f,added);
   POOLVER++;
+  /* A PRESET APPLIED IN THE FIRST SECOND NAMES TAKES THAT HAVE NOT LANDED YET
+     — the library loads asynchronously — so every arrival re-offers itself to
+     whatever is still waiting. The flag keeps this free once nothing is. */
+  if(SMPWAIT){SMPWAIT=false; try{for(const ci of CHANS())applySmpRefs(ci);}catch(_){}}
   return POOL.length-1;
 }
 /* A FACTORY REFERENCE IS NOW A PATH, not a bare filename — the one-shot shelf
@@ -17402,8 +17734,11 @@ function smpDec(o){
 function opSmpSave(noAudio){
   const blobs={}, at={}, holes=[]; let spent=0, id=0;
   const seen=new Map();
-  for(let pi=0;pi<10;pi++)for(let i=0;i<10;i++){
-    const buf=engine.opSamples.get(pi+':'+i); if(!buf)continue;
+  /* walk the MAP rather than a 10x10 grid of assumed keys: a kit's keys carry
+     a pad now (see smpKey) and a nested loop cannot guess them */
+  for(const [smpk,buf] of engine.opSamples){
+    if(!buf)continue;
+    const pi=+String(smpk).split(':')[0], i=+String(smpk).split(':').pop();
     const e=POOL.find(p2=>p2.buf===buf);
     const nm=(e&&e.name)||'take', src=(e&&e.src)||{k:'r'};
     let k=seen.get(buf);
@@ -17426,7 +17761,7 @@ function opSmpSave(noAudio){
       }
       seen.set(buf,k);
     }
-    at[pi+':'+i]=k;
+    at[smpk]=k;          // the KEY AS IT IS, pad and all — never rebuilt from pi+i
   }
   return {smp:blobs,osmp:at,_holes:holes,_bytes:spent};
 }
@@ -24526,7 +24861,7 @@ document.addEventListener('drop',e=>{
     f.arrayBuffer().then(ab=>AC.decodeAudioData(ab)).then(buf=>{
       poolAdd(buf,f.name.replace(/\.[^.]+$/,''),{k:'d',f:f.name});
       if(S.layer>=3&&MODULES[S.curMod]&&MODULES[S.curMod].id==='osc'&&!isAudioCh(S.editSnd)){
-        engine.opSamples.set(S.editSnd+':'+S.curSlot,buf);
+        engine.opSamples.set(smpKeyUI(),buf);
         S.presets[S.editSnd].osc[S.curSlot].wav=WAVES.indexOf('smp');
         flash('sample → op '+((S.curSlot+1)%10)+' · '+f.name.slice(0,20));
       }else if(dropAlt||isGranCh(S.layer>=2?S.editSnd:S.curPreset)){
