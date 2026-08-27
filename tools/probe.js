@@ -2803,22 +2803,25 @@ async function probeSmpKit() {
   return { cols: ['take', 'wired', 'dur', 'peak', 'centroid'], rows };
 }
 
-/* ---------------- pwm: is a width sweep SMOOTH, or a string of clicks? ---
- * The ear calls it "crackly"; the honest number is EXTRA EDGES. A pulse wave
- * of any duty crosses zero exactly twice per cycle — that is what a pulse IS.
- * Move the width continuously and it still crosses twice: the edge simply
- * arrives earlier or later. Move it in STEPS and every step whose jump lands
- * on top of the running phase flips the output where no edge belongs, and
- * then flips back at the real edge — an extra PAIR of crossings, which is
- * exactly the click you hear.
+/* ---------------- pwm: is the width a real width, and does it move smoothly ---
+ * Two questions, and they are not the same one.
  *
- * So the probe counts crossings (Schmitt, ±25% of peak) over a static window
- * to learn the note's own period, then over a modulated window, and reports
- * the excess. Zero excess = the sweep is smooth. It is self-calibrating: no
- * probe ever has to know what frequency the operator landed on.
+ * IS IT A WIDTH? A pulse of duty d has EVERY harmonic — |b_k| = 4/(pi k)
+ * |sin(pi k d)| — and that is what makes the edge sit anywhere other than
+ * halfway. A square has only the ODD ones. So h2/h1 at d=0.25 is the whole
+ * test: theory says 0.71, and a build that can only RESCALE the square's own
+ * harmonics can never make it anything but 0, because zero times anything is
+ * zero. That build has no width; it has a comb filter on a square.
+ *
+ * DOES IT MOVE SMOOTHLY? A pulse crosses zero exactly twice per cycle, always.
+ * Move the width continuously and it still crosses twice — the edge simply
+ * arrives earlier or later. Move it in STEPS and every step that lands on top
+ * of the running phase flips the output where no edge belongs and then flips
+ * back at the real one: an extra PAIR of crossings, which is the click. So the
+ * excess over 2-per-cycle IS the click rate, and smooth means zero.
  *
  *     tools/probe.sh pwm ch=8 wav=3 rate=2 amt=70
- *     tools/probe.sh pwm --ab https://gadbaruch.github.io/Ten/                */
+ *     tools/probe.sh pwm --ab http://localhost:3032/                            */
 async function probePwm() {
   const ch = CH === 9 ? 8 : CH;
   const WAV = Math.round(num(P.wav, 3));
@@ -2838,13 +2841,15 @@ async function probePwm() {
     p.cat = 'keys';
     p.osc = rack(mkOsc);
     p.osc[0] = { wav: WAV, mode: 0, dst: 0, rat: 1, amt: 1, fine: 0, ph: 0, phm: 0, pw: 0.5 };
-    p.flt = rack(mkFlt); p.flt[0].typ = 0;
+    p.flt = rack(mkFlt); p.flt[0].typ = 0;      // nothing between the operator and the bus
     p.fx = rack(mkFx);
     p.env = rack(mkEnv);
     p.env[0] = { dst: 1, idx: 0, amt: 100, a: 0.004, d: 0.02, s: 1, r: 0.05, crv: 0 };
     p.mod = rack(mkMod);
     p.mix.lvl = 1; p.mix.pan = 0;
     (modHolder(p, 'vox').vox || (p.vox = {})).fmw = FMW;
+    /* the LFO, wired the way the picker wires one: an ADDRESS, which is the
+       only shape modTick's ctrl path reads */
     p.mod[0] = Object.assign(mkMod(0), {
       src: 2, wav: 0, rate: RATE, syn: 0, ltr: 0, ph: 0, off: true,
       routes: [{ dst: 0, idx: 0, amt: AMT, tgt: null,
@@ -2854,6 +2859,8 @@ async function probePwm() {
     if (!resolveDest(p, p.mod[0].routes[0].addr).length)
       return { cols: [], rows: [], err: 'the pw route does not resolve on this build' };
 
+    /* witness the width itself — a smooth reading means nothing until we know
+       the modulator actually reached pw */
     const seen = [];
     realPw = engine.pwLive.bind(engine);
     engine.pwLive = function (pi2, si2, v2) {
@@ -2864,7 +2871,7 @@ async function probePwm() {
       engine.allOff(); await sleep(80);
       const bus = busOf(ch); if (!bus) return null;
       engine.noteOn(AC.currentTime + 0.02, ch, NOTE, VEL);
-      await sleep(140);
+      await sleep(140);                       // past the attack and the first ticks
       seen.length = 0;
       const t = tap(bus);
       await sleep(ms);
@@ -2875,66 +2882,180 @@ async function probePwm() {
       engine.allOff(); await sleep(50);
       return L;
     };
-    /* magnitude of harmonics 1..H, from a Hann-windowed FFT, peak-picked in a
-       +/-3 bin neighbourhood so a few cents of drift cannot miss one */
-    const harms = (x, f0, H) => {
-      const N = 16384;
-      if (x.length < N) return null;
-      const o = Math.round((x.length - N) / 2);
-      const re = new Float64Array(N), im = new Float64Array(N);
-      for (let i = 0; i < N; i++)
-        re[i] = x[o + i] * (0.5 - 0.5 * Math.cos(2 * Math.PI * i / N));
-      fft(re, im);
-      const bhz = sr / N, out = [];
-      for (let k = 1; k <= H; k++) {
-        const c = Math.round(k * f0 / bhz);
-        let m = 0;
-        for (let b = c - 3; b <= c + 3; b++)
-          m = Math.max(m, Math.sqrt(re[b] * re[b] + im[b] * im[b]));
-        out.push(m);
+    /* HARMONICS BY GOERTZEL, NOT BY BIN. A 16384-point FFT is 2.7Hz per bin and
+       a 129Hz note lands between bins, so a Hann peak-pick scallops by up to
+       1.4dB and the +/-3 bin search walks onto a neighbour at high k. Summing
+       x[n]e^-i2.pi.k.f0.n/sr against a Hann taper reads the amplitude AT the
+       frequency asked for, whatever the bin grid happens to be. */
+    const goertz = (x, hz, o, N) => {
+      let re = 0, im = 0;
+      const w = 2 * Math.PI * hz / sr;
+      for (let n = 0; n < N; n++) {
+        const win = 0.5 - 0.5 * Math.cos(2 * Math.PI * n / N), v = x[o + n] * win;
+        re += v * Math.cos(w * n); im -= v * Math.sin(w * n);
       }
+      return 2 * Math.sqrt(re * re + im * im) / N / 0.5;   // 0.5 = Hann coherent gain
+    };
+    /* and f0 refined until harmonic 1 is loudest — a crossing count is only
+       good to a fraction of a cycle, and 1% of f0 times k=6 is a whole bin */
+    const refine = (x, f0, o, N) => {
+      let best = f0, bm = -1;
+      for (let q = -30; q <= 30; q++) {
+        const f2 = f0 * (1 + q * 0.001), m = goertz(x, f2, o, N);
+        if (m > bm) { bm = m; best = f2; }
+      }
+      return best;
+    };
+    const harms = (x, f0, H) => {
+      const N = Math.min(16384, x.length - 1);
+      if (N < 4096) return null;
+      const o = Math.round((x.length - N) / 2);
+      const ff = refine(x, f0, o, N), out = [];
+      for (let k = 1; k <= H; k++) out.push(goertz(x, k * ff, o, N));
+      out.f = ff;
       return out;
     };
-    /* what a REAL pulse of duty d has: |b_k| = (4/pi k)|sin(pi k d)| */
+    /* THE DUTY THE WAVE ACTUALLY HAS: the falling edge's place between two
+       rising ones, median over every cycle in the window. No spectrum and no
+       assumptions — this is the number the whole ask is about. */
+    /* the whole duty series, not just its median — a sweep that never moves and
+       a sweep that moves smoothly BOTH show zero excess edges, and only the
+       span tells them apart. A phase-engine operator whose table message never
+       lands reads perfectly smooth because it is perfectly still. */
+    const dutySeries = (x, per) => {
+      const e = edges(x, per), d = [];
+      for (let i = 0; i + 1 < e.rise.length; i++) {
+        const f2 = e.fall.find(v => v > e.rise[i] && v < e.rise[i + 1]);
+        if (f2 !== undefined) d.push((f2 - e.rise[i]) / (e.rise[i + 1] - e.rise[i]));
+      }
+      return d;
+    };
+    const dutyOf = (x, per) => {
+      const d = dutySeries(x, per).slice().sort((a, b) => a - b);
+      return d.length ? d[d.length >> 1] : null;
+    };
+    const dutySpan = (x, per) => {
+      const d = dutySeries(x, per).slice().sort((a, b) => a - b);
+      if (d.length < 8) return null;
+      return { lo: +d[Math.round(0.05 * (d.length - 1))].toFixed(3),
+               hi: +d[Math.round(0.95 * (d.length - 1))].toFixed(3) };
+    };
     const theory = (d, H) => { const o = [];
       for (let k = 1; k <= H; k++) o.push(4 / (Math.PI * k) * Math.abs(Math.sin(Math.PI * k * d)));
       return o; };
+    /* Schmitt crossings — hysteresis at a quarter of peak, so band-limit
+       ringing around an edge cannot be counted as one */
+    /* THE SPLIT IS THE MIDPOINT BETWEEN THE TWO LEVELS, NOT ZERO — and getting
+       that wrong cost a whole round of numbers. A pulse carries no DC through a
+       PeriodicWave, so at duty 0.15 it sits at +1.7 for 15% of the cycle and
+       -0.3 for the other 85%: a threshold at a quarter of PEAK is +/-0.42, the
+       low level never reaches -0.42, and the detector simply stops finding
+       falling edges. Duty then read 0.486 for a 0.15 pulse and went
+       NON-MONOTONIC, which is the tell. Split at (hi+lo)/2 with hysteresis
+       scaled to the span and every duty reads alike. */
+    const levels = x => {
+      const srt = Array.from(x).sort((a, b) => a - b), n = srt.length;
+      const lo = srt[Math.round(0.02 * (n - 1))], hi = srt[Math.round(0.98 * (n - 1))];
+      return { lo, hi, mid: (hi + lo) / 2, h: 0.18 * (hi - lo) };
+    };
+    /* ...AND THE SPLIT HAS TO FOLLOW A MOVING WIDTH. Those two levels are
+       1-2d apart from the mean, so a sweep from 0.185 to 0.815 walks the
+       midpoint from +0.63 to -0.63: one split for the whole window counts the
+       wrong things at both ends, which is why the excess came out -65/s.
+       Local max/min over a couple of cycles tracks it. */
+    const edges = (x, per) => {
+      const n = x.length, L = levels(x);
+      const pk = Math.max(Math.abs(L.hi), Math.abs(L.lo));
+      if (L.hi - L.lo < 1e-4) return { pk: 0, n: 0, rise: [], fall: [] };
+      const W = per ? Math.max(8, Math.round(per * 2)) : 0;
+      let st = 0, cnt = 0; const rise = [], fall = [];
+      let mid = L.mid, h = L.h, next = 0;
+      for (let i = 0; i < n; i++) {
+        if (W && i >= next) {                       // re-read the levels each window
+          let mx = -1e9, mn = 1e9;
+          for (let q = Math.max(0, i - (W >> 1)); q < Math.min(n, i + W); q++) {
+            if (x[q] > mx) mx = x[q];
+            if (x[q] < mn) mn = x[q];
+          }
+          if (mx - mn > 1e-4) { mid = (mx + mn) / 2; h = 0.18 * (mx - mn); }
+          next = i + (W >> 2);
+        }
+        if (st <= 0 && x[i] > mid + h) { if (st) cnt++; rise.push(i); st = 1; }
+        else if (st >= 0 && x[i] < mid - h) { if (st) { cnt++; fall.push(i); } st = -1; }
+      }
+      return { pk, n: cnt, rise, fall };
+    };
+    /* f0 FROM THE FIRST AND LAST RISING EDGE, not from a count over the window.
+       A count divided by the window length is wrong by whatever fraction of a
+       cycle hangs off each end — it read 128.1 on a 130.5Hz note, and 2% times
+       harmonic 3 walks clean off the bin the FFT was sent to look at. Whole
+       cycles between two rising edges is exact. */
+    const f0Of = e => (e.rise.length > 4)
+      ? (e.rise.length - 1) / ((e.rise[e.rise.length - 1] - e.rise[0]) / sr) : 0;
 
-    /* ---- the ruler: one static note, to learn f0 ---- */
-    const A0 = await grab(350);
+    /* ---- the ruler: one static note at 0.5, to learn f0 ---- */
+    const A0 = await grab(480);
     if (!A0) return { cols: [], rows: [], err: 'no bus' };
-    const w0 = { o: 0, take: Math.min(NFFT, A0.length) };
-    const f = spectral(A0, A0, sr, w0.o, w0.take).hz;
-    if (!(f > 20)) return { cols: [], rows: [], err: 'silent' };
+    /* THE RULER IS THE CROSSING COUNT, not an FFT bin. At 2.7Hz per bin a peak
+       pick is 1% out on a 130Hz note, and 1% times harmonic 6 walks clean off
+       the harmonic it was sent to look at. A square crosses zero exactly twice
+       per cycle, so counting them over a known window is exact. */
+    const e0 = edges(A0);
+    const f = f0Of(e0);
+    if (!(f > 20)) return { cols: [], rows: [], err: 'silent, peak ' + r3(e0.pk) };
 
-    /* ---- IS THE WIDTH A REAL WIDTH? Static, one row per duty. --------
-       A pulse of duty d has EVERY harmonic, odd and even. A square has only
-       the odd ones. So h2/h1 at d=0.25 is the whole question: theory says
-       0.71, and a build that only ever RESCALES the square's own harmonics
-       can never make it anything but 0. */
+    /* ---- IS IT A WIDTH? one static row per duty ---- */
     const H = 6;
     for (const d of [0.5, 0.35, 0.25, 0.15]) {
       p.osc[0].pw = d;
       engine.rebuildRack(ch); engine.refresh(ch);
-      const x = await grab(350);
+      const x = await grab(480);
       const hm = harms(x, f, H), th = theory(d, H);
       const rel = hm ? hm.map(v => v / (hm[0] || 1)) : [];
       const rth = th.map(v => v / (th[0] || 1));
-      const row = { k: 'pw ' + d.toFixed(2), hz: r3(f) };
-      for (let k = 2; k <= 4; k++) row['h' + k] = r3(rel[k - 1]);
-      for (let k = 2; k <= 4; k++) row['want h' + k] = r3(rth[k - 1]);
+      const row = { k: 'static pw ' + d.toFixed(2), hz: r3(hm && hm.f || f),
+                    duty: r3(dutyOf(x, 0)), asked: d };
+      for (let k = 2; k <= 3; k++) { row['h' + k] = r3(rel[k - 1]); row['want' + k] = r3(rth[k - 1]); }
       rows.push(row);
     }
+
+    /* ---- DOES IT MOVE SMOOTHLY? static first, as the floor ---- */
     p.osc[0].pw = 0.5;
     engine.rebuildRack(ch); engine.refresh(ch);
+    const A = await grab(450);
+    p.mod[0].off = false;
+    const B = await grab(700);
+    const ea = edges(A, 0), eb = edges(B, sr / f);
+    /* how many crossings a pulse MUST have over the same span: two per cycle,
+       counted between the first and last rising edge so no partial cycle is
+       charged to the total */
+    const per = (z, e) => (e.rise.length > 4)
+      ? 2 * f * (e.rise[e.rise.length - 1] - e.rise[0]) / sr + 1 : 2 * f * (z.length / sr);
+    const spanA = (ea.rise[ea.rise.length - 1] - ea.rise[0]) / sr;
+    const spanB = (eb.rise[eb.rise.length - 1] - eb.rise[0]) / sr;
+    const nA = ea.rise.length * 2 - 1, nB = eb.rise.length * 2 - 1;
+    rows.push({ k: 'sweep OFF (the floor)', hz: r3(f), h2: r3(ea.pk),
+                want2: nA, h3: Math.round(per(A, ea)),
+                want3: +((nA - per(A, ea)) / spanA).toFixed(1) });
+    rows.push({ k: 'sweep ON  ' + RATE + 'Hz depth ' + AMT, hz: r3(f), h2: r3(eb.pk),
+                want2: nB, h3: Math.round(per(B, eb)),
+                want3: +((nB - per(B, eb)) / spanB).toFixed(1),
+                h4: B._calls, want4: r3(B._lo) + '..' + r3(B._hi),
+                duty: (sp => sp ? sp.lo + '..' + sp.hi : '?')(dutySpan(B, sr / f)),
+                asked: r3(B._lo) + '..' + r3(B._hi) });
+    p.mod[0].off = true;
   } finally {
     if (typeof realPw === 'function') engine.pwLive = realPw;
     for (const m of mutes) try { m(); } catch (_) {}
     unstash(ch, keep);
   }
-  notes.push('h2 = the 2nd harmonic against the 1st. A pulse of duty d has one; a square does not. ' +
-             'Measured 0 where "want" is not 0 means the width is not a width.');
-  return { cols: ['hz', 'h2', 'want h2', 'h3', 'want h3', 'h4', 'want h4'], rows };
+  notes.push('STATIC rows: h2/h3/h4 against "want". A pulse of duty d has every harmonic; ' +
+             'a square has only the odd ones. h2 reading 0 where want2 is not 0 means the ' +
+             'width is not a width — the even harmonics were never created.');
+  notes.push('SWEEP rows: h2=peak, want2=crossings counted, h3=crossings a pulse must have ' +
+             '(2 per cycle), want3=EXCESS PER SECOND. That excess is the click rate. ' +
+             'Smooth = 0. h4/want4 = pwLive calls and the width range they carried.');
+  return { cols: ['hz', 'duty', 'asked', 'h2', 'want2', 'h3', 'want3', 'h4', 'want4'], rows };
 }
 
 /* ---------------- kitoct: does a kit pad move with the octave -----------

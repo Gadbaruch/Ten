@@ -462,14 +462,28 @@ const fmHarm=(E,op,f)=>{
   try{harm=(E.harmonics(wv)||[]).slice();}catch(_){harm=[1];}
   if(!harm.length)harm=[1];
   const dw=clamp((op&&op.pw)===undefined?0.5:op.pw,0.05,0.95);
-  if(Math.abs(dw-0.5)>=0.005)harm=harm.map((v2,q)=>{
-    const kk=q+1, ref=Math.sin(kk*Math.PI/2);
-    return v2*(Math.abs(ref)<1e-6?Math.sin(kk*Math.PI*dw)
-                                 :Math.sin(kk*Math.PI*dw)/ref);
-  });
+  /* A SINE SERIES CANNOT BE A PULSE, which is why this needed a second array.
+     fmTable sums harm[k] times sin(k.theta); a pulse of duty d is only odd
+     about the origin when d is 0.5, so at any other width it has a COSINE half
+     and the table had nowhere to put it. Same arithmetic as setWave: the
+     square gets its own Fourier pair, with the even harmonics MADE rather than
+     scaled — the old map multiplied a square's even coefficients, and those
+     are zero — while every other wave keeps the weighting it had. */
+  let harc=null;
+  if(Math.abs(dw-0.5)>=0.005){
+    if(wv===3){
+      harc=harm.map((_,q)=>{const kk=q+1; return 2/(Math.PI*kk)*Math.sin(2*Math.PI*kk*dw);});
+      harm=harm.map((_,q)=>{const kk=q+1; return 2/(Math.PI*kk)*(1-Math.cos(2*Math.PI*kk*dw));});
+    }else harm=harm.map((v2,q)=>{
+      const kk=q+1, ref=Math.sin(kk*Math.PI/2);
+      return v2*(Math.abs(ref)<1e-6?Math.sin(kk*Math.PI*dw)
+                                   :Math.sin(kk*Math.PI*dw)/ref);
+    });
+  }
   const lim=Math.max(1,Math.floor(AC.sampleRate*0.45/Math.max(1,f)));
   const H=Math.max(1,Math.min(harm.length,Math.pow(2,Math.floor(Math.log2(lim)))));
-  return {key:wv+'_'+H+'_'+Math.round(dw*40), harm:harm.slice(0,H)};
+  return {key:wv+'_'+H+'_'+Math.round(dw*40), harm:harm.slice(0,H),
+          harc:harc?harc.slice(0,H):null};
 };
 const MODLOG=new Set(['freq','time']);                 // these modulate in cents
 const MODTAPER=a=>{const x=clamp(a/100,-1,1); return Math.sign(x)*x*x;};
@@ -1245,7 +1259,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-27.1408';
+const BUILD='2026-08-27.1505';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -5621,15 +5635,19 @@ let fxwReady=false;
      exactly what "advanced waves lost their character" was. Same recipe as
      setWave uses now, pulse width already folded in by the caller, so the two
      engines draw the same wave. */
-  function fmTable(key,harm,H){
+  function fmTable(key,harm,harc,H){
     var t=FMCACHE[key];
     if(t)return t;
     t=new Float32Array(FMTL);
     var lim=Math.min(H,harm.length);
     for(var n=1;n<=lim;n++){
-      var a=harm[n-1];
-      if(!a)continue;
-      for(var k=0;k<FMTL;k++)t[k]+=a*Math.sin(2*Math.PI*n*k/FMTL);
+      var a=harm[n-1], c=harc?harc[n-1]:0;
+      if(!a&&!c)continue;
+      for(var k=0;k<FMTL;k++){
+        var th=2*Math.PI*n*k/FMTL;
+        if(a)t[k]+=a*Math.sin(th);
+        if(c)t[k]+=c*Math.cos(th);
+      }
     }
     var pk=0; for(var q=0;q<FMTL;q++){var v=t[q]<0?-t[q]:t[q]; if(v>pk)pk=v;}
     if(pk>0)for(var q2=0;q2<FMTL;q2++)t[q2]/=pk;
@@ -5684,7 +5702,7 @@ let fxwReady=false;
                          pl:Math.cos((pa+1)*Math.PI/4),pr:Math.sin((pa+1)*Math.PI/4),
                          inc:s.f/sampleRate,amp:s.amp,
                          dep:s.dep,tgt:s.tgt,mode:s.mode,
-                         tbl:fmTable(s.key,s.harm||[1],s.harm?s.harm.length:1),
+                         tbl:fmTable(s.key,s.harm||[1],s.harc||null,s.harm?s.harm.length:1),
                          pm:0,ramt:s.ramt||0,rgv:1,incT:0});
           }
           this.N=this.o.length;
@@ -5713,7 +5731,7 @@ let fxwReady=false;
              restarting it — the same thing setPeriodicWave does natively */
           for(var w2=0;w2<d.ops.length;w2++){
             var e2=d.ops[w2];
-            if(this.o[e2.i])this.o[e2.i].tbl=fmTable(e2.key,e2.harm,e2.harm.length);
+            if(this.o[e2.i])this.o[e2.i].tbl=fmTable(e2.key,e2.harm,e2.harc||null,e2.harm.length);
           }
         }
         else if(d.t==='on'){this.tg=1;}
@@ -7072,7 +7090,7 @@ class Voice{
              operator, because in this engine they are all accumulators. */
           const ph0=b.o.phm===1?Math.random():((b.o.ph||0)/360);
           return {f:b.f, amp:md===0?(b.i===0?a0:a0*0.9):1, wav:Math.round(b.o.wav||0),
-                  key:hw.key, harm:hw.harm, ph:ph0-Math.floor(ph0),
+                  key:hw.key, harm:hw.harm, harc:hw.harc, ph:ph0-Math.floor(ph0),
                   mode:wm, tgt:md===0?-1:tgtIx(b),
                   dep:ix/(2*Math.PI), ramt:md===2?a0:0};
         });
@@ -7287,6 +7305,28 @@ class Voice{
         rootWt={a:src,b:oB,ga:gA,gb:gB,cur:'a'};
         pitchParam=src.frequency;
       }
+      else if(!isN&&rootW===3){
+        /* OP 0 IS BUILT SEPARATELY, and that is worth saying out loud: the
+           loop below runs `for(let i=1;i<10;i++)`, so a fix applied only there
+           reaches every operator except the FIRST — which is the one nearly
+           every patch actually uses. Same saw-minus-delayed-saw as ops 1-9;
+           the reasoning is written out at that branch. */
+        const so=ac.createOscillator();
+        E.setWave(so,2,(ops[0].phm===1?Math.random()*360:ops[0].ph)+180,0.5);
+        const fd=Math.max(2,target), md=clamp(1.02/fd,0.002,0.5);
+        const dl=ac.createDelay(md), neg=ac.createGain(), sum2=ac.createGain();
+        neg.gain.value=-1;
+        so.connect(dl); dl.connect(sum2);
+        so.connect(neg); neg.connect(sum2);
+        dl.delayTime.value=clamp(clamp(ops[0].pw===undefined?0.5:ops[0].pw,0.05,0.95)/fd,0,md);
+        ((this.opPw=this.opPw||{})[0]=this.opPw[0]||[]).push({dl,f:fd,max:md});
+        this.nodes.push(so);
+        src=sum2;
+        src.frequency=so.frequency; src.detune=so.detune;
+        src.start=t=>{const e0=t-1/fd; try{so.start(e0>AC.currentTime?e0:t);}catch(_){}};
+        src.stop=t=>{try{so.stop(t);}catch(_){}};
+        pitchParam=so.frequency;
+      }
       else if(!isN){src=ac.createOscillator();
         E.setWave(src,rootW,ops[0].phm===1?Math.random()*360:ops[0].ph,ops[0].pw);
         pitchParam=src.frequency;}
@@ -7410,6 +7450,50 @@ class Voice{
           s2=sum2;
           s2.start=t=>{try{oA.start(t);}catch(_){} try{oB.start(t);}catch(_){}};
           s2.stop=t=>{try{oA.stop(t);}catch(_){} try{oB.stop(t);}catch(_){}};
+        }
+        else if(wv===3){
+          /* A WIDTH THAT MOVES WITHOUT STEPPING — a saw minus a delayed copy
+             of itself, which is exactly a pulse:
+
+               s(f-d) - s(f) = 2-2d for f<d, -2d for f>d
+
+             duty d, span 2, mean 0 — the same wave setWave builds, and at
+             d=0.5 the same wave as a plain square, edge for edge.
+
+             WHY NOT KEEP SWAPPING TABLES. Because the width arrives on the
+             8ms control tick, and a table swap on a running oscillator is a
+             STEP: wherever the phase happens to sit between the old edge and
+             the new one, the output flips early and flips back at the real
+             edge — an extra edge pair, which is the click. Finer steps do not
+             help; measured, taking the width cache from 40 steps to 400 moved
+             the broadband floor 1.1dB, because the artifact energy is the
+             total distance the edge travels and that is fixed. A delay is an
+             AudioParam, so the edge SLIDES instead, and there is no step to
+             hear at any rate.
+
+             The oscillator starts one whole period early so the delay line is
+             primed and the phase at the note is exactly what it would have
+             been — one period is a no-op on phase, which is what makes that
+             free. */
+          const so=ac.createOscillator();
+          E.setWave(so,2,(op.phm===1?Math.random()*360:op.ph)+180,0.5);
+          setF(so.frequency,fi);
+          const fd=Math.max(2,fi), md=clamp(1.02/fd,0.002,0.5);
+          const dl=ac.createDelay(md), neg=ac.createGain(), sum2=ac.createGain();
+          neg.gain.value=-1;
+          so.connect(dl); dl.connect(sum2);
+          so.connect(neg); neg.connect(sum2);
+          dl.delayTime.value=clamp(clamp(op.pw===undefined?0.5:op.pw,0.05,0.95)/fd,0,md);
+          ((this.opPw=this.opPw||{})[i]=this.opPw[i]||[]).push({dl,f:fd,max:md});
+          this.nodes.push(so);
+          s2=sum2;
+          /* the pair the rest of the builder reaches for — an operator being
+             FM'd is `fg.connect(tb.s.frequency)`, and unison detune is
+             opDet — so the composite hands out the oscillator's own params
+             and every one of those paths is unchanged */
+          s2.frequency=so.frequency; s2.detune=so.detune;
+          s2.start=t=>{const e0=t-1/fd; try{so.start(e0>AC.currentTime?e0:t);}catch(_){}};
+          s2.stop=t=>{try{so.stop(t);}catch(_){}};
         }
         else{s2=ac.createOscillator();
           E.setWave(s2,wv,op.phm===1?Math.random()*360:op.ph,op.pw);
@@ -8967,6 +9051,11 @@ class Engine{
     if(!op||isNoiseW(op.wav)||op.wav===9)return false;
     const w=val===undefined?op.pw:val;
     for(const v of this.act[pi]){
+      /* A SQUARE'S WIDTH IS A DELAY NOW, so it slides instead of stepping.
+         setTargetAtTime rather than a jump: the tick is 8ms and the time
+         constant is 4ms, so the edge is always moving and never once lands. */
+      for(const q of (v.opPw&&v.opPw[slot])||[])
+        try{q.dl.delayTime.setTargetAtTime(clamp(w/q.f,0,q.max),AC.currentTime,0.004);}catch(_){}
       for(const n of (v.opNodes&&v.opNodes[slot])||[])
         if(n.setPeriodicWave)this.setWave(n,op.wav,op.phm===1?0:op.ph,w);
       /* A PHASE-ENGINE OPERATOR HAS NO setPeriodicWave — its wave is a table
@@ -8978,7 +9067,7 @@ class Engine{
         if(!nd||!nd._ix)continue;
         const k=nd._ix.indexOf(slot); if(k<0)continue;
         const hw=fmHarm(this,{...op,pw:w},(nd._f&&nd._f[k])||440);
-        try{nd.port.postMessage({t:'tbl',ops:[{i:k,key:hw.key,harm:hw.harm}]});}catch(_){}
+        try{nd.port.postMessage({t:'tbl',ops:[{i:k,key:hw.key,harm:hw.harm,harc:hw.harc}]});}catch(_){}
       }
     }
     return true;
@@ -9099,11 +9188,20 @@ class Engine{
   setWave(osc,w,phDeg,width){
     if(w>=9){osc.type='sine';return;}   // 'smp' handled as a buffer source elsewhere
     const ph=fmod(phDeg||0,360);
-    /* PULSE WIDTH, for every wave that has harmonics to weight. A pulse of
-       duty d has harmonic n at sin(nπd)/n — so scaling any wave's harmonic
-       table by sin(nπd)/sin(nπ/2) is exact PWM on a square and a believable
-       thinning on the rest, with d=0.5 leaving every wave untouched. Built
-       into the PeriodicWave, so it costs one cached table and no nodes. */
+    /* PULSE WIDTH. For the SQUARE this is the exact variable-duty pulse; for
+       every other wave it is a weighting of the harmonics it already has.
+       THE EVEN HARMONICS HAVE TO BE MADE, NOT SCALED, and that was the bug:
+       the old line multiplied the wave's own coefficient by sin(kπd), and a
+       square's even coefficients are ZERO, so zero times anything stayed zero
+       forever. A pulse of duty d is exactly what needs them — |b_k| is
+       4/(πk)·|sin(πkd)| for EVERY k — and without them the edge cannot move.
+       Measured on the old code: commanded 0.185..0.815, the duty in the wave
+       moved 0.356..0.515, and h2/h1 read 0.000 at duty 0.25 where a pulse has
+       0.707. So the square takes its own Fourier pair,
+           a_k = 2/(πk)·sin(2πkd)     b_k = 2/(πk)·(1−cos 2πkd)
+       which at d=0.5 collapses to 4/(πk) on the odd harmonics and nothing on
+       the even ones — the square, unchanged, so no patch sitting at 0.5 moves.
+       Built into the PeriodicWave, so it costs one cached table and no nodes. */
     const d=clamp(width===undefined?0.5:width,0.05,0.95);
     const plain=Math.abs(d-0.5)<0.005;
     if(ph<1&&w<4&&plain){osc.type=['sine','triangle','sawtooth','square'][w];return;}
@@ -9115,13 +9213,21 @@ class Engine{
       const phi=ph/180*Math.PI;
       for(let i=0;i<n;i++){
         const k=i+1;
-        let b=h[i];
+        let a=0, b=h[i];
         if(!plain){
-          const ref=Math.sin(k*Math.PI/2);
-          b*= (Math.abs(ref)<1e-6) ? Math.sin(k*Math.PI*d)   // even harmonics: absent at 50%
-                                   : Math.sin(k*Math.PI*d)/ref;
+          if(w===3){                                   // the pulse, made not scaled
+            const c=2/(Math.PI*k), t2=2*Math.PI*k*d;
+            a=c*Math.sin(t2); b=c*(1-Math.cos(t2));
+          }else{
+            const ref=Math.sin(k*Math.PI/2);
+            b*= (Math.abs(ref)<1e-6) ? Math.sin(k*Math.PI*d)   // even harmonics: absent at 50%
+                                     : Math.sin(k*Math.PI*d)/ref;
+          }
         }
-        re[k]=b*Math.sin(k*phi); im[k]=b*Math.cos(k*phi);
+        /* the phase rotation, now that there is a cosine term to rotate too.
+           With a=0 this is the line it replaces, so nothing else moves. */
+        re[k]=a*Math.cos(k*phi)+b*Math.sin(k*phi);
+        im[k]=b*Math.cos(k*phi)-a*Math.sin(k*phi);
       }
       pw=AC.createPeriodicWave(re,im); this.waveCache.set(key,pw);
     }
