@@ -18,6 +18,12 @@
       "runtimeExecutable": "npx",
       "runtimeArgs": ["serve", "-l", "3033", "."],
       "port": 3033
+    },
+    {
+      "name": "ten-pw",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["serve", "-l", "3034", ".claude/worktrees/pulse-width"],
+      "port": 3034
     }
   ]
 }

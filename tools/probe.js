@@ -2770,6 +2770,15 @@ async function probeSmpKit() {
     S.presets[ch].cat = 'kit';
     randomizeKit(ch, roll);
   }
+  /* `chflt=<hz>` puts a lowpass on the CHANNEL after the kit is loaded, which
+     is the whole point of the shared racks: one filter, twelve pads. Applied
+     HERE and not before, because loading the kit preset replaces the channel's
+     own rack and would throw it away. */
+  const chflt = P.chflt === undefined ? null : num(P.chflt, 0);
+  if (chflt) {
+    S.presets[ch].kglob = 1;
+    S.presets[ch].flt[0] = { typ: 1, frq: chflt, q: 1.4, gn: 0 };
+  }
   engine.rebuildRack(ch);
   await sleep(120);
   const rows = [];
@@ -2794,6 +2803,11 @@ async function probeSmpKit() {
   const cents = rows.map(r => r.centroid).filter(Number.isFinite);
   const uniq = new Set(cents.map(c => Math.round(c))).size;
   const takes = new Set(rows.map(r => r.take)).size;
+  const cs2 = rows.map(r => r.centroid).filter(Number.isFinite);
+  if (cs2.length) notes.push('centroid ' + Math.round(Math.min(...cs2)) + '..' +
+    Math.round(Math.max(...cs2)) + '  mean ' +
+    Math.round(cs2.reduce((a, b) => a + b, 0) / cs2.length) +
+    (chflt ? '   (channel lowpass at ' + chflt + 'Hz)' : '   (no channel filter)'));
   const silent = rows.filter(r => !(r.peak > 0.01)).map(r => r.k);
   const unwired = rows.filter(r => r.wired === 'NO').map(r => r.k);
   notes.push((roll == null ? nm : 'rolled @wild ' + roll) + ': ' + takes + '/12 distinct takes, ' + uniq + '/12 distinct centroids' +
