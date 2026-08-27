@@ -1314,7 +1314,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-27.2006';
+const BUILD='2026-08-27.2119';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -3265,6 +3265,19 @@ const OPTRACK={
         /* nothing but a route: amount is the whole control, on both the dial
            and the pair, because there is no second thing left to reach */
         mag:{amt:'amt',pri:'amt'}},
+  /* MACRO HAS A FRONT DOOR TOO (Gad: "how do i access the macros?"). Before
+     this the only way in was to open the MOD rack by hand, find a free slot
+     and know that `macro` had appeared in the source list — and the dials
+     stay hidden until something is routed, so there was nothing to find. Now
+     it is the same grammar as env, lfo and keytrack: the letter takes you
+     there and makes one if the rack has none. */
+  KeyM:{id:'mod',name:'macro',nav:1,
+        find:rk=>rk.map((x,i)=>x&&x.src===MSRC_MACRO&&!x.off?i:-1).filter(i=>i>=0),
+        make:(sl,i)=>Object.assign(sl,mkMod(i),{src:MSRC_MACRO,off:false}),
+        unmake:(sl,i)=>Object.assign(sl,mkMod(i)),
+        free:rk=>rk.findIndex(x=>!x||!x.src),
+        /* which dial it listens to, and how far it moves what it points at */
+        mag:{amt:'amt',pri:'mac',sec:'amt'}},
   Slash:{id:'mod',name:'random',nav:1,
         find:rk=>rk.map((x,i)=>x&&x.src===5&&!x.off?i:-1).filter(i=>i>=0),
         make:(sl,i)=>Object.assign(sl,mkMod(i),{src:5,off:false,rate:6}),
@@ -6642,6 +6655,14 @@ class Voice{
     for(const n of this.pressN)
       try{n.p.setTargetAtTime((n.base||0)+this.press*n.sc,t,this.pressGlide);}catch(_){}
   }
+  /* A MACRO MOVED. Same shape as setFollow, one bag per dial index — the
+     glide is short but not zero, because a step change on a gain is a click. */
+  setMacro(i,x,gl){
+    if(this.killed||!this.macN||!this.macN.length)return;
+    const v=clamp(x,0,1), t=AC.currentTime, g=gl==null?0.02:gl;
+    for(const nd of this.macN)
+      if((nd.mac|0)===i)try{nd.p.setTargetAtTime((nd.base||0)+v*nd.sc,t,g);}catch(_){}
+  }
   setFollow(x){
     if(this.killed||!this.flwN||!this.flwN.length)return;
     const v=clamp(x,0,1), t=AC.currentTime;
@@ -8021,6 +8042,7 @@ class Voice{
        adding DC to the gain (a note must still be able to reach silence), and
        pressure rides a gain AFTER the vca for the same reason. */
     this.pressN=[]; this.press=0; this.pressGlide=0.03;
+    this.macN=[];        // macro handles: live, like press — see setMacro
     this.modN=this.modN||[];
     for(let mi5=0;mi5<md.length;mi5++){
       const m=md[mi5];
@@ -8030,11 +8052,19 @@ class Voice{
          could SEE the slot (voiceMods put it there) and still hear nothing,
          which is the shape of every bug in this feature so far. */
       if(!m||m.off||m.src<3||(m.src>7&&m.src!==MSRC_MACRO)||!m.routes)continue;
-      const LIVE=m.src===6||m.src===7;           // press / flw keep moving
+      /* A MACRO IS A LIVE SOURCE (Gad, 2026-08-27: "i need macros to run on
+         live played note"). It was read once, when the voice was built, so a
+         turn was heard on the NEXT hit — fine for a drum, useless for a held
+         note, and the whole point of a macro is that you move it while the
+         sound is going. press and flw already had the machinery: a
+         ConstantSource per destination whose offset can be moved afterwards.
+         A macro is that, from a dial. */
+      const MAC=m.src===MSRC_MACRO;
+      const LIVE=m.src===6||m.src===7||MAC;      // press / flw / macro keep moving
       const FL=m.src===7;
-      const bag=FL?(this.flwN=this.flwN||[]):this.pressN;
+      const bag=MAC?this.macN:FL?(this.flwN=this.flwN||[]):this.pressN;
       if(LIVE&&FL)this.flwMi=(this.flwMi===undefined?mi5:this.flwMi);
-      if(LIVE&&!FL){this.pressGlide=Math.max(0.005,m.pg??0.03);
+      if(LIVE&&!FL&&!MAC){this.pressGlide=Math.max(0.005,m.pg??0.03);
                     this.pressCurve=Math.max(0.2,m.pc??1);}
       const v=LIVE?0:(m.src===3?clamp(vel,0,1)
                      :m.src===4?clamp((midi-60)/24,-2,2)
@@ -8048,7 +8078,7 @@ class Voice{
           const b0=1;                            // pressure: a post-vca gain
           if(!this.pGain){this.pGain=ac.createGain(); this.pGain.gain.value=b0;}
           else this.pGain.gain.value=b0;
-          bag.push({p:this.pGain.gain,sc:MODTAPER(rt.amt||0),base:b0,mi:mi5,ri,span:1});
+          bag.push({p:this.pGain.gain,sc:MODTAPER(rt.amt||0),base:b0,mi:mi5,ri,span:1,mac:m.mac|0});
           continue;
         }
         for(const t of this._destOf(rt,p)){
@@ -8056,10 +8086,18 @@ class Voice{
           const cs=ac.createConstantSource();
           cs.offset.value=LIVE?0:clamp(v*dep,-Math.abs(dep)*2-1,Math.abs(dep)*2+1);
           cs.connect(t.p); cs.start(at); this.nodes.push(cs);
-          if(LIVE)bag.push({p:cs.offset,sc:dep,base:0,mi:mi5,ri,span:t.span});
+          if(LIVE)bag.push({p:cs.offset,sc:dep,base:0,mi:mi5,ri,span:t.span,mac:m.mac|0});
           this.modN.push({p:cs.offset,span:t.span,mi:mi5,ri,kind:LIVE?'live':'fixed',v});
         }
       }
+    }
+    /* AND THE VOICE STARTS WHERE THE DIALS ALREADY ARE. The live path sets
+       every handle to 0 and waits to be told; without this, a note played
+       while a macro is at 60% comes in at 0% and only jumps when the dial is
+       next touched. */
+    if(this.macN.length){
+      const MC=(S.presets[pi]||{}).macro||[];
+      for(let i9=0;i9<NMACRO;i9++)this.setMacro(i9,MC[i9]||0,0.001);
     }
     /* center: a per-route DC bias on the target (independent of the source) */
     /* learned targets (cmd+C/V): route the source onto any resolvable live param */
@@ -9199,7 +9237,7 @@ class Engine{
         }catch(_){}
       }
       /* press/flw handles live in their own bags and carry `sc` */
-      for(const bag of [v.pressN,v.flwN]){
+      for(const bag of [v.pressN,v.flwN,v.macN]){
         if(!bag)continue;
         for(const b of bag){
           if(b.mi===undefined)continue;
@@ -12536,6 +12574,13 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
     if(gch&&gch.node&&!this.act[pi].some(v=>v&&v._grn&&v.live&&!v.released)){
       try{gch.node.port.postMessage({t:'panic'});}catch(_){}}
     this.audStop(pi,n+0.002);}
+  /* A MACRO DIAL MOVED: tell every voice this channel has sounding. Cheap —
+     a channel with nothing playing is an empty array — and it is what makes a
+     macro a PERFORMANCE control rather than a setting you hear next time. */
+  macroLive(pi,i,v){
+    for(const vo of (this.act[pi]||[]))
+      if(vo&&vo.setMacro)try{vo.setMacro(i,v);}catch(_){}
+  }
   allOff(){const n=AC.currentTime;for(const a of this.act)for(const v of [...a])v.kill(n);
     /* cursors AND clouds live in the worklet, so silence has to reach both:
        tclr only ever stopped the tape, which left grain voices with no shim
@@ -16305,6 +16350,7 @@ function _prsAction(d){
     p.macro=p.macro||[0,0,0,0];
     const step=(KM.sr||KM.shl)?0.1:0.02;
     p.macro[i]=+clamp((p.macro[i]||0)+d*step,0,1).toFixed(3);
+    engine.macroLive(pi,i,p.macro[i]);      // and everything already sounding moves
     flash('M'+(i+1)+' '+Math.round(p.macro[i]*100)+'%');
     dirty=true; dirtySave=true; return;
   }
