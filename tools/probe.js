@@ -3280,6 +3280,151 @@ async function probeKitDcy() {
   return { cols: ['d', 'ringMs', 'peak'], rows };
 }
 
+/* ---------------- pwmall: which waves still STEP their width -------------
+ * The excess-edge count in `pwm` only works on a pulse — it counts edge PAIRS
+ * that should not be there. A saw or a triangle under a width sweep has no
+ * edge to double, so that probe is blind to them, and "smooth" for a square
+ * says nothing about the other three waves.
+ *
+ * This one is mechanism-agnostic. The note is periodic at f0, so take the
+ * SECOND difference across one period:
+ *
+ *     r[n] = x[n] - 2x[n-P] + x[n-2P]        P fractional, interpolated
+ *
+ * A width that slides makes the waveform change smoothly period to period, and
+ * a second difference cancels anything moving at a constant rate — r stays
+ * small and smooth. A width that STEPS puts one whole period out of line with
+ * its neighbours, and r gets an isolated spike. So the shape of r is the
+ * answer, and crest (max/rms) and kurtosis both read it without needing a
+ * calibrated threshold.
+ *
+ * Every wave is compared to ITS OWN floor — the same note with the modulator
+ * off — because the interpolation at a fractional P leaves more residue on a
+ * bright wave than a dull one, and that residue is not an artifact.
+ *
+ *     tools/probe.sh pwmall ch=8 rate=2 amt=70                                */
+async function probePwmAll() {
+  const ch = CH === 9 ? 8 : CH;
+  const RATE = num(P.rate, 2), AMT = num(P.amt, 70);
+  const FMW = Math.round(num(P.fmw, 0));
+  const WAVS = list(P.wavs, ['0', '1', '2', '3']).map(Number);
+  const sr = AC.sampleRate;
+  const keep = stash(ch);
+  const mutes = [];
+  const rows = [];
+  try {
+    if (T.playing) stop();
+    pin(ch);
+    mutes.push(...muteOthers([ch]));
+    const p = S.presets[ch];
+    const at = (x, t) => { const i = Math.floor(t), f = t - i;
+      return (i < 0 || i + 1 >= x.length) ? 0 : x[i] * (1 - f) + x[i + 1] * f; };
+    /* JUNK BETWEEN THE TEETH. A note's energy sits ON the harmonics of f0; a
+       width sweep smears each one into sidebands a few Hz wide. A STEP is
+       broadband and lands everywhere, including the gaps. So: the bins from
+       60Hz to 1.6kHz that are more than 25Hz from any harmonic, against the
+       fundamental, in dB.
+
+       This number is NOT comparable to an ideal — the legitimate sidebands sit
+       in it too, and an exact continuous sweep reads WORSE than a stepped one
+       that barely moves (measured: -42.2 ideal against -46.5 for a build whose
+       width was not moving at all). It IS comparable BEFORE AND AFTER on the
+       same wave, because the spectrum those two builds are asked for is
+       identical and only the way the width arrives changed. */
+    const junk = (x, f0) => {
+      const N = 16384;
+      if (x.length < N) return null;
+      const o = Math.round((x.length - N) / 2);
+      const re = new Float64Array(N), im = new Float64Array(N);
+      for (let i2 = 0; i2 < N; i2++)
+        re[i2] = x[o + i2] * (0.5 - 0.5 * Math.cos(2 * Math.PI * i2 / N));
+      fft(re, im);
+      const bhz = sr / N;
+      let j2 = 0, jn = 0, fund = 0;
+      for (let k = Math.round(60 / bhz); k < Math.round(1600 / bhz); k++) {
+        const hz = k * bhz, m = Math.sqrt(re[k] * re[k] + im[k] * im[k]);
+        if (Math.abs(hz - f0) < 3 * bhz) fund = Math.max(fund, m);
+        if (Math.abs(hz - Math.round(hz / f0) * f0) > 25) { j2 += m * m; jn++; }
+      }
+      return +(10 * Math.log10(Math.max(1e-20, j2 / Math.max(1, jn)) /
+                               Math.max(1e-20, fund * fund))).toFixed(1);
+    };
+    /* f0 FROM THE ENGINE, NOT FROM THE SIGNAL. Two origins do not necessarily
+       play the same note — localStorage carries the octave — and this probe
+       read 130.845 on one and 128.683 on the other for the same NOTE. 1.7% is
+       26Hz at harmonic 12, which is exactly the guard band, so real harmonics
+       fell into the "junk" bins and the pre-fix build showed a -43dB floor on a
+       STATIC note. A voice knows what frequency it was built at; ask it. */
+    const grab = async ms => {
+      engine.allOff(); await sleep(80);
+      const bus = busOf(ch); if (!bus) return null;
+      engine.noteOn(AC.currentTime + 0.02, ch, NOTE, VEL);
+      await sleep(140);
+      const v = (engine.act[ch] || [])[0];
+      const pp = v && v.opPitch && v.opPitch[0] && v.opPitch[0][0];
+      const t = tap(bus);
+      await sleep(ms);
+      const [L] = t.stop();
+      L._f0 = (pp && pp.base > 20) ? pp.base : 0;
+      engine.allOff(); await sleep(50);
+      return L;
+    };
+    const goertz = (x, hz, o, N) => { let re = 0, im = 0; const w = 2 * Math.PI * hz / sr;
+      for (let i = 0; i < N; i++) { const win = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / N), v = x[o + i] * win;
+        re += v * Math.cos(w * i); im -= v * Math.sin(w * i); }
+      return Math.sqrt(re * re + im * im); };
+    for (const wv of WAVS) {
+      p.cat = 'keys';
+      p.osc = rack(mkOsc);
+      p.osc[0] = { wav: wv, mode: 0, dst: 0, rat: 1, amt: 1, fine: 0, ph: 0, phm: 0, pw: 0.5 };
+      p.flt = rack(mkFlt); p.flt[0].typ = 0;
+      p.fx = rack(mkFx); p.env = rack(mkEnv);
+      p.env[0] = { dst: 1, idx: 0, amt: 100, a: 0.004, d: 0.02, s: 1, r: 0.05, crv: 0 };
+      p.mod = rack(mkMod);
+      p.mix.lvl = 1; p.mix.pan = 0;
+      /* PIN THE VOICE. Unison and its detune spread make the sum INHARMONIC,
+         which fills the gaps between the harmonics with energy that is not an
+         artifact — the pre-fix build read a -43dB "floor" on a completely
+         static note purely because its vox carried uni>1. One voice, no
+         spread, no slop: then anything between the teeth got there by
+         stepping. */
+      Object.assign(modHolder(p, 'vox').vox || (p.vox = {}),
+        { mode: 0, glide: 0, uni: 1, sprd: 0, wide: 0, slop: 0, fmw: FMW });
+      p.mod[0] = Object.assign(mkMod(0), {
+        src: 2, wav: 0, rate: RATE, syn: 0, ltr: 0, ph: 0, off: true,
+        routes: [{ dst: 0, idx: 0, amt: AMT, tgt: null,
+                   addr: { rack: 'osc', slot: 0, key: 'pw', lbl: 'width' } }] });
+      S.editSnd = ch; S.curSlot = 0;
+      engine.rebuildRack(ch); engine.refresh(ch);
+      const A = await grab(500);
+      if (!A) { rows.push({ k: 'wav ' + wv, floor: 'no bus' }); continue; }
+      let f = A._f0;
+      if (!f) {                          // no voice to ask: fall back to the spectrum
+        const N = Math.min(16384, A.length - 1), o = Math.round((A.length - N) / 2);
+        let bm = -1, bf = spectral(A, A, sr, 0, Math.min(NFFT, A.length)).hz;
+        for (let q = -40; q <= 40; q++) { const f2 = bf * (1 + q * 0.001), m = goertz(A, f2, o, N);
+          if (m > bm) { bm = m; f = f2; } }
+      }
+      const fl = junk(A, f);
+      p.mod[0].off = false;
+      const B = await grab(700);
+      p.mod[0].off = true;
+      const sw = junk(B, f);
+      rows.push({ k: 'wav ' + wv + ' ' + (['sine', 'tri', 'saw', 'square'][wv] || '?'),
+                  hz: r3(f),
+                  floor: fl, swept: sw,
+                  added: (fl != null && sw != null) ? +(sw - fl).toFixed(1) : '?' });
+    }
+  } finally {
+    for (const m of mutes) try { m(); } catch (_) {}
+    unstash(ch, keep);
+  }
+  notes.push('floor = the junk between the harmonics with the modulator OFF, dB under the ' +
+             'fundamental. swept = the same with the width sweeping. Compare the SWEPT column ' +
+             'between two builds — it is not meaningful against an absolute.');
+  return { cols: ['hz', 'floor', 'swept', 'added'], rows };
+}
+
 const HELP = {
   cols: ['args'],
   rows: [
@@ -3311,6 +3456,7 @@ const HELP = {
     { k: 'smpkit',   args: 'name=KT808 ch=8 \u2014 load a sampled kit and play all twelve pads: distinct takes, distinct sounds, none unwired' },
     { k: 'smplib',   args: 'ch=8 names=tr808-kick-01,linn-snare-01 \u2014 point a synth op at named library one-shots and hear whether they sound' },
     { k: 'spread',   args: "ch=8 ty=rake \u2014 can a bank filter's spread be modulated, and does a tweak reach a held note" },
+    { k: 'pwmall',   args: 'ch=8 rate=2 amt=70 wavs=0,1,2,3 \u2014 which waves still STEP their width, for waves a pulse metric cannot see' },
     { k: 'pwm',      args: 'ch=8 wav=3 rate=2 amt=70 \u2014 is a width sweep smooth? excess edges per second = clicks' },
     { k: 'poolkind', args: 'want=loop — every pool take: measured onsets/centroid, the kind it was called, and both dial views in order' },
     { k: '(any)',    args: '--ab <url> runs the same probe on a second build and diffs it' },
@@ -3362,6 +3508,7 @@ try {
                    archlvl: probeArchLvl,
                    patqual: probePatQual,
                    pwm: probePwm,
+                   pwmall: probePwmAll,
                    spread: probeSpread };
   const fn = PROBES[NAME];
   out = fn ? await fn() : (NAME === 'help' ? HELP : { cols: [], rows: [], err: 'no probe named ' + NAME });

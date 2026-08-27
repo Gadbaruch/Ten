@@ -456,6 +456,34 @@ const fmDepth=(amt,carHz,modHz,isPM)=>{
    table cache stays about ten entries per wave rather than one per pitch.
    Shared by the builder and by pwLive, so a live width edit cannot drift from
    what the next note would build. */
+/* CAN THIS OPERATOR'S WIDTH MOVE. A square gets the delay treatment always,
+   because there the width IS the wave. Every other wave keeps its exact table
+   — a saw at width 0.5 is a saw, and w(f)-w(f-d) would make it a square — so
+   the step is taken out by crossfading two oscillators instead, which costs a
+   second oscillator per copy. That is only worth paying where the width can
+   actually move: a dialled width, or a route pointed at it. An FM sine at the
+   default pays nothing, which matters because sines are most of the operators
+   in the file. */
+const pwRouted=(p,i)=>{
+  for(const m of (p&&p.mod)||[]){
+    if(!m||m.off||!m.src||!m.routes)continue;
+    for(const rt of m.routes){
+      const a=rt&&rt.addr; if(!a||rt.dst)continue;
+      if(a.rack!=='osc'||a.key!=='pw')continue;
+      if(a.slot==='*'||clamp(Math.round(+a.slot||0),0,9)===i)return true;
+    }
+  }
+  return false;
+};
+const pwMoves=(p,i,op)=>{
+  const w=Math.round((op&&op.wav)||0);
+  if(w>3||isNoiseW(w))return false;              // sample/wt/noise carry no width
+  if(w===0)return false;                          /* a sine's width is ONE harmonic scaled,
+     and createPeriodicWave normalises it straight back out — measured rms
+     0.3823 at 0.5 against 0.3816 at 0.15, centroid 132 against 131. It does
+     nothing, so there is nothing to smooth. */
+  return Math.abs(((op&&op.pw)===undefined?0.5:op.pw)-0.5)>=0.005||pwRouted(p,i);
+};
 const fmHarm=(E,op,f)=>{
   const wv=Math.round((op&&op.wav)||0);
   let harm=[];
@@ -1259,7 +1287,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-27.1808';
+const BUILD='2026-08-27.1824';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -7345,6 +7373,7 @@ class Voice{
           if(en9>st9+0.005){src.loopStart=st9; src.loopEnd=en9; src._off=st9;}
           if(Math.round(ops[0].lps||0)===1)src.loop=false;}}
       let rootWt=null;                  // wt twin for THIS unison copy (crossfade pair)
+      let rootPwx=null;                 // ...and the width twin, same idea
       if(skipOp0){}
       else if(!isN&&rootW===14){
         /* the root op gets the same standby-twin treatment as ops 1-9: a wt
@@ -7379,6 +7408,23 @@ class Voice{
         src.stop=t=>{try{so.stop(t);}catch(_){}};
         pitchParam=so.frequency;
       }
+      else if(!isN&&pwMoves(p,0,ops[0])){
+        /* AND OP 0 AGAIN — the loop below starts at 1, so this is the second
+           time a width fix has had to be written twice. See the pair at ops
+           1-9 for why a triangle or a saw cannot use the delay. */
+        const oA=ac.createOscillator(), oB=ac.createOscillator();
+        const gA=ac.createGain(), gB=ac.createGain(), sum2=ac.createGain();
+        const ph0=ops[0].phm===1?Math.random()*360:ops[0].ph;
+        E.setWave(oA,rootW,ph0,ops[0].pw); E.setWave(oB,rootW,ph0,ops[0].pw);
+        gA.gain.value=1; gB.gain.value=0;
+        oA.connect(gA); oB.connect(gB); gA.connect(sum2); gB.connect(sum2);
+        rootPwx={a:oA,b:oB,ga:gA,gb:gB,cur:'a',w:rootW,ph:ph0};
+        src=sum2;
+        src.frequency=oA.frequency; src.detune=oA.detune;
+        src.start=t=>{try{oA.start(t);}catch(_){} try{oB.start(t);}catch(_){}};
+        src.stop=t=>{try{oA.stop(t);}catch(_){} try{oB.stop(t);}catch(_){}};
+        pitchParam=oA.frequency;
+      }
       else if(!isN){src=ac.createOscillator();
         E.setWave(src,rootW,ops[0].phm===1?Math.random()*360:ops[0].ph,ops[0].pw);
         pitchParam=src.frequency;}
@@ -7404,8 +7450,8 @@ class Voice{
         rootMods.push(isN?src.playbackRate:src.detune);
         (this.opPitch[0]=this.opPitch[0]||[]).push({pm:pitchParam,base:target});
         (this.opDet[0]=this.opDet[0]||[]).push({pm:isN?src.playbackRate:src.detune,sc:isN?0.5:200});
-        if(rootWt){                     // twin tracks every pitch/detune mod the primary gets
-          const oB=rootWt.b; setF(oB.frequency,target);
+        if(rootWt||rootPwx){            // twin tracks every pitch/detune mod the primary gets
+          const oB=(rootWt||rootPwx).b; setF(oB.frequency,target);
           rootMods.push(oB.detune);
           this.opPitch[0].push({pm:oB.frequency,base:target,kind:'osc'});
           this.opDet[0].push({pm:oB.detune,sc:200});
@@ -7427,7 +7473,10 @@ class Voice{
         if(rootWt){rootWt.a.connect(rootWt.ga); rootWt.b.connect(rootWt.gb);
           rootWt.ga.connect(g0); rootWt.gb.connect(g0);
           ((this.opWt=this.opWt||{})[0]=this.opWt[0]||[]).push(rootWt);}
-        else src.connect(g0);
+        else{
+          if(rootPwx)((this.opPwx=this.opPwx||{})[0]=this.opPwx[0]||[]).push(rootPwx);
+          src.connect(g0);
+        }
         (this.opGains[0]=this.opGains[0]||[]).push(g0);
         (this.opNodes[0]=this.opNodes[0]||[]).push(src);
         (this.opAmt[0]=this.opAmt[0]||[]).push({g:g0,sc:1});
@@ -7547,6 +7596,42 @@ class Voice{
           s2.start=t=>{const e0=t-1/fd; try{so.start(e0>AC.currentTime?e0:t);}catch(_){}};
           s2.stop=t=>{try{so.stop(t);}catch(_){}};
         }
+        else if(pwMoves(p,i,op)){
+          /* A WIDTH THAT SLIDES ON A WAVE THAT IS NOT A PULSE. The square can
+             be built out of a delay because a pulse IS a saw minus a shifted
+             saw; a triangle or a saw cannot — w(f)-w(f-d) at d=0.5 is a SQUARE
+             whatever w was, so it would throw the wave away. Their tables have
+             to stay exactly what setWave builds.
+             So the step goes instead of the table: two phase-locked
+             oscillators, the new width lands on the SILENT one and the pair
+             crossfades, the same trick the wavetable operators use. The time
+             constant is 1ms against a control tick MEASURED at 5.8ms median
+             (not the 8ms modTick alone — automation calls it too), so the
+             standby has decayed through nearly six time constants by the time
+             the next width lands on it. The swap that used to put a new table
+             on the AUDIBLE oscillator at gain 1.0 now puts it on one at 0.002:
+             a full-scale flip becomes a -50dB one. */
+          const oA=ac.createOscillator(), oB=ac.createOscillator();
+          const gA=ac.createGain(), gB=ac.createGain(), sum2=ac.createGain();
+          const ph0=op.phm===1?Math.random()*360:op.ph;    // ONE phase, both copies
+          E.setWave(oA,wv,ph0,op.pw); E.setWave(oB,wv,ph0,op.pw);
+          gA.gain.value=1; gB.gain.value=0;
+          oA.connect(gA); oB.connect(gB); gA.connect(sum2); gB.connect(sum2);
+          setF(oA.frequency,fi); setF(oB.frequency,fi);
+          ((this.opPwx=this.opPwx||{})[i]=this.opPwx[i]||[]).push(
+            {a:oA,b:oB,ga:gA,gb:gB,cur:'a',w:wv,ph:ph0});
+          sum2._pwx=1;                    // BOTH copies are registered below —
+                                          // the generic push must not add oA again
+          for(const o2 of [oA,oB]){
+            (this.opPitch[i]=this.opPitch[i]||[]).push({pm:o2.frequency,base:fi,kind:'osc'});
+            (this.opDet[i]=this.opDet[i]||[]).push({pm:o2.detune,sc:200});
+            this.nodes.push(o2);
+          }
+          s2=sum2;
+          s2.frequency=oA.frequency; s2.detune=oA.detune;
+          s2.start=t=>{try{oA.start(t);}catch(_){} try{oB.start(t);}catch(_){}};
+          s2.stop=t=>{try{oA.stop(t);}catch(_){} try{oB.stop(t);}catch(_){}};
+        }
         else{s2=ac.createOscillator();
           E.setWave(s2,wv,op.phm===1?Math.random()*360:op.ph,op.pw);
           setF(s2.frequency,fi);}
@@ -7559,7 +7644,7 @@ class Voice{
         built.push({i,s:s2,osc:!isNoiseW(wv)&&wv!==9&&!scanned,f:fi,op,scan:scanned,
           drv:scanDrives[i]!==undefined?scanDrives[i]:fmDrives[i]});
         (this.opNodes[i]=this.opNodes[i]||[]).push(s2);
-        if(!isNoiseW(wv)&&wv!==9&&wv!==14){
+        if(!isNoiseW(wv)&&wv!==9&&wv!==14&&!s2._pwx){
           (this.opPitch[i]=this.opPitch[i]||[]).push({pm:s2.frequency,base:fi,kind:sync?'sync':'osc'});
           (this.opDet[i]=this.opDet[i]||[]).push({pm:s2.detune,sc:200});
         }
@@ -9108,6 +9193,18 @@ class Engine{
          constant is 4ms, so the edge is always moving and never once lands. */
       for(const q of (v.opPw&&v.opPw[slot])||[])
         try{q.dl.delayTime.setTargetAtTime(clamp(w/q.f,0,q.max),AC.currentTime,0.004);}catch(_){}
+      /* THE OTHER WAVES KEEP THEIR TABLE and lose the step instead: the new
+         width lands on whichever copy is silent, the pair crossfades, the
+         roles swap. 1.5ms against an 8ms tick, so the standby is under 1% by
+         the time the next width arrives on it. */
+      for(const q of (v.opPwx&&v.opPwx[slot])||[]){
+        const on=q.cur==='a'?{o:q.b,g:q.gb,off:q.ga}:{o:q.a,g:q.ga,off:q.gb};
+        try{this.setWave(on.o,q.w,q.ph,w);}catch(_){continue;}
+        const n2=AC.currentTime;
+        on.g.gain.setTargetAtTime(1,n2,0.001);
+        on.off.gain.setTargetAtTime(0,n2,0.001);
+        q.cur=q.cur==='a'?'b':'a';
+      }
       for(const n of (v.opNodes&&v.opNodes[slot])||[])
         if(n.setPeriodicWave)this.setWave(n,op.wav,op.phm===1?0:op.ph,w);
       /* A PHASE-ENGINE OPERATOR HAS NO setPeriodicWave — its wave is a table

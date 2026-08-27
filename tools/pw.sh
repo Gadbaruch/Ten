@@ -1,7 +1,7 @@
 #!/bin/bash
-# Front the worktree's own tab, then probe it. probe.sh runs in whatever tab is
-# fronted, and the window has a dozen of them — landing on :3032 by accident
-# measured the wrong build twice, so the front and the probe are ONE call.
+# Front the worktree's own tab, then probe it. `eval` runs in whichever tab is
+# fronted and the window holds a dozen — measuring the wrong build reached a
+# wrong conclusion twice in one session, so the front and the probe are ONE call.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 B="$HOME/.claude/skills/gstack/browse/dist/browse"
