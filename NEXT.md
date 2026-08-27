@@ -47,6 +47,51 @@ read `2026-08-27.1519` or later. Ordered by what is most likely to be wrong.
    shape must drag as a shape, not collapse. *Not measured; the `_r`
    bookkeeping is shared with cutLive but no probe covers the pair.*
 
+## ...AND THE OTHER THREE WAVES STEPPED IT TOO  (9010ee0)
+
+Gad, after the square fix: **"still a bit crackley"**. The square measures
+clean — excess edges/s under a FULL-depth sweep is -1.6 at 2Hz, -0.4 at 8Hz,
++0.3 at 20Hz — so this was the rest of the mechanism. Every OTHER wave still
+got its width by swapping a PeriodicWave on a running oscillator ~180 times a
+second.
+
+**The square's fix does not generalise.** A pulse is a saw minus a shifted saw;
+but `w(f)-w(f-d)` at d=0.5 is a SQUARE whatever w was, so applying it to a saw
+throws the saw away. Their tables must stay exactly what setWave builds, so the
+STEP goes instead of the table: two phase-locked oscillators, the new width
+lands on the SILENT one, the pair crossfades — the wavetable operators' trick.
+
+The witness is the standby's gain AT THE MOMENT the table lands on it, which IS
+the step:
+
+    before   1.0        the table went onto the AUDIBLE oscillator
+    after    0.00308    -50.2dB worst case over 188 swaps, tri and saw alike
+
+1ms time constant against a control tick **measured at 5.8ms median** — not the
+8ms of modTick alone, because automation calls pwLive too. Sizing the fade
+against 8ms left the standby at 0.021 (-33.7dB) instead of 0.003.
+
+Built ONLY where the width can move — a dialled width or a route pointed at it
+(`pwMoves`). A plain saw at 0.5 builds no pair: 3 pitch params at unison 3
+rather than 6. **A SINE is excluded because its width does nothing at all** —
+one harmonic scaled, and createPeriodicWave normalises it back out. Measured
+rms 0.3823 at width 0.5 against 0.3816 at 0.15, centroid 132 against 131.
+
+⚠ **OP 0 AGAIN.** Second width fix in a row that had to be written twice,
+because the operator loop starts at 1.
+
+⚠ **WHAT IS NOT MEASURED: any spectral difference.** Inter-harmonic junk under
+a sweep reads -42.4 before and -41.3 after on a saw, -58.4 and -59.6 on a
+triangle — nothing. That metric is swamped by the sweep's LEGITIMATE sidebands
+(an exact continuous sweep reads -42.2 on it, WORSE than a stepped one that
+barely moves at -46.5). The claim is the mechanism, 50dB of it, not a listening
+result. **If it still crackles, this was the wrong thing to fix.**
+
+Two probe traps worth keeping: `pwmall` has to PIN vox — unison detune makes
+the sum inharmonic and put -43dB of energy between the harmonics on a totally
+STATIC note — and it has to take f0 FROM THE VOICE, because two origins do not
+necessarily play the same note and 1.7% is a whole guard band at harmonic 12.
+
 ## PULSE WIDTH WAS NEVER A WIDTH  (0104f18)
 
 Gad: "can you make that pulsewidth modding will be smooth? right now its
