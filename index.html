@@ -1245,7 +1245,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-26.1615';
+const BUILD='2026-08-27.0740';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1618,11 +1618,17 @@ const OSC_P=sl=>[
   ...(Math.round((sl&&sl.wav)||0)===14?WTF:[]),
   /* a smp op picks its buffer from the POOL — drop still works, the pool is
      how one take feeds many mouths */
+  /* A SYNTH OP IS PLAYED FROM THE KEYS, so what it wants is a ONE-SHOT — a
+     hit it can pitch, not four bars of somebody else's tempo. The view puts
+     those first; the loops are still down the far end of the same dial. */
   ...(Math.round((sl&&sl.wav)||0)===9?[SP('smpl','_pool','lin',{min:0,max:31,step:1,w:2,
-     fmt:v=>POOL[Math.round(v)]?POOL[Math.round(v)].name:'—',
-     get:()=>{const k=S.editSnd+':'+S.curSlot;
-       const i=POOL.findIndex(p2=>p2.buf===engine.opSamples.get(k)); return i<0?0:i;},
-     set:(o,v)=>{const e2=POOL[clamp(Math.round(v),0,Math.max(0,POOL.length-1))];
+     fmt:v=>{const V=poolView('one'), e2=POOL[V[Math.round(v)]];
+       return e2?KINDMK(e2.kind)+e2.name:'—';},
+     get:()=>{const k=S.editSnd+':'+S.curSlot, V=poolView('one');
+       const j=V.indexOf(POOL.findIndex(p2=>p2.buf===engine.opSamples.get(k)));
+       return j<0?0:j;},
+     set:(o,v)=>{const V=poolView('one');
+       const e2=POOL[V[clamp(Math.round(v),0,Math.max(0,V.length-1))]];
        if(!e2){flash('pool is empty — record (esc+tab) or drop audio first');return;}
        engine.opSamples.set(S.editSnd+':'+S.curSlot,e2.buf);
        engine.rebuildRack(S.editSnd);}}),
@@ -12086,7 +12092,7 @@ fetch('samples/manifest.json').then(r=>r.ok?r.json():null).then(man=>{
   for(const en of man.slice(0,32)){   // the pool itself holds 32
     fetch('samples/'+en.file).then(r=>r.ok?r.arrayBuffer():null)
       .then(ab=>ab&&AC.decodeAudioData(ab))
-      .then(buf=>{if(buf){poolAdd(buf,en.name||en.file.replace(/\.\w+$/,''),{k:'f',f:en.file}); seedCloud();}})
+      .then(buf=>{if(buf){poolAdd(buf,en.name||en.file.replace(/\.\w+$/,''),{k:'f',f:en.file},en); seedCloud();}})
       .catch(()=>{});
   }
   setTimeout(()=>seedCloud(true),4000);   // whatever landed, rather than silence
@@ -14179,10 +14185,16 @@ const GRANF=[
  SP('dif','dif','lin',{min:0,max:1,step:0.05,fmt:v=>v<0.03?'dry':Math.round(v*100)+'%'}),
  SP('fb','fb','lin',{min:0,max:0.95,step:0.05,fmt:v=>Math.round(v*100)+'%',
     get:m=>m.fb||0,set:(m,v)=>m.fb=v}),
+ /* THE AUDIO CHANNEL LOOPS AND GRANULATES, so what it wants is a LOOP.
+    Same dial, opposite view — see poolView. */
  SP('smpl','_pool','lin',{min:0,max:31,step:1,w:2,
-   fmt:v=>POOL[Math.round(v)]?POOL[Math.round(v)].name:'\u2014',
-   get:()=>{const i=POOL.findIndex(p2=>p2.buf===(engine.granBuf||[])[S.editSnd]); return i<0?0:i;},
-   set:(o,v)=>{const pi=S.editSnd, e2=POOL[clamp(Math.round(v),0,Math.max(0,POOL.length-1))];
+   fmt:v=>{const V=poolView('loop'), e2=POOL[V[Math.round(v)]];
+     return e2?KINDMK(e2.kind)+e2.name:'\u2014';},
+   get:()=>{const V=poolView('loop');
+     const j=V.indexOf(POOL.findIndex(p2=>p2.buf===(engine.granBuf||[])[S.editSnd]));
+     return j<0?0:j;},
+   set:(o,v)=>{const pi=S.editSnd, V=poolView('loop');
+     const e2=POOL[V[clamp(Math.round(v),0,Math.max(0,V.length-1))]];
      if(!e2){flash('pool is empty — record (esc+tab) or drop audio first');return;}
      engine.granNode(pi); engine.setChanBuf(pi,e2.buf,e2.name);
      takeToLane(pi,e2.buf); engine.audLive(pi);}}),
@@ -14783,8 +14795,9 @@ function _prsAction(d){
      the tape and the cloud are handed the same take by the same call */
   if(f==='sample'&&(p.cat==='audio'||engineGranP(p))){
     if(!POOL.length){flash('pool is empty — record (esc+tab) or drop audio in');dirty=true;return;}
-    const cur=POOL.findIndex(e2=>e2.buf===(engine.audBuf[pi]||(engine.granBuf||[])[pi]));
-    const nx=POOL[fmod((cur<0?0:cur)+(d>0?1:-1),POOL.length)];
+    const V=poolView('loop');            // loops first here too, so the walk agrees with the dial
+    const cur=V.indexOf(POOL.findIndex(e2=>e2.buf===(engine.audBuf[pi]||(engine.granBuf||[])[pi])));
+    const nx=POOL[V[fmod((cur<0?0:cur)+(d>0?1:-1),V.length)]];
     pushUndo('sample');
     if(engineGranP(p))engine.granNode(pi);
     engine.setChanBuf(pi,nx.buf,nx.name);
@@ -16831,12 +16844,103 @@ function seedCloud(any){
    every setting it had and re-dropping the file puts the sound back under
    them. Embedding the audio itself is the next step and is deliberately not
    this one. */
-function poolAdd(buf,name,src){
+/* ---- WHAT KIND OF SOUND A TAKE IS ------------------------------------
+   The pool was one flat list and every browser walked it by raw index, so
+   hunting for a loop in an audio channel meant turning past every one-shot
+   in the session and hunting for a one-shot in a synth op meant the reverse.
+   A take is classified ONCE, when it enters the pool, from the audio itself.
+
+   Three measurements, and the reasoning for each:
+     onsets  a phrase is struck more than once. This is the definition of the
+             difference and it is the first thing asked.
+     cen     the time centroid of ENERGY, 0..1 — WHERE the weight of the sound
+             sits. A hit is front-loaded (attack then decay, ~0.2-0.35). A
+             gesture fired once — a riser, a sweep — is back-loaded (~0.6+).
+             Material you would loop is even (~0.5). Duration alone cannot
+             tell a 4s crash from a 4s loop; this can.
+     dur     only as a tiebreak on the even, single-attack case: a 3s pad
+             drone is a loop, a 0.4s one is a swell.
+   A manifest that declares bars is DECLARING a loop and skips all of it. */
+function poolMeasure(buf){
+  const sr=buf.sampleRate, ch=buf.getChannelData(0);
+  const N=Math.max(1,Math.round(sr*0.02));               // 20ms frames
+  const nf=Math.max(1,Math.floor(ch.length/N));
+  const rms=new Float32Array(nf);
+  for(let f=0;f<nf;f++){
+    let s2=0; const a=f*N, b=a+N;
+    for(let i=a;i<b;i++){const x=ch[i]; s2+=x*x;}
+    rms[f]=Math.sqrt(s2/N);
+  }
+  let pk=0; for(let f=0;f<nf;f++)if(rms[f]>pk)pk=rms[f];
+  if(pk<=1e-6)return {dur:buf.duration,pk:0,onsets:0,cen:0.5,nf};
+  let num=0,den=0;
+  for(let f=0;f<nf;f++){const e=rms[f]*rms[f]; num+=e*(f+0.5); den+=e;}
+  const cen=den>0?num/den/nf:0.5;
+  /* a frame that jumps well clear of the one before it AND is loud enough to
+     be a hit rather than a swell, with a 60ms refractory so one attack is not
+     counted three times on the way up */
+  const refr=3; let onsets=0,last=-99;
+  if(rms[0]>0.22*pk){onsets=1;last=0;}                   // a take that starts ON the hit
+  for(let f=1;f<nf;f++)
+    if(rms[f]>0.22*pk&&rms[f]>rms[f-1]*1.9&&f-last>=refr){onsets++;last=f;}
+  /* HOW FAST IT GOT THERE. A struck thing is at half its peak inside a frame
+     or two; a pad walks up to it. This is what tells a decaying HIT from a
+     sustained sound that happens to fade — both are front-weighted and cen
+     cannot see the difference. */
+  let rise=1; for(let f=0;f<nf;f++)if(rms[f]>=0.5*pk){rise=(f+0.5)/nf;break;}
+  /* AND WHETHER THE TONE IS GOING ANYWHERE. Zero crossings per frame stand in
+     for brightness — cheap, no FFT — and a GESTURE moves its brightness end to
+     end while a loop or a drone comes back to where it started. This is the
+     only thing that separates sweep.mp3 from drone.mp3: their envelopes are
+     the same shape and their spectra are not. Quarter means, in octaves. */
+  const q=Math.max(1,Math.floor(nf/4));
+  const zc=(f0,f1)=>{let c=0,n2=0;
+    for(let f=f0;f<f1;f++){const a=f*N,b=Math.min(ch.length,a+N);
+      for(let i=a+1;i<b;i++)if((ch[i]<0)!==(ch[i-1]<0))c++;
+      n2+=b-a;}
+    return n2>0?c/n2:0;};
+  const z0=zc(0,q), z1=zc(nf-q,nf);
+  const drift=(z0>1e-5&&z1>1e-5)?Math.log2(z1/z0):0;
+  return {dur:buf.duration,pk,onsets,cen,rise,drift,nf};
+}
+function poolKindOf(buf,hint){
+  if(hint&&(hint.kind==='loop'||hint.kind==='one'))return hint.kind;
+  if(hint&&hint.bars>0)return 'loop';
+  if(!buf)return 'one';
+  let m; try{m=poolMeasure(buf);}catch(_){return 'one';}
+  if(!(m.pk>0))return 'one';
+  if(m.onsets>=3)return 'loop';                          // struck repeatedly: a phrase
+  if(m.onsets===2)return m.dur>=0.9?'loop':'one';        // two hits inside a second is a flam
+  /* One attack, or none. MEASURED over the 26 factory takes: a gesture moves
+     its own brightness end to end — sweep +4.98 octaves, riser +1.86 — and a
+     decaying hit loses it — pluck -1.72, kick -1.14. Every loop in the
+     library sits inside ±0.73, so 1.2 separates them with room either side
+     and it is the only thing that does: sweep and drone have the same
+     envelope shape and only their spectra differ. */
+  if(Math.abs(m.drift)>=1.2)return 'one';
+  if(m.dur>=6)return 'loop';                             // six seconds of steady tone is material
+  if(m.cen<0.42||m.cen>0.62)return 'one';                // front-loaded decay · back-loaded build
+  return m.dur>=2?'loop':'one';
+}
+/* TWO BROWSERS, TWO ORDERS. The pool itself never moves — an op stores the
+   BUFFER and a channel stores the buffer, never the index, so a set saved
+   under one order reads correctly under any. What each browser gets is a
+   VIEW: the kind it is hunting for first, in pool order, then the rest, so
+   the other kind stays reachable at the far end instead of being filtered
+   away. Nothing is hidden; the thing you want is just under your hand. */
+function poolView(want){
+  const a=[],b=[];
+  for(let i=0;i<POOL.length;i++)((POOL[i].kind||'one')===want?a:b).push(i);
+  return a.concat(b);
+}
+const KINDMK=k=>k==='loop'?'\u221e ':'\u25aa ';     // \u221e a loop · \u25aa one hit
+function poolAdd(buf,name,src,hint){
   if(!buf)return -1;
   const i=POOL.findIndex(p2=>p2.buf===buf);
   if(i>=0){if(src&&!POOL[i].src)POOL[i].src=src; return i;}
   if(POOL.length>=32)POOL.shift();   // oldest label falls off; anything still referencing the buffer keeps it
-  POOL.push({name:String(name||'take').slice(0,18),buf,src:src||{k:'r'}});
+  POOL.push({name:String(name||'take').slice(0,18),buf,src:src||{k:'r'},
+    kind:poolKindOf(buf,hint)});
   return POOL.length-1;
 }
 /* ---- A SYNTH OP'S SAMPLE, WRITTEN INTO THE SET ------------------------

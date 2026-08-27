@@ -2403,6 +2403,45 @@ async function probeFxWire() {
   return { cols: ['k', 'offered', 'claimed', 'moved', 'ok', 'err'], rows };
 }
 
+/* ---------------- poolkind: is every take in the pool called right ------
+ * The classifier runs ONCE, at poolAdd, and after that the whole browsing
+ * experience is downstream of it — so the only honest check is to print what
+ * it decided for every take next to the numbers it decided on, and read the
+ * column. `want=loop` also prints the two views in dial order, which is what
+ * a hand actually turns through.
+ */
+async function probePoolKind() {
+  if (typeof POOL === 'undefined') return { cols: [], rows: [], err: 'no POOL on this build' };
+  const want = str(P.want, 'loop');
+  const rows = POOL.map((e, i) => {
+    let m = {};
+    try { m = poolMeasure(e.buf); } catch (err) { m = { err: String(err) }; }
+    return { k: e.name, i, kind: e.kind || '?', dur: r3(m.dur), onsets: m.onsets,
+             cen: r3(m.cen), rise: r3(m.rise), drift: r3(m.drift), pk: r3(m.pk),
+             src: (e.src || {}).k };
+  });
+  /* AND DRIVE THE TWO REAL DIAL SPECS, not a copy of their logic — the whole
+     point of the views is what a hand turning that dial lands on, so read the
+     first few positions out of the specs themselves. */
+  const dial = (arr, want) => {
+    const sp = (arr || []).find(x => x && x.key === '_pool');
+    if (!sp) return 'spec not found';
+    const n = Math.min(8, poolView(want).length);
+    const out = [];
+    for (let v = 0; v < n; v++) out.push(sp.fmt(v));
+    return out.join('  ');
+  };
+  notes.push('audio dial 0..7: ' + dial(typeof GRANF !== 'undefined' ? GRANF : null, 'loop'));
+  notes.push('smp op  0..7: ' + dial(typeof OSC_P !== 'undefined' ? OSC_P({ wav: 9 }) : null, 'one'));
+  const view = n => poolView(n).map(i => (POOL[i].kind === n ? '' : '| ') + POOL[i].name).join(' ');
+  notes.push('loop view: ' + view('loop'));
+  notes.push('one  view: ' + view('one'));
+  notes.push('counts: ' + POOL.filter(e => e.kind === 'loop').length + ' loop, ' +
+             POOL.filter(e => e.kind !== 'loop').length + ' one-shot, of ' + POOL.length +
+             '  (| marks where the wanted kind runs out, want=' + want + ')');
+  return { cols: ['i', 'kind', 'dur', 'onsets', 'cen', 'rise', 'drift', 'pk', 'src'], rows };
+}
+
 const HELP = {
   cols: ['args'],
   rows: [
@@ -2426,6 +2465,7 @@ const HELP = {
     { k: 'resamp',   args: 'ch=9 — master resample is pre-master-fx and replays exactly like live at mSum: take clean of a hot sat, unity dials, replay ratio ~1, mid-bounce rebuild survives' },
     { k: 'fxwire',   args: 'ch=8 — EXHAUSTIVE: every (fx type, param) FXMODOK claims, driven through the real applier — offered/claimed/moved. No audio, one call.' },
     { k: 'fxmod',    args: 'ch=8 — every wired fx (type,param) wobbles under a 5Hz lfo through the real ctrl path; arp rate mod moves note density' },
+    { k: 'poolkind', args: 'want=loop — every pool take: measured onsets/centroid, the kind it was called, and both dial views in order' },
     { k: '(any)',    args: '--ab <url> runs the same probe on a second build and diffs it' },
   ]
 };
@@ -2465,7 +2505,8 @@ try {
                    audclip: probeAudClip,
                    resamp: probeResamp,
                    fxmod: probeFxMod,
-                   fxwire: probeFxWire };
+                   fxwire: probeFxWire,
+                   poolkind: probePoolKind };
   const fn = PROBES[NAME];
   out = fn ? await fn() : (NAME === 'help' ? HELP : { cols: [], rows: [], err: 'no probe named ' + NAME });
 } catch (e) {
