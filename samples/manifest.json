@@ -120,16 +120,6 @@
   "kind": "loop"
  },
  {
-  "name": "kick",
-  "file": "kick.mp3",
-  "kind": "one"
- },
- {
-  "name": "pluck",
-  "file": "pluck.mp3",
-  "kind": "one"
- },
- {
   "name": "rain",
   "file": "rain.mp3",
   "kind": "loop"
@@ -137,11 +127,6 @@
  {
   "name": "riser",
   "file": "riser.mp3",
-  "kind": "one"
- },
- {
-  "name": "snare",
-  "file": "snare.mp3",
   "kind": "one"
  },
  {

@@ -1245,7 +1245,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-27.1346';
+const BUILD='2026-08-27.1408';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1516,6 +1516,18 @@ function kitSlot(p,midi,make){
    ONLY for a kit: a plain channel's key is byte-identical to what it always
    was, so every set ever saved still loads without a migration. */
 const smpKey=(pi,op,pad)=>pad==null?pi+':'+op:pi+':p'+pcOf(pad)+':'+op;
+/* A SET SAVED BEFORE THE SHELF WAS REORGANISED names its takes
+   `oneshots/<machine>/<instrument>/<file>`; the library is filed by INSTRUMENT
+   now and the machine is the name's prefix. Those old paths 404 and the take
+   comes back as a NAMED HOLE — settings intact, no sound — which is the
+   quietest kind of wrong. The two shapes are told apart by depth (four
+   segments where there are now three) and convert exactly, so a set from
+   yesterday still finds its drums. */
+const smpPath=f=>{
+  const t=String(f||'');
+  const m=/^oneshots\/[^/]+\/([^/]+)\/([^/]+)$/.exec(t);
+  return m?'oneshots/'+m[1]+'/'+m[2]:t;
+};
 /* the key the SOUND PAGE is pointing at: a kit edits its focused pad, and with
    no pad focused it edits the channel — the same rule modHolder already uses */
 /* SHIFT ON A POOL DIAL JUMPS TO THE NEXT INSTRUMENT. The shelf is 250 sounds
@@ -1575,7 +1587,7 @@ function applySmpRefs(pi,eng){
     if(!rk||!rk.osc)continue;
     for(let i=0;i<rk.osc.length;i++){
       const sl=rk.osc[i]; if(!sl||!sl.smp||!sl.smp.f)continue;
-      const e=POOLBYF.get(sl.smp.f);
+      const e=POOLBYF.get(smpPath(sl.smp.f));
       if(!e){SMPWAIT=true; continue;}
       const key=smpKey(pi,i,pad);
       if(E.opSamples.get(key)!==e.buf)E.opSamples.set(key,e.buf);
@@ -12900,6 +12912,56 @@ function jumpPreset(pi,n){
   flash((p.cat||'misc')+' '+(n+1)+'/'+pool.length+' → '+pool[n].name);
   dirty=true; dirtySave=true;
 }
+/* A NEW ENGINE ARRIVES PLAYING SOMETHING (Gad, 2026-08-27: "when selecting any
+   engine, choose a random preset, apply this to kit engine as well"). Switching
+   engine used to hand you whatever the defaults happen to be — a bare saw, an
+   EMPTY kit, a silent tape — and the first thing anybody does next is go
+   hunting for a sound. Each engine has its own idea of what a preset is:
+
+     synth/kit   a random entry of that category from the library
+     audio       there are no audio presets, so a random LOOP is the sound
+     proc        a random one of that model's own presets
+
+   Returns false when there is nothing to pick — a kit before the shelf has
+   landed — so the caller can fall back to rolling one. */
+function randomPreset(pi,say){
+  const p=S.presets[pi], cat=p.cat||'misc';
+  const R=a=>a[Math.floor(Math.random()*a.length)];
+  if(cat==='audio'){
+    const loops=poolView('loop').map(i=>POOL[i]).filter(e=>e&&e.kind==='loop');
+    if(!loops.length)return false;
+    const e=R(loops);
+    if(engineGranP(p))engine.granNode(pi);
+    engine.setChanBuf(pi,e.buf,e.name); takeToLane(pi,e.buf); engine.audLive(pi);
+    /* and the channel is CALLED that. An audio channel has no library entry to
+       take a name from, so without this it kept whatever the last engine left
+       behind — a tape channel reading "KT505". */
+    p.name=String(e.name||'take').slice(0,8);
+    if(say)flash('audio \u2192 '+e.name);
+    return true;
+  }
+  if(cat==='proc'){
+    const L=procPresets(p.pmodel||PROCNAMES[0]);
+    if(!L.length)return false;
+    p.psel=Math.floor(Math.random()*L.length);
+    applyProcPreset(pi,L[p.psel]);
+    if(say)flash('proc \u2192 '+((L[p.psel]||{}).n||'?'));
+    return true;
+  }
+  const pool=libAll().filter(en=>en&&en.cat===cat&&en.data);
+  if(!pool.length)return false;
+  const en=R(pool);
+  /* LEVEL AND PAN ARE THE CHANNEL'S, NOT THE PRESET'S — the same rule
+     randomizeChannel keeps. Without this, switching engine silently reset the
+     fader you had set, which is a worse surprise than the empty sound this
+     was written to fix. */
+  const keepLvl=p.mix.lvl, keepPan=p.mix.pan;
+  setPresetData(pi,en.name,en.cat,en.data);   // setEngine has already taken the undo
+  S.presets[pi].mix.lvl=keepLvl; S.presets[pi].mix.pan=keepPan;
+  engine.rebuildRack(pi); engine.refresh(pi);
+  if(say)flash(cat+' \u2192 '+en.name);
+  return true;
+}
 function scrollPreset(pi,dir){
   const p=S.presets[pi], pool=libAll().filter(en=>en.cat===(p.cat||'misc'));
   if(!pool.length){flash('no '+(p.cat||'misc')+' presets in library');return;}
@@ -13933,12 +13995,20 @@ function genLane(pat,pi,mutate,ctx){
     if(rnd()<0.4)push(1.5,58,0.5,0.12);
   }
   else if(cat==='kit'){                        // a kit writes the whole beat by itself
-    for(let bar=0;bar<L;bar+=4)for(const o of C.kick)push(bar+o,36,0.95,0.15);
-    for(let bar=0;bar<L;bar+=4){push(bar+1,37,0.9,0.15);push(bar+3,37,0.9,0.15);}
+    /* AT MIDDLE C, on the KITMAP layout — the old lines wrote 36..43, which is
+       two octaves below where a sampler plays at rate 1.0 (see KITLIFT) and on
+       a lane list that no longer exists: 43 was 'wood' and is the CYMBAL now.
+       KP names the pads so this cannot drift out of step with KITMAP again. */
+    const KP={kick:60,snare:61,hatC:62,hatO:63,clap:64,tom:65,rim:66,
+              cymbal:67,cowbell:68,conga:69,shaker:70,clave:71};
+    for(let bar=0;bar<L;bar+=4)for(const o of C.kick)push(bar+o,KP.kick,0.95,0.15);
+    for(let bar=0;bar<L;bar+=4){push(bar+1,KP.snare,0.9,0.15);push(bar+3,KP.snare,0.9,0.15);}
     const st=C.hatScheme===1?0.25:0.5;
-    for(let t=0;t<L;t+=st)if(rnd()<0.9){const on=Math.abs(t%1)<1e-9;push(t,38,on?0.65:0.4,0.05);}
-    if(rnd()<0.5)for(let i=0;i<3;i++)push(L-0.75+i*0.25,41,0.4+i*0.15,0.1);   // tom ruff
-    if(rnd()<0.4)push(2.5,43,0.5,0.1);                                        // wood accent
+    for(let t=0;t<L;t+=st)if(rnd()<0.9){const on=Math.abs(t%1)<1e-9;
+      push(t,on?KP.hatC:(rnd()<0.12?KP.hatO:KP.hatC),on?0.65:0.4,0.05);}
+    if(rnd()<0.5)for(let i=0;i<3;i++)push(L-0.75+i*0.25,KP.tom,0.4+i*0.15,0.1);  // tom ruff
+    if(rnd()<0.4)push(2.5,KP.clave,0.5,0.1);                                     // wood accent
+    if(rnd()<0.35)for(let bar=0;bar<L;bar+=4)push(bar+2,KP.clap,0.7,0.1);        // clap on 3
   }
   else if(DRUMCATS.includes(cat)){             // perc/wood/zap: syncopated answers to the kick
     /* PERC QUOTES THE SHARED CELL rather than sprinkling its own offbeats —
@@ -14907,13 +14977,22 @@ function setEngine(pi,key){
     /* a wavetable op survives the trip: wt is a wave now, not an engine */
   }
   engine.rebuildRack(pi); engine.refresh(pi);
+  /* and it comes up PLAYING something — see randomPreset. A kit asked for
+     before the shelf has landed has no library entry to pick, so it rolls one
+     instead, which is always available. */
+  if(!randomPreset(pi,false)&&key==='kit')randomizeKit(pi);
   return true;
 }
 function prsFieldDefs(){
   const p=S.presets[S.editSnd], K=edKit(p);
   const chEng={k:'engine',v:()=>engineName(p)};  // ALWAYS first — this is how you leave any engine
-  if(K)return [    // kit: engine, then which pad, then that pad's own chain
+  if(K)return [    // kit: engine, the WHOLE kit, then which pad, then its chain
     chEng,
+    /* THE KIT ITSELF WAS NOT SELECTABLE ANYWHERE (Gad, 2026-08-27: "give me a
+       way to select presets, i dont have any slot for that rn"). The `prst`
+       field below browses the focused PAD's sound; nothing browsed the kit.
+       scrollPreset already handles cat 'kit' — the field simply did not exist. */
+    {k:'kit',  v:()=>p.name},
     {k:'pad',  v:()=>NN[pcOf(S.prepFocus)]+(Math.floor(S.prepFocus/12)-1)},
     {k:'sound',v:()=>K.cat||'kik'},
     {k:'prst', v:()=>K.name},
@@ -14968,6 +15047,7 @@ function prsFieldDefs(){
     {k:'gain',  v:()=>((p.au||{}).gain??0.9).toFixed(2)}];
   if(p.cat==='kit')return [        // kit, but no pad played yet: no pad fields to show
     chEng,
+    {k:'kit',  v:()=>p.name},
     {k:'kinfo',v:()=>'play a note to pick a pad'}];
   return [                                        // Synth: engine, then category
     chEng,
@@ -15598,7 +15678,10 @@ function _prsAction(d){
      engine/category split, so on a kit channel with a pad focused the engine
      field fell into the pad branch, matched none of its cases, and silently
      did nothing. The kit engine could be entered but never left. */
-  if(K&&f!=='engine'){               // ---- editing one kit pad (a whole preset chain) ----
+  /* `kit` belongs to the CHANNEL even with a pad focused, exactly as `engine`
+     does — without this it falls into the pad branch, matches no case there,
+     and silently does nothing, which is the bug the engine field already had. */
+  if(K&&f!=='engine'&&f!=='kit'){    // ---- editing one kit pad (a whole preset chain) ----
     pushUndo('kit pad');
     const kcat=K.cat||'kik';
     if(f==='pad'){                   // step through the 12 pads with the arrows
@@ -15771,6 +15854,7 @@ function _prsAction(d){
     dirty=true; dirtySave=true; return;
   }
   if(f==='prst')scrollPreset(pi,d);
+  if(f==='kit')scrollPreset(pi,d);       // the whole kit — cat 'kit' in the library
   else if(f==='type'){
     const i0=Math.max(0,SYNTHCATS.indexOf(p.cat||'misc'));
     const cat=SYNTHCATS[fmod(i0+d,SYNTHCATS.length)];
@@ -16044,6 +16128,22 @@ const KBSEQ=['KeyZ','KeyX','KeyC','KeyV','KeyB','KeyN','KeyM',
    the seven steps below it, which is what a keyboard player reaches for
    without thinking. */
 const KBHOME=KBSEQ.indexOf('KeyA');
+/* A KIT'S HOME KEY IS MIDDLE C, and this is a bug fix wearing a preference's
+   clothes (Gad, 2026-08-27: "make middle oct A key be middle C of the keyboard
+   in kit engine"). A sampler op's playback rate is
+   `noteRatio = 2^((midi-60)/12)` — rate 1.0 at MIDI 60 — while the keyboard's
+   home key is KBBASE, 48. So every sampled drum on a kit was playing an octave
+   DOWN, at half speed. Measured on KT808's kick, the same pad at five octaves:
+
+       C@24  hz  8.1   C@36 13.5   C@48 26.9   C@60 51.1   C@72 102.3
+       rms  0.202       0.158       0.114       0.079       0.055
+
+   hz doubling and rms halving per octave is the sample running at twice the
+   speed each time; a real TR-808 kick sits near 50-55Hz, which is C@60 and
+   nowhere else. KeyA was giving 26.9Hz.
+   Only the KIT lifts. A synth channel with a sampler op is PLAYING notes, and
+   an octave down there is a musical choice rather than a mistake. */
+const KITLIFT=12;
 function kbNote(code,chrom){
   const raw=KBSEQ.indexOf(code); if(raw<0)return null;
   const i=raw-KBHOME;
@@ -17813,8 +17913,8 @@ function poolAdd(buf,name,src,hint){
      a file already on the shelf. Measured after one load of a set using a
      sampled kit: 14 duplicates, exactly its twelve pads plus the two other
      factory takes the set referenced. It compounds every reload. */
-  if(src&&src.k==='f'&&src.f&&POOLBYF.has(src.f)){
-    const e0=POOLBYF.get(src.f); const j=POOL.indexOf(e0);
+  if(src&&src.k==='f'&&src.f&&POOLBYF.has(smpPath(src.f))){
+    const e0=POOLBYF.get(smpPath(src.f)); const j=POOL.indexOf(e0);
     if(j>=0){
       /* THE MANIFEST IS THE AUTHORITY ON WHERE A TAKE BELONGS. A set restores
          out of localStorage before the shelf has finished loading, so the
@@ -17957,9 +18057,9 @@ function opSmpLoad(blobs,at){
     if(src.k==='f'&&src.f){                     // a factory phrase: fetch it back
       const have=POOL.find(p2=>p2.src&&p2.src.k==='f'&&p2.src.f===src.f);
       if(have){put(k,have.buf); continue;}
-      const shelf=POOLBYF.get(src.f);      // already on the shelf: no fetch, no copy
+      const shelf=POOLBYF.get(smpPath(src.f));   // already on the shelf: no fetch, no copy
       if(shelf&&shelf.buf){put(k,shelf.buf); continue;}
-      fetch('samples/'+src.f).then(r=>r.ok?r.arrayBuffer():null)
+      fetch('samples/'+smpPath(src.f)).then(r=>r.ok?r.arrayBuffer():null)
         .then(ab=>ab&&AC.decodeAudioData(ab))
         .then(buf=>{ if(buf){poolAdd(buf,fName(src.f),{k:'f',f:src.f}); put(k,buf);} })
         .catch(()=>{});
@@ -18018,12 +18118,12 @@ function restoreAudio(refs){
   });
   if(landed){engine.audRelockAll(); dirty=true;}
   for(const [file,chans] of want){
-    const have=POOL.find(p2=>p2.src&&p2.src.k==='f'&&p2.src.f===file);
+    const have=POOL.find(p2=>p2.src&&p2.src.k==='f'&&smpPath(p2.src.f)===smpPath(file));
     const put=buf=>{ if(!buf)return;
       for(const i of chans){ engine.granNode(i); engine.setChanBuf(i,buf,fName(file)); }
       engine.audRelockAll(); dirty=true; };
     if(have){put(have.buf); continue;}
-    fetch('samples/'+file).then(r=>r.ok?r.arrayBuffer():null)
+    fetch('samples/'+smpPath(file)).then(r=>r.ok?r.arrayBuffer():null)
       .then(ab=>ab&&AC.decodeAudioData(ab))
       .then(buf=>{ if(buf){poolAdd(buf,fName(file),{k:'f',f:file}); put(buf);} })
       .catch(()=>{});
@@ -22961,7 +23061,7 @@ const onKeyDown=e=>{
     const kbi9=KBSEQ.indexOf(c);
     const midi=(isAudioCh(pi)&&!kmodeOf(S.presets[pi])&&kbi9>=0)
       ?60+kbi9
-      :KBBASE+S.oct*12+noteOf(c,pi);
+      :KBBASE+S.oct*12+noteOf(c,pi)+(isKit(S.presets[pi])?KITLIFT:0);
     const hitVel=EXP.take();          // MIDI velocity if this key came from EXP, else the c/v value
     /* CHORD MAP EDITING: while a map-on chord slot is under the cursor, the
        key you play is the key you edit — replay it to hear the change */

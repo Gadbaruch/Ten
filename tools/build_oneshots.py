@@ -35,7 +35,7 @@ TWO AXES, and together they ARE the categorisation system:
     INSTRUMENT  the sub-folder — one vocabulary shared across every machine
 Both travel in the manifest, so browsing can move along either one.
 """
-import argparse, json, pathlib, re, shutil, subprocess
+import argparse, json, pathlib, re, shutil, subprocess, sys
 import numpy as np
 from scipy.cluster.hierarchy import linkage, fcluster
 
@@ -426,6 +426,33 @@ def manifest():
 for _i, _s in enumerate(SOURCES):
     _s['rank'] = _i                       # curatorial order: most famous machine first
 
+def check():
+    """Does every manifest name a file that is actually there, and is every
+    file named? A manifest that lists a deleted take is how mystery silence
+    starts: the app fetches it, gets a 404, and degrades to a named hole with
+    nothing said. Gad pruned three one-shot mp3s out of the LOOP shelf by hand
+    and its manifest went on naming them for a day."""
+    bad = 0
+    for rel in ('manifest.json', 'oneshots/manifest.json'):
+        f = ROOT / 'samples' / rel
+        if not f.exists():
+            continue
+        m = json.loads(f.read_text())
+        missing = [x for x in m if not (ROOT / 'samples' / x['file']).exists()]
+        print('  %-22s %3d entries  %d missing' % (rel, len(m), len(missing)))
+        for x in missing:
+            print('      MISSING ' + x['file'])
+        bad += len(missing)
+    named = {x['file'] for x in json.loads((OUT / 'manifest.json').read_text())}
+    disk = {str(f.relative_to(ROOT / 'samples')) for f in OUT.rglob('*.flac')
+            if '_similar' not in f.parts}
+    for f in sorted(disk - named):
+        print('      ORPHAN  ' + f)
+        bad += 1
+    print('  ' + ('OK' if not bad else '%d problems' % bad))
+    return bad
+
+
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument('--src', default=str(ROOT / '_dl'),
@@ -437,7 +464,11 @@ if __name__ == '__main__':
     ap.add_argument('--loose', type=float, default=1.5,
                     help='below this they are probably the same and go to _similar/')
     ap.add_argument('--no-dedupe', action='store_true')
+    ap.add_argument('--check', action='store_true',
+                    help='verify both manifests against the disk and stop')
     a = ap.parse_args()
+    if a.check:
+        sys.exit(1 if check() else 0)
     if not a.manifest_only:
         print('encoding to 44.1k/16-bit mono FLAC …')
         build(pathlib.Path(a.src))
@@ -450,3 +481,4 @@ if __name__ == '__main__':
     mb = sum(f.stat().st_size for f in OUT.rglob('*.flac')) / 1048576
     print('%d sounds  %.1f MB  %d machines  %d instruments'
           % (len(m), mb, len({x['style'] for x in m}), len({x['inst'] for x in m})))
+    check()

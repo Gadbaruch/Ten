@@ -2213,6 +2213,7 @@ async function probeFxMod() {
     p.au.cmode = 0; p.au.auto = 1; p.au.src = 0;
     Object.assign(p.au, { spd: 1, rate: 1, st: 0, en: 1, semis: 0, gain: 1, lvol: 1 });
     p.mix.lvl = 1; p.mix.pan = 0;
+    (modHolder(p, 'vox').vox || (p.vox = {})).fmw = FMW;
     p.flt = rack(mkFlt); p.flt[0].typ = 0; p.fx = rack(mkFx); p.mod = rack(mkMod);
     const lane = S.patterns[S.editPat].lanes[ch];
     lane.unit = 'B'; lane.count = 1; lane.auto = false; lane.events = [];
@@ -2802,6 +2803,179 @@ async function probeSmpKit() {
   return { cols: ['take', 'wired', 'dur', 'peak', 'centroid'], rows };
 }
 
+/* ---------------- pwm: is a width sweep SMOOTH, or a string of clicks? ---
+ * The ear calls it "crackly"; the honest number is EXTRA EDGES. A pulse wave
+ * of any duty crosses zero exactly twice per cycle — that is what a pulse IS.
+ * Move the width continuously and it still crosses twice: the edge simply
+ * arrives earlier or later. Move it in STEPS and every step whose jump lands
+ * on top of the running phase flips the output where no edge belongs, and
+ * then flips back at the real edge — an extra PAIR of crossings, which is
+ * exactly the click you hear.
+ *
+ * So the probe counts crossings (Schmitt, ±25% of peak) over a static window
+ * to learn the note's own period, then over a modulated window, and reports
+ * the excess. Zero excess = the sweep is smooth. It is self-calibrating: no
+ * probe ever has to know what frequency the operator landed on.
+ *
+ *     tools/probe.sh pwm ch=8 wav=3 rate=2 amt=70
+ *     tools/probe.sh pwm --ab https://gadbaruch.github.io/Ten/                */
+async function probePwm() {
+  const ch = CH === 9 ? 8 : CH;
+  const WAV = Math.round(num(P.wav, 3));
+  const RATE = num(P.rate, 2);
+  const AMT = num(P.amt, 70);
+  const FMW = Math.round(num(P.fmw, 0));
+  const sr = AC.sampleRate;
+  const keep = stash(ch);
+  const mutes = [];
+  const rows = [];
+  let realPw = null;
+  try {
+    if (T.playing) stop();
+    pin(ch);
+    mutes.push(...muteOthers([ch]));
+    const p = S.presets[ch];
+    p.cat = 'keys';
+    p.osc = rack(mkOsc);
+    p.osc[0] = { wav: WAV, mode: 0, dst: 0, rat: 1, amt: 1, fine: 0, ph: 0, phm: 0, pw: 0.5 };
+    p.flt = rack(mkFlt); p.flt[0].typ = 0;
+    p.fx = rack(mkFx);
+    p.env = rack(mkEnv);
+    p.env[0] = { dst: 1, idx: 0, amt: 100, a: 0.004, d: 0.02, s: 1, r: 0.05, crv: 0 };
+    p.mod = rack(mkMod);
+    p.mix.lvl = 1; p.mix.pan = 0;
+    (modHolder(p, 'vox').vox || (p.vox = {})).fmw = FMW;
+    p.mod[0] = Object.assign(mkMod(0), {
+      src: 2, wav: 0, rate: RATE, syn: 0, ltr: 0, ph: 0, off: true,
+      routes: [{ dst: 0, idx: 0, amt: AMT, tgt: null,
+                 addr: { rack: 'osc', slot: 0, key: 'pw', lbl: 'width' } }] });
+    S.editSnd = ch; S.curSlot = 0;
+    engine.rebuildRack(ch); engine.refresh(ch);
+    if (!resolveDest(p, p.mod[0].routes[0].addr).length)
+      return { cols: [], rows: [], err: 'the pw route does not resolve on this build' };
+
+    const seen = [];
+    realPw = engine.pwLive.bind(engine);
+    engine.pwLive = function (pi2, si2, v2) {
+      if (pi2 === ch && si2 === 0) seen.push(v2 === undefined ? -1 : v2);
+      return realPw(pi2, si2, v2);
+    };
+    const grab = async ms => {
+      engine.allOff(); await sleep(80);
+      const bus = busOf(ch); if (!bus) return null;
+      engine.noteOn(AC.currentTime + 0.02, ch, NOTE, VEL);
+      await sleep(140);
+      seen.length = 0;
+      const t = tap(bus);
+      await sleep(ms);
+      const [L] = t.stop();
+      L._calls = seen.length;
+      L._lo = seen.length ? Math.min.apply(null, seen) : null;
+      L._hi = seen.length ? Math.max.apply(null, seen) : null;
+      engine.allOff(); await sleep(50);
+      return L;
+    };
+    /* magnitude of harmonics 1..H, from a Hann-windowed FFT, peak-picked in a
+       +/-3 bin neighbourhood so a few cents of drift cannot miss one */
+    const harms = (x, f0, H) => {
+      const N = 16384;
+      if (x.length < N) return null;
+      const o = Math.round((x.length - N) / 2);
+      const re = new Float64Array(N), im = new Float64Array(N);
+      for (let i = 0; i < N; i++)
+        re[i] = x[o + i] * (0.5 - 0.5 * Math.cos(2 * Math.PI * i / N));
+      fft(re, im);
+      const bhz = sr / N, out = [];
+      for (let k = 1; k <= H; k++) {
+        const c = Math.round(k * f0 / bhz);
+        let m = 0;
+        for (let b = c - 3; b <= c + 3; b++)
+          m = Math.max(m, Math.sqrt(re[b] * re[b] + im[b] * im[b]));
+        out.push(m);
+      }
+      return out;
+    };
+    /* what a REAL pulse of duty d has: |b_k| = (4/pi k)|sin(pi k d)| */
+    const theory = (d, H) => { const o = [];
+      for (let k = 1; k <= H; k++) o.push(4 / (Math.PI * k) * Math.abs(Math.sin(Math.PI * k * d)));
+      return o; };
+
+    /* ---- the ruler: one static note, to learn f0 ---- */
+    const A0 = await grab(350);
+    if (!A0) return { cols: [], rows: [], err: 'no bus' };
+    const w0 = { o: 0, take: Math.min(NFFT, A0.length) };
+    const f = spectral(A0, A0, sr, w0.o, w0.take).hz;
+    if (!(f > 20)) return { cols: [], rows: [], err: 'silent' };
+
+    /* ---- IS THE WIDTH A REAL WIDTH? Static, one row per duty. --------
+       A pulse of duty d has EVERY harmonic, odd and even. A square has only
+       the odd ones. So h2/h1 at d=0.25 is the whole question: theory says
+       0.71, and a build that only ever RESCALES the square's own harmonics
+       can never make it anything but 0. */
+    const H = 6;
+    for (const d of [0.5, 0.35, 0.25, 0.15]) {
+      p.osc[0].pw = d;
+      engine.rebuildRack(ch); engine.refresh(ch);
+      const x = await grab(350);
+      const hm = harms(x, f, H), th = theory(d, H);
+      const rel = hm ? hm.map(v => v / (hm[0] || 1)) : [];
+      const rth = th.map(v => v / (th[0] || 1));
+      const row = { k: 'pw ' + d.toFixed(2), hz: r3(f) };
+      for (let k = 2; k <= 4; k++) row['h' + k] = r3(rel[k - 1]);
+      for (let k = 2; k <= 4; k++) row['want h' + k] = r3(rth[k - 1]);
+      rows.push(row);
+    }
+    p.osc[0].pw = 0.5;
+    engine.rebuildRack(ch); engine.refresh(ch);
+  } finally {
+    if (typeof realPw === 'function') engine.pwLive = realPw;
+    for (const m of mutes) try { m(); } catch (_) {}
+    unstash(ch, keep);
+  }
+  notes.push('h2 = the 2nd harmonic against the 1st. A pulse of duty d has one; a square does not. ' +
+             'Measured 0 where "want" is not 0 means the width is not a width.');
+  return { cols: ['hz', 'h2', 'want h2', 'h3', 'want h3', 'h4', 'want h4'], rows };
+}
+
+/* ---------------- kitoct: does a kit pad move with the octave -----------
+ * A kit picks its pad by PITCH CLASS and "octaves just transpose", so the same
+ * pad played at C2, C3 and C4 is the same sound at three pitches. For a
+ * SAMPLED pad that means three playback rates — and it decides whether the
+ * keyboard's home can be moved an octave without every drum in the library
+ * changing speed.
+ *
+ *     tools/probe.sh kitoct name=KT808 ch=8
+ */
+async function probeKitOct() {
+  const nm = str(P.name, 'KT808');
+  const ch = CH;
+  const en = libAll().find(e => e && e.name === nm && e.cat === 'kit');
+  if (!en) return { cols: [], rows: [], err: 'no kit named ' + nm };
+  const keep = presetData(S.presets[ch]);
+  setP(ch, en.name, 'kit', en.data);
+  engine.rebuildRack(ch);
+  await sleep(120);
+  const rows = [];
+  for (const midi of list(P.notes, ['24', '36', '48', '60', '72']).map(Number)) {
+    const r = await hit(ch, () => engine.noteOn(AC.currentTime + 0.02, ch, midi, VEL), MS);
+    rows.push({ k: 'C@' + midi + ' (' + NN[((midi % 12) + 12) % 12] + ')',
+                hz: r.hz, centroid: r.centroid, peak: r.peak, rms: r.rms });
+    try { engine.allOff(); } catch (_) {}
+    await sleep(60);
+  }
+  setP(ch, keep.name || 'tmp', keep.cat || 'misc', keep);
+  engine.rebuildRack(ch);
+  const cs = rows.map(r => r.centroid).filter(Number.isFinite);
+  if (cs.length > 1) {
+    const ratios = [];
+    for (let i = 1; i < cs.length; i++) ratios.push(r3(cs[i] / cs[i - 1]));
+    notes.push('centroid ratio per octave: ' + ratios.join(' ') +
+               '   (~2 = the pad transposes · ~1 = it is pinned)');
+  }
+  return { cols: ['hz', 'centroid', 'peak', 'rms'], rows };
+}
+
+
 const HELP = {
   cols: ['args'],
   rows: [
@@ -2828,8 +3002,10 @@ const HELP = {
     { k: 'patqual',  args: 'n=6 \u2014 generated patterns: velocity spread, bar-4-vs-bar-1 difference, cross-lane onset agreement' },
     { k: 'archlvl',  args: 'cat=bass k=6 \u2014 mean peak of every ARCHETYPE, and the trim that would level them' },
     { k: 'genqual',  args: 'cat=bass n=10 wild=35 seed=1 \u2014 roll N patches, play each, and name the duds: SILENT/QUIET/HARSH/MUD/FLAT' },
+    { k: 'kitoct',   args: 'name=KT808 notes=24,36,48,60,72 \u2014 does a kit pad transpose with the octave, and by how much' },
     { k: 'smpkit',   args: 'name=KT808 ch=8 \u2014 load a sampled kit and play all twelve pads: distinct takes, distinct sounds, none unwired' },
     { k: 'smplib',   args: 'ch=8 names=tr808-kick-01,linn-snare-01 \u2014 point a synth op at named library one-shots and hear whether they sound' },
+    { k: 'pwm',      args: 'ch=8 wav=3 rate=2 amt=70 \u2014 is a width sweep smooth? excess edges per second = clicks' },
     { k: 'poolkind', args: 'want=loop — every pool take: measured onsets/centroid, the kind it was called, and both dial views in order' },
     { k: '(any)',    args: '--ab <url> runs the same probe on a second build and diffs it' },
   ]
@@ -2874,9 +3050,11 @@ try {
                    poolkind: probePoolKind,
                    smplib: probeSmpLib,
                    smpkit: probeSmpKit,
+                   kitoct: probeKitOct,
                    genqual: probeGenQual,
                    archlvl: probeArchLvl,
-                   patqual: probePatQual };
+                   patqual: probePatQual,
+                   pwm: probePwm };
   const fn = PROBES[NAME];
   out = fn ? await fn() : (NAME === 'help' ? HELP : { cols: [], rows: [], err: 'no probe named ' + NAME });
 } catch (e) {
