@@ -60,6 +60,39 @@ never finds a falling edge), and it has to TRACK when the width is moving.
 in whichever tab is fronted, and measuring the wrong build reached a wrong
 conclusion twice in one session.
 
+## SPREAD WAS THE ONE DIAL NOTHING COULD REACH  (4aa773d)
+
+Gad: "another thing i found i can[not] mod or live tweak, spread of special
+filters like rake". Both halves true, two different causes.
+
+**Nothing could drive it:** `destRate` had no entry for `flt.spr`, so it
+returned undefined, `modDests` dropped it, and the picker answered "nothing can
+drive spread yet" for every source. That is SIX filters with an unmodulatable
+shape — fmnt vowl twin trip comb rake, the whole FBANK.
+
+**And your own hand did not reach a sounding note:** a hand edit of `spr` went
+to `rebuildRack`, grouped with `typ` and `pol` under "these change what the
+filter IS". They do; spread does not, it only moves where the peaks SIT. And
+rebuildRack was the wrong tool anyway — it rebuilds the CHANNEL bus, and on a
+synth channel the filter is per VOICE, so the held note never heard it.
+
+    peak 2 of a rake bank in Hz, spread 0.05 -> 0.95 under a HELD note
+      before   1275 -> 1275     DEAD both ways
+      after     803 -> 1748
+    a 3Hz lfo on spread
+      before   1275 -> 1275     DEAD, the route would not even resolve
+      after     753 -> 1798
+
+`sprLive` re-aims the bank the way `cutLive` already does for a cutoff move,
+on the voices AND the bus bank, keeping the same `_r` bookkeeping so a cutoff
+move after a spread move drags the NEW shape. Cheap because a bank's peak
+COUNT never changes with spread — only the ratios — and every shape's per-peak
+LEVELS are constants, so there is no gain to chase.
+
+`tools/probe.sh spread` asks all three questions in one call. It reads PEAK 2
+OF THE BANK in Hz: a centroid over a whole saw read 1783 vs 1776 across a
+change that did nothing at all, so it is far too blunt to judge a shape by.
+
 ## ⚠ TWO SESSIONS IN ONE WORKING TREE, 2026-08-27
 
 Two Claude sessions were editing this directory at once. Costs, both real:
