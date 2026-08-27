@@ -1,5 +1,67 @@
 # DRUMS — 2026-08-27 (late, branch `sound-library`)
 
+## THE WIDTH STOPS SNAPPING BETWEEN RUNGS  (73a3f3f)
+
+Gad: **"it works now, not clicky but it is very stepped not fluid as id like"**.
+Not a click any more — a STAIRCASE. `setWave` caches on `Math.round(d*40)`, so
+a sweep only ever had 40 tables to land on and the timbre snapped between them.
+On a slow sweep that is exactly what you hear.
+
+The pair is already two oscillators crossfading, so it does not have to put the
+SAME rung on both. **Straddle** — the rung below the width on one copy, the rung
+above on the other, blended by the fraction between. Continuous width, and NOT
+ONE EXTRA TABLE, which matters because more tables is precisely what drained
+memory the commit before.
+
+    slow sweep 0.25Hz, harmonic 2 sampled every 10ms
+                        flat treads   blending between rungs
+      before (2006)      19% / 18%     0%
+      after               4% /  7%    77-78%
+    waveCache after ten notes: 60, flat
+
+⚠ **THE PART I GOT WRONG FIRST, AND IT IS THE LESSON.** I argued the reload
+could never be heard, BY PARITY: even rungs on A, odd on B, so crossing a rung
+always re-tables the copy whose weight has just reached zero. The argument is
+sound and the premise is false. At 2Hz the width crosses a rung roughly every
+OTHER control tick, so x does not pass through 1 — it jumps from 0.4 to past 1
+in one tick and the copy whose turn has come is sitting at 0.6. Reloading there
+is the very click it was meant to remove: **measured 3.1-4.6 per second,
+straight back to the pre-fix numbers.**
+
+So the reload is gated on the MEASURED gain. A copy that is still loud has its
+weight sent to zero this tick and waits for the next; the sound leans on the
+other copy meanwhile, which is the nearest rung — the behaviour that measured
+clean. A fast sweep degrades to snapping, a slow sweep gets the true blend:
+
+      2Hz     clicks/s 0 / 0 / 0, worst jump 3x the median step
+      2Hz     40% blending, and silent
+      0.25Hz  77-78% blending
+
+**A TIMING ARGUMENT IS NOT A MEASUREMENT.** "By the time the next tick arrives
+that gain will be zero" depends on a tick rate and a sweep rate the code does
+not have in hand. Ask the gain. Same shape as the cache-key mistake below.
+
+## DOES WIDTH EVEN MAKE SENSE ON TRI AND SAW — Gad asked, 2026-08-27
+
+Worth writing down, because the honest answer is "only on one of them".
+
+- **square** — yes, it IS pulse width. The edge moves; measured duty follows
+  the dial to three places.
+- **triangle** — the classic, musical control here is SYMMETRY: move the peak
+  off centre and a triangle morphs toward a saw. TEN does not do that. It
+  re-weights the harmonics by the pulse's magnitude ratio, which thins the
+  triangle without moving its peak. An effect, but not a width.
+- **saw** — a saw has no width. Same harmonic re-weighting; it reads as a
+  comb/notch sweep, which the filter rack already does better and with a
+  cutoff you can aim.
+- **sine** — nothing at all. One harmonic scaled and normalised straight back
+  out. Measured rms 0.3823 at 0.5 against 0.3816 at 0.15.
+
+If it is ever worth revisiting: `width` on a triangle should become the
+symmetry morph (tri -> saw), which is continuous by construction and needs no
+table at all, and on a sine it should be hidden rather than shown doing
+nothing.
+
 ## ⚠ MY REGRESSION: A CACHE KEY IS AN API  (aa099d5)
 
 Gad, on the crossfade build: **"now i dont hear any movement on saw and tri,
