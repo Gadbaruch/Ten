@@ -1259,7 +1259,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-27.1519';
+const BUILD='2026-08-27.1533';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1638,8 +1638,22 @@ function modHolder(p,modId){
 function kitVoicePre(chan,pad){
   if(!kitGlob(chan))return pad;
   const m={...pad};
-  for(const id of KITSHARE)if(chan[id])m[id]=chan[id];
-  m._addr=chan._addr;      // the mod rack's addressing travels WITH the rack
+  for(const id of KITSHARE)if(chan[id]&&id!=='mod')m[id]=chan[id];
+  /* THE MOD RACK IS MERGED, NOT REPLACED, and this is the whole subtlety.
+     foldMod folds a preset's AMP AND PITCH ENVELOPES into the mod rack —
+     MSRC[1] is 'env' — so handing the voice the channel's rack threw every
+     pad's amp envelope away and left the sample playing flat. Measured before
+     the fix: the 808 kick rang 220ms at EVERY amp-decay factor from 0.02x to
+     3x of its own length, because there was no envelope left to shorten it.
+     A pad's envelopes are its IDENTITY. The channel's lfo, velocity, key and
+     random routes are the shared shaping. */
+  if(chan.mod){
+    const mine=(pad.mod||[]).filter(x=>x&&x.src===1);           // env: the pad's own
+    const theirs=(chan.mod||[]).filter(x=>x&&x.src&&x.src!==1); // everything else: shared
+    const merged=[]; for(let i=0;i<10;i++)merged.push(mkMod());
+    [...mine,...theirs].slice(0,10).forEach((x,i)=>{merged[i]=x;});
+    m.mod=merged;
+  }
   return m;
 }
 const RACK_MK={osc:mkOsc,amp:mkAmp,flt:mkFlt,env:mkEnv,lfo:mkLfo,mod:mkMod,fx:mkFx,ply:mkPly};
@@ -10762,7 +10776,14 @@ class Engine{
        get theirs from the voice, but an fx mix is a channel-level thing and
        belongs to whatever was played last */
     (this.lastOn=this.lastOn||{})[pi]={t:at,vel:clamp(vel,0,1),midi};
-    midi+=(chan.tr||0)*12+(chan.trs||0);   // octave + semitone transpose, pre-scale
+    /* A KIT IGNORES TRANSPOSE, for exactly the reason it ignores the global
+       scale (Gad, 2026-08-27: "kits should ignore that same as they ignore
+       global scale"). On every other channel transpose moves the PITCH; on a
+       kit it moves the PITCH CLASS, and the pitch class is WHICH PAD PLAYS —
+       so a transpose of +4 semitones turns every kick into a clap. This was
+       the "middle oct A key playing pad E" report: the key was right, the
+       transpose moved it, and it happens BEFORE kitSlot picks the pad. */
+    if(!isKit(chan))midi+=(chan.tr||0)*12+(chan.trs||0);   // octave + semitone, pre-scale
     if(chan.vof)vel=clamp(vel+chan.vof,0.02,1);   // the channel's own velocity offset
     /* kit pads carry their own PLAY rack (chord/arp/flam/humanize per pad) */
     const kp=isKit(chan)?kitSlot(chan,midi):null;
@@ -13286,10 +13307,13 @@ function drumSample(p,cat,rnd,wild,H){
     p.osc[1]={...body,mode:0,dst:0,amt:+R(0.25,0.6).toFixed(2),fine:0,ph:90,phm:0};
     if(cat==='kik')p.env[2]={dst:2,idx:2,amt:RI(30,70),a:0.001,d:+R(0.03,0.09).toFixed(3),s:0,r:0.05};
   }else{
-    /* THE SAMPLE IS THE ENVELOPE. Sustain 1 and a release longer than any
-       sequenced note, so nothing here truncates a 3s cymbal; `lps:1` ends the
-       voice at the end of the take, which is where a one-shot ends. */
-    Object.assign(p.env[0],{a:0.0005,d:0.01,s:1,r:2});
+    /* PERCUSSIVE, the same as a kit pad — this was the other gate, and a
+       gated one-shot gives you a sound with no decay to play. Sustain 0 with
+       the decay drawn from the take's own length; `lps:1` still ends the voice
+       at the end of the take. */
+    const d0=(e.buf&&e.buf.duration)||0.4;
+    Object.assign(p.env[0],{a:0.0004,
+      d:+clamp(d0*kitDcy(e.inst||'perc',rnd),0.02,5).toFixed(3),s:0,r:0.02});
   }
   if(shape==='mangle'){
     p.amp[0]={typ:pick([1,2,4,5,7]),drv:+R(0.25,0.6).toFixed(2),mix:+R(0.35,0.7).toFixed(2),par:0};
@@ -14857,14 +14881,51 @@ const KITMAP=[
    the take, which is where a one-shot ends.
    Poly, not mono: twelve pads share one channel, and mono here would have a
    hat cutting off a kick. */
-function smpPad(nm,cat,e){
+/* HOW LONG A PAD RINGS, as a fraction of its own take. `1` is "the whole
+   thing"; below that it tightens. This is the drum machine's DECAY knob and it
+   is why a pad has an amp envelope at all — see smpPad. */
+/* MEASURED, on an 808 kick whose own take is 0.44s, ring = onset to -40dB:
+
+       x0.03 -> 30ms   x0.08 -> 45   x0.15 -> 75   x0.3 -> 115
+       x0.6  -> 145    x1.2  -> 155        (the raw sample rings ~165-220)
+
+   so the envelope bites all the way down and 0.7 sits just inside natural —
+   percussive, with the whole tight half of the dial still ahead of it.
+   Per instrument, because a hat and a ride do not want the same answer: the
+   pair is the range a ROLL draws from, and their midpoint is what a factory
+   kit gets. */
+const KITDCY={kick:[0.45,0.9],sub:[0.5,1.0],snare:[0.35,0.8],clap:[0.35,0.8],
+  rim:[0.12,0.4],'hat-closed':[0.1,0.35],'hat-open':[0.3,0.8],
+  cymbal:[0.5,1.1],ride:[0.5,1.1],tom:[0.4,0.9],conga:[0.3,0.7],bongo:[0.25,0.6],
+  cowbell:[0.25,0.6],shaker:[0.15,0.45],clave:[0.1,0.35],timbale:[0.3,0.7],
+  perc:[0.25,0.7],fx:[0.5,1.1]};
+const kitDcy=(inst,rnd)=>{const r=KITDCY[inst]||[0.3,0.8];
+  return rnd?r[0]+rnd()*(r[1]-r[0]):(r[0]+r[1])/2;};
+function smpPad(nm,cat,e,dcyF){
   const kp=basePreset(nm); kp.cat=cat; delete kp.kit;
   kp.osc[0]={wav:9,mode:0,dst:0,rat:1,amt:1,fine:0,ph:0,phm:0,
              sst:0,sen:1,lps:1,smp:{f:e.src.f}};
-  Object.assign(kp.env[0],{a:0.0005,d:0.01,s:1,r:2});
+  /* PERCUSSIVE, NOT A GATE (Gad, 2026-08-27: "add amp env mods so sounds are
+     percussive"). The gate — sustain 1, release longer than any note — let the
+     SAMPLE be the envelope. Honest, and it leaves you nothing to play: every
+     hit is exactly as long as its file and the decay dial does nothing at all.
+     Sustain 0 with the decay taken from the take's own length gives every pad
+     a real envelope to shorten, and the amp decay is a setTargetAtTime time
+     CONSTANT rather than a time-to-zero, so the factor is measured (see
+     tools/probe.sh smpkit dcy=) and not reasoned about. */
+  const dur=(e.buf&&e.buf.duration)||0.4;
+  Object.assign(kp.env[0],{a:0.0004,d:+clamp(dur*(dcyF??0.7),0.02,5).toFixed(3),
+                           s:0,r:0.02});
   kp.flt[0]={typ:0,frq:18000,q:0.7,gn:0};
   kp.vox.mode=0;
   kp.mix={...(MIXT[cat]||MIXT.misc)};
+  /* FOLDED HERE, and it matters. The engine reads modulation out of the MOD
+     rack, and foldMod is what moves an envelope's a/d/s/r onto it. A FACTORY
+     kit got folded on the way through setPresetData, but randomizeKit writes
+     p.kit straight in — so a rolled kit's sampled pads reached the engine with
+     no amp envelope at all and played flat. Measured: every rolled pad showed
+     no src-1 slot while the same factory pads showed twelve. */
+  foldMod(kp); kp._addr=false; addrMod(kp);
   return kp;
 }
 /* Pick a take for one pad: this machine's own voice first, a near-enough voice
@@ -14904,7 +14965,7 @@ function sampleKit(style,rnd){
   rnd=rnd||Math.random;
   const pads=KITMAP.map((slot,i)=>{
     const e=kitPick(style,slot,rnd);
-    return e?smpPad(NN[i],slot.cat,e):null;
+    return e?smpPad(NN[i],slot.cat,e,kitDcy(slot.inst)):null;
   });
   return pads.every(x=>!x)?null:pads.map((k,i)=>k||smpPad(NN[i],KITMAP[i].cat,
     POOL.find(e=>e&&e.src&&e.src.f)||{src:{f:''}}));
@@ -15016,11 +15077,11 @@ function randomizeKit(pi,wildOverride){
     let kp=null;
     if(home&&rnd()>=stray){
       const e=kitPick(home,slot,rnd,true);            // this machine ONLY
-      if(e){kp=smpPad(NN[i],slot.cat,e); fromHome++;}
+      if(e){kp=smpPad(NN[i],slot.cat,e,kitDcy(slot.inst,rnd)); fromHome++;}
     }
     if(!kp&&home&&rnd()<0.85){
       const e=kitPick(null,slot,rnd);                 // anybody's box
-      if(e){kp=smpPad(NN[i],slot.cat,e); borrowed++;}
+      if(e){kp=smpPad(NN[i],slot.cat,e,kitDcy(slot.inst,rnd)); borrowed++;}
     }
     if(!kp){
       kp=genPreset(slot.cat,rnd,w); kp.cat=slot.cat; delete kp.kit;
@@ -15057,7 +15118,9 @@ const trSemis=p=>(p.tr||0)*12+(p.trs||0);
    guaranteed not to match the sound. */
 function heardMidi(pi,midi){
   const p=S.presets[pi]; if(!p)return midi;
-  let m=midi+trSemis(p);
+  /* the grid has to show the pad you will HEAR — see trigger(), which skips
+     transpose on a kit for the same reason */
+  let m=midi+(isKit(p)?0:trSemis(p));
   if(CFG.scaleOn&&!isDrumCat(p.cat)&&!isChordMaster(p))m=snapToPCs(m,pcsNow());
   return m;
 }

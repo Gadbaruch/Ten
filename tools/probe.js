@@ -2774,6 +2774,22 @@ async function probeSmpKit() {
      is the whole point of the shared racks: one filter, twelve pads. Applied
      HERE and not before, because loading the kit preset replaces the channel's
      own rack and would throw it away. */
+  /* `dcy=` rewrites every pad's amp decay as a fraction of its take's own
+     length, which is how the percussive envelope's factor was picked rather
+     than guessed: the amp decay is a time CONSTANT, so what "the whole take"
+     means in the field is a measurement, not arithmetic. */
+  const dcy = P.dcy === undefined ? null : num(P.dcy, 1);
+  if (dcy != null) for (let pc = 0; pc < 12; pc++) {
+    const pad = (S.presets[ch].kit || [])[pc];
+    /* the take's length comes from the POOL, not from opSamples: the samples
+       are not wired until rebuildRack runs, which is after this, so the first
+       version of this found no buffer and silently changed nothing — every
+       decay factor measured identically, which is what gave it away. */
+    const ref = pad && ((pad.osc || [])[0] || {}).smp;
+    const e = ref && ref.f && POOLBYF.get(smpPath(ref.f));
+    if (pad && pad.env && pad.env[0] && e && e.buf)
+      Object.assign(pad.env[0], { a: 0.0004, d: Math.max(0.02, e.buf.duration * dcy), s: 0, r: 0.02 });
+  }
   const chflt = P.chflt === undefined ? null : num(P.chflt, 0);
   if (chflt) {
     S.presets[ch].kglob = 1;
@@ -2794,7 +2810,7 @@ async function probeSmpKit() {
                 take: ref ? String(ref.f).split('/').pop().replace('.flac', '') : 'synth',
                 wired: buf ? 'yes' : (synth ? 'n/a' : 'NO'),
                 dur: buf ? r3(buf.duration) : null,
-                peak: r.peak, centroid: r.centroid });
+                peak: r.peak, rms: r.rms, centroid: r.centroid });
     try { engine.allOff(); } catch (_) {}
     await sleep(50);
   }
@@ -2803,6 +2819,10 @@ async function probeSmpKit() {
   const cents = rows.map(r => r.centroid).filter(Number.isFinite);
   const uniq = new Set(cents.map(c => Math.round(c))).size;
   const takes = new Set(rows.map(r => r.take)).size;
+  const rs = rows.map(r => r.rms).filter(Number.isFinite);
+  if (rs.length) notes.push('rms ' + r3(Math.min(...rs)) + '..' + r3(Math.max(...rs)) +
+    '  mean ' + r3(rs.reduce((a, b) => a + b, 0) / rs.length) +
+    (dcy != null ? '   (amp decay = ' + dcy + ' x the take)' : '   (each pad\'s own decay)'));
   const cs2 = rows.map(r => r.centroid).filter(Number.isFinite);
   if (cs2.length) notes.push('centroid ' + Math.round(Math.min(...cs2)) + '..' +
     Math.round(Math.max(...cs2)) + '  mean ' +
@@ -2814,7 +2834,7 @@ async function probeSmpKit() {
              (uniq <= 2 ? '  <-- THE PADS ARE ALL ONE SOUND' : ''));
   if (unwired.length) notes.push('NOT WIRED: ' + unwired.join(' '));
   if (silent.length) notes.push('SILENT: ' + silent.join(' '));
-  return { cols: ['take', 'wired', 'dur', 'peak', 'centroid'], rows };
+  return { cols: ['take', 'wired', 'dur', 'peak', 'rms', 'centroid'], rows };
 }
 
 /* ---------------- pwm: is the width a real width, and does it move smoothly ---
@@ -3198,6 +3218,68 @@ async function probeSpread() {
   return { cols: ['got', 'want', 'rate'], rows };
 }
 
+/* ---------------- kitdcy: how long a pad actually rings ------------------
+ * RMS IN A WINDOW CANNOT SEE A DECAY. hit() measures around the onset, which
+ * is where the envelope has not happened yet — sweeping the amp decay across a
+ * 20x range moved the reported rms by nothing at all, three decimals
+ * identical, which is what gave the wrong instrument away. This measures the
+ * thing itself: time from the onset until the envelope has fallen 40dB.
+ *
+ *     tools/probe.sh kitdcy name=KT808 pad=0 dcys=0.15,0.35,0.7,1.5,3
+ */
+async function probeKitDcy() {
+  const nm = str(P.name, 'KT808');
+  const ch = CH, pc = Math.round(num(P.pad, 0));
+  const en = libAll().find(e => e && e.name === nm && e.cat === 'kit');
+  if (!en) return { cols: [], rows: [], err: 'no kit named ' + nm };
+  const keep = presetData(S.presets[ch]);
+  setP(ch, en.name, 'kit', en.data);
+  engine.rebuildRack(ch);
+  await sleep(150);
+  const pad = (S.presets[ch].kit || [])[pc] || {};
+  const ref = ((pad.osc || [])[0] || {}).smp;
+  const e = ref && ref.f && POOLBYF.get(smpPath(ref.f));
+  const dur = e && e.buf ? e.buf.duration : 0;
+  const rows = [];
+  for (const f of list(P.dcys, ['0.15', '0.35', '0.7', '1.5', '3']).map(Number)) {
+    /* WRITE THE FOLDED SLOT, not p.env[0]. foldMod moves an envelope's
+       a/d/s/r ONTO the mod slot (MSRC[1] = 'env'), and the engine reads it
+       there — so setting p.env[0].d after loading changes nothing at all, and
+       a sweep across a 40x range reported one number. */
+    const es = (pad.mod || []).find(m => m && m.src === 1);
+    const adsr = { a: 0.0004, d: Math.max(0.02, dur * f), s: 0, r: 0.02 };
+    if (es) Object.assign(es, adsr);
+    if (pad.env && pad.env[0]) Object.assign(pad.env[0], adsr);
+    const bus = busOf(ch);
+    const t = tap(bus);
+    await sleep(30);
+    engine.noteOn(AC.currentTime + 0.02, ch, 60 + pc, VEL);
+    await sleep(Math.max(400, dur * 2200));
+    const [L] = t.stop();
+    try { engine.allOff(); } catch (_) {}
+    /* envelope in 5ms frames, then the first frame after the peak that is
+       40dB down and stays down */
+    const W = Math.round(AC.sampleRate * 0.005), nf = Math.floor(L.length / W);
+    let pk = 0, pkAt = 0;
+    const env = new Float32Array(nf);
+    for (let i = 0; i < nf; i++) {
+      let s2 = 0;
+      for (let j = i * W; j < (i + 1) * W; j++) s2 += L[j] * L[j];
+      env[i] = Math.sqrt(s2 / W);
+      if (env[i] > pk) { pk = env[i]; pkAt = i; }
+    }
+    let end = nf - 1;
+    if (pk > 0) { const thr = pk * 0.01; for (let i = pkAt; i < nf; i++) if (env[i] < thr) { end = i; break; } }
+    rows.push({ k: 'x' + f, d: r3(Math.max(0.02, dur * f)),
+                ringMs: Math.round((end - pkAt) * 5), peak: r3(pk) });
+    await sleep(60);
+  }
+  setP(ch, keep.name || 'tmp', keep.cat || 'misc', keep);
+  engine.rebuildRack(ch);
+  notes.push('pad ' + NN[pc] + ' · take ' + r3(dur) + 's · ring = onset to -40dB');
+  return { cols: ['d', 'ringMs', 'peak'], rows };
+}
+
 const HELP = {
   cols: ['args'],
   rows: [
@@ -3224,6 +3306,7 @@ const HELP = {
     { k: 'patqual',  args: 'n=6 \u2014 generated patterns: velocity spread, bar-4-vs-bar-1 difference, cross-lane onset agreement' },
     { k: 'archlvl',  args: 'cat=bass k=6 \u2014 mean peak of every ARCHETYPE, and the trim that would level them' },
     { k: 'genqual',  args: 'cat=bass n=10 wild=35 seed=1 \u2014 roll N patches, play each, and name the duds: SILENT/QUIET/HARSH/MUD/FLAT' },
+    { k: 'kitdcy',   args: 'name=KT808 pad=0 dcys=0.15,0.35,0.7,1.5,3 \u2014 how long a pad rings at each amp-decay factor' },
     { k: 'kitoct',   args: 'name=KT808 notes=24,36,48,60,72 \u2014 does a kit pad transpose with the octave, and by how much' },
     { k: 'smpkit',   args: 'name=KT808 ch=8 \u2014 load a sampled kit and play all twelve pads: distinct takes, distinct sounds, none unwired' },
     { k: 'smplib',   args: 'ch=8 names=tr808-kick-01,linn-snare-01 \u2014 point a synth op at named library one-shots and hear whether they sound' },
@@ -3274,6 +3357,7 @@ try {
                    smplib: probeSmpLib,
                    smpkit: probeSmpKit,
                    kitoct: probeKitOct,
+                   kitdcy: probeKitDcy,
                    genqual: probeGenQual,
                    archlvl: probeArchLvl,
                    patqual: probePatQual,
