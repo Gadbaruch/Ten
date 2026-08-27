@@ -80,12 +80,23 @@ rms 0.3823 at width 0.5 against 0.3816 at 0.15, centroid 132 against 131.
 ⚠ **OP 0 AGAIN.** Second width fix in a row that had to be written twice,
 because the operator loop starts at 1.
 
-⚠ **WHAT IS NOT MEASURED: any spectral difference.** Inter-harmonic junk under
-a sweep reads -42.4 before and -41.3 after on a saw, -58.4 and -59.6 on a
-triangle — nothing. That metric is swamped by the sweep's LEGITIMATE sidebands
-(an exact continuous sweep reads -42.2 on it, WORSE than a stepped one that
-barely moves at -46.5). The claim is the mechanism, 50dB of it, not a listening
-result. **If it still crackles, this was the wrong thing to fix.**
+**AND THE TRIANGLE PROVES IT.** A band-limited triangle has no discontinuity of
+its own — the smoothest wave in the set — so every large sample-to-sample jump
+in one IS an artifact, with no guard band needed. Jumps over 8x the median step:
+
+    triangle, 2Hz full-depth sweep, three runs each
+      before   1.5 / 3.1 / 3.1 clicks/s, worst jump 9x / 9x / 13x
+      after    0 / 0 / 0,                worst jump 3x / 2x / 3x
+
+A saw jumps once per cycle by construction (1091/s of band-limited edge samples
+at 131Hz) and a square twice, so the count is blind on those — but they take
+the identical path and the triangle proves the path.
+
+⚠ **THE METRIC THAT COULD NOT SEE IT**, so nobody re-derives it: inter-harmonic
+junk under the same sweep reads -56.7/-58.4/-57.8 before and -58.9/-58.2/-59.8
+after. Overlapping. The sweep's legitimate sidebands sit 20dB above the
+artifact and swamp it — and an exact continuous sweep reads WORSE on that
+metric (-42.2) than a stepped one that barely moves (-46.5).
 
 Two probe traps worth keeping: `pwmall` has to PIN vox — unison detune makes
 the sum inharmonic and put -43dB of energy between the harmonics on a totally
