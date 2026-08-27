@@ -1245,7 +1245,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-27.0828';
+const BUILD='2026-08-27.0833';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -13364,7 +13364,40 @@ function prodCtx(rnd,opts={}){
     [0,1.5,3],                        // half-time push
   ];
   const ki=Math.floor(rnd()*KICKS.length);
+  /* ---- THE THREE THINGS THAT MAKE PARTS SOUND ARRANGED RATHER THAN MERELY
+     CO-LOCATED. All three live here, in the producer context, for the same
+     reason the chord progression does: they are one decision shared by every
+     lane, and it is the AGREEMENT between lanes that reads as a band.
+
+     1 ACCENT GRID. Velocity was a per-note constant with a 6% jitter, which is
+       exactly why generated parts sat flat — real playing leans on the same
+       places across the whole kit. Sixteen slots to the bar; every lane's
+       chosen velocity is multiplied by it, so a lane still decides what is
+       loud and the grid decides where the weight falls. Deliberately shallow
+       (0.72..1) — it shapes a part, it must not flatten one that already has
+       dynamics of its own, like the snare's ghost notes. */
+  const ACCENTS=[
+    [1,.78,.86,.76, .96,.74,.86,.78, .98,.76,.86,.76, .94,.78,.88,.82], // straight, backbeat-led
+    [1,.74,.82,.9,  .78,.74,.96,.76, .9,.74,.84,.94,  .78,.74,.98,.8],  // broken, weight off the beat
+    [1,.82,.88,.82, .88,.82,.92,.82, .94,.82,.88,.82, .9,.82,.94,.86],  // even, house
+    [1,.72,.8,.96,  .74,.92,.78,.72, .96,.72,.8,.9,   .74,.94,.8,.72],  // syncopated
+  ];
+  const acc=pk(ACCENTS);
+  const accAt=t=>acc[((Math.round(t*4)%16)+16)%16];
+  /* 2 A RHYTHMIC CELL the melodic lanes may quote, so the bass, the stab and
+       the lead land on the same syncopation instead of each inventing one. */
+  const CELLS=[[0,0.75,1.5,2.5],[0,1,1.75,3],[0,0.5,1.75,2.5,3.5],[0,1.5,2,3.25],[0,0.75,2,2.75]];
+  const cell=pk(CELLS);
+  /* 3 A FOUR-BAR ARC. Every bar-pair was written by the same loop body, so the
+       only difference between bar 1 and bar 4 was noise. This says how full
+       each bar is, and a value over 1 on the last bar is what makes a loop
+       arrive somewhere rather than just stop. */
+  const ARCS=[[1,0.82,0.94,1.12],[0.86,1,0.9,1.16],[1,0.98,0.84,1.2],[0.92,1,0.96,1.08]];
+  const arc=pk(ARCS);
+  const arcAt=t=>arc[Math.floor(((t%16)+16)%16/4)%4];
+  const lastBar=(t,L)=>t>=L-4;              // where a fill belongs
   return {scale,key,prog,deg,chords,crazy,
+    accAt,cell,arcAt,lastBar,
     kick:KICKS[ki], fourFloor:ki===0,
     hatScheme:ki===0&&rnd()<0.5?2:Math.floor(rnd()*2),  // 0=straight8 1=16s 2=offbeat house
     bassStyle:Math.floor(rnd()*4),    // anchor · rolling 8ths · dub · octave bounce
@@ -13558,8 +13591,11 @@ function genLane(pat,pi,mutate,ctx){
   }
   delete lane._cap;
   const L=lane.len, evs=[];
+  /* every note is weighed by the SHARED accent grid before its own jitter, so
+     the lanes lean together — see prodCtx */
+  const acc=C.accAt||(()=>1);
   const push=(t,m,v,d)=>{if(t<L-1e-9)evs.push({t:fmod(t,L),midi:m,
-    vel:+clamp(v*(0.94+rnd()*0.12),0.15,1).toFixed(2),dur:d});};
+    vel:+clamp(v*acc(t)*(0.94+rnd()*0.12),0.15,1).toFixed(2),dur:d});};
   const cIdx=b=>Math.floor(fmod(b,8)/2)%4;                          // 4 chords over 2 bars
   const chordAt=b=>C.prog[cIdx(b)];
   if(cat==='kik'){
@@ -13577,10 +13613,13 @@ function genLane(pat,pi,mutate,ctx){
     }else{
       const st=C.hatScheme===1?0.25:0.5;
       for(let t=0;t<L;t+=st){
-        if(rnd()<0.08)continue;                                     // breathing holes
+        /* the holes follow the ARC now instead of being a flat 8% everywhere,
+           so bar three thins and bar four fills — the loop breathes */
+        if(rnd()>0.92*(C.arcAt?C.arcAt(t):1))continue;
         const on=Math.abs(t%1)<1e-9, off8=Math.abs(t%0.5)<1e-9;
         push(t,60,on?0.72:off8?0.5:0.34,0.05);
       }
+      if(L>=8&&rnd()<0.5)for(let i=0;i<4;i++)push(L-1+i*0.25,60,0.4+i*0.14,0.05);  // 16th roll out
       if(C.hatScheme===1&&rnd()<0.5)push(L-0.25,60,0.75,0.12);      // gallop into the 1
     }
   }
@@ -13598,9 +13637,21 @@ function genLane(pat,pi,mutate,ctx){
     if(rnd()<0.4)push(2.5,43,0.5,0.1);                                        // wood accent
   }
   else if(DRUMCATS.includes(cat)){             // perc/wood/zap: syncopated answers to the kick
-    const offs=[0.75,1.25,1.75,2.25,2.75,3.25,3.75];
-    for(let bar=0;bar<L;bar+=4)for(const o of offs)
-      if(rnd()<0.28*C.energy)push(bar+o,60,0.45+rnd()*0.3,0.1);
+    /* PERC QUOTES THE SHARED CELL rather than sprinkling its own offbeats —
+       the same syncopation the bass and the lead are using, which is what
+       turns three parts into an arrangement */
+    /* MEASURED: quoting the cell AND keeping the old offbeat list made things
+       worse — offbeat concentration across the lanes fell 0.606 -> 0.579,
+       because adding positions is the opposite of agreeing on them. The cell
+       is the primary source and the old spread is a thin fallback. */
+    const cell=(C.cell||[]).filter(o=>o>0);
+    const spare=[0.75,1.25,1.75,2.25,2.75,3.25,3.75].filter(o=>!cell.includes(o));
+    for(let bar=0;bar<L;bar+=4){
+      for(const o of cell)
+        if(rnd()<0.55*C.energy*(C.arcAt?C.arcAt(bar+o):1))push(bar+o,60,0.5+rnd()*0.3,0.1);
+      for(const o of spare)
+        if(rnd()<0.09*C.energy*(C.arcAt?C.arcAt(bar+o):1))push(bar+o,60,0.4+rnd()*0.25,0.1);
+    }
     if(!evs.length)push(2.5,60,0.6,0.1);
   }
   else if(cat==='bass'){                       // root-locked, style picked per song
@@ -13617,8 +13668,14 @@ function genLane(pat,pi,mutate,ctx){
         for(let t2=0;t2<2;t2+=0.5)push(b+t2,(t2*2)%2?root+12:root,0.75,0.2);
       }else{                                                         // anchor + pickups
         push(b,root,0.9,C.fourFloor?0.4:0.7);
-        if(rnd()<0.6)push(b+1.5,rnd()<0.5?root:C.deg(d+4,36),0.6,0.25);
-        if(C.fourFloor&&rnd()<0.5)push(b+0.75,root,0.5,0.15);
+        /* the pickups come off the SHARED CELL, so the bass lands where the
+           perc and the stab land instead of somewhere near them */
+        for(const o of (C.cell||[1.5])){
+          if(o<=0||o>=2)continue;
+          if(rnd()<0.55*(C.arcAt?C.arcAt(b+o):1))
+            push(b+o,rnd()<0.5?root:C.deg(d+4,36),0.6,0.25);
+        }
+        if(C.fourFloor&&rnd()<0.4)push(b+0.75,root,0.5,0.15);
         if(rnd()<0.25)push(b+1.75,C.deg(d,48),0.5,0.2);
       }
     }

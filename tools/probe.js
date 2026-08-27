@@ -2619,6 +2619,106 @@ async function probeArchLvl() {
   return { cols: ['n', 'mean', 'min', 'max', 'cent', 'trim'], rows };
 }
 
+/* ---------------- patqual: is a generated pattern arranged or merely stacked
+ * Three numbers, one per claim made about the note generator:
+ *   vspread  standard deviation of velocity within a lane. A part whose notes
+ *            are all the same loudness reads as typed in, not played; the old
+ *            generator gave every note a constant with a 6% jitter.
+ *   barvar   how different bar 4 is from bar 1, as 1 - (shared onsets /
+ *            union of onsets). Every bar-pair used to be written by the same
+ *            loop body, so this was near zero and a four-bar loop was one bar
+ *            repeated.
+ *   agree    fraction of a melodic lane's OFFBEAT onsets that another lane
+ *            also plays. Parts that syncopate together sound arranged; parts
+ *            that each invent their own syncopation sound co-located. This is
+ *            the one the shared rhythmic cell exists to move.
+ *
+ *     tools/probe.sh patqual n=6
+ */
+async function probePatQual() {
+  if (typeof genLane !== 'function') return { cols: [], rows: [], err: 'no genLane on this build' };
+  const n = Math.max(1, Math.min(12, Math.round(num(P.n, 6))));
+  const CATS2 = { 1: 'kik', 2: 'snr', 3: 'hh', 4: 'perc', 5: 'bass', 6: 'chord', 7: 'lead' };
+  const pat = S.editPat;
+  const rows = [];
+  const keep = {};
+  for (const pi of Object.keys(CATS2)) keep[pi] = S.presets[pi].cat;
+  const agg = { vcorr: [], barvar: [], conc: [] };
+  for (let run = 0; run < n; run++) {
+    for (const pi of Object.keys(CATS2)) S.presets[pi].cat = CATS2[pi];
+    const ctx = prodCtx(Math.random, {});
+    const lanes = {};
+    for (const pi of Object.keys(CATS2)) {
+      const lane = S.patterns[pat].lanes[pi];
+      /* FOUR BARS, FORCED -- and the dummy event is the point. genLane opens
+         with `if (lane.auto || !lane.events.length)` and resets the lane to
+         one or two bars, so CLEARING it first threw the length away and every
+         build read bar 4 against an empty bar: barvar 1.000, pinned at its
+         ceiling, measuring nothing. Leave one event behind and the length
+         survives; genLane replaces the events anyway. */
+      lane.unit = 'B'; lane.count = 4; lane.auto = false;
+      lane.events = [{ t: 0, midi: 60, vel: 0.5, dur: 0.1 }];
+      genLane(pat, +pi, false, ctx);
+      lanes[pi] = (S.patterns[pat].lanes[pi].events || []).slice();
+    }
+    /* the whole grid, so a lane can be asked whether it lands WITH the others
+       and whether they lean the same way when it does */
+    const at = {};
+    for (const pi of Object.keys(lanes))
+      for (const e of lanes[pi]) {
+        const t = +e.t.toFixed(3);
+        (at[t] = at[t] || []).push({ pi, vel: e.vel || 0 });
+      }
+    /* ACCENT AGREEMENT: at every moment two or more lanes play together, do
+       they agree on whether it is a strong beat? Correlate each lane's
+       velocity against the mean of the others at the same instant. This, not
+       within-lane spread, is what a shared accent grid is FOR. */
+    let cn = 0, cs = 0;
+    for (const t of Object.keys(at)) {
+      const g = at[t]; if (g.length < 2) continue;
+      const m = g.reduce((a, b) => a + b.vel, 0) / g.length;
+      for (const x of g) { cs += 1 - Math.min(1, Math.abs(x.vel - m) / 0.5); cn++; }
+    }
+    agg.vcorr.push(cn ? cs / cn : 0);
+    /* OFFBEAT CONCENTRATION: of all the offbeat onsets anyone plays, how few
+       distinct POSITIONS do they use? Parts syncopating in the same places
+       sound arranged; each inventing its own sounds co-located. */
+    /* THE HAT LANE IS EXCLUDED, and that is a correction rather than a
+       convenience: a hat is a CONTINUOUS STREAM of eighths or sixteenths, not
+       a syncopation anybody chose, and it contributes more offbeat onsets than
+       every other lane combined -- so it dominated this number and any change
+       to hat DENSITY moved it more than any change to where the parts agree.
+       What is being asked here is whether the parts that choose their
+       syncopation choose the same one. */
+    const offOn = [], offPos = new Set();
+    for (const pi of Object.keys(lanes)) {
+      if (CATS2[pi] === 'hh') continue;
+      for (const e of lanes[pi]) if (Math.abs(e.t % 1) > 1e-6) {
+        offOn.push(e); offPos.add(+(e.t % 4).toFixed(3));
+      }
+    }
+    agg.conc.push(offOn.length ? 1 - offPos.size / offOn.length : 0);
+    for (const pi of Object.keys(CATS2)) {
+      const ev = lanes[pi];
+      if (!ev.length) { rows.push({ k: CATS2[pi] + ' r' + run, notes: 0 }); continue; }
+      const b1 = new Set(ev.filter(e => e.t < 4).map(e => +e.t.toFixed(2)));
+      const b4 = new Set(ev.filter(e => e.t >= 12 && e.t < 16).map(e => +(e.t - 12).toFixed(2)));
+      let shared = 0; for (const t of b4) if (b1.has(t)) shared++;
+      const uni = new Set([...b1, ...b4]).size;
+      const bv = (b1.size && b4.size) ? 1 - shared / uni : null;
+      if (Number.isFinite(bv)) agg.barvar.push(bv);
+      rows.push({ k: CATS2[pi] + ' r' + run, notes: ev.length, b1: b1.size, b4: b4.size,
+                  barvar: Number.isFinite(bv) ? r3(bv) : null });
+    }
+  }
+  for (const pi of Object.keys(CATS2)) S.presets[pi].cat = keep[pi];
+  const av = a => a.length ? r3(a.reduce((x, y) => x + y, 0) / a.length) : null;
+  notes.push('accent agreement ' + av(agg.vcorr) +
+             '   bar4-vs-bar1 ' + av(agg.barvar) +
+             '   offbeat concentration ' + av(agg.conc));
+  return { cols: ['notes', 'b1', 'b4', 'barvar'], rows };
+}
+
 const HELP = {
   cols: ['args'],
   rows: [
@@ -2642,6 +2742,7 @@ const HELP = {
     { k: 'resamp',   args: 'ch=9 — master resample is pre-master-fx and replays exactly like live at mSum: take clean of a hot sat, unity dials, replay ratio ~1, mid-bounce rebuild survives' },
     { k: 'fxwire',   args: 'ch=8 — EXHAUSTIVE: every (fx type, param) FXMODOK claims, driven through the real applier — offered/claimed/moved. No audio, one call.' },
     { k: 'fxmod',    args: 'ch=8 — every wired fx (type,param) wobbles under a 5Hz lfo through the real ctrl path; arp rate mod moves note density' },
+    { k: 'patqual',  args: 'n=6 \u2014 generated patterns: velocity spread, bar-4-vs-bar-1 difference, cross-lane onset agreement' },
     { k: 'archlvl',  args: 'cat=bass k=6 \u2014 mean peak of every ARCHETYPE, and the trim that would level them' },
     { k: 'genqual',  args: 'cat=bass n=10 wild=35 seed=1 \u2014 roll N patches, play each, and name the duds: SILENT/QUIET/HARSH/MUD/FLAT' },
     { k: 'smplib',   args: 'ch=8 names=tr808-kick-01,linn-snare-01 \u2014 point a synth op at named library one-shots and hear whether they sound' },
@@ -2689,7 +2790,8 @@ try {
                    poolkind: probePoolKind,
                    smplib: probeSmpLib,
                    genqual: probeGenQual,
-                   archlvl: probeArchLvl };
+                   archlvl: probeArchLvl,
+                   patqual: probePatQual };
   const fn = PROBES[NAME];
   out = fn ? await fn() : (NAME === 'help' ? HELP : { cols: [], rows: [], err: 'no probe named ' + NAME });
 } catch (e) {
