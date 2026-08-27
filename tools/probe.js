@@ -3355,6 +3355,21 @@ async function probePwmAll() {
        26Hz at harmonic 12, which is exactly the guard band, so real harmonics
        fell into the "junk" bins and the pre-fix build showed a -43dB floor on a
        STATIC note. A voice knows what frequency it was built at; ask it. */
+    /* A TRIANGLE HAS NO DISCONTINUITY OF ITS OWN. Band-limited, it is the
+       smoothest wave in the set — so every large sample-to-sample jump in one
+       IS an artifact, and no guard band or harmonic bookkeeping is needed to
+       say so. (A saw jumps once per cycle by construction and a square twice,
+       so for those the count is offset by that, not zero.) Threshold at 8x the
+       MEDIAN step, which is robust to whatever slope the wave itself has. */
+    const jumps = (x, f0) => {
+      const n = x.length, d = new Float64Array(n - 1);
+      for (let i = 1; i < n; i++) d[i - 1] = Math.abs(x[i] - x[i - 1]);
+      const srt = Array.from(d).sort((a, b) => a - b);
+      const med = srt[srt.length >> 1] || 1e-12;
+      let big = 0, mx = 0;
+      for (let i = 0; i < d.length; i++) { if (d[i] > 8 * med) big++; if (d[i] > mx) mx = d[i]; }
+      return { per_s: +(big / (n / sr)).toFixed(1), worst: +(mx / med).toFixed(0) };
+    };
     const grab = async ms => {
       engine.allOff(); await sleep(80);
       const bus = busOf(ch); if (!bus) return null;
@@ -3405,15 +3420,16 @@ async function probePwmAll() {
         for (let q = -40; q <= 40; q++) { const f2 = bf * (1 + q * 0.001), m = goertz(A, f2, o, N);
           if (m > bm) { bm = m; f = f2; } }
       }
-      const fl = junk(A, f);
+      const fl = junk(A, f), jA = jumps(A, f);
       p.mod[0].off = false;
       const B = await grab(700);
       p.mod[0].off = true;
-      const sw = junk(B, f);
+      const sw = junk(B, f), jB = jumps(B, f);
       rows.push({ k: 'wav ' + wv + ' ' + (['sine', 'tri', 'saw', 'square'][wv] || '?'),
                   hz: r3(f),
                   floor: fl, swept: sw,
-                  added: (fl != null && sw != null) ? +(sw - fl).toFixed(1) : '?' });
+                  added: (fl != null && sw != null) ? +(sw - fl).toFixed(1) : '?',
+                  jfloor: jA.per_s, jswept: jB.per_s, worst: jB.worst });
     }
   } finally {
     for (const m of mutes) try { m(); } catch (_) {}
@@ -3422,7 +3438,10 @@ async function probePwmAll() {
   notes.push('floor = the junk between the harmonics with the modulator OFF, dB under the ' +
              'fundamental. swept = the same with the width sweeping. Compare the SWEPT column ' +
              'between two builds — it is not meaningful against an absolute.');
-  return { cols: ['hz', 'floor', 'swept', 'added'], rows };
+  notes.push('jfloor/jswept = sample-to-sample jumps over 8x the median step, per second. ' +
+             'On a TRIANGLE the wave has none of its own, so jswept above jfloor is the click ' +
+             'rate outright. A saw carries one per cycle and a square two, by construction.');
+  return { cols: ['hz', 'floor', 'swept', 'added', 'jfloor', 'jswept', 'worst'], rows };
 }
 
 const HELP = {
