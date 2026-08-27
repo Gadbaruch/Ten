@@ -2755,10 +2755,20 @@ async function probeSmpKit() {
   if (typeof sampleKit !== 'function') return { cols: [], rows: [], err: 'no sampleKit on this build' };
   const nm = str(P.name, 'KT808');
   const ch = CH;
-  const en = libAll().find(e => e && e.name === nm && e.cat === 'kit');
-  if (!en) return { cols: [], rows: [], err: 'no kit named ' + nm + ' in the library' };
   const keep = presetData(S.presets[ch]);
-  setP(ch, en.name, 'kit', en.data);
+  /* `roll=<wild>` tests the DICE instead of the library: rolling a kit has to
+     give twelve sounding pads on the drum-machine layout just as a factory
+     kit does, and it is the path that reaches synthesised drums when the
+     shelf has no such voice. */
+  const roll = P.roll === undefined ? null : num(P.roll, 35);
+  if (roll == null) {
+    const en = libAll().find(e => e && e.name === nm && e.cat === 'kit');
+    if (!en) return { cols: [], rows: [], err: 'no kit named ' + nm + ' in the library' };
+    setP(ch, en.name, 'kit', en.data);
+  } else {
+    S.presets[ch].cat = 'kit';
+    randomizeKit(ch, roll);
+  }
   engine.rebuildRack(ch);
   await sleep(120);
   const rows = [];
@@ -2768,10 +2778,11 @@ async function probeSmpKit() {
     const ref = ((pad.osc || [])[0] || {}).smp;
     const key = smpKey(ch, 0, pc);
     const buf = engine.opSamples.get(key);
+    const synth = !ref;
     const r = await hit(ch, () => engine.noteOn(AC.currentTime + 0.02, ch, midi, VEL), MS);
     rows.push({ k: NN[pc] + ' ' + (pad.cat || '?'),
-                take: ref ? String(ref.f).split('/').pop().replace('.flac', '') : '—',
-                wired: buf ? 'yes' : 'NO',
+                take: ref ? String(ref.f).split('/').pop().replace('.flac', '') : 'synth',
+                wired: buf ? 'yes' : (synth ? 'n/a' : 'NO'),
                 dur: buf ? r3(buf.duration) : null,
                 peak: r.peak, centroid: r.centroid });
     try { engine.allOff(); } catch (_) {}
@@ -2784,7 +2795,7 @@ async function probeSmpKit() {
   const takes = new Set(rows.map(r => r.take)).size;
   const silent = rows.filter(r => !(r.peak > 0.01)).map(r => r.k);
   const unwired = rows.filter(r => r.wired === 'NO').map(r => r.k);
-  notes.push(nm + ': ' + takes + '/12 distinct takes, ' + uniq + '/12 distinct centroids' +
+  notes.push((roll == null ? nm : 'rolled @wild ' + roll) + ': ' + takes + '/12 distinct takes, ' + uniq + '/12 distinct centroids' +
              (uniq <= 2 ? '  <-- THE PADS ARE ALL ONE SOUND' : ''));
   if (unwired.length) notes.push('NOT WIRED: ' + unwired.join(' '));
   if (silent.length) notes.push('SILENT: ' + silent.join(' '));

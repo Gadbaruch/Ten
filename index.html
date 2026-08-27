@@ -1245,7 +1245,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-27.1340';
+const BUILD='2026-08-27.1346';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -12663,7 +12663,11 @@ function libAll(){
        first. Dropping the factory half is the only way anyone already carrying
        a library ever sees them: without it the stored copies shadow the
        definitions in this file forever. */
-    const keep=v<28?items.filter(en=>en&&!en.factory):items;  // v4-8 levels · v9-11 voicings · v13 SNGB/LDGB · v15 KKGB/HHGB · v16 tuning + envelopes retranslated · v19 VABGA out · v26 snares rebuilt
+    /* v32 drops the factory KITS specifically — the rest of the factory half
+       is unchanged and there is no reason to make somebody's library rebuild
+       a hundred and eighty presets to fix twelve pads. */
+    const keep=(v<28?items.filter(en=>en&&!en.factory)
+                    :items.filter(en=>!(en&&en.factory&&en.cat==='kit')));  // v4-8 levels · v9-11 voicings · v13 SNGB/LDGB · v15 KKGB/HHGB · v16 tuning + envelopes retranslated · v19 VABGA out · v26 snares rebuilt
     libStore(keep);
     return libCache=keep;
   }
@@ -12771,7 +12775,11 @@ function unpackRacks(d){
   if(Array.isArray(q.kit))q.kit=q.kit.map(k=>k?unpackRacks(k):null);
   return q;
 }
-const LIBV=31;   // bump BOTH: libStore writes it, libAll checks it
+/* v32: the factory SYNTH kits are re-laid on the drum-machine layout. Their
+   old lane list was kik·snr·hh·hh·perc·tom·cymb·wood·zap·perc·snr·kik — two
+   kicks, two snares, a zap, and no clap, rim, cowbell or clave anywhere — so
+   a stored copy has to be dropped or it shadows the definition forever. */
+const LIBV=32;   // bump BOTH: libStore writes it, libAll checks it
 function libStore(a){libMigrated=true; libCache=null; libNoCache=null;
   /* `gen` entries are built from this file and the manifest every boot — see
      smpKitEntries. Writing them would cost 831KB for nothing and would let a
@@ -14608,15 +14616,31 @@ function smpPad(nm,cat,e){
 /* Pick a take for one pad: this machine's own voice first, a near-enough voice
    from the same machine next, and only then anybody's. `rnd` chooses among
    equals so two 808 kits are not the same 808 kit. */
-function kitPick(style,slot,rnd){
+function kitPick(style,slot,rnd,strict){
   const pool=POOL.filter(e=>e&&e.src&&e.src.f&&e.inst);
   const tryOne=(inst,st)=>{
     const c=pool.filter(e=>e.inst===inst&&(!st||e.style===st));
     return c.length?c[Math.floor(rnd()*c.length)]:null;
   };
   for(const inst of [slot.inst,...slot.alt]){const e=tryOne(inst,style); if(e)return e;}
+  /* STRICT MEANS STRICT. Without this the "anybody's box" loop below ran
+     inside what the caller thought was a same-machine pick, so a roll asking
+     for one coherent machine got a scatter and never knew: a kit rolled at
+     20% wildness came out tr808x4 rx5x2 linnx2 tr8x1 trap x1 tr505x1 mrk2x1
+     while reporting itself as a single-machine kit. */
+  if(strict)return null;
   for(const inst of [slot.inst,...slot.alt]){const e=tryOne(inst,null);  if(e)return e;}
   return null;
+}
+/* WHICH MACHINES CAN ACTUALLY FURNISH A KIT. `trap` has one surviving sound
+   and the Maestro Rhythm King has ten; choosing either as a kit's home means
+   eleven pads borrowed from elsewhere, which is a scatter wearing a machine's
+   name. Six distinct instruments is the bar — enough that the kit sounds like
+   somewhere, with the fallback chain covering the rest. */
+function kitMachines(min){
+  const by={};
+  for(const e of POOL)if(e&&e.style&&e.inst)(by[e.style]=by[e.style]||new Set()).add(e.inst);
+  return Object.keys(by).filter(k=>by[k].size>=(min||6));
 }
 /* A WHOLE KIT. `style` names a machine, or is null for a kit drawn from the
    lot — which is the one people actually reach for, and the reason the pick is
@@ -14680,8 +14704,12 @@ function smpKitEntries(){
   return out;
 }
 function kitPads(rnd,wild){    // 12 complete pad chains, one per pitch class
-  const lanes=['kik','snr','hh','hh','perc','tom','cymb','wood','zap','perc','snr','kik'];
-  return lanes.map((c,i)=>{const kp=genPreset(c,rnd,wild??0.3);kp.cat=c;kp.name=NN[i];delete kp.kit;
+  /* THE SAME LAYOUT AS EVERY OTHER KIT. These are laid down before the shelf
+     exists so they stay synthesised, but C is still the kick and there is
+     still a clap where a clap belongs — the old lane list had two kicks, two
+     snares and no clap, rim, cowbell or clave at all. */
+  return KITMAP.map((slot,i)=>{const c=slot.cat;
+    const kp=genPreset(c,rnd,wild??0.3);kp.cat=c;kp.name=NN[i];delete kp.kit;
     /* A PAD'S LEVEL IS THE CHANNEL FADER FOR THAT PAD — it multiplies with the
        kit channel's own, so a pad left at a generated 0.4 came out half of what
        the same drum does on its own channel. Give each pad the level its kind
@@ -14699,14 +14727,59 @@ function kitNotes(pool,rnd){   // (legacy) map every playable midi to a drum pre
   }
   return notes;
 }
-function randomizeKit(pi){
+/* ROLLING A KIT SHOULD GIVE YOU A KIT, not twelve unrelated drums that happen
+   to share a channel. Two things were wrong with the old roll and both of them
+   are what made a rolled kit feel like a bag of parts:
+
+   1 THE LAYOUT. It rolled the lanes kik·snr·hh·hh·perc·tom·cymb·wood·zap·
+     perc·snr·kik — two kicks, two snares, a zap, and no clap, rim, cowbell or
+     clave anywhere. KITMAP is the layout a drum machine actually has and is
+     what the factory sampled kits already use; a rolled kit uses it too now,
+     so C is the kick wherever the kit came from.
+
+   2 THE COHERENCE. Twelve independent rolls give twelve unrelated drums. A
+     kit sounds like a kit because its voices came out of the SAME BOX, so the
+     roll picks one machine and takes the whole kit off it — and wildness is
+     how far it is allowed to stray:
+
+       <30%   one machine, every pad          a straight classic kit
+       <60%   mostly one, a quarter borrowed  a kit with a couple of ringers
+       <85%   half and half
+       >=85%  anything, synthesised drums included
+
+   Below the top rung a pad only falls through to a SYNTHESISED drum when the
+   shelf has nothing for that slot at all — which is the LinnDrum's missing
+   clave, not a dice roll. */
+function randomizeKit(pi,wildOverride){
   const p=S.presets[pi];
   pushUndo('preset');
-  const lanes=['kik','snr','hh','hh','perc','tom','cymb','wood','zap','perc','snr','kik'];
-  p.kit=lanes.map((c,i)=>{const kp=genPreset(c,Math.random,clamp(CFG.wild??35,0,100)/100);
-    kp.cat=c; kp.name=NN[i]; delete kp.kit; return kp;});
+  const w=clamp(wildOverride??CFG.wild??35,0,100)/100, rnd=Math.random;
+  const machines=kitMachines(6);
+  const home=machines.length?machines[Math.floor(rnd()*machines.length)]:null;
+  const stray=w<0.3?0:w<0.6?0.25:w<0.85?0.5:1;
+  let fromHome=0, borrowed=0, synth=0;
+  p.kit=KITMAP.map((slot,i)=>{
+    let kp=null;
+    if(home&&rnd()>=stray){
+      const e=kitPick(home,slot,rnd,true);            // this machine ONLY
+      if(e){kp=smpPad(NN[i],slot.cat,e); fromHome++;}
+    }
+    if(!kp&&home&&rnd()<0.85){
+      const e=kitPick(null,slot,rnd);                 // anybody's box
+      if(e){kp=smpPad(NN[i],slot.cat,e); borrowed++;}
+    }
+    if(!kp){
+      kp=genPreset(slot.cat,rnd,w); kp.cat=slot.cat; delete kp.kit;
+      kp.mix={...(MIXT[slot.cat]||MIXT.misc)};        // a pad's level is its kind's
+      synth++;
+    }
+    kp.name=NN[i];
+    return kp;
+  });
   engine.rebuildRack(pi);
-  flash('☆ new random kit — 12 pads');
+  flash('\u2606 kit \u2014 '+(fromHome?fromHome+'\u00d7'+home:'')+
+        (borrowed?(fromHome?' \u00b7 ':'')+borrowed+' borrowed':'')+
+        (synth?(fromHome||borrowed?' \u00b7 ':'')+synth+' synth':''));
   dirty=true; dirtySave=true;
 }
 function randomizeChannel(pi,wildOverride){
