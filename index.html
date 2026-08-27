@@ -1245,7 +1245,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-27.1312';
+const BUILD='2026-08-27.1319';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1518,6 +1518,26 @@ function kitSlot(p,midi,make){
 const smpKey=(pi,op,pad)=>pad==null?pi+':'+op:pi+':p'+pcOf(pad)+':'+op;
 /* the key the SOUND PAGE is pointing at: a kit edits its focused pad, and with
    no pad focused it edits the channel — the same rule modHolder already uses */
+/* SHIFT ON A POOL DIAL JUMPS TO THE NEXT INSTRUMENT. The shelf is 250 sounds
+   in nineteen groups, and a numeric coarse step is no more use than a fine one
+   when what you actually want is "the next kind of drum" — 250 presses to
+   cross the shelf, or nineteen. Backwards lands on the HEAD of the previous
+   group rather than its tail, because walking back should put you at the
+   beginning of the kicks and not at the last one. */
+const poolJump=want=>(v,dir)=>{
+  const V=poolView(want);
+  if(!V.length)return 0;
+  const gk=i=>{const e=POOL[V[i]]; return e?(e.inst||('·'+(e.kind||'?'))):'?';};
+  let i=clamp(Math.round(v),0,V.length-1);
+  const here=gk(i);
+  if(dir>0){while(i<V.length-1&&gk(i)===here)i++;}
+  else{
+    while(i>0&&gk(i)===here)i--;                       // step back into the previous group
+    const prev=gk(i);
+    while(i>0&&gk(i-1)===prev)i--;                     // then walk to its head
+  }
+  return i;
+};
 const smpKeyUI=()=>smpKey(S.editSnd,S.curSlot,
   (isKit(S.presets[S.editSnd])&&S.prepFocus!=null)?S.prepFocus:null);
 /* A SAMPLE OP CARRIES A REFERENCE, and this is what turns a sampled patch into
@@ -1681,6 +1701,7 @@ const OSC_P=sl=>[
      hit it can pitch, not four bars of somebody else's tempo. The view puts
      those first; the loops are still down the far end of the same dial. */
   ...(Math.round((sl&&sl.wav)||0)===9?[poolSP(SP('smpl','_pool','lin',{min:0,max:31,step:1,w:2,
+     jump:poolJump('one'),          // shift walks the instrument groups
      fmt:v=>{const V=poolView('one'), e2=POOL[V[Math.round(v)]];
        return e2?KINDMK(e2.kind)+e2.name:'—';},
      get:()=>{const k=smpKeyUI(), V=poolView('one');
@@ -2834,6 +2855,11 @@ function arepStart(code){
   AREP.timer=setTimeout(step,110);             // no half-second wait to get going
 }
 function adjust(spec,v,dir,m=1){
+  /* `jump` is `big`'s semantic sibling: what the COARSE step means when the
+     right answer is not a number of places but a place. Asked before
+     dialScale() touches `m`, because a pool dial's groups are not a continuum
+     and pressure has nothing to say about them. */
+  if(spec.jump&&m>1)return spec.jump(v,dir);
   /* A MENU IS NOT A DIAL. Pressing an enum harder should not skip nine entries
      to reach the tenth — one press, one option, always. Depth only means
      something where the values are a continuum. */
@@ -14896,6 +14922,7 @@ const GRANF=[
  /* THE AUDIO CHANNEL LOOPS AND GRANULATES, so what it wants is a LOOP.
     Same dial, opposite view — see poolView. */
  poolSP(SP('smpl','_pool','lin',{min:0,max:31,step:1,w:2,
+   jump:poolJump('loop'),           // shift walks the instrument groups
    fmt:v=>{const V=poolView('loop'), e2=POOL[V[Math.round(v)]];
      return e2?KINDMK(e2.kind)+e2.name:'\u2014';},
    get:()=>{const V=poolView('loop');
@@ -17667,6 +17694,30 @@ function poolAdd(buf,name,src,hint){
   if(!buf)return -1;
   const i=POOL.findIndex(p2=>p2.buf===buf);
   if(i>=0){if(src&&!POOL[i].src){POOL[i].src=src; if(src.f)POOLBYF.set(src.f,POOL[i]);} return i;}
+  /* A FACTORY TAKE IS ITS PATH, and a re-fetch produces a NEW AudioBuffer — so
+     deduping by buffer identity alone let a set restore add a SECOND entry for
+     a file already on the shelf. Measured after one load of a set using a
+     sampled kit: 14 duplicates, exactly its twelve pads plus the two other
+     factory takes the set referenced. It compounds every reload. */
+  if(src&&src.k==='f'&&src.f&&POOLBYF.has(src.f)){
+    const e0=POOLBYF.get(src.f); const j=POOL.indexOf(e0);
+    if(j>=0){
+      /* THE MANIFEST IS THE AUTHORITY ON WHERE A TAKE BELONGS. A set restores
+         out of localStorage before the shelf has finished loading, so the
+         takes it references enter the pool first, with a session `ord` and no
+         instrument at all — and then the manifest arrived, found the path
+         already there, and left it stranded. tr808-rim-01 sorted after the fx
+         group instead of with the other rims. When a hint turns up later it
+         wins. */
+      if(hint&&Number.isFinite(hint.ord)){
+        e0.ord=hint.ord; e0.inst=hint.inst||e0.inst;
+        e0.style=hint.style||e0.style; e0.cat=hint.cat||e0.cat;
+        if(hint.kind)e0.kind=hint.kind;
+        POOLVER++;
+      }
+      return j;
+    }
+  }
   if(POOL.length>=POOLMAX){
     const k=POOL.findIndex(p2=>!p2.src||p2.src.k!=='f');
     POOL.splice(k<0?0:k,1);
@@ -17792,6 +17843,8 @@ function opSmpLoad(blobs,at){
     if(src.k==='f'&&src.f){                     // a factory phrase: fetch it back
       const have=POOL.find(p2=>p2.src&&p2.src.k==='f'&&p2.src.f===src.f);
       if(have){put(k,have.buf); continue;}
+      const shelf=POOLBYF.get(src.f);      // already on the shelf: no fetch, no copy
+      if(shelf&&shelf.buf){put(k,shelf.buf); continue;}
       fetch('samples/'+src.f).then(r=>r.ok?r.arrayBuffer():null)
         .then(ab=>ab&&AC.decodeAudioData(ab))
         .then(buf=>{ if(buf){poolAdd(buf,fName(src.f),{k:'f',f:src.f}); put(k,buf);} })

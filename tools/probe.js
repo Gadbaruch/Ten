@@ -2433,6 +2433,21 @@ async function probePoolKind() {
   };
   notes.push('audio dial 0..7: ' + dial(typeof GRANF !== 'undefined' ? GRANF : null, 'loop'));
   notes.push('smp op  0..7: ' + dial(typeof OSC_P !== 'undefined' ? OSC_P({ wav: 9 }) : null, 'one'));
+  /* and what SHIFT does on that dial: the whole shelf in group-sized strides,
+     driven through the real spec's own jump so this cannot drift from it */
+  const sp9 = (typeof OSC_P !== 'undefined' ? OSC_P({ wav: 9 }) : []).find(x => x && x.key === '_pool');
+  if (sp9 && sp9.jump) {
+    const stops = []; let v = 0;
+    for (let i = 0; i < 40; i++) {
+      stops.push(sp9.fmt(v));
+      const nv = adjust(sp9, v, 1, 10);
+      if (nv === v) break;
+      v = nv;
+    }
+    notes.push('shift-jump from 0 (' + stops.length + ' stops): ' + stops.join(' > '));
+    let back = adjust(sp9, v, -1, 10);
+    notes.push('and back one group: ' + sp9.fmt(back));
+  }
   /* the head of each view and nothing more: the pool is 300+ and printing all
      of it is the "re-dumping results" waste NEXT.md warns about */
   const view = n => { const V = poolView(n);
