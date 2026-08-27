@@ -1259,7 +1259,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-27.1533';
+const BUILD='2026-08-27.1808';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1586,6 +1586,7 @@ const POOLBYF=new Map();             // src.f -> entry, so a preset's sample ref
    libAll() appends them and libInit() calls libAll during module init, long
    before the kit block itself is reached. See smpKitEntries. */
 let SMPKITCACHE=null;
+let SHELFN=0;                        // how many one-shots the manifest promised
 /* THE ENGINE ARRIVES AS AN ARGUMENT and is never read from the outer const.
    `rebuildRack` runs while `const engine = new Engine()` is still evaluating,
    and reading a const from inside its own initialiser is a ReferenceError, not
@@ -12427,7 +12428,8 @@ function loadShelf(url,ord0){
   }).catch(()=>0);
 }
 loadShelf('samples/manifest.json',0);
-loadShelf('samples/oneshots/manifest.json',1e4).then(()=>{
+loadShelf('samples/oneshots/manifest.json',1e4).then(nSh=>{
+  SHELFN=nSh|0;
   /* the manifest has resolved but the BUFFERS are still landing, so this only
      INVALIDATES — the kits rebuild themselves on the next libAll, from
      whatever the shelf holds by then. Nothing is lost if this fires early;
@@ -14933,8 +14935,14 @@ function smpPad(nm,cat,e,dcyF){
    equals so two 808 kits are not the same 808 kit. */
 function kitPick(style,slot,rnd,strict){
   const pool=POOL.filter(e=>e&&e.src&&e.src.f&&e.inst);
+  /* SORTED, so the POOL'S ORDER cannot change which take a seed picks. The
+     shelf arrives over 250 parallel fetches and lands in whatever order they
+     finish, so an unsorted candidate list made a fixed seed produce a
+     different kit on different boots — a factory kit that is not the same kit
+     twice. By name, which is stable. */
   const tryOne=(inst,st)=>{
-    const c=pool.filter(e=>e.inst===inst&&(!st||e.style===st));
+    const c=pool.filter(e=>e.inst===inst&&(!st||e.style===st))
+                .sort((a,b)=>a.name<b.name?-1:a.name>b.name?1:0);
     return c.length?c[Math.floor(rnd()*c.length)]:null;
   };
   for(const inst of [slot.inst,...slot.alt]){const e=tryOne(inst,style); if(e)return e;}
@@ -15003,7 +15011,12 @@ const SMPKITS=[['tr808','KT808'],['tr8','KTTR8'],['linn','KTLIN'],['cr78','KTC78
    be lost, and reappears on its own the moment the shelf is loaded. */
 function smpKitEntries(){
   if(SMPKITCACHE)return SMPKITCACHE;
-  if(!POOL.some(e=>e&&e.inst))return [];      // shelf not in yet: ask again next call
+  /* AND NOT UNTIL THE SHELF IS ALL THERE. Building from a half-loaded pool
+     gives a kit assembled out of whatever had arrived, which is a different
+     kit — the 2.5s invalidation would replace it, but not before it had been
+     browsed. SHELFN is the manifest's own count. */
+  const have=POOL.filter(e=>e&&e.inst).length;
+  if(!have||(SHELFN&&have<SHELFN))return [];  // shelf not in yet: ask again next call
   const out=[];
   SMPKITS.forEach(([style,nm],ki)=>{
     if(style&&!POOL.some(e=>e&&e.style===style))return;    // that machine was pruned away
@@ -25180,13 +25193,15 @@ function load(json){
   }catch(err){console.warn('load failed',err);return false;}
 }
 let _smpQuota=false;
-setInterval(()=>{if(dirtySave){dirtySave=false;
-  /* THE AUTOSAVE MUST NOT DIE BECAUSE THE AUDIO DID NOT FIT. This was one
-     empty catch, which was survivable while a set was only numbers and is not
-     now that it carries samples: over quota, the whole set stopped saving
-     without a word. Drop the audio and keep the set — and SAY so, once, because
-     an autosave that quietly saves less than you think is worse than one that
-     fails loudly. The linked FILE has no such limit and still gets everything. */
+/* THE AUTOSAVE MUST NOT DIE BECAUSE THE AUDIO DID NOT FIT. This was one
+   empty catch, which was survivable while a set was only numbers and is not
+   now that it carries samples: over quota, the whole set stopped saving
+   without a word. Drop the audio and keep the set — and SAY so, once, because
+   an autosave that quietly saves less than you think is worse than one that
+   fails loudly. The linked FILE has no such limit and still gets everything. */
+function saveNow(withBackup){
+  if(!dirtySave)return false;
+  dirtySave=false;
   try{localStorage.setItem(LS,serialize());_smpQuota=false;}
   catch(_){
     try{localStorage.setItem(LS,serialize(true));
@@ -25194,8 +25209,24 @@ setInterval(()=>{if(dirtySave){dirtySave=false;
         flash('set is bigger than this browser will hold — autosaving WITHOUT the op samples · ⌘⇧E links a file that keeps them');}
     }catch(_2){}
   }
-  bakPush('auto');
-  fileWrite();}},1500);
+  if(withBackup)bakPush('auto');
+  fileWrite();
+  return true;
+}
+setInterval(()=>{saveNow(true);},1500);
+/* AND A FLUSH ON THE WAY OUT (Gad, 2026-08-27: "once i have a kit i like,
+   refreshing the webpage randomizes the kit again"). The autosave is a 1.5s
+   INTERVAL and nothing flushed it when the page went away — the pagehide
+   handler only slept the keyboard. So everything done in the last second and a
+   half before a refresh was simply dropped, and you came back to the set as it
+   was BEFORE your last roll. Rolling kits until one is right and then
+   refreshing is exactly the gesture that loses the roll you kept, and it looks
+   for all the world like the kit re-randomising itself.
+   `pagehide` and visibility-hidden are the two the browser actually
+   guarantees; beforeunload is not fired reliably on mobile or on a discarded
+   tab. No backup ring entry here — a flush is not a checkpoint, and writing
+   one on every tab switch would churn the ring. */
+const flushSave=()=>{try{saveNow(false);}catch(_){}};
 /* ---------------- AUTOSAVE INTO A REAL FILE ---------------------------
    THERE HAS ALWAYS BEEN AN AUTOSAVE. It writes every 1.5 seconds and it has
    never missed. The trouble is WHERE: localStorage belongs to the browser
@@ -25462,9 +25493,9 @@ libInit();
 setTimeout(()=>{try{if(!document.hidden)HE.reconnect();}catch(_){}},600);
 /* …and only ever in the tab you are actually looking at */
 document.addEventListener('visibilitychange',()=>{
-  if(document.hidden)HE.sleep(); else HE.wake();
+  if(document.hidden){flushSave(); HE.sleep();} else HE.wake();
 });
-window.addEventListener('pagehide',()=>{try{HE.sleep();}catch(_){}});
+window.addEventListener('pagehide',()=>{flushSave(); try{HE.sleep();}catch(_){}});
 if(CFG.midiIn|0)EXP.connect(true);   // reconnect silently if midi in was left on
 
 /* ---------------- render --------------------------------------------- */
