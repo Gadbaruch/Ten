@@ -1,9 +1,72 @@
 # DRUMS — 2026-08-27 (late, branch `sound-library`)
 
+## ⚠ MY REGRESSION: A CACHE KEY IS AN API  (aa099d5)
+
+Gad, on the crossfade build: **"now i dont hear any movement on saw and tri,
+and the whole app feels glitchy like memory is drained"**. Both symptoms, one
+line, and it was mine.
+
+The crossfade pair baked the note's free-run phase into its table:
+
+    const ph0 = op.phm===1 ? Math.random()*360 : op.ph;
+
+`setWave`'s cache key is **wave:phase:width**. With a phase of ZERO — which is
+what the old pwLive always passed, deliberately — that key has 40 rows per wave
+and stops. With a phase PER NOTE it gains a third dimension, so every note
+minted its own row for every width the sweep touched:
+
+    waveCache entries after each of ten notes on a saw
+      broken   27, 54, 81, 108, 135, 162, 189, 216, 243, 270 ...
+      fixed    27, 27, 27, 27, 27, 27, 27, 27, 27, 27
+
+Chrome builds ~160KB of band-limited tables behind each PeriodicWave, so three
+notes was 13MB and it never came back.
+
+**AND THE SILENCE CAME FROM THE SAME LINE.** `createPeriodicWave` runs on the
+MAIN THREAD, and this called it ~180 times a second with a fresh key every
+time. modTick is a main-thread interval; a modulator that never ticks moves
+nothing. The width was not broken, it was STARVED. That is the shape to
+remember: a main-thread allocation in a control-rate path takes out every other
+control-rate thing in the app, and it presents as "that feature stopped
+working" somewhere else entirely.
+
+**The fix, which is also better than what was there before.** The table's phase
+is fixed and free-run randomness moved to the START TIME — an oscillator
+started r/f seconds early is at phase r when the note lands, and both copies of
+a pair start at the same instant so they stay locked. The ORIGINAL code baked a
+random phase at note-on and then had pwLive pass phase 0, so the first width
+edit of every free-run note silently jumped the waveform's phase; now the table
+never changes phase at all. `waveCache` also has a 600-entry cap — `wtWave` has
+always had one, this side never did, and it did not matter while the only
+caller passed zero.
+
+Verified on the served bytes: centroid swing across a 2Hz sweep is 1304Hz on a
+saw, 302 on a triangle, 988 on a square, and the cache grows by **0** across
+eight notes of each. Clicks stayed gone — triangle jumps/s 0/0/0, worst jump
+2-5x the median step.
+
+**THE LESSON: A CACHE KEY IS AN API.** Every value reaching one has to be asked
+"how many distinct values can this ever take", and "a random number per note"
+is the answer that unbounds it.
+
 ## QA CHECKLIST — pulse width and spread, 2026-08-27
 
 Reload **http://localhost:3033/** (a plain reload keeps your set). Build must
 read `2026-08-27.1519` or later. Ordered by what is most likely to be wrong.
+
+0. **FIRST: play for a minute and watch for the glitchiness.** The build that
+   drained memory was `1824`; `1929` and later are clean. *Measured: waveCache
+   entries grew 27 per note and never stopped on 1824; on 1929 they grow by 0
+   across eight notes of each wave.*
+
+0b. **Width on a SAW and a TRIANGLE must MOVE, and must not crackle.** Both
+   were dead on 1824 (starved main thread) and both stepped before that.
+   *Measured: centroid swings 1304Hz on a saw and 302Hz on a triangle across a
+   2Hz sweep; triangle clicks/s 0 against 1.5-3.1 before.*
+
+0c. **Width on a SINE does nothing, and never has** — one harmonic scaled and
+   normalised straight back out. Not a bug introduced here; say if you want it
+   to mean something. *Measured rms 0.3823 at 0.5 against 0.3816 at 0.15.*
 
 1. **A patch you already had, with a square at pw 0.5.** Play it. It must sound
    EXACTLY as before — that case is mathematically identical and 25 of the 29
