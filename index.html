@@ -1314,7 +1314,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-27.2119';
+const BUILD='2026-08-27.2121';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -7465,10 +7465,9 @@ class Voice{
         const gA=ac.createGain(), gB=ac.createGain(), sum2=ac.createGain();
         const ph0=ops[0].phm===1?0:ops[0].ph;            // see the pair at ops 1-9
         const roff=ops[0].phm===1?Math.random():0;
-        E.setWave(oA,rootW,ph0,ops[0].pw); E.setWave(oB,rootW,ph0,ops[0].pw);
-        gA.gain.value=1; gB.gain.value=0;
         oA.connect(gA); oB.connect(gB); gA.connect(sum2); gB.connect(sum2);
-        rootPwx={a:oA,b:oB,ga:gA,gb:gB,cur:'a',w:rootW,ph:ph0};
+        rootPwx={a:oA,b:oB,ga:gA,gb:gB,w:rootW,ph:ph0,ka:-1,kb:-1};
+        E.pwxAim(rootPwx,ops[0].pw===undefined?0.5:ops[0].pw,0);
         src=sum2;
         src.frequency=oA.frequency; src.detune=oA.detune;
         src.start=t=>{const e0=t-roff/Math.max(1,target), t0=e0>AC.currentTime?e0:t;
@@ -7679,12 +7678,11 @@ class Voice{
              because they start at the same instant. */
           const ph0=op.phm===1?0:op.ph;                    // ONE phase, both copies, ONE cache row
           const roff=op.phm===1?Math.random():0;           // ...and free-run lives here now
-          E.setWave(oA,wv,ph0,op.pw); E.setWave(oB,wv,ph0,op.pw);
-          gA.gain.value=1; gB.gain.value=0;
           oA.connect(gA); oB.connect(gB); gA.connect(sum2); gB.connect(sum2);
           setF(oA.frequency,fi); setF(oB.frequency,fi);
-          ((this.opPwx=this.opPwx||{})[i]=this.opPwx[i]||[]).push(
-            {a:oA,b:oB,ga:gA,gb:gB,cur:'a',w:wv,ph:ph0});
+          const qx={a:oA,b:oB,ga:gA,gb:gB,w:wv,ph:ph0,ka:-1,kb:-1};
+          E.pwxAim(qx,op.pw===undefined?0.5:op.pw,0);   // tables and blend, from the start
+          ((this.opPwx=this.opPwx||{})[i]=this.opPwx[i]||[]).push(qx);
           sum2._pwx=1;                    // BOTH copies are registered below —
                                           // the generic push must not add oA again
           for(const o2 of [oA,oB]){
@@ -9283,18 +9281,11 @@ class Engine{
          constant is 4ms, so the edge is always moving and never once lands. */
       for(const q of (v.opPw&&v.opPw[slot])||[])
         try{q.dl.delayTime.setTargetAtTime(clamp(w/q.f,0,q.max),AC.currentTime,0.004);}catch(_){}
-      /* THE OTHER WAVES KEEP THEIR TABLE and lose the step instead: the new
-         width lands on whichever copy is silent, the pair crossfades, the
-         roles swap. 1.5ms against an 8ms tick, so the standby is under 1% by
-         the time the next width arrives on it. */
-      for(const q of (v.opPwx&&v.opPwx[slot])||[]){
-        const on=q.cur==='a'?{o:q.b,g:q.gb,off:q.ga}:{o:q.a,g:q.ga,off:q.gb};
-        try{this.setWave(on.o,q.w,q.ph,w);}catch(_){continue;}
-        const n2=AC.currentTime;
-        on.g.gain.setTargetAtTime(1,n2,0.001);
-        on.off.gain.setTargetAtTime(0,n2,0.001);
-        q.cur=q.cur==='a'?'b':'a';
-      }
+      /* THE OTHER WAVES KEEP THEIR TABLE and lose the step instead — see
+         pwxAim, which straddles the two rungs either side of the width so the
+         timbre is continuous rather than a 40-step staircase. */
+      for(const q of (v.opPwx&&v.opPwx[slot])||[])
+        try{this.pwxAim(q,w,0.0015);}catch(_){}
       for(const n of (v.opNodes&&v.opNodes[slot])||[])
         if(n.setPeriodicWave)this.setWave(n,op.wav,op.phm===1?0:op.ph,w);
       /* A PHASE-ENGINE OPERATOR HAS NO setPeriodicWave — its wave is a table
@@ -9310,6 +9301,57 @@ class Engine{
       }
     }
     return true;
+  }
+  /* WIDTH BETWEEN THE RUNGS. setWave caches on Math.round(d*40), so a sweep
+     only ever has 40 tables to land on and the timbre SNAPS from one to the
+     next — not a click any more, but a staircase, and on a slow sweep the
+     staircase is what you hear.
+
+     The pair is already two oscillators crossfading, so it does not have to
+     put the SAME rung on both. Straddle instead: the rung below the width on
+     one, the rung above it on the other, blended by the fraction between them.
+     The width becomes continuous with no more tables than before — which
+     matters, because more tables is exactly what drained memory once already.
+
+     WHICH COPY HOLDS WHICH RUNG IS BY PARITY, and that is the whole trick:
+     even rungs on A, odd on B. Crossing a rung flips the parity, so the copy
+     that has to be re-tabled is always the one whose blend weight has just
+     reached ZERO. A reload can never be heard, in either direction, at any
+     rate — it does not depend on the fade being fast enough.
+
+     rung 10 on A and 11 on B, weights (1-x) and x. x reaches 1: A is silent,
+     i0 becomes 11, A takes rung 12 while silent, and the blend runs back. */
+  pwxAim(q,w,tc){
+    const N=40, LO=2, HI=38;                    // 0.05 and 0.95, on the cache's own grid
+    const t=clamp(clamp(w,0.05,0.95)*N,LO,HI);
+    let i0=Math.floor(t); if(i0>=HI)i0=HI-1;
+    const x=clamp(t-i0,0,1), n2=AC.currentTime;
+    /* KEEP WHATEVER IS ALREADY RIGHT. Whichever copy already holds one of the
+       two rungs keeps it, and the other takes the neighbour — so a slow sweep
+       re-tables one copy per rung crossed and never the one you can hear. */
+    let ra,rb;
+    if(q.ka===i0||q.ka===i0+1){ra=q.ka; rb=(ra===i0)?i0+1:i0;}
+    else if(q.kb===i0||q.kb===i0+1){rb=q.kb; ra=(rb===i0)?i0+1:i0;}
+    else {ra=i0; rb=i0+1;}
+    /* A RELOAD ONLY EVER LANDS ON A COPY THAT IS ACTUALLY SILENT, and it is
+       the measured gain that decides, not an argument about which one OUGHT to
+       be silent. Parity alone was not enough: at 2Hz the width crosses a rung
+       roughly every other control tick, so a copy can be at 0.6 when its turn
+       comes round, and reloading there is exactly the click this was supposed
+       to remove — measured 3.1 to 4.6 a second, straight back to the old
+       numbers. When a copy is still loud its weight goes to zero this tick and
+       the reload waits for the next one; the sound leans on the other copy
+       meanwhile, which is the nearest rung, which is the behaviour that
+       measured clean. So a fast sweep degrades to snapping and a slow sweep —
+       where a staircase is what you actually hear — gets the true blend. */
+    let okA=(q.ka===ra), okB=(q.kb===rb);
+    if(!okA&&q.ga.gain.value<0.03){try{this.setWave(q.a,q.w,q.ph,ra/N);}catch(_){} q.ka=ra; okA=true;}
+    if(!okB&&q.gb.gain.value<0.03){try{this.setWave(q.b,q.w,q.ph,rb/N);}catch(_){} q.kb=rb; okB=true;}
+    let ga=(ra===i0)?1-x:x, gb=(rb===i0)?1-x:x;
+    if(!okA){ga=0; gb=1;}                       // stale: hand it all to the other for one tick
+    else if(!okB){ga=1; gb=0;}
+    if(tc>0){q.ga.gain.setTargetAtTime(ga,n2,tc); q.gb.gain.setTargetAtTime(gb,n2,tc);}
+    else{q.ga.gain.value=ga; q.gb.gain.value=gb;}
   }
   /* THE CROP, LIVE. Modulating or automating start/end has to be heard on the
      note already sounding — a four-bar pad whose crop only moves at the next
