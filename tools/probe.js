@@ -2442,6 +2442,46 @@ async function probePoolKind() {
   return { cols: ['i', 'kind', 'dur', 'onsets', 'cen', 'rise', 'drift', 'pk', 'src'], rows };
 }
 
+/* ---------------- smplib: does a library one-shot reach the engine ------
+ * The library is 666 sounds behind one dial, so the failure that matters is
+ * not "does it look right in the list" but "does the buffer a synth op picks
+ * actually SOUND". Sets one operator to smp, points it at named sounds from
+ * the pool, plays a note, and reads the channel bus.
+ *
+ *     tools/probe.sh smplib ch=8 names=tr808-kick-01,linn-snare-01
+ */
+async function probeSmpLib() {
+  if (typeof POOL === 'undefined') return { cols: [], rows: [], err: 'no POOL on this build' };
+  const ch = CH;
+  const names = list(P.names, ['tr808-kick-01', 'tr808-snare-01', 'linn-snare-01',
+                               'tr8-hat-open-01', 'cr78-cowbell-01', 'dr5-tom-01']);
+  const p = S.presets[ch];
+  const keep = JSON.parse(JSON.stringify({ cat: p.cat, osc: p.osc, env: p.env }));
+  p.cat = 'keys';
+  p.osc = [{ wav: 9, mode: 0, dst: 0, rat: 1, amt: 1, fine: 0, ph: 0, phm: 0 }];
+  p.env[0] = { a: 0.001, d: 0.5, s: 0, r: 0.1 };
+  S.editSnd = ch; S.curSlot = 0;
+  const rows = [];
+  for (const nm of names) {
+    const e = POOL.find(x => x.name === nm);
+    if (!e) { rows.push({ k: nm, err: 'not in the pool' }); continue; }
+    engine.opSamples.set(ch + ':0', e.buf);
+    engine.rebuildRack(ch);
+    const r = await hit(ch, () => engine.noteOn(AC.currentTime + 0.02, ch, NOTE, VEL), MS);
+    rows.push(Object.assign({ k: nm, inst: e.inst, style: e.style, cat: e.cat,
+                              dur: r3(e.buf.duration), kind: e.kind }, r));
+    try { engine.allOff(); } catch (_) {}
+    await sleep(60);
+  }
+  Object.assign(p, keep);
+  engine.rebuildRack(ch);
+  notes.push('pool ' + POOL.length + ' \u00b7 ' + POOL.filter(x => x.kind === 'loop').length +
+             ' loop / ' + POOL.filter(x => x.kind !== 'loop').length + ' one-shot');
+  const silent = rows.filter(r => !r.err && !(r.peak > 0.001)).map(r => r.k);
+  if (silent.length) notes.push('SILENT: ' + silent.join(' '));
+  return { cols: ['inst', 'style', 'cat', 'kind', 'dur', 'peak', 'rms', 'centroid'], rows };
+}
+
 const HELP = {
   cols: ['args'],
   rows: [
@@ -2465,6 +2505,7 @@ const HELP = {
     { k: 'resamp',   args: 'ch=9 — master resample is pre-master-fx and replays exactly like live at mSum: take clean of a hot sat, unity dials, replay ratio ~1, mid-bounce rebuild survives' },
     { k: 'fxwire',   args: 'ch=8 — EXHAUSTIVE: every (fx type, param) FXMODOK claims, driven through the real applier — offered/claimed/moved. No audio, one call.' },
     { k: 'fxmod',    args: 'ch=8 — every wired fx (type,param) wobbles under a 5Hz lfo through the real ctrl path; arp rate mod moves note density' },
+    { k: 'smplib',   args: 'ch=8 names=tr808-kick-01,linn-snare-01 \u2014 point a synth op at named library one-shots and hear whether they sound' },
     { k: 'poolkind', args: 'want=loop — every pool take: measured onsets/centroid, the kind it was called, and both dial views in order' },
     { k: '(any)',    args: '--ab <url> runs the same probe on a second build and diffs it' },
   ]
@@ -2506,7 +2547,8 @@ try {
                    resamp: probeResamp,
                    fxmod: probeFxMod,
                    fxwire: probeFxWire,
-                   poolkind: probePoolKind };
+                   poolkind: probePoolKind,
+                   smplib: probeSmpLib };
   const fn = PROBES[NAME];
   out = fn ? await fn() : (NAME === 'help' ? HELP : { cols: [], rows: [], err: 'no probe named ' + NAME });
 } catch (e) {
