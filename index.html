@@ -393,7 +393,34 @@ const FTYPE_W=[null,'lowpass','highpass','bandpass','notch','peaking','lowshelf'
 const EDST=['off','amp','pitch','filt','op'];
 const LDST=['off','pitch','filt','amp','pan','op'];
 /* unified MOD rack: one source per slot, one target enum */
-const MSRC=['off','env','lfo','vel','key','rnd','press','flw'];   // press = per-note pressure · flw = follow another channel
+/* `macro` is a source like any other, and that is the whole trick: a mod slot
+   already carries up to EIGHT routes with their own destination, amount and
+   polarity, so one macro slot IS "one dial that targets many things". It needs
+   no new subsystem — only a value, which comes from a channel dial instead of
+   an envelope. Appended, so every stored `src` index still means what it did. */
+const MSRC=['off','env','lfo','vel','key','rnd','press','flw','macro'];   // press = per-note pressure · flw = follow another channel
+const MSRC_MACRO=MSRC.indexOf('macro');
+const NMACRO=4;
+/* WHICH DIAL A MACRO SLOT LISTENS TO. `rsel` is already taken — it picks which
+   ROUTE of the slot you are editing — so a macro slot names its dial in `mac`. */
+const macroVal=(pi,m)=>{
+  const ch=S.presets[pi]; if(!ch||!ch.macro)return 0;
+  return clamp(ch.macro[clamp(Math.round(m.mac||0),0,NMACRO-1)]||0,0,1);
+};
+/* THE VOICE'S MODULATORS: this preset's own rack, plus the CHANNEL's macro
+   slots. A macro is a channel control by definition — one dial moving many
+   values — so its routes live on the channel and every voice sees them,
+   whether the channel is a kit or not. Unconditional, and ADDITIVE: a macro
+   biases what the pad already has rather than replacing it, which is why this
+   needs no mode and cannot silently disable anything. The global-kit
+   experiment did the opposite, and that is exactly why it came out. */
+function voiceMods(pi,p){
+  const own=p.mod||[];
+  const ch=S.presets[pi];
+  if(!ch||ch===p)return own;                       // not a kit: already the channel's
+  const mac=(ch.mod||[]).filter(m=>m&&m.src===MSRC_MACRO&&!m.off);
+  return mac.length?own.concat(mac):own;
+}
 const MDST=['off','amp','pitch','filt','pan','op'];   // + learned tgt address overrides this
 const MD2ENV={1:1,2:2,3:3,5:4};                        // MDST → the engine's env-dst numbering
 const MD2LFO={2:1,3:2,1:3,4:4,5:5};                    // MDST → the engine's lfo-dst numbering
@@ -784,7 +811,7 @@ const mkRoute=()=>({dst:0,idx:0,amt:100,tgt:null});
    keeps whatever it was given. */
 /* TRIG DEFAULTS TO FREE (Gad, 2026-08-26). Only the DEFAULT moves — every
    saved slot keeps whatever it was given, same rule as sustain above. */
-const mkMod =i=>({src:0,rsel:0,routes:[mkRoute()],a:0.005,d:0.15,s:0,r:0.2,crv:0,
+const mkMod =i=>({src:0,rsel:0,mac:0,routes:[mkRoute()],a:0.005,d:0.15,s:0,r:0.2,crv:0,
                   wav:0,rate:5,ph:0,syn:0,rdiv:4,ltr:1,
                   fch:1,fa:0.01,fr:0.15,fg:4});
 /* tempo divisions for a synced LFO, in beats */
@@ -1287,7 +1314,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-27.1959';
+const BUILD='2026-08-27.2006';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1519,6 +1546,7 @@ function basePreset(name){return{
   osc:rack(mkOsc), amp:rack(mkAmp), flt:rack(mkFlt), env:rack(mkEnv),
   lfo:rack(mkLfo), mod:rack(mkMod), fx:rack(mkFx), ply:rack(mkPly),
   vox:{mode:0,glide:0,uni:1,sprd:12,wide:0.6,slop:0.008},
+  macro:[0,0,0,0],   // four dials, each able to drive eight things — see MSRC_MACRO
   mix:{lvl:0.8,pan:0},
   code:null,       // procedural channels: custom DSP source (null = use pmodel)
   pmodel:null,     // ...or a name from PROCLIB
@@ -1886,6 +1914,15 @@ const MOD_P=sl=>{                    // unified: source picks which extra fields
     }
     return rt.tgt?tgtLabel(rt.tgt):MDST[clamp(Math.round(rt.dst),0,MDST.length-1)];};
   const base=[SP('src','src','enum',{opts:MSRC}),
+    /* WHICH DIAL, and only when the source is a macro. Four per channel, and
+       the slot's own routes do the rest — up to eight destinations off one
+       dial, each with its own amount and polarity. */
+    ...(Math.round((sl&&sl.src)||0)===MSRC_MACRO
+      ?[SP('dial','mac','lin',{min:0,max:NMACRO-1,step:1,
+          fmt:v=>'M'+(clamp(Math.round(v),0,NMACRO-1)+1),
+          get:m=>clamp(Math.round(m.mac||0),0,NMACRO-1),
+          set:(m,v)=>m.mac=clamp(Math.round(v),0,NMACRO-1)})]
+      :[]),
     SP('route','_rt','lin',{min:0,max:9,step:1,fmt:v=>'R'+(Math.round(v)+1)+'/'+nR,
       get:m=>m.rsel||0, set:(m,v)=>{const n=(m.routes||[mkRoute()]).length;
         if(v>=n&&n<8){m.routes.push(mkRoute());m.rsel=n;}else m.rsel=fmod(Math.round(v),n);}}),
@@ -6839,7 +6876,7 @@ class Voice{
 
     /* envelopes: routable rack. amp env = first dst:amp; default safety env otherwise */
     /* unified MOD rack → the engine's existing env / lfo scheduling, re-sourced */
-    const md=p.mod||[];
+    const md=voiceMods(pi,p);   // this rack, plus the channel's macros
     const envs=[], lfoList=[];       // one source fans out to all its routes
     for(let mi2=0;mi2<md.length;mi2++){
       const m=md[mi2];
@@ -6884,6 +6921,7 @@ class Voice{
           const si4=clamp(Math.round(rt.idx),1,10)-1, A2=(rt.amt||0)/100;
           let b2=0;
           if(m.src===3)b2+=clamp(vel,0,1)*A2;
+          else if(m.src===MSRC_MACRO)b2+=macroVal(pi,m)*A2;
           else if(m.src===4)b2+=clamp((midi-60)/24,-2,2)*A2;
           else if(m.src===5)b2+=(Math.random()*2-1)*A2;
           this.opBias[si4]=(this.opBias[si4]||0)+b2;
@@ -6891,6 +6929,7 @@ class Voice{
         }
         const A=(rt.amt||0)/100;
         if(m.src===3)ampBias+=clamp(vel,0,1)*A;
+        else if(m.src===MSRC_MACRO)ampBias+=macroVal(pi,m)*A;
         else if(m.src===4)ampBias+=clamp((midi-60)/24,-2,2)*A;
         else if(m.src===5)ampBias+=(Math.random()*2-1)*A;
       }}
@@ -7985,7 +8024,12 @@ class Voice{
     this.modN=this.modN||[];
     for(let mi5=0;mi5<md.length;mi5++){
       const m=md[mi5];
-      if(!m||m.off||m.src<3||m.src>7||!m.routes)continue;
+      /* THE RANGE GUARD HAD TO LEARN ABOUT MACRO. It read `src<3||src>7`,
+         which is "the static and live sources" — and macro is 8, so every
+         macro slot was skipped here before its value was ever read. The voice
+         could SEE the slot (voiceMods put it there) and still hear nothing,
+         which is the shape of every bug in this feature so far. */
+      if(!m||m.off||m.src<3||(m.src>7&&m.src!==MSRC_MACRO)||!m.routes)continue;
       const LIVE=m.src===6||m.src===7;           // press / flw keep moving
       const FL=m.src===7;
       const bag=FL?(this.flwN=this.flwN||[]):this.pressN;
@@ -7993,7 +8037,8 @@ class Voice{
       if(LIVE&&!FL){this.pressGlide=Math.max(0.005,m.pg??0.03);
                     this.pressCurve=Math.max(0.2,m.pc??1);}
       const v=LIVE?0:(m.src===3?clamp(vel,0,1)
-                     :m.src===4?clamp((midi-60)/24,-2,2):(Math.random()*2-1));
+                     :m.src===4?clamp((midi-60)/24,-2,2)
+                     :m.src===MSRC_MACRO?macroVal(pi,m):(Math.random()*2-1));
       const rts=effRoutes(m);
       for(let ri=0;ri<rts.length;ri++){
         const rt=rts[ri];
@@ -8058,7 +8103,8 @@ class Voice{
             (this.modN=this.modN||[]).push({p:lg.gain,mi:mi6,ri:ri6,kind:'lfo',
                                             span:(dep*0.5)/(A||1e-9),lin:true});
           }else{                                     // vel / key / rnd → param (constant)
-            const vv=m.src===3?clamp(vel,0,1):m.src===4?clamp((midi-60)/24,-2,2):(Math.random()*2-1);
+            const vv=m.src===3?clamp(vel,0,1):m.src===4?clamp((midi-60)/24,-2,2)
+              :m.src===MSRC_MACRO?macroVal(pi,m):(Math.random()*2-1);
             const cs=ac.createConstantSource(); cs.offset.value=vv*dep; cs.connect(param); cs.start(at); this.nodes.push(cs);
           }
         }
@@ -15359,6 +15405,19 @@ function setEngine(pi,key){
 function prsFieldDefs(){
   const p=S.presets[S.editSnd], K=edKit(p);
   const chEng={k:'engine',v:()=>engineName(p)};  // ALWAYS first — this is how you leave any engine
+  /* THE MACRO DIALS. Four, on every channel, at the END of the row so nothing
+     anybody already reaches for has moved. A macro is a CHANNEL control — on a
+     kit it reaches all twelve pads, because voiceMods hands the channel's
+     macro slots to every voice. Hidden until one is actually routed: four dead
+     dials on every channel is desk nobody asked for, and the moment a macro
+     slot exists its dial appears. */
+  const macs=()=>{
+    const used=new Set();
+    for(const m of (p.mod||[]))if(m&&m.src===MSRC_MACRO&&!m.off)
+      used.add(clamp(Math.round(m.mac||0),0,NMACRO-1));
+    return [...used].sort().map(i=>({k:'M'+(i+1),
+      v:()=>Math.round(((p.macro||[])[i]||0)*100)+'%'}));
+  };
   if(K)return [    // kit: engine, the WHOLE kit, then which pad, then its chain
     chEng,
     /* THE KIT ITSELF WAS NOT SELECTABLE ANYWHERE (Gad, 2026-08-27: "give me a
@@ -15370,7 +15429,8 @@ function prsFieldDefs(){
     {k:'sound',v:()=>K.cat||'kik'},
     {k:'prst', v:()=>K.name},
     {k:'level',v:()=>Math.round((K.mix?K.mix.lvl:0.8)*100)+'%',br:true},
-    {k:'pan',  v:()=>{const pn=K.mix?K.mix.pan:0;return pn===0?'C':(pn>0?'R':'L')+Math.round(Math.abs(pn)*100);}}];
+    {k:'pan',  v:()=>{const pn=K.mix?K.mix.pan:0;return pn===0?'C':(pn>0?'R':'L')+Math.round(Math.abs(pn)*100);}},
+    ...macs()];
   if(p.cat==='proc'){
     const L=procPresets(p.pmodel||PROCNAMES[0]);
     return [
@@ -15421,11 +15481,13 @@ function prsFieldDefs(){
   if(p.cat==='kit')return [        // kit, but no pad played yet: no pad fields to show
     chEng,
     {k:'kit',  v:()=>p.name},
-    {k:'kinfo',v:()=>'play a note to pick a pad'}];
+    {k:'kinfo',v:()=>'play a note to pick a pad'},
+    ...macs()];
   return [                                        // Synth: engine, then category
     chEng,
     {k:'type', v:()=>p.cat||'misc'},
-    {k:'prst', v:()=>p.name}];
+    {k:'prst', v:()=>p.name},
+    ...macs()];
 }
 /* (There was a PRSFIELDS array here: a second, hand-written copy of the PRST
    field keys that nothing referenced, already missing half of them and still
@@ -16059,7 +16121,10 @@ function _prsAction(d){
   /* `kit` belongs to the CHANNEL even with a pad focused, exactly as `engine`
      does — without this it falls into the pad branch, matches no case there,
      and silently does nothing, which is the bug the engine field already had. */
-  if(K&&f!=='engine'&&f!=='kit'){    // ---- editing one kit pad (a whole preset chain) ----
+  /* a MACRO belongs to the channel, like engine and kit — without this it
+     falls into the pad branch, matches nothing there and silently does
+     nothing, which is the trap the engine field has already sprung once. */
+  if(K&&f!=='engine'&&f!=='kit'&&!/^M\d$/.test(f)){   // ---- editing one kit pad ----
     pushUndo('kit pad');
     const kcat=K.cat||'kik';
     if(f==='pad'){                   // step through the 12 pads with the arrows
@@ -16229,6 +16294,18 @@ function _prsAction(d){
     p.psel=fmod((p.psel|0)+d,L.length);
     applyProcPreset(pi,L[p.psel]);
     flash('⚙ '+(p.pmodel)+' · '+L[p.psel].n);
+    dirty=true; dirtySave=true; return;
+  }
+  /* THE MACRO DIALS. 0..100%, coarse step under shift. The value is read when
+     a note is BUILT, so a turn is heard on the next hit rather than under a
+     ringing one — which for a drum kit is exactly when you want it, and is why
+     this needs no live re-aim to be useful. */
+  if(/^M\d$/.test(f)){
+    const i=clamp(+f.slice(1)-1,0,NMACRO-1);
+    p.macro=p.macro||[0,0,0,0];
+    const step=(KM.sr||KM.shl)?0.1:0.02;
+    p.macro[i]=+clamp((p.macro[i]||0)+d*step,0,1).toFixed(3);
+    flash('M'+(i+1)+' '+Math.round(p.macro[i]*100)+'%');
     dirty=true; dirtySave=true; return;
   }
   if(f==='prst')scrollPreset(pi,d);
