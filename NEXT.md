@@ -1,3 +1,72 @@
+# DRUMS — 2026-08-27 (late, branch `sound-library`)
+
+## "PRESETS FOR KITS WHICH DONT EXIST RIGHT NOW"
+
+They existed here and not for him, and the design had TWO ways to lose them —
+either of which leaves a session with no kits and nothing said:
+
+- **the TIMER was a race.** libSampleKits ran once, on a 2.5s setTimeout after
+  the manifest resolved. If the shelf has not finished decoding by then it lays
+  nothing AND NOTHING EVER CALLS IT AGAIN. 539ms here, on one machine with one
+  tab and no set to restore — not a number to design against.
+- **the WRITE could fail.** 831KB of kits into a `setItem` that throws is 831KB
+  of kits silently absent.
+
+**A FACTORY KIT IS NOT DATA — IT IS DERIVABLE**, from this file plus the
+manifest, from a fixed seed. So it is built in memory, appended by `libAll`,
+and filtered back out by `libStore` (`gen:true`) so it can never be written.
+Costs nothing, cannot be lost, reappears the moment the shelf loads. The
+generator OWNS those names so a stored copy from the old build is dropped on
+read — no version bump, self-healing. **library 845KB -> 643KB.**
+
+    storage filled with 4MB of ballast   -> 20 kits, 10 sampled
+    cache dropped, rebuilt cold          -> 10 sampled kits immediately
+
+⚠ `withSmpKits` DECLINES SILENTLY during module init — POOL, KITMAP and MIXT
+are all in their dead zones there, and a throw lands in libAll's catch, which
+returns `[]`. That is exactly how the whole library read as empty this
+morning. **Fifth time this trap has been sprung today.**
+
+## ROLLING A KIT NOW GIVES YOU A KIT
+
+**The layout was wrong.** `kik snr hh hh perc tom cymb wood zap perc snr kik` —
+two kicks, two snares, a zap, no clap/rim/cowbell/clave. Everything uses
+KITMAP now (kick·snare·hat-closed·hat-open·clap·tom·rim·cymbal·cowbell·conga·
+shaker·clave), so **C is the kick wherever the kit came from**. LIBV 32 re-lays
+the factory kits and ONLY the kits.
+
+**The coherence was wrong.** One machine per roll, wildness says how far it
+strays. Five rolls per rung, % of pads from the dominant machine:
+
+    w20   100 100 100 100 100      dr5 · rx5 · rx5 · tr808 · tr8
+    w45    83  75  67  58  75
+    w70    75  67  50  50  58
+    w95    42  25  33  42  58
+
+⚠ **TWO WAYS A "SINGLE-MACHINE KIT" LIED.** `kitPick`'s second loop falls back
+to ANY machine, so a caller asking for one machine got a scatter and never
+knew — it takes `strict` now. And the home machine was drawn from every style
+present, including `trap` (ONE surviving sound) and the Rhythm King (ten); a
+home that cannot furnish a kit is a scatter wearing a machine's name.
+`kitMachines(6)` is the bar and eight machines clear it.
+
+`tools/probe.sh smpkit roll=<wild>` tests the dice; `smpkit name=KT808` the
+library. 9/12 distinct takes at w20 is the FALLBACK working (the CR-78 has no
+clap and no separate open hat) — the twelve centroids are still all different.
+
+## WHAT IS OPEN, IN HIS ORDER
+
+- **Drums are where he wants to be.** Kits exist, roll coherently, and the
+  drum-cat rolls reach the shelf ~half the time. His ear has not been on any
+  of it yet.
+- `_bass-round1.json` is parked until he says drums are done.
+- `_similar/` (312 files) still waiting on his ear.
+- The backup ring `ten-bak-v1` was 2.77MB of a ~5MB origin — the next storage
+  wall, and the library no longer being the biggest consumer is why it is now
+  visible.
+- hh 8/10 and cymb/tom/perc 9/10 on generated drums; every remaining dud is
+  QUIET and in the SYNTH recipes, none in the sampled path.
+
 # WHERE THE INSTRUMENT STANDS — 2026-08-27 (afternoon, branch `sound-library`)
 
 ## STILL A BRANCH. Live and `main` have none of this.
