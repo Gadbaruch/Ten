@@ -1245,7 +1245,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-27.1408';
+const BUILD='2026-08-27.1508';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1597,7 +1597,37 @@ function applySmpRefs(pi,eng){
 const kitHas=(p,midi)=>!!(isKit(p)&&p.kit&&p.kit[pcOf(midi)]);
 /* which preset the sound layer is editing: a kit's focused slot, else the channel */
 function edKit(p){return isKit(p)&&S.prepFocus!=null?kitSlot(p,S.prepFocus,true):null;}
-function modHolder(p,modId){const K=edKit(p);return K||p;}
+/* WHAT A KIT SHARES (Gad, 2026-08-27: "id like to have the option to make all
+   the mods/fx/play effects and maybe even filters, global to all pads … i
+   think it should be the default and then individual mode is a bit deeper mode
+   for advnaced"). Agreed, and it also makes the kit COHERENT: the fx rack was
+   already channel-level — rebuildRack reads S.presets[pi], not the pad — while
+   the filter, the modulators and the play rack were per-pad, so half the kit
+   was one instrument and half of it was twelve.
+
+   A pad's IDENTITY is its osc, its envelopes and its amp: what the drum IS.
+   Everything that shapes the whole channel is shared by default, and per-pad
+   stays one field away for the case that actually wants it — a filter on the
+   snare alone.
+
+   `kglob` lives on the kit CHANNEL preset and defaults ON, so every kit that
+   already exists becomes global without a migration. */
+const KITSHARE=new Set(['flt','lfo','mod','ply','fx']);
+const kitGlob=p=>!!(isKit(p)&&(p.kglob==null||p.kglob));
+function modHolder(p,modId){
+  if(kitGlob(p)&&KITSHARE.has(modId))return p;   // the kit's, not this pad's
+  const K=edKit(p);return K||p;
+}
+/* the pad's chain as the VOICE should see it: its own sound, the channel's
+   shaping. A fresh object per note is ~15 property copies, which is nothing
+   beside building the audio graph it is about to feed. */
+function kitVoicePre(chan,pad){
+  if(!kitGlob(chan))return pad;
+  const m={...pad};
+  for(const id of KITSHARE)if(chan[id])m[id]=chan[id];
+  m._addr=chan._addr;      // the mod rack's addressing travels WITH the rack
+  return m;
+}
 const RACK_MK={osc:mkOsc,amp:mkAmp,flt:mkFlt,env:mkEnv,lfo:mkLfo,mod:mkMod,fx:mkFx,ply:mkPly};
 /* WHAT A DIAL READS WHEN THE SLOT HAS NO KEY FOR IT. A slot written before a
    param existed simply has no such field, and `undefined` walks into the
@@ -6206,7 +6236,8 @@ function scheduleRange(from,to){
         const pc=kitCh?pcOf(midi):-1;
         if(plyCache[pc])return plyCache[pc];
         let list;
-        if(kitCh){const K=kitSlot(chP,midi);            // kits: the pad's rack, nothing else
+        if(kitCh&&kitGlob(chP))list=chP.ply.filter(sl=>sl.typ&&!sl.off);   // shared
+        else if(kitCh){const K=kitSlot(chP,midi);       // per-pad: this pad's rack only
           list=K?K.ply.filter(sl=>sl.typ&&!sl.off):[];}
         else list=chP.ply.filter(sl=>sl.typ&&!sl.off);
         const g=t=>list.find(sl=>sl.typ===t);
@@ -10569,7 +10600,7 @@ class Engine{
     /* empty pad, no voice — falling back to the channel's own preset would
        play the leftover sound of whichever channel the kit was folded onto */
     if(isKit(p)&&!K)return null;
-    const pre=K?K:prepEffective(p,pm);
+    const pre=K?kitVoicePre(p,K):prepEffective(p,pm);
     const lid=K?pcOf(pm):'ch';
     const v=new Voice(this,at,pi,midi,vel,pre,pm,legato); v._lid=lid;
     this.act[pi].push(v);
@@ -10590,7 +10621,7 @@ class Engine{
        recorder gave a duration to. A held key has no length yet; it ends when
        you let go, and stretching that would mean holding the key for you. */
     if(durSec!=null){
-      const rk=(kp?kp.ply:chan.ply)||[];
+      const rk=((kp&&!kitGlob(chan))?kp.ply:chan.ply)||[];
       for(const sl of rk){
         if(!sl||sl.typ!==14||sl.off)continue;
         durSec=Math.max(sl.p3??0.02,durSec*(sl.p1??1)+(sl.p2||0));
@@ -14993,6 +15024,8 @@ function prsFieldDefs(){
        field below browses the focused PAD's sound; nothing browsed the kit.
        scrollPreset already handles cat 'kit' — the field simply did not exist. */
     {k:'kit',  v:()=>p.name},
+    /* what the filter, the modulators, the play rack and the fx belong to */
+    {k:'mods', v:()=>kitGlob(p)?'global':'per pad'},
     {k:'pad',  v:()=>NN[pcOf(S.prepFocus)]+(Math.floor(S.prepFocus/12)-1)},
     {k:'sound',v:()=>K.cat||'kik'},
     {k:'prst', v:()=>K.name},
@@ -15048,6 +15081,7 @@ function prsFieldDefs(){
   if(p.cat==='kit')return [        // kit, but no pad played yet: no pad fields to show
     chEng,
     {k:'kit',  v:()=>p.name},
+    {k:'mods', v:()=>kitGlob(p)?'global':'per pad'},
     {k:'kinfo',v:()=>'play a note to pick a pad'}];
   return [                                        // Synth: engine, then category
     chEng,
@@ -15651,13 +15685,18 @@ function instFields(){
   /* only the SYNTH builds voices worth thickening: audio (tape/cloud) and
      proc show none of the voice fields — proc keeps glide, which its models
      honour; kit keeps mode (kit LIVES in that menu) minus the unison half */
+  /* A KIT SHOWS NO VOICE FIELDS AT ALL (Gad, 2026-08-27: "in kit - we dont
+     need the voices/glide/native params, we can keep it native default"). Kits
+     used to show mode and glide, which are a synth's ideas: a kit allocates per
+     PAD — the voice's lane id is the pitch class — so mono already means what
+     it should mean here, and glide on a drum is a dial nobody reaches for. */
   const dead=new Set(['uni','sprd','wide','slop']);
   return prsFieldDefs().concat(
     (MODULES[VOXI].flat||[])
       .filter(spec=>{
         if(audio)return false;
         if(proc)return spec.key==='glide';
-        if(kit)return !dead.has(spec.key);
+        if(kit)return false;
         return true;
       })
       .map(spec=>({k:spec.lbl,spec})));
@@ -15681,7 +15720,7 @@ function _prsAction(d){
   /* `kit` belongs to the CHANNEL even with a pad focused, exactly as `engine`
      does — without this it falls into the pad branch, matches no case there,
      and silently does nothing, which is the bug the engine field already had. */
-  if(K&&f!=='engine'&&f!=='kit'){    // ---- editing one kit pad (a whole preset chain) ----
+  if(K&&f!=='engine'&&f!=='kit'&&f!=='mods'){  // ---- editing one kit pad ----
     pushUndo('kit pad');
     const kcat=K.cat||'kik';
     if(f==='pad'){                   // step through the 12 pads with the arrows
@@ -15855,6 +15894,28 @@ function _prsAction(d){
   }
   if(f==='prst')scrollPreset(pi,d);
   if(f==='kit')scrollPreset(pi,d);       // the whole kit — cat 'kit' in the library
+  if(f==='mods'){
+    pushUndo('kit mods');
+    const now=kitGlob(p);
+    if(now)p.kglob=0;
+    else{
+      /* TURNING IT ON MUST NOT SILENTLY EMPTY THE RACKS. A kit channel's own
+         flt/lfo/mod/ply are untouched defaults, so switching to global with
+         nothing in them would read as "my filter vanished". If the channel has
+         nothing and a pad does, that pad's shaping comes up with it — the
+         focused one for choice, else the first pad that has any. */
+      const empty=id=>!(p[id]||[]).some(sl=>sl&&(sl.typ||sl.dst||sl.src));
+      const donor=[edKit(p),...(p.kit||[])].find(k=>k&&['flt','lfo','mod','ply']
+        .some(id=>(k[id]||[]).some(sl=>sl&&(sl.typ||sl.dst||sl.src))));
+      if(donor)for(const id of ['flt','lfo','mod','ply'])
+        if(empty(id)&&donor[id])p[id]=JSON.parse(JSON.stringify(donor[id]));
+      p.kglob=1;
+    }
+    engine.rebuildRack(pi); engine.refresh(pi);
+    flash('kit mods \u2192 '+(kitGlob(p)?'global \u2014 one filter, one set of mods and fx for every pad'
+                                       :'per pad \u2014 each pad keeps its own'));
+    dirty=true; dirtySave=true; return;
+  }
   else if(f==='type'){
     const i0=Math.max(0,SYNTHCATS.indexOf(p.cat||'misc'));
     const cat=SYNTHCATS[fmod(i0+d,SYNTHCATS.length)];
@@ -16162,19 +16223,29 @@ const kbFull=()=>(CFG.kbd??'full')!=='piano';
    the twelve pitch classes vanish with the scale on. Kit channels read the
    keyboard chromatically no matter what the scale says. */
 function noteOf(code,pi){
-  const chrom=pi!=null&&isKit(S.presets[pi]);
-  if(kbFull())return kbNote(code,chrom);
-  const v=NOTEKEYS_PIANO[code];
-  return v===undefined?null:v;
+  const kit=pi!=null&&isKit(S.presets[pi]);
+  const v=kbFull()?kbNote(code,kit):NOTEKEYS_PIANO[code];
+  if(v===undefined||v===null)return null;
+  /* THE KIT'S LIFT LIVES HERE, not at the one call site that used to carry it.
+     There are three places that turn a key into a note and I had lifted one;
+     the other two are audio-channel paths today, but "today" is exactly the
+     assumption that rots. Inside noteOf every caller gets it, including
+     keyForOffset's reverse map — which decides which key LIGHTS UP for a note
+     and was pointing at a key an octave away on kit channels. */
+  return kit?v+KITLIFT:v;
 }
 const isNoteKey=code=>noteOf(code)!=null;
 /* kept for the places that want the piano map itself */
 const NOTEKEYS=NOTEKEYS_PIANO;
 /* which key plays a given offset — rebuilt per keyboard, because full mode
    maps a different set and the highlight has to follow */
-function keyForOffset(off){
-  if(!kbFull()){for(const k in NOTEKEYS_PIANO)if(NOTEKEYS_PIANO[k]===off)return k;return null;}
-  for(const code of KBSEQ)if(kbNote(code)===off)return code;
+function keyForOffset(off,pi){
+  /* the mirror of noteOf, and it has to take the same lift off again or a kit
+     channel highlights a key an octave from the one you pressed */
+  const kit=pi!=null&&isKit(S.presets[pi]);
+  const o=kit?off-KITLIFT:off;
+  if(!kbFull()){for(const k in NOTEKEYS_PIANO)if(NOTEKEYS_PIANO[k]===o)return k;return null;}
+  for(const code of KBSEQ)if(kbNote(code,kit)===o)return code;
   return null;
 }
 const KEYFOR=new Proxy({},{get:(_,k)=>keyForOffset(+k)});
@@ -16236,7 +16307,7 @@ const EXP={
   },
   noteOn(ch,note,vel){
     const pi=S.layer>=2?S.editSnd:S.curPreset;
-    const code=KEYFOR[note-(KBBASE+S.oct*12)];
+    const code=keyForOffset(note-(KBBASE+S.oct*12),pi);
     if(code&&this.keyDown(code,vel)){         // in range: take the real key path
       this.held[ch+':'+note]={code};
       return;
@@ -23061,7 +23132,7 @@ const onKeyDown=e=>{
     const kbi9=KBSEQ.indexOf(c);
     const midi=(isAudioCh(pi)&&!kmodeOf(S.presets[pi])&&kbi9>=0)
       ?60+kbi9
-      :KBBASE+S.oct*12+noteOf(c,pi)+(isKit(S.presets[pi])?KITLIFT:0);
+      :KBBASE+S.oct*12+noteOf(c,pi);        // noteOf carries the kit lift
     const hitVel=EXP.take();          // MIDI velocity if this key came from EXP, else the c/v value
     /* CHORD MAP EDITING: while a map-on chord slot is under the cursor, the
        key you play is the key you edit — replay it to hear the change */
