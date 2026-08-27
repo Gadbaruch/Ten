@@ -1287,7 +1287,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-27.1929';
+const BUILD='2026-08-27.1959';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1640,76 +1640,39 @@ function applySmpRefs(pi,eng){
 const kitHas=(p,midi)=>!!(isKit(p)&&p.kit&&p.kit[pcOf(midi)]);
 /* which preset the sound layer is editing: a kit's focused slot, else the channel */
 function edKit(p){return isKit(p)&&S.prepFocus!=null?kitSlot(p,S.prepFocus,true):null;}
-/* WHAT A KIT SHARES (Gad, 2026-08-27: "id like to have the option to make all
-   the mods/fx/play effects and maybe even filters, global to all pads … i
-   think it should be the default and then individual mode is a bit deeper mode
-   for advnaced"). Agreed, and it also makes the kit COHERENT: the fx rack was
-   already channel-level — rebuildRack reads S.presets[pi], not the pad — while
-   the filter, the modulators and the play rack were per-pad, so half the kit
-   was one instrument and half of it was twelve.
+/* A KIT IS TWELVE PAD CHAINS AND THAT IS ALL (Gad, 2026-08-27: "i kinda regret
+   this global mode for at least mods and filters maybe doesnt make sense, or
+   maybe only audio fx should just always be global and we dont need modes and
+   complications?"). He is right, and the evidence is this week's rather than
+   an argument:
 
-   A pad's IDENTITY is its osc, its envelopes and its amp: what the drum IS.
-   Everything that shapes the whole channel is shared by default, and per-pad
-   stays one field away for the case that actually wants it — a filter on the
-   snare alone.
+   · THE FX RACK WAS ALREADY CHANNEL-LEVEL — rebuildRack reads S.presets[pi],
+     not the pad — and nobody ever asked for a switch for it. A default that
+     needs no mode is the one that was already right. It stays as it was.
+   · SHARING THE OTHER RACKS FORCED A MERGE POLICY, twice. First "keep the
+     pad's envelopes, take the channel's other slots", which silently ate every
+     global env he added. Then "except where the channel speaks, the pad steps
+     aside", which silently REPLACED every pad's own decay — C 0.297 · D 0.038
+     · G 2.776 all became 0.05. Two invisible rules, each of which cost a round
+     of debugging to see at all.
+   · AND IT COULD NOT DO THE THING HE WANTED. "Global hit length" is not one
+     envelope for twelve pads, which makes them identical. It is one dial
+     moving twelve values, each from where it already was — a MACRO, and a
+     macro needs no mode.
 
-   `kglob` lives on the kit CHANNEL preset and defaults ON, so every kit that
-   already exists becomes global without a migration. */
-const KITSHARE=new Set(['flt','lfo','mod','ply','fx']);
-const kitGlob=p=>!!(isKit(p)&&(p.kglob==null||p.kglob));
+   So modHolder is what it always was: a kit edits its focused pad — with ONE
+   exception, and it is not a mode, it is a bug that predates all of this.
+   THE ENGINE READS FX FROM THE CHANNEL. rebuildRack builds the fx chain out of
+   S.presets[pi] and always has, so an fx edit sent to a focused PAD landed in
+   a rack nothing ever reads: dialling a reverb on a kit pad did nothing at
+   all, silently, and had done since a kit became twelve chains.
+   Gad: "maybe only audio fx should just always be global and we dont need
+   modes and complications". It always WAS global — only the edit went
+   somewhere else. No switch and no policy: fx edits go where the engine
+   looks. */
 function modHolder(p,modId){
-  if(kitGlob(p)&&KITSHARE.has(modId))return p;   // the kit's, not this pad's
+  if(isKit(p)&&modId==='fx')return p;      // the channel: that is where fx lives
   const K=edKit(p);return K||p;
-}
-/* the pad's chain as the VOICE should see it: its own sound, the channel's
-   shaping. A fresh object per note is ~15 property copies, which is nothing
-   beside building the audio graph it is about to feed. */
-function kitVoicePre(chan,pad){
-  if(!kitGlob(chan))return pad;
-  const m={...pad};
-  for(const id of KITSHARE)if(chan[id]&&id!=='mod')m[id]=chan[id];
-  /* THE MOD RACK IS MERGED, NOT REPLACED, and this is the whole subtlety.
-     foldMod folds a preset's AMP AND PITCH ENVELOPES into the mod rack —
-     MSRC[1] is 'env' — so handing the voice the channel's rack threw every
-     pad's amp envelope away and left the sample playing flat. Measured before
-     the fix: the 808 kick rang 220ms at EVERY amp-decay factor from 0.02x to
-     3x of its own length, because there was no envelope left to shorten it.
-     A pad's envelopes are its IDENTITY. The channel's lfo, velocity, key and
-     random routes are the shared shaping. */
-  if(chan.mod){
-    /* THE PAD'S ENVELOPES ARE KEPT, THE CHANNEL'S RACK IS TAKEN WHOLE.
-       The first version of this filtered the channel's slots to `src!==1` —
-       excluding ENV, because MSRC[1] is 'env' and the pad's own amp envelope
-       lives there after foldMod. That protected the pad and threw away
-       something nobody had thought about: an envelope the PLAYER adds to the
-       kit's shared rack is also src 1, so a global env on amp, pitch or pan
-       was filtered out on its way to the voice and did nothing at all.
-       Gad: "global mods dont work for me, im trying to use env for master amp,
-       pitch or pan and nothing."
-       Distinguishing them by SOURCE was the mistake — the difference is whose
-       rack a slot is IN, and that is already known here. Both apply: the pad's
-       envelope shapes the pad, the channel's shapes the kit, and a pad with an
-       amp envelope under a global amp envelope is two gains in series, which
-       is what asking for both means. */
-    const theirs=(chan.mod||[]).filter(x=>x&&x.src);    // the kit's whole shared rack
-    /* AND WHERE THE KIT SPEAKS, THE PAD IS QUIET. The voice's VCA takes ONE
-       amp envelope: a second slot aimed at amp is simply ignored, measured —
-       a global amp env with d=0.03 left the kick ringing 155ms, exactly as
-       without it, while a global PITCH env moved it 65Hz -> 27Hz and a global
-       FILTER env 65 -> 38. So "global" has to MEAN global: for any destination
-       the channel's rack modulates, the pad's own slot for that destination
-       steps aside. Everywhere the channel is silent the pad keeps its own —
-       which is how a kit can have one shared filter sweep and still have
-       twelve different decays. */
-    const taken=new Set();
-    for(const x of theirs)for(const rt of (x.routes||[]))if(rt&&rt.dst)taken.add(rt.dst);
-    const mine=(pad.mod||[]).filter(x=>x&&x.src===1&&
-      !(x.routes||[]).some(rt=>rt&&taken.has(rt.dst)));
-    const merged=[]; for(let i=0;i<10;i++)merged.push(mkMod());
-    [...mine,...theirs].slice(0,10).forEach((x,i)=>{merged[i]=x;});
-    m.mod=merged;
-  }
-  return m;
 }
 const RACK_MK={osc:mkOsc,amp:mkAmp,flt:mkFlt,env:mkEnv,lfo:mkLfo,mod:mkMod,fx:mkFx,ply:mkPly};
 /* WHAT A DIAL READS WHEN THE SLOT HAS NO KEY FOR IT. A slot written before a
@@ -6329,8 +6292,7 @@ function scheduleRange(from,to){
         const pc=kitCh?pcOf(midi):-1;
         if(plyCache[pc])return plyCache[pc];
         let list;
-        if(kitCh&&kitGlob(chP))list=chP.ply.filter(sl=>sl.typ&&!sl.off);   // shared
-        else if(kitCh){const K=kitSlot(chP,midi);       // per-pad: this pad's rack only
+        if(kitCh){const K=kitSlot(chP,midi);            // kits: the pad's rack, nothing else
           list=K?K.ply.filter(sl=>sl.typ&&!sl.off):[];}
         else list=chP.ply.filter(sl=>sl.typ&&!sl.off);
         const g=t=>list.find(sl=>sl.typ===t);
@@ -10915,7 +10877,7 @@ class Engine{
     /* empty pad, no voice — falling back to the channel's own preset would
        play the leftover sound of whichever channel the kit was folded onto */
     if(isKit(p)&&!K)return null;
-    const pre=K?kitVoicePre(p,K):prepEffective(p,pm);
+    const pre=K?K:prepEffective(p,pm);
     const lid=K?pcOf(pm):'ch';
     const v=new Voice(this,at,pi,midi,vel,pre,pm,legato); v._lid=lid;
     this.act[pi].push(v);
@@ -10943,7 +10905,7 @@ class Engine{
        recorder gave a duration to. A held key has no length yet; it ends when
        you let go, and stretching that would mean holding the key for you. */
     if(durSec!=null){
-      const rk=((kp&&!kitGlob(chan))?kp.ply:chan.ply)||[];
+      const rk=(kp?kp.ply:chan.ply)||[];
       for(const sl of rk){
         if(!sl||sl.typ!==14||sl.off)continue;
         durSec=Math.max(sl.p3??0.02,durSec*(sl.p1??1)+(sl.p2||0));
@@ -15404,8 +15366,6 @@ function prsFieldDefs(){
        field below browses the focused PAD's sound; nothing browsed the kit.
        scrollPreset already handles cat 'kit' — the field simply did not exist. */
     {k:'kit',  v:()=>p.name},
-    /* what the filter, the modulators, the play rack and the fx belong to */
-    {k:'mods', v:()=>kitGlob(p)?'global':'per pad'},
     {k:'pad',  v:()=>NN[pcOf(S.prepFocus)]+(Math.floor(S.prepFocus/12)-1)},
     {k:'sound',v:()=>K.cat||'kik'},
     {k:'prst', v:()=>K.name},
@@ -15461,7 +15421,6 @@ function prsFieldDefs(){
   if(p.cat==='kit')return [        // kit, but no pad played yet: no pad fields to show
     chEng,
     {k:'kit',  v:()=>p.name},
-    {k:'mods', v:()=>kitGlob(p)?'global':'per pad'},
     {k:'kinfo',v:()=>'play a note to pick a pad'}];
   return [                                        // Synth: engine, then category
     chEng,
@@ -16100,7 +16059,7 @@ function _prsAction(d){
   /* `kit` belongs to the CHANNEL even with a pad focused, exactly as `engine`
      does — without this it falls into the pad branch, matches no case there,
      and silently does nothing, which is the bug the engine field already had. */
-  if(K&&f!=='engine'&&f!=='kit'&&f!=='mods'){  // ---- editing one kit pad ----
+  if(K&&f!=='engine'&&f!=='kit'){    // ---- editing one kit pad (a whole preset chain) ----
     pushUndo('kit pad');
     const kcat=K.cat||'kik';
     if(f==='pad'){                   // step through the 12 pads with the arrows
@@ -16274,28 +16233,6 @@ function _prsAction(d){
   }
   if(f==='prst')scrollPreset(pi,d);
   if(f==='kit')scrollPreset(pi,d);       // the whole kit — cat 'kit' in the library
-  if(f==='mods'){
-    pushUndo('kit mods');
-    const now=kitGlob(p);
-    if(now)p.kglob=0;
-    else{
-      /* TURNING IT ON MUST NOT SILENTLY EMPTY THE RACKS. A kit channel's own
-         flt/lfo/mod/ply are untouched defaults, so switching to global with
-         nothing in them would read as "my filter vanished". If the channel has
-         nothing and a pad does, that pad's shaping comes up with it — the
-         focused one for choice, else the first pad that has any. */
-      const empty=id=>!(p[id]||[]).some(sl=>sl&&(sl.typ||sl.dst||sl.src));
-      const donor=[edKit(p),...(p.kit||[])].find(k=>k&&['flt','lfo','mod','ply']
-        .some(id=>(k[id]||[]).some(sl=>sl&&(sl.typ||sl.dst||sl.src))));
-      if(donor)for(const id of ['flt','lfo','mod','ply'])
-        if(empty(id)&&donor[id])p[id]=JSON.parse(JSON.stringify(donor[id]));
-      p.kglob=1;
-    }
-    engine.rebuildRack(pi); engine.refresh(pi);
-    flash('kit mods \u2192 '+(kitGlob(p)?'global \u2014 one filter, one set of mods and fx for every pad'
-                                       :'per pad \u2014 each pad keeps its own'));
-    dirty=true; dirtySave=true; return;
-  }
   else if(f==='type'){
     const i0=Math.max(0,SYNTHCATS.indexOf(p.cat||'misc'));
     const cat=SYNTHCATS[fmod(i0+d,SYNTHCATS.length)];
