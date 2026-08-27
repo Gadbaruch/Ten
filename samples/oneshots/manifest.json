@@ -1,23 +1,7 @@
 [
  {
-  "name": "tr808-kick-06",
-  "file": "oneshots/kick/tr808-kick-06.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "tr808",
-  "cat": "kik"
- },
- {
   "name": "tr808-kick-08",
   "file": "oneshots/kick/tr808-kick-08.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "tr808",
-  "cat": "kik"
- },
- {
-  "name": "tr808-kick-20",
-  "file": "oneshots/kick/tr808-kick-20.flac",
   "kind": "one",
   "inst": "kick",
   "style": "tr808",
@@ -37,14 +21,6 @@
   "kind": "one",
   "inst": "kick",
   "style": "cr78",
-  "cat": "kik"
- },
- {
-  "name": "linn-kick-01",
-  "file": "oneshots/kick/linn-kick-01.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "linn",
   "cat": "kik"
  },
  {
@@ -189,70 +165,6 @@
   "kind": "one",
   "inst": "kick",
   "style": "dr5",
-  "cat": "kik"
- },
- {
-  "name": "dr5-kick-33",
-  "file": "oneshots/kick/dr5-kick-33.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "dr5",
-  "cat": "kik"
- },
- {
-  "name": "lofi-kick-01",
-  "file": "oneshots/kick/lofi-kick-01.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "lofi",
-  "cat": "kik"
- },
- {
-  "name": "lofi-kick-02",
-  "file": "oneshots/kick/lofi-kick-02.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "lofi",
-  "cat": "kik"
- },
- {
-  "name": "lofi-kick-03",
-  "file": "oneshots/kick/lofi-kick-03.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "lofi",
-  "cat": "kik"
- },
- {
-  "name": "tr8-sub-02",
-  "file": "oneshots/sub/tr8-sub-02.flac",
-  "kind": "one",
-  "inst": "sub",
-  "style": "tr8",
-  "cat": "kik"
- },
- {
-  "name": "trap-sub-01",
-  "file": "oneshots/sub/trap-sub-01.flac",
-  "kind": "one",
-  "inst": "sub",
-  "style": "trap",
-  "cat": "kik"
- },
- {
-  "name": "trap-sub-02",
-  "file": "oneshots/sub/trap-sub-02.flac",
-  "kind": "one",
-  "inst": "sub",
-  "style": "trap",
-  "cat": "kik"
- },
- {
-  "name": "lofi-sub-01",
-  "file": "oneshots/sub/lofi-sub-01.flac",
-  "kind": "one",
-  "inst": "sub",
-  "style": "lofi",
   "cat": "kik"
  },
  {
@@ -464,22 +376,6 @@
   "cat": "snr"
  },
  {
-  "name": "lofi-snare-02",
-  "file": "oneshots/snare/lofi-snare-02.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "lofi",
-  "cat": "snr"
- },
- {
-  "name": "lofi-snare-03",
-  "file": "oneshots/snare/lofi-snare-03.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "lofi",
-  "cat": "snr"
- },
- {
   "name": "tr808-clap-01",
   "file": "oneshots/clap/tr808-clap-01.flac",
   "kind": "one",
@@ -504,35 +400,19 @@
   "cat": "snr"
  },
  {
-  "name": "tr8-clap-07",
-  "file": "oneshots/clap/tr8-clap-07.flac",
+  "name": "tr8-clap-01",
+  "file": "oneshots/clap/tr8-clap-01.flac",
   "kind": "one",
   "inst": "clap",
   "style": "tr8",
   "cat": "snr"
  },
  {
-  "name": "dr5-clap-01",
-  "file": "oneshots/clap/dr5-clap-01.flac",
+  "name": "tr8-clap-07",
+  "file": "oneshots/clap/tr8-clap-07.flac",
   "kind": "one",
   "inst": "clap",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "trap-clap-01",
-  "file": "oneshots/clap/trap-clap-01.flac",
-  "kind": "one",
-  "inst": "clap",
-  "style": "trap",
-  "cat": "snr"
- },
- {
-  "name": "lofi-clap-01",
-  "file": "oneshots/clap/lofi-clap-01.flac",
-  "kind": "one",
-  "inst": "clap",
-  "style": "lofi",
+  "style": "tr8",
   "cat": "snr"
  },
  {
@@ -600,6 +480,14 @@
   "cat": "snr"
  },
  {
+  "name": "tr8-rim-01",
+  "file": "oneshots/rim/tr8-rim-01.flac",
+  "kind": "one",
+  "inst": "rim",
+  "style": "tr8",
+  "cat": "snr"
+ },
+ {
   "name": "tr8-rim-02",
   "file": "oneshots/rim/tr8-rim-02.flac",
   "kind": "one",
@@ -610,38 +498,6 @@
  {
   "name": "dr5-rim-05",
   "file": "oneshots/rim/dr5-rim-05.flac",
-  "kind": "one",
-  "inst": "rim",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-rim-06",
-  "file": "oneshots/rim/dr5-rim-06.flac",
-  "kind": "one",
-  "inst": "rim",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-rim-07",
-  "file": "oneshots/rim/dr5-rim-07.flac",
-  "kind": "one",
-  "inst": "rim",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-rim-08",
-  "file": "oneshots/rim/dr5-rim-08.flac",
-  "kind": "one",
-  "inst": "rim",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-rim-09",
-  "file": "oneshots/rim/dr5-rim-09.flac",
   "kind": "one",
   "inst": "rim",
   "style": "dr5",
@@ -752,14 +608,6 @@
   "cat": "hh"
  },
  {
-  "name": "lofi-hat-closed-01",
-  "file": "oneshots/hat-closed/lofi-hat-closed-01.flac",
-  "kind": "one",
-  "inst": "hat-closed",
-  "style": "lofi",
-  "cat": "hh"
- },
- {
   "name": "tr808-hat-open-01",
   "file": "oneshots/hat-open/tr808-hat-open-01.flac",
   "kind": "one",
@@ -856,24 +704,8 @@
   "cat": "hh"
  },
  {
-  "name": "lofi-hat-open-01",
-  "file": "oneshots/hat-open/lofi-hat-open-01.flac",
-  "kind": "one",
-  "inst": "hat-open",
-  "style": "lofi",
-  "cat": "hh"
- },
- {
   "name": "tr808-cymbal-12",
   "file": "oneshots/cymbal/tr808-cymbal-12.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "tr808",
-  "cat": "cymb"
- },
- {
-  "name": "tr808-cymbal-14",
-  "file": "oneshots/cymbal/tr808-cymbal-14.flac",
   "kind": "one",
   "inst": "cymbal",
   "style": "tr808",
@@ -1024,14 +856,6 @@
   "cat": "cymb"
  },
  {
-  "name": "tr8-ride-01",
-  "file": "oneshots/ride/tr8-ride-01.flac",
-  "kind": "one",
-  "inst": "ride",
-  "style": "tr8",
-  "cat": "cymb"
- },
- {
   "name": "tr8-ride-04",
   "file": "oneshots/ride/tr8-ride-04.flac",
   "kind": "one",
@@ -1085,14 +909,6 @@
   "kind": "one",
   "inst": "tom",
   "style": "linn",
-  "cat": "tom"
- },
- {
-  "name": "mrk2-tom-01",
-  "file": "oneshots/tom/mrk2-tom-01.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "mrk2",
   "cat": "tom"
  },
  {
@@ -1312,16 +1128,48 @@
   "cat": "tom"
  },
  {
-  "name": "tr8-tom-25",
-  "file": "oneshots/tom/tr8-tom-25.flac",
+  "name": "dr5-perc-15",
+  "file": "oneshots/tom/dr5-perc-15.flac",
   "kind": "one",
   "inst": "tom",
-  "style": "tr8",
+  "style": "dr5",
   "cat": "tom"
  },
  {
-  "name": "dr5-tom-01",
-  "file": "oneshots/tom/dr5-tom-01.flac",
+  "name": "dr5-perc-16",
+  "file": "oneshots/tom/dr5-perc-16.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "dr5",
+  "cat": "tom"
+ },
+ {
+  "name": "dr5-rim-06",
+  "file": "oneshots/tom/dr5-rim-06.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "dr5",
+  "cat": "tom"
+ },
+ {
+  "name": "dr5-rim-07",
+  "file": "oneshots/tom/dr5-rim-07.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "dr5",
+  "cat": "tom"
+ },
+ {
+  "name": "dr5-rim-08",
+  "file": "oneshots/tom/dr5-rim-08.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "dr5",
+  "cat": "tom"
+ },
+ {
+  "name": "dr5-rim-09",
+  "file": "oneshots/tom/dr5-rim-09.flac",
   "kind": "one",
   "inst": "tom",
   "style": "dr5",
@@ -1392,32 +1240,8 @@
   "cat": "tom"
  },
  {
-  "name": "lofi-tom-01",
-  "file": "oneshots/tom/lofi-tom-01.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "lofi",
-  "cat": "tom"
- },
- {
-  "name": "lofi-tom-02",
-  "file": "oneshots/tom/lofi-tom-02.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "lofi",
-  "cat": "tom"
- },
- {
   "name": "tr808-conga-02",
   "file": "oneshots/conga/tr808-conga-02.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "tr808",
-  "cat": "perc"
- },
- {
-  "name": "tr808-conga-07",
-  "file": "oneshots/conga/tr808-conga-07.flac",
   "kind": "one",
   "inst": "conga",
   "style": "tr808",
@@ -1432,51 +1256,11 @@
   "cat": "perc"
  },
  {
-  "name": "tr808-conga-12",
-  "file": "oneshots/conga/tr808-conga-12.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "tr808",
-  "cat": "perc"
- },
- {
-  "name": "tr808-conga-15",
-  "file": "oneshots/conga/tr808-conga-15.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "tr808",
-  "cat": "perc"
- },
- {
   "name": "cr78-conga-01",
   "file": "oneshots/conga/cr78-conga-01.flac",
   "kind": "one",
   "inst": "conga",
   "style": "cr78",
-  "cat": "perc"
- },
- {
-  "name": "linn-conga-01",
-  "file": "oneshots/conga/linn-conga-01.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "linn",
-  "cat": "perc"
- },
- {
-  "name": "linn-conga-02",
-  "file": "oneshots/conga/linn-conga-02.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "linn",
-  "cat": "perc"
- },
- {
-  "name": "linn-conga-03",
-  "file": "oneshots/conga/linn-conga-03.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "linn",
   "cat": "perc"
  },
  {
@@ -1562,30 +1346,6 @@
  {
   "name": "tr8-conga-06",
   "file": "oneshots/conga/tr8-conga-06.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "tr8",
-  "cat": "perc"
- },
- {
-  "name": "tr8-conga-07",
-  "file": "oneshots/conga/tr8-conga-07.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "tr8",
-  "cat": "perc"
- },
- {
-  "name": "tr8-conga-08",
-  "file": "oneshots/conga/tr8-conga-08.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "tr8",
-  "cat": "perc"
- },
- {
-  "name": "tr8-conga-09",
-  "file": "oneshots/conga/tr8-conga-09.flac",
   "kind": "one",
   "inst": "conga",
   "style": "tr8",
@@ -1728,6 +1488,22 @@
   "cat": "perc"
  },
  {
+  "name": "dr5-cowbell-04",
+  "file": "oneshots/cowbell/dr5-cowbell-04.flac",
+  "kind": "one",
+  "inst": "cowbell",
+  "style": "dr5",
+  "cat": "perc"
+ },
+ {
+  "name": "trap-clap-01",
+  "file": "oneshots/cowbell/trap-clap-01.flac",
+  "kind": "one",
+  "inst": "cowbell",
+  "style": "trap",
+  "cat": "perc"
+ },
+ {
   "name": "tr808-clave-01",
   "file": "oneshots/clave/tr808-clave-01.flac",
   "kind": "one",
@@ -1741,14 +1517,6 @@
   "kind": "one",
   "inst": "clave",
   "style": "mrk2",
-  "cat": "wood"
- },
- {
-  "name": "tr8-clave-01",
-  "file": "oneshots/clave/tr8-clave-01.flac",
-  "kind": "one",
-  "inst": "clave",
-  "style": "tr8",
   "cat": "wood"
  },
  {
@@ -1768,14 +1536,6 @@
   "cat": "wood"
  },
  {
-  "name": "cr78-wood-02",
-  "file": "oneshots/wood/cr78-wood-02.flac",
-  "kind": "one",
-  "inst": "wood",
-  "style": "cr78",
-  "cat": "wood"
- },
- {
   "name": "mrk2-wood-01",
   "file": "oneshots/wood/mrk2-wood-01.flac",
   "kind": "one",
@@ -1784,32 +1544,8 @@
   "cat": "wood"
  },
  {
-  "name": "dr5-wood-01",
-  "file": "oneshots/wood/dr5-wood-01.flac",
-  "kind": "one",
-  "inst": "wood",
-  "style": "dr5",
-  "cat": "wood"
- },
- {
   "name": "dr5-wood-03",
   "file": "oneshots/wood/dr5-wood-03.flac",
-  "kind": "one",
-  "inst": "wood",
-  "style": "dr5",
-  "cat": "wood"
- },
- {
-  "name": "dr5-wood-04",
-  "file": "oneshots/wood/dr5-wood-04.flac",
-  "kind": "one",
-  "inst": "wood",
-  "style": "dr5",
-  "cat": "wood"
- },
- {
-  "name": "dr5-wood-05",
-  "file": "oneshots/wood/dr5-wood-05.flac",
   "kind": "one",
   "inst": "wood",
   "style": "dr5",
@@ -1826,14 +1562,6 @@
  {
   "name": "cr78-shaker-01",
   "file": "oneshots/shaker/cr78-shaker-01.flac",
-  "kind": "one",
-  "inst": "shaker",
-  "style": "cr78",
-  "cat": "perc"
- },
- {
-  "name": "cr78-shaker-02",
-  "file": "oneshots/shaker/cr78-shaker-02.flac",
   "kind": "one",
   "inst": "shaker",
   "style": "cr78",
@@ -1904,14 +1632,6 @@
   "cat": "perc"
  },
  {
-  "name": "lofi-shaker-01",
-  "file": "oneshots/shaker/lofi-shaker-01.flac",
-  "kind": "one",
-  "inst": "shaker",
-  "style": "lofi",
-  "cat": "perc"
- },
- {
   "name": "tr505-timbale-01",
   "file": "oneshots/timbale/tr505-timbale-01.flac",
   "kind": "one",
@@ -1941,30 +1661,6 @@
   "kind": "one",
   "inst": "timbale",
   "style": "dr5",
-  "cat": "perc"
- },
- {
-  "name": "rx5-perc-01",
-  "file": "oneshots/perc/rx5-perc-01.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "rx5",
-  "cat": "perc"
- },
- {
-  "name": "rx5-perc-02",
-  "file": "oneshots/perc/rx5-perc-02.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "rx5",
-  "cat": "perc"
- },
- {
-  "name": "rx5-perc-03",
-  "file": "oneshots/perc/rx5-perc-03.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "rx5",
   "cat": "perc"
  },
  {
@@ -2144,43 +1840,11 @@
   "cat": "perc"
  },
  {
-  "name": "tr8-perc-07",
-  "file": "oneshots/perc/tr8-perc-07.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "tr8",
-  "cat": "perc"
- },
- {
   "name": "tr8-perc-08",
   "file": "oneshots/perc/tr8-perc-08.flac",
   "kind": "one",
   "inst": "perc",
   "style": "tr8",
-  "cat": "perc"
- },
- {
-  "name": "dr5-perc-01",
-  "file": "oneshots/perc/dr5-perc-01.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "dr5",
-  "cat": "perc"
- },
- {
-  "name": "dr5-perc-02",
-  "file": "oneshots/perc/dr5-perc-02.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "dr5",
-  "cat": "perc"
- },
- {
-  "name": "dr5-perc-03",
-  "file": "oneshots/perc/dr5-perc-03.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "dr5",
   "cat": "perc"
  },
  {
@@ -2226,22 +1890,6 @@
  {
   "name": "dr5-perc-13",
   "file": "oneshots/perc/dr5-perc-13.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "dr5",
-  "cat": "perc"
- },
- {
-  "name": "dr5-perc-15",
-  "file": "oneshots/perc/dr5-perc-15.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "dr5",
-  "cat": "perc"
- },
- {
-  "name": "dr5-perc-16",
-  "file": "oneshots/perc/dr5-perc-16.flac",
   "kind": "one",
   "inst": "perc",
   "style": "dr5",

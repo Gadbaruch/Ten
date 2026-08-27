@@ -12,28 +12,28 @@ AAC pre-echoes ahead of the transient.
 See `PRUNED.md` for what the dedupe pass removed and what is parked in
 `_similar/` waiting on your ear.
 
-## Roland TR-808 — `tr808-*` (28 sounds)
+## Roland TR-808 — `tr808-*` (22 sounds)
 
 - licence: **CC0-1.0**
 - source: https://github.com/tidalcycles/sounds-tr808-fischer
 - repo: `tidalcycles/sounds-tr808-fischer`
 - Michael Fischer / Edward Loveall recordings of a real TR-808, every voice across its tone and decay grid
 
-## Roland CompuRhythm CR-78 — `cr78-*` (15 sounds)
+## Roland CompuRhythm CR-78 — `cr78-*` (13 sounds)
 
 - licence: **Public Domain**
 - source: https://oramics.github.io/sampled/DM/CR-78/
 - repo: `oramics/sampled`
 - declared Public Domain by oramics; source boxedear.com
 
-## LinnDrum LM-2 — `linn-*` (29 sounds)
+## LinnDrum LM-2 — `linn-*` (25 sounds)
 
 - licence: **Public Domain**
 - source: https://oramics.github.io/sampled/DM/LM-2/
 - repo: `oramics/sampled`
 - declared Public Domain by oramics; source machines.hyperreal.org
 
-## Maestro Rhythm King MRK-2 — `mrk2-*` (9 sounds)
+## Maestro Rhythm King MRK-2 — `mrk2-*` (8 sounds)
 
 - licence: **Public Domain**
 - source: https://oramics.github.io/sampled/DM/MRK-2/
@@ -47,40 +47,33 @@ See `PRUNED.md` for what the dedupe pass removed and what is parked in
 - repo: `oramics/sampled`
 - declared Public Domain by oramics; source progsounds.com
 
-## Yamaha RX5 — `rx5-*` (74 sounds)
+## Yamaha RX5 — `rx5-*` (71 sounds)
 
 - licence: **CC0-1.0**
 - source: https://github.com/MckAudio/MckSamplePacks
 - repo: `MckAudio/MckSamplePacks`
 - the repo owner's own recordings of their own hardware
 
-## Roland TR-8 (ACB models of the 808 and 909) — `tr8-*` (50 sounds)
+## Roland TR-8 (ACB models of the 808 and 909) — `tr8-*` (44 sounds)
 
 - licence: **CC0-1.0**
 - source: https://github.com/MckAudio/MckSamplePacks
 - repo: `MckAudio/MckSamplePacks`
 - the repo owner's own recordings; Roland's own model of the 808 and 909, which is why there is a 909 here and no scraped 909 pack
 
-## Alesis DR5 — `dr5-*` (60 sounds)
+## Alesis DR5 — `dr5-*` (52 sounds)
 
 - licence: **CC0-1.0**
 - source: https://github.com/MckAudio/MckSamplePacks
 - repo: `MckAudio/MckSamplePacks`
 - the repo owner's own recordings of their own hardware
 
-## hard trap kit — `trap-*` (3 sounds)
+## hard trap kit — `trap-*` (1 sounds)
 
 - licence: **CC0-1.0**
 - source: https://github.com/Boochi44/free-drum-samples
 - repo: `Boochi44/free-drum-samples`
 - derived from the CC0 TR-808 recordings above
-
-## soulful vintage kit — `lofi-*` (12 sounds)
-
-- licence: **CC0-1.0**
-- source: https://github.com/Boochi44/free-drum-samples
-- repo: `Boochi44/free-drum-samples`
-- derived from the CC0 TR-808 recordings above, down-sampled and crushed
 
 ## Deliberately NOT included
 

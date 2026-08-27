@@ -93,6 +93,22 @@ NOTHAT = re.compile(r'crash|cymbal|cymball|ride|splash')
 OPENISH = re.compile(r'\bopen\b|\boh\d*\b')
 
 
+# GAD'S OWN CORRECTIONS, keyed by the name the rules first produced. He
+# auditioned the library and prefixed four files "this is a ...":
+#   dr5-wood-01 was a cowbell · tr8-tom-25 a rim · dr5-wood-05 a snare ·
+#   tr8-sub-02 a clap
+# A filename rule can only ever be as good as the filename, and none of those
+# four were going to be got right from theirs — so they are RECORDED rather
+# than guessed at again on the next build. This is a manual list and it is
+# meant to be: add to it whenever an ear beats the rules.
+OVERRIDE = {
+    'dr5-wood-01': 'cowbell',
+    'tr8-tom-25': 'rim',
+    'dr5-wood-05': 'snare',
+    'tr8-sub-02': 'clap',
+}
+
+
 def instr_of(name, folder_hint=''):
     s = (folder_hint + ' ' + name).lower().replace('_', ' ').replace('-', ' ')
     if HATISH.search(s) and not NOTHAT.search(s):
@@ -204,6 +220,9 @@ def build(srcroot):
         for f in files:
             hint = f.parent.name if f.parent != base else ''
             inst = instr_of(f.stem, hint)
+            probe = '%s-%s-%02d' % (s['key'], inst, seen.get(inst, 0) + 1)
+            if probe in OVERRIDE:                 # an ear beat the rules here
+                inst = OVERRIDE[probe]
             i = seen.get(inst, 0) + 1
             seen[inst] = i
             dst = OUT / inst / ('%s-%s-%02d.flac' % (s['key'], inst, i))
