@@ -1287,7 +1287,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-27.1853';
+const BUILD='2026-08-27.1929';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -7419,7 +7419,8 @@ class Voice{
            every patch actually uses. Same saw-minus-delayed-saw as ops 1-9;
            the reasoning is written out at that branch. */
         const so=ac.createOscillator();
-        E.setWave(so,2,(ops[0].phm===1?Math.random()*360:ops[0].ph)+180,0.5);
+        const roff3=ops[0].phm===1?Math.random():0;
+        E.setWave(so,2,(ops[0].phm===1?0:ops[0].ph)+180,0.5);
         const fd=Math.max(2,target), md=clamp(1.02/fd,0.002,0.5);
         const dl=ac.createDelay(md), neg=ac.createGain(), sum2=ac.createGain();
         neg.gain.value=-1;
@@ -7430,7 +7431,7 @@ class Voice{
         this.nodes.push(so);
         src=sum2;
         src.frequency=so.frequency; src.detune=so.detune;
-        src.start=t=>{const e0=t-1/fd; try{so.start(e0>AC.currentTime?e0:t);}catch(_){}};
+        src.start=t=>{const e0=t-(1+roff3)/fd; try{so.start(e0>AC.currentTime?e0:t);}catch(_){}};
         src.stop=t=>{try{so.stop(t);}catch(_){}};
         pitchParam=so.frequency;
       }
@@ -7440,14 +7441,16 @@ class Voice{
            1-9 for why a triangle or a saw cannot use the delay. */
         const oA=ac.createOscillator(), oB=ac.createOscillator();
         const gA=ac.createGain(), gB=ac.createGain(), sum2=ac.createGain();
-        const ph0=ops[0].phm===1?Math.random()*360:ops[0].ph;
+        const ph0=ops[0].phm===1?0:ops[0].ph;            // see the pair at ops 1-9
+        const roff=ops[0].phm===1?Math.random():0;
         E.setWave(oA,rootW,ph0,ops[0].pw); E.setWave(oB,rootW,ph0,ops[0].pw);
         gA.gain.value=1; gB.gain.value=0;
         oA.connect(gA); oB.connect(gB); gA.connect(sum2); gB.connect(sum2);
         rootPwx={a:oA,b:oB,ga:gA,gb:gB,cur:'a',w:rootW,ph:ph0};
         src=sum2;
         src.frequency=oA.frequency; src.detune=oA.detune;
-        src.start=t=>{try{oA.start(t);}catch(_){} try{oB.start(t);}catch(_){}};
+        src.start=t=>{const e0=t-roff/Math.max(1,target), t0=e0>AC.currentTime?e0:t;
+          try{oA.start(t0);}catch(_){} try{oB.start(t0);}catch(_){}};
         src.stop=t=>{try{oA.stop(t);}catch(_){} try{oB.stop(t);}catch(_){}};
         pitchParam=oA.frequency;
       }
@@ -7603,7 +7606,9 @@ class Voice{
              been — one period is a no-op on phase, which is what makes that
              free. */
           const so=ac.createOscillator();
-          E.setWave(so,2,(op.phm===1?Math.random()*360:op.ph)+180,0.5);
+          /* one cache row, and free-run in the start time — see the pair below */
+          const roff3=op.phm===1?Math.random():0;
+          E.setWave(so,2,(op.phm===1?0:op.ph)+180,0.5);
           setF(so.frequency,fi);
           const fd=Math.max(2,fi), md=clamp(1.02/fd,0.002,0.5);
           const dl=ac.createDelay(md), neg=ac.createGain(), sum2=ac.createGain();
@@ -7619,7 +7624,9 @@ class Voice{
              opDet — so the composite hands out the oscillator's own params
              and every one of those paths is unchanged */
           s2.frequency=so.frequency; s2.detune=so.detune;
-          s2.start=t=>{const e0=t-1/fd; try{so.start(e0>AC.currentTime?e0:t);}catch(_){}};
+          /* one WHOLE period early primes the delay line and is a no-op on
+             phase; roff on top of that is the free-run offset */
+          s2.start=t=>{const e0=t-(1+roff3)/fd; try{so.start(e0>AC.currentTime?e0:t);}catch(_){}};
           s2.stop=t=>{try{so.stop(t);}catch(_){}};
         }
         else if(pwMoves(p,i,op)){
@@ -7639,7 +7646,17 @@ class Voice{
              a full-scale flip becomes a -50dB one. */
           const oA=ac.createOscillator(), oB=ac.createOscillator();
           const gA=ac.createGain(), gB=ac.createGain(), sum2=ac.createGain();
-          const ph0=op.phm===1?Math.random()*360:op.ph;    // ONE phase, both copies
+          /* THE TABLE'S PHASE IS FIXED; THE RANDOMNESS IS IN THE START TIME.
+             Baking a note's free-run phase into the table puts that phase in
+             setWave's CACHE KEY, so every note minted a fresh set of tables —
+             27 per note, measured, ~160KB of band-limited tables each, and
+             createPeriodicWave runs on the MAIN thread. It drained memory and
+             starved modTick, which is why the width stopped moving at all.
+             An oscillator started r/f seconds early is at phase r when the
+             note lands, so free-run costs nothing and both copies stay locked
+             because they start at the same instant. */
+          const ph0=op.phm===1?0:op.ph;                    // ONE phase, both copies, ONE cache row
+          const roff=op.phm===1?Math.random():0;           // ...and free-run lives here now
           E.setWave(oA,wv,ph0,op.pw); E.setWave(oB,wv,ph0,op.pw);
           gA.gain.value=1; gB.gain.value=0;
           oA.connect(gA); oB.connect(gB); gA.connect(sum2); gB.connect(sum2);
@@ -7655,7 +7672,8 @@ class Voice{
           }
           s2=sum2;
           s2.frequency=oA.frequency; s2.detune=oA.detune;
-          s2.start=t=>{try{oA.start(t);}catch(_){} try{oB.start(t);}catch(_){}};
+          s2.start=t=>{const e0=t-roff/Math.max(1,fi), t0=e0>AC.currentTime?e0:t;
+            try{oA.start(t0);}catch(_){} try{oB.start(t0);}catch(_){}};
           s2.stop=t=>{try{oA.stop(t);}catch(_){} try{oB.stop(t);}catch(_){}};
         }
         else{s2=ac.createOscillator();
@@ -9405,6 +9423,16 @@ class Engine{
         im[k]=b*Math.cos(k*phi)-a*Math.sin(k*phi);
       }
       pw=AC.createPeriodicWave(re,im); this.waveCache.set(key,pw);
+      /* A CAP, BECAUSE THIS ONE COULD GROW FOREVER. wtWave has had one; this
+         side never did, and it did not matter while the only caller passed a
+         PHASE OF ZERO. The moment a caller passed a note's own free-run phase
+         the key gained a third dimension and every note minted its own set of
+         tables — 27 per note, measured, and Chrome builds ~160KB of
+         band-limited tables behind each one. Three notes was 13MB and it never
+         came back. The phase is stable again below, so this is a backstop
+         rather than the fix. */
+      if(this.waveCache.size>600)
+        this.waveCache.delete(this.waveCache.keys().next().value);
     }
     osc.setPeriodicWave(pw);
   }
