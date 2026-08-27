@@ -1287,7 +1287,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-27.1824';
+const BUILD='2026-08-27.1853';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1677,8 +1677,34 @@ function kitVoicePre(chan,pad){
      A pad's envelopes are its IDENTITY. The channel's lfo, velocity, key and
      random routes are the shared shaping. */
   if(chan.mod){
-    const mine=(pad.mod||[]).filter(x=>x&&x.src===1);           // env: the pad's own
-    const theirs=(chan.mod||[]).filter(x=>x&&x.src&&x.src!==1); // everything else: shared
+    /* THE PAD'S ENVELOPES ARE KEPT, THE CHANNEL'S RACK IS TAKEN WHOLE.
+       The first version of this filtered the channel's slots to `src!==1` —
+       excluding ENV, because MSRC[1] is 'env' and the pad's own amp envelope
+       lives there after foldMod. That protected the pad and threw away
+       something nobody had thought about: an envelope the PLAYER adds to the
+       kit's shared rack is also src 1, so a global env on amp, pitch or pan
+       was filtered out on its way to the voice and did nothing at all.
+       Gad: "global mods dont work for me, im trying to use env for master amp,
+       pitch or pan and nothing."
+       Distinguishing them by SOURCE was the mistake — the difference is whose
+       rack a slot is IN, and that is already known here. Both apply: the pad's
+       envelope shapes the pad, the channel's shapes the kit, and a pad with an
+       amp envelope under a global amp envelope is two gains in series, which
+       is what asking for both means. */
+    const theirs=(chan.mod||[]).filter(x=>x&&x.src);    // the kit's whole shared rack
+    /* AND WHERE THE KIT SPEAKS, THE PAD IS QUIET. The voice's VCA takes ONE
+       amp envelope: a second slot aimed at amp is simply ignored, measured —
+       a global amp env with d=0.03 left the kick ringing 155ms, exactly as
+       without it, while a global PITCH env moved it 65Hz -> 27Hz and a global
+       FILTER env 65 -> 38. So "global" has to MEAN global: for any destination
+       the channel's rack modulates, the pad's own slot for that destination
+       steps aside. Everywhere the channel is silent the pad keeps its own —
+       which is how a kit can have one shared filter sweep and still have
+       twelve different decays. */
+    const taken=new Set();
+    for(const x of theirs)for(const rt of (x.routes||[]))if(rt&&rt.dst)taken.add(rt.dst);
+    const mine=(pad.mod||[]).filter(x=>x&&x.src===1&&
+      !(x.routes||[]).some(rt=>rt&&taken.has(rt.dst)));
     const merged=[]; for(let i=0;i<10;i++)merged.push(mkMod());
     [...mine,...theirs].slice(0,10).forEach((x,i)=>{merged[i]=x;});
     m.mod=merged;

@@ -889,7 +889,7 @@ async function probeTrig() {
       const t = tap(bus); await sleep(20);
       engine.noteOn(AC.currentTime + 0.02, ch, note, 0.9);
       await sleep(160);
-      const [L] = t.stop();
+      const [L, R] = t.stop();
       engine.allOff();
       const w = windowOf(L, L);
       return L.slice(w.o, w.o + 1500);
@@ -2790,6 +2790,19 @@ async function probeSmpKit() {
     if (pad && pad.env && pad.env[0] && e && e.buf)
       Object.assign(pad.env[0], { a: 0.0004, d: Math.max(0.02, e.buf.duration * dcy), s: 0, r: 0.02 });
   }
+  /* `gmod=amp|pitch|pan` puts an ENVELOPE on the KIT CHANNEL's shared mod rack
+     — the thing that silently did nothing, because the merge was filtering
+     every src-1 slot out of the channel's side. Installed after the kit loads,
+     for the same reason chflt is. */
+  const gmod = str(P.gmod, '');
+  if (gmod) {
+    const dst = { amp: 1, pitch: 2, filt: 3, pan: 4 }[gmod] || 1;
+    const cp = S.presets[ch];
+    cp.kglob = 1;
+    cp.mod[0] = { src: 1, rsel: 0, a: 0.001, d: num(P.gd, 0.05), s: 0, r: 0.02,
+                  routes: [{ dst, idx: 0, amt: num(P.gamt, 100), ctr: 0, tgt: null }] };
+    cp._addr = false; addrMod(cp);
+  }
   const chflt = P.chflt === undefined ? null : num(P.chflt, 0);
   if (chflt) {
     S.presets[ch].kglob = 1;
@@ -2822,7 +2835,8 @@ async function probeSmpKit() {
   const rs = rows.map(r => r.rms).filter(Number.isFinite);
   if (rs.length) notes.push('rms ' + r3(Math.min(...rs)) + '..' + r3(Math.max(...rs)) +
     '  mean ' + r3(rs.reduce((a, b) => a + b, 0) / rs.length) +
-    (dcy != null ? '   (amp decay = ' + dcy + ' x the take)' : '   (each pad\'s own decay)'));
+    (dcy != null ? '   (amp decay = ' + dcy + ' x the take)' : '   (each pad\'s own decay)') +
+    (gmod ? '   [global ' + gmod + ' env]' : ''));
   const cs2 = rows.map(r => r.centroid).filter(Number.isFinite);
   if (cs2.length) notes.push('centroid ' + Math.round(Math.min(...cs2)) + '..' +
     Math.round(Math.max(...cs2)) + '  mean ' +
@@ -3240,6 +3254,21 @@ async function probeKitDcy() {
   const ref = ((pad.osc || [])[0] || {}).smp;
   const e = ref && ref.f && POOLBYF.get(smpPath(ref.f));
   const dur = e && e.buf ? e.buf.duration : 0;
+  /* `gmod=amp|pitch|pan` installs an ENVELOPE on the kit CHANNEL's shared rack,
+     which is the thing being tested — and it is tested HERE, with ring time,
+     because hit()'s window sits at the onset and cannot see an envelope at
+     all. That instrument said "no change" for three different global mods
+     that were in fact wired correctly. */
+  const gmod = str(P.gmod, '');
+  if (gmod) {
+    const dst = { amp: 1, pitch: 2, filt: 3, pan: 4 }[gmod] || 1;
+    const cp = S.presets[ch]; cp.kglob = 1;
+    cp.mod[0] = { src: 1, rsel: 0, a: 0.001, d: num(P.gd, 0.03), s: 0, r: 0.02,
+                  routes: [{ dst, idx: 0, amt: num(P.gamt, 100), ctr: 0, tgt: null }] };
+    cp._addr = false; addrMod(cp);
+    engine.rebuildRack(ch);
+    await sleep(80);
+  }
   const rows = [];
   for (const f of list(P.dcys, ['0.15', '0.35', '0.7', '1.5', '3']).map(Number)) {
     /* WRITE THE FOLDED SLOT, not p.env[0]. foldMod moves an envelope's
@@ -3255,7 +3284,7 @@ async function probeKitDcy() {
     await sleep(30);
     engine.noteOn(AC.currentTime + 0.02, ch, 60 + pc, VEL);
     await sleep(Math.max(400, dur * 2200));
-    const [L] = t.stop();
+    const [L, R] = t.stop();
     try { engine.allOff(); } catch (_) {}
     /* envelope in 5ms frames, then the first frame after the peak that is
        40dB down and stays down */
@@ -3270,14 +3299,22 @@ async function probeKitDcy() {
     }
     let end = nf - 1;
     if (pk > 0) { const thr = pk * 0.01; for (let i = pkAt; i < nf; i++) if (env[i] < thr) { end = i; break; } }
+    /* L AND R TOO, because a PAN mod is invisible to every other number here —
+       and the ring, measured on L alone, COLLAPSES when a pan env is added
+       (155ms -> 35ms) which reads as "the sound got shorter" when what
+       happened is that it moved. A hand-rolled tap on the wrong bus node had
+       already reported L and R equal for a route that was wired correctly;
+       busOf is the tap that knows where a channel comes out. */
+    const pkOf = a => { let m = 0; for (let i = 0; i < a.length; i++) m = Math.max(m, Math.abs(a[i])); return m; };
     rows.push({ k: 'x' + f, d: r3(Math.max(0.02, dur * f)),
-                ringMs: Math.round((end - pkAt) * 5), peak: r3(pk) });
+                ringMs: Math.round((end - pkAt) * 5), peak: r3(pk),
+                pkL: r3(pkOf(L)), pkR: r3(pkOf(R)) });
     await sleep(60);
   }
   setP(ch, keep.name || 'tmp', keep.cat || 'misc', keep);
   engine.rebuildRack(ch);
   notes.push('pad ' + NN[pc] + ' · take ' + r3(dur) + 's · ring = onset to -40dB');
-  return { cols: ['d', 'ringMs', 'peak'], rows };
+  return { cols: ['d', 'ringMs', 'peak', 'pkL', 'pkR'], rows };
 }
 
 /* ---------------- pwmall: which waves still STEP their width -------------
