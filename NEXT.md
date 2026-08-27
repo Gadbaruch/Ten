@@ -1,5 +1,75 @@
 # DRUMS — 2026-08-27 (late, branch `sound-library`)
 
+## PULSE WIDTH WAS NEVER A WIDTH  (0104f18)
+
+Gad: "can you make that pulsewidth modding will be smooth? right now its
+crackly". It was crackly, and underneath that the dial was doing nothing.
+
+**Zero times anything is zero.** A square has only ODD harmonics, and setWave
+got width by SCALING the wave's own coefficients by sin(k.pi.d)/sin(k.pi/2) —
+so the even ones, which are 0, stayed 0 at every width. A pulse needs them:
+|b_k| = 4/(pi.k)|sin(pi.k.d)| for EVERY k. `fmHarm` had the identical map, so
+both engines were the same. Duty read straight out of the waveform:
+
+    asked   0.50   0.35   0.25   0.15
+    before  0.500  0.500  0.500  0.500      the control did nothing at all
+    after   0.501  0.350  0.249  0.151
+
+    h2/h1 at duty 0.25   before 0.000  after 0.707  theory 0.707
+    h2/h1 at duty 0.15   before 0.000  after 0.891  theory 0.891
+
+**And the crackle is the control tick, which no amount of resolution fixes.**
+The width lands every 8ms and a table swap on a running oscillator is a STEP:
+wherever the phase sits between the old edge and the new one, the output flips
+early and flips back at the real edge — an extra edge PAIR, which is the click.
+MEASURED, not argued: taking the width cache from 40 steps to 400 moved the
+broadband floor between the harmonics 1.1dB (-47.1 -> -46.0), because the
+artifact energy is the total distance the edge travels and that is fixed.
+
+So a square operator is a SAW MINUS A DELAYED COPY of itself, which is exactly
+a pulse — s(f-d)-s(f) is 2-2d for f<d and -2d for f>d: duty d, span 2, mean 0,
+and at d=0.5 the same wave as a plain square, edge for edge. delayTime is an
+AudioParam, so the edge slides and there is no step at any rate.
+
+    excess edges/s under a 2Hz full-depth sweep      0 = smooth
+      native        before  +80.2   after   -0.4   (floor +0.4)
+      phase engine  before +120.3   after   +3.1   (floor  0)
+
+The phase engine keeps its table — a worklet table is read per sample and swaps
+on phase — but it needed the COSINE half, since a pulse is only odd about the
+origin at d=0.5 and `fmTable` summed sines alone. `fmHarm` returns `harc` now.
+
+⚠ **OP 0 IS BUILT SEPARATELY.** The operator loop is `for(let i=1;i<10;i++)`, so
+a fix applied only there reaches every operator EXCEPT the first — the one
+nearly every patch uses. Cost a round: the static numbers came back exact and
+the sweep still crackled at 62/s, because it was on the table path the whole
+time. Anything touching operators gets checked against BOTH sites.
+
+**What changes for existing patches:** 29 of 190 factory presets use a square
+and 25 sit at pw 0.5, unchanged by construction. The four that dialled a width —
+S606, RD909, VEP9 — now sound like the width they asked for, and so does any
+saved patch that moved the dial. Level unchanged: a square's RMS against a
+saw's is 1.732 by definition, measured 1.676 before and 1.741 after.
+
+`tools/probe.sh pwm` is the measurement — duty out of the waveform, harmonics by
+Goertzel against theory, excess edges as the click rate. Two traps it cost:
+the level split has to be the MIDPOINT BETWEEN THE TWO LEVELS, not zero (a
+DC-free pulse at duty 0.15 sits at +1.7/-0.3 and a quarter-of-peak threshold
+never finds a falling edge), and it has to TRACK when the width is moving.
+`tools/pw.sh` and `tools/wev.sh` front the tab before measuring it — `eval` runs
+in whichever tab is fronted, and measuring the wrong build reached a wrong
+conclusion twice in one session.
+
+## ⚠ TWO SESSIONS IN ONE WORKING TREE, 2026-08-27
+
+Two Claude sessions were editing this directory at once. Costs, both real:
+`tools/probe.js` had a new `kitoct` probe overwritten (recovered byte-identical
+from the other session's own scratchpad copy), and an in-progress probe was
+swept into somebody else's commit by `git add -A`. The pulse-width work was
+finished in `.claude/worktrees/pulse-width` on port **3034** (launch.json
+`ten-pw`) and merged back once the tree was clean. If a second session is live,
+take a worktree — the merge cost one conflict, on the build stamp.
+
 ## "PRESETS FOR KITS WHICH DONT EXIST RIGHT NOW"
 
 They existed here and not for him, and the design had TWO ways to lose them —
