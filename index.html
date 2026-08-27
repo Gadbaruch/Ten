@@ -1259,7 +1259,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-27.1514';
+const BUILD='2026-08-27.1519';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -2448,6 +2448,12 @@ const destRate=(rack,key)=>
      into the pool, and a modulator needs a range, not a menu. */
   :(rack==='osc'&&(key==='pw'||key==='mrph'||key==='fold'||key==='posa'||key==='posb'
                    ||key==='sst'||key==='sen'))?'ctrl'
+  /* A BANK'S SPREAD. The six shape filters all carry it and none of them could
+     be modulated: with no entry here destRate returned undefined, modDests
+     dropped it, and the picker said "nothing can drive spread yet". It moves
+     several biquad frequencies at once, so it rides the control tick rather
+     than taking an audio-rate input — see sprLive. */
+  :(rack==='flt'&&key==='spr')?'ctrl'
   /* PAN IS A BUS PARAMETER — one panner for the channel, shared by every note,
      so there is no per-voice AudioParam to hand an LFO. It rides the control
      tick instead, which is how EVERY source gets to drive it: as an audio-rate
@@ -9702,6 +9708,7 @@ class Engine{
     if(rack==='mod'&&(key==='rate'||key==='amt'||key==='rdiv'))return this.modLive(pi,si,key,v);
     if(rack==='osc'&&(key==='sst'||key==='sen'))return this.smpLive(pi,si,key,v);
     if(rack==='osc'&&key==='pw')return this.pwLive(pi,si,v);
+    if(rack==='flt'&&key==='spr')return this.sprLive(pi,si,v);
     if(rack==='osc'&&(key==='mrph'||key==='fold'||key==='posa'||key==='posb'))
       return this.wtLive(pi,si,key,v);
     return this.ovPut(pi,rack,si,key,v);
@@ -9840,6 +9847,42 @@ class Engine{
       if(!nd||!nd[which])continue;
       try{nd[which].setTargetAtTime(val,n,0.03);}catch(_){}
     }
+  }
+  /* SPREAD, LIVE — AND MODULATABLE AT ALL. `spread` is the one dial the six
+     bank filters share (fmnt vowl twin trip comb rake) and it was the one
+     nothing could reach: destRate had no entry for flt.spr, so the picker
+     refused it ("nothing can drive spread yet") and a hand edit went to
+     rebuildRack, which rebuilds the CHANNEL bus and never touches the voices
+     that are already sounding. Turn it under a held note and nothing moved.
+
+     It can be live, and cheaply, because a bank's peak COUNT never changes
+     with spread — only where the peaks SIT. Every shape's levels are fixed
+     ([1,0.55,0.28] for a throat, 0.62^n for a rake), so there is no gain to
+     chase; the ratios and the per-peak Q are the whole of it. Same 20ms slew
+     and the same _r bookkeeping cutLive uses, so a cutoff move after a spread
+     move still drags the new shape rather than the old one. */
+  sprLive(pi,slot,v){
+    const f=(S.presets[pi].flt||[])[slot]; if(!f)return false;
+    const ty=FTYPES[Math.round(f.typ)];
+    if(!FBANK.has(ty))return false;
+    const sp=clamp(v===undefined?(f.spr??0.4):v,0,1);
+    const peaks=bankPeaks(ty,sp), n=AC.currentTime;
+    const frq=clamp(f.frq,20,20000);
+    const aim=bank=>{
+      for(let k=0;k<bank.length&&k<peaks.length;k++){
+        const bp=bank[k], r=peaks[k].r;
+        bp._r=r;
+        try{bp.frequency.setTargetAtTime(clamp(frq*r,20,20000),n,0.02);}catch(_){}
+        try{bp.Q.setTargetAtTime(clamp((0.8+f.q*1.4)*Math.sqrt(r),0.6,30),n,0.02);}catch(_){}
+      }
+    };
+    for(const vo of this.act[pi]||[]){
+      const bank=vo.fBank&&vo.fBank[slot]; if(bank)aim(bank);
+    }
+    /* and the bus bank, because an audio channel has no voices to walk */
+    const FC=(this.buses[pi]||{}).fltBus;
+    if(FC&&FC.bank&&FC.bank[slot])aim(FC.bank[slot]);
+    return true;
   }
   cutLive(pi,slot){
     const f=S.presets[pi].flt[slot], n=AC.currentTime;
@@ -12462,9 +12505,13 @@ function applyParam(pi,mi,si,px,v){
   else if(M.id==='flt'&&spec.key==='frq')engine.cutLive(pi,si);
   /* every OTHER filter dial is live too now, not just the cutoff */
   else if(M.id==='flt'&&(spec.key==='q'||spec.key==='gn'))engine.dialLive(pi,'flt',si,spec.key,v);
-  /* these three change what the filter IS, not where it sits, so the graph has
+  /* SPREAD ONLY MOVES THE PEAKS, so it does not need the graph again — and
+     rebuildRack was the wrong tool anyway: it rebuilds the channel bus, so on
+     a synth channel the note under your finger never heard it. */
+  else if(M.id==='flt'&&spec.key==='spr'&&engine.sprLive(pi,si,v)){}
+  /* these two change what the filter IS, not where it sits, so the graph has
      to be built again — rebuildRack crossfades, so it does not click */
-  else if(M.id==='flt'&&(spec.key==='typ'||spec.key==='pol'||spec.key==='spr'))engine.rebuildRack(pi);
+  else if(M.id==='flt'&&(spec.key==='typ'||spec.key==='pol'))engine.rebuildRack(pi);
   /* on an AUDIO channel the rack is on the BUS, built once — so anything the
      live dials above do not cover (par/ser, a parallel slot's level) has to
      build it again or it is heard on nothing */

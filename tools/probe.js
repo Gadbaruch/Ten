@@ -3111,6 +3111,93 @@ async function probeKitOct() {
 }
 
 
+/* ---------------- spread: can a bank's shape be moved at all -------------
+ * `spread` is the one dial the six BANK filters share — fmnt vowl twin trip
+ * comb rake — and it is the only filter dial that was reachable by nothing:
+ * destRate had no entry for flt.spr, so the picker refused every route
+ * ("nothing can drive spread yet"), and a hand edit went to rebuildRack, which
+ * rebuilds the CHANNEL bus and never touches a voice that is already sounding.
+ * Turn it under a held note and the peaks did not move.
+ *
+ * Three questions, one call: is it OFFERED as a destination, does a hand tweak
+ * reach the note that is already sounding, and does a route on it actually
+ * swing the peaks. The witness is peak 2 of the bank, in Hz — a centroid over
+ * a whole saw is far too blunt to see a shape move.
+ *
+ *     tools/probe.sh spread ch=8 ty=rake
+ *     tools/probe.sh spread --ab https://gadbaruch.github.io/Ten/                */
+async function probeSpread() {
+  const ch = CH === 9 ? 8 : CH;
+  const ty = str(P.ty, 'rake');
+  const keep = stash(ch);
+  const mutes = [];
+  const rows = [];
+  try {
+    if (T.playing) stop();
+    pin(ch);
+    mutes.push(...muteOthers([ch]));
+    const p = S.presets[ch];
+    p.cat = 'keys';
+    p.osc = rack(mkOsc);
+    p.osc[0] = { wav: 2, mode: 0, dst: 0, rat: 1, amt: 1, fine: 0, ph: 0, phm: 0, pw: 0.5 };
+    p.env = rack(mkEnv);
+    p.env[0] = { dst: 1, idx: 0, amt: 100, a: 0.004, d: 0.02, s: 1, r: 0.05, crv: 0 };
+    p.flt = rack(mkFlt);
+    p.flt.forEach((f, i) => { f.typ = i === 0 ? FTYPES.indexOf(ty) : 0; f.frq = 600; f.q = 6; f.spr = 0.4; });
+    p.fx = rack(mkFx); p.mod = rack(mkMod);
+    p.mix.lvl = 1; p.mix.pan = 0;
+    S.editSnd = ch; S.curSlot = 0;
+    engine.rebuildRack(ch); engine.refresh(ch);
+    const offered = (destList(p) || []).some(d => d.rack === 'flt' && d.spec && d.spec.key === 'spr');
+    rows.push({ k: 'offered as a destination', got: offered ? 'yes' : 'NO',
+                want: 'yes', rate: destRate('flt', 'spr') || '(none)' });
+    /* peak 2 of the bank, after moving spread on a note that is ALREADY held */
+    const tweak = async sp => {
+      p.flt[0].spr = 0.5; engine.rebuildRack(ch); engine.refresh(ch);
+      engine.allOff(); await sleep(70);
+      engine.noteOn(AC.currentTime + 0.02, ch, NOTE, VEL);
+      await sleep(200);
+      p.flt[0].spr = sp;
+      if (typeof engine.sprLive === 'function') engine.sprLive(ch, 0, sp);
+      else engine.rebuildRack(ch);
+      await sleep(220);
+      const v = (engine.act[ch] || [])[0], b = v && v.fBank && v.fBank[0];
+      const hz = b && b[1] ? Math.round(b[1].frequency.value) : null;
+      engine.allOff(); await sleep(50);
+      return hz;
+    };
+    const lo = await tweak(0.05), hi = await tweak(0.95);
+    rows.push({ k: 'hand tweak under a held note', got: lo + ' -> ' + hi,
+                want: 'two different numbers', rate: (lo && hi && lo !== hi) ? 'MOVES' : 'DEAD' });
+    /* and through the real ctrl path, from an LFO */
+    p.flt[0].spr = 0.5;
+    p.mod[0] = Object.assign(mkMod(0), { src: 2, wav: 0, rate: 3, syn: 0, ltr: 0, ph: 0,
+      routes: [{ dst: 0, idx: 0, amt: 180, tgt: null,
+                 addr: { rack: 'flt', slot: 0, key: 'spr', lbl: 'spread' } }] });
+    engine.rebuildRack(ch); engine.refresh(ch);
+    const res = resolveDest(p, p.mod[0].routes[0].addr).length;
+    engine.allOff(); await sleep(70);
+    engine.noteOn(AC.currentTime + 0.02, ch, NOTE, VEL);
+    const seen = [];
+    for (let i = 0; i < 40; i++) {
+      await sleep(25);
+      const v = (engine.act[ch] || [])[0], b = v && v.fBank && v.fBank[0];
+      if (b && b[1]) seen.push(b[1].frequency.value);
+    }
+    engine.allOff();
+    const mn = seen.length ? Math.round(Math.min.apply(null, seen)) : 0;
+    const mx = seen.length ? Math.round(Math.max.apply(null, seen)) : 0;
+    rows.push({ k: 'a 3Hz lfo on spread', got: mn + ' -> ' + mx,
+                want: 'a wide swing', rate: res ? (mx - mn > 50 ? 'MOVES' : 'DEAD') : 'UNRESOLVED' });
+  } finally {
+    for (const m of mutes) try { m(); } catch (_) {}
+    unstash(ch, keep);
+  }
+  notes.push('peak 2 of the bank in Hz is the witness — a centroid over a whole saw is ' +
+             'too blunt to see a shape move. DEAD on any row is the bug.');
+  return { cols: ['got', 'want', 'rate'], rows };
+}
+
 const HELP = {
   cols: ['args'],
   rows: [
@@ -3140,6 +3227,7 @@ const HELP = {
     { k: 'kitoct',   args: 'name=KT808 notes=24,36,48,60,72 \u2014 does a kit pad transpose with the octave, and by how much' },
     { k: 'smpkit',   args: 'name=KT808 ch=8 \u2014 load a sampled kit and play all twelve pads: distinct takes, distinct sounds, none unwired' },
     { k: 'smplib',   args: 'ch=8 names=tr808-kick-01,linn-snare-01 \u2014 point a synth op at named library one-shots and hear whether they sound' },
+    { k: 'spread',   args: "ch=8 ty=rake \u2014 can a bank filter's spread be modulated, and does a tweak reach a held note" },
     { k: 'pwm',      args: 'ch=8 wav=3 rate=2 amt=70 \u2014 is a width sweep smooth? excess edges per second = clicks' },
     { k: 'poolkind', args: 'want=loop — every pool take: measured onsets/centroid, the kind it was called, and both dial views in order' },
     { k: '(any)',    args: '--ab <url> runs the same probe on a second build and diffs it' },
@@ -3189,7 +3277,8 @@ try {
                    genqual: probeGenQual,
                    archlvl: probeArchLvl,
                    patqual: probePatQual,
-                   pwm: probePwm };
+                   pwm: probePwm,
+                   spread: probeSpread };
   const fn = PROBES[NAME];
   out = fn ? await fn() : (NAME === 'help' ? HELP : { cols: [], rows: [], err: 'no probe named ' + NAME });
 } catch (e) {
