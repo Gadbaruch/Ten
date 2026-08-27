@@ -1,55 +1,7 @@
 [
  {
-  "name": "tr808-kick-01",
-  "file": "oneshots/tr808/kick/tr808-kick-01.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "tr808",
-  "cat": "kik"
- },
- {
-  "name": "tr808-kick-02",
-  "file": "oneshots/tr808/kick/tr808-kick-02.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "tr808",
-  "cat": "kik"
- },
- {
-  "name": "tr808-kick-03",
-  "file": "oneshots/tr808/kick/tr808-kick-03.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "tr808",
-  "cat": "kik"
- },
- {
-  "name": "tr808-kick-04",
-  "file": "oneshots/tr808/kick/tr808-kick-04.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "tr808",
-  "cat": "kik"
- },
- {
-  "name": "tr808-kick-05",
-  "file": "oneshots/tr808/kick/tr808-kick-05.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "tr808",
-  "cat": "kik"
- },
- {
   "name": "tr808-kick-06",
-  "file": "oneshots/tr808/kick/tr808-kick-06.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "tr808",
-  "cat": "kik"
- },
- {
-  "name": "tr808-kick-07",
-  "file": "oneshots/tr808/kick/tr808-kick-07.flac",
+  "file": "oneshots/kick/tr808-kick-06.flac",
   "kind": "one",
   "inst": "kick",
   "style": "tr808",
@@ -57,95 +9,7 @@
  },
  {
   "name": "tr808-kick-08",
-  "file": "oneshots/tr808/kick/tr808-kick-08.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "tr808",
-  "cat": "kik"
- },
- {
-  "name": "tr808-kick-09",
-  "file": "oneshots/tr808/kick/tr808-kick-09.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "tr808",
-  "cat": "kik"
- },
- {
-  "name": "tr808-kick-10",
-  "file": "oneshots/tr808/kick/tr808-kick-10.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "tr808",
-  "cat": "kik"
- },
- {
-  "name": "tr808-kick-11",
-  "file": "oneshots/tr808/kick/tr808-kick-11.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "tr808",
-  "cat": "kik"
- },
- {
-  "name": "tr808-kick-12",
-  "file": "oneshots/tr808/kick/tr808-kick-12.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "tr808",
-  "cat": "kik"
- },
- {
-  "name": "tr808-kick-13",
-  "file": "oneshots/tr808/kick/tr808-kick-13.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "tr808",
-  "cat": "kik"
- },
- {
-  "name": "tr808-kick-14",
-  "file": "oneshots/tr808/kick/tr808-kick-14.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "tr808",
-  "cat": "kik"
- },
- {
-  "name": "tr808-kick-15",
-  "file": "oneshots/tr808/kick/tr808-kick-15.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "tr808",
-  "cat": "kik"
- },
- {
-  "name": "tr808-kick-16",
-  "file": "oneshots/tr808/kick/tr808-kick-16.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "tr808",
-  "cat": "kik"
- },
- {
-  "name": "tr808-kick-17",
-  "file": "oneshots/tr808/kick/tr808-kick-17.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "tr808",
-  "cat": "kik"
- },
- {
-  "name": "tr808-kick-18",
-  "file": "oneshots/tr808/kick/tr808-kick-18.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "tr808",
-  "cat": "kik"
- },
- {
-  "name": "tr808-kick-19",
-  "file": "oneshots/tr808/kick/tr808-kick-19.flac",
+  "file": "oneshots/kick/tr808-kick-08.flac",
   "kind": "one",
   "inst": "kick",
   "style": "tr808",
@@ -153,15 +17,7 @@
  },
  {
   "name": "tr808-kick-20",
-  "file": "oneshots/tr808/kick/tr808-kick-20.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "tr808",
-  "cat": "kik"
- },
- {
-  "name": "tr808-kick-21",
-  "file": "oneshots/tr808/kick/tr808-kick-21.flac",
+  "file": "oneshots/kick/tr808-kick-20.flac",
   "kind": "one",
   "inst": "kick",
   "style": "tr808",
@@ -169,903 +25,23 @@
  },
  {
   "name": "tr808-kick-22",
-  "file": "oneshots/tr808/kick/tr808-kick-22.flac",
+  "file": "oneshots/kick/tr808-kick-22.flac",
   "kind": "one",
   "inst": "kick",
   "style": "tr808",
-  "cat": "kik"
- },
- {
-  "name": "tr808-kick-23",
-  "file": "oneshots/tr808/kick/tr808-kick-23.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "tr808",
-  "cat": "kik"
- },
- {
-  "name": "tr808-kick-24",
-  "file": "oneshots/tr808/kick/tr808-kick-24.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "tr808",
-  "cat": "kik"
- },
- {
-  "name": "tr808-kick-25",
-  "file": "oneshots/tr808/kick/tr808-kick-25.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "tr808",
-  "cat": "kik"
- },
- {
-  "name": "tr808-snare-01",
-  "file": "oneshots/tr808/snare/tr808-snare-01.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "tr808",
-  "cat": "snr"
- },
- {
-  "name": "tr808-snare-02",
-  "file": "oneshots/tr808/snare/tr808-snare-02.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "tr808",
-  "cat": "snr"
- },
- {
-  "name": "tr808-snare-03",
-  "file": "oneshots/tr808/snare/tr808-snare-03.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "tr808",
-  "cat": "snr"
- },
- {
-  "name": "tr808-snare-04",
-  "file": "oneshots/tr808/snare/tr808-snare-04.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "tr808",
-  "cat": "snr"
- },
- {
-  "name": "tr808-snare-05",
-  "file": "oneshots/tr808/snare/tr808-snare-05.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "tr808",
-  "cat": "snr"
- },
- {
-  "name": "tr808-snare-06",
-  "file": "oneshots/tr808/snare/tr808-snare-06.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "tr808",
-  "cat": "snr"
- },
- {
-  "name": "tr808-snare-07",
-  "file": "oneshots/tr808/snare/tr808-snare-07.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "tr808",
-  "cat": "snr"
- },
- {
-  "name": "tr808-snare-08",
-  "file": "oneshots/tr808/snare/tr808-snare-08.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "tr808",
-  "cat": "snr"
- },
- {
-  "name": "tr808-snare-09",
-  "file": "oneshots/tr808/snare/tr808-snare-09.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "tr808",
-  "cat": "snr"
- },
- {
-  "name": "tr808-snare-10",
-  "file": "oneshots/tr808/snare/tr808-snare-10.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "tr808",
-  "cat": "snr"
- },
- {
-  "name": "tr808-snare-11",
-  "file": "oneshots/tr808/snare/tr808-snare-11.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "tr808",
-  "cat": "snr"
- },
- {
-  "name": "tr808-snare-12",
-  "file": "oneshots/tr808/snare/tr808-snare-12.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "tr808",
-  "cat": "snr"
- },
- {
-  "name": "tr808-snare-13",
-  "file": "oneshots/tr808/snare/tr808-snare-13.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "tr808",
-  "cat": "snr"
- },
- {
-  "name": "tr808-snare-14",
-  "file": "oneshots/tr808/snare/tr808-snare-14.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "tr808",
-  "cat": "snr"
- },
- {
-  "name": "tr808-snare-15",
-  "file": "oneshots/tr808/snare/tr808-snare-15.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "tr808",
-  "cat": "snr"
- },
- {
-  "name": "tr808-snare-16",
-  "file": "oneshots/tr808/snare/tr808-snare-16.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "tr808",
-  "cat": "snr"
- },
- {
-  "name": "tr808-snare-17",
-  "file": "oneshots/tr808/snare/tr808-snare-17.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "tr808",
-  "cat": "snr"
- },
- {
-  "name": "tr808-snare-18",
-  "file": "oneshots/tr808/snare/tr808-snare-18.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "tr808",
-  "cat": "snr"
- },
- {
-  "name": "tr808-snare-19",
-  "file": "oneshots/tr808/snare/tr808-snare-19.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "tr808",
-  "cat": "snr"
- },
- {
-  "name": "tr808-snare-20",
-  "file": "oneshots/tr808/snare/tr808-snare-20.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "tr808",
-  "cat": "snr"
- },
- {
-  "name": "tr808-snare-21",
-  "file": "oneshots/tr808/snare/tr808-snare-21.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "tr808",
-  "cat": "snr"
- },
- {
-  "name": "tr808-snare-22",
-  "file": "oneshots/tr808/snare/tr808-snare-22.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "tr808",
-  "cat": "snr"
- },
- {
-  "name": "tr808-snare-23",
-  "file": "oneshots/tr808/snare/tr808-snare-23.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "tr808",
-  "cat": "snr"
- },
- {
-  "name": "tr808-snare-24",
-  "file": "oneshots/tr808/snare/tr808-snare-24.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "tr808",
-  "cat": "snr"
- },
- {
-  "name": "tr808-snare-25",
-  "file": "oneshots/tr808/snare/tr808-snare-25.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "tr808",
-  "cat": "snr"
- },
- {
-  "name": "tr808-clap-01",
-  "file": "oneshots/tr808/clap/tr808-clap-01.flac",
-  "kind": "one",
-  "inst": "clap",
-  "style": "tr808",
-  "cat": "snr"
- },
- {
-  "name": "tr808-rim-01",
-  "file": "oneshots/tr808/rim/tr808-rim-01.flac",
-  "kind": "one",
-  "inst": "rim",
-  "style": "tr808",
-  "cat": "snr"
- },
- {
-  "name": "tr808-hat-closed-01",
-  "file": "oneshots/tr808/hat-closed/tr808-hat-closed-01.flac",
-  "kind": "one",
-  "inst": "hat-closed",
-  "style": "tr808",
-  "cat": "hh"
- },
- {
-  "name": "tr808-hat-open-01",
-  "file": "oneshots/tr808/hat-open/tr808-hat-open-01.flac",
-  "kind": "one",
-  "inst": "hat-open",
-  "style": "tr808",
-  "cat": "hh"
- },
- {
-  "name": "tr808-hat-open-02",
-  "file": "oneshots/tr808/hat-open/tr808-hat-open-02.flac",
-  "kind": "one",
-  "inst": "hat-open",
-  "style": "tr808",
-  "cat": "hh"
- },
- {
-  "name": "tr808-hat-open-03",
-  "file": "oneshots/tr808/hat-open/tr808-hat-open-03.flac",
-  "kind": "one",
-  "inst": "hat-open",
-  "style": "tr808",
-  "cat": "hh"
- },
- {
-  "name": "tr808-hat-open-04",
-  "file": "oneshots/tr808/hat-open/tr808-hat-open-04.flac",
-  "kind": "one",
-  "inst": "hat-open",
-  "style": "tr808",
-  "cat": "hh"
- },
- {
-  "name": "tr808-hat-open-05",
-  "file": "oneshots/tr808/hat-open/tr808-hat-open-05.flac",
-  "kind": "one",
-  "inst": "hat-open",
-  "style": "tr808",
-  "cat": "hh"
- },
- {
-  "name": "tr808-cymbal-01",
-  "file": "oneshots/tr808/cymbal/tr808-cymbal-01.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "tr808",
-  "cat": "cymb"
- },
- {
-  "name": "tr808-cymbal-02",
-  "file": "oneshots/tr808/cymbal/tr808-cymbal-02.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "tr808",
-  "cat": "cymb"
- },
- {
-  "name": "tr808-cymbal-03",
-  "file": "oneshots/tr808/cymbal/tr808-cymbal-03.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "tr808",
-  "cat": "cymb"
- },
- {
-  "name": "tr808-cymbal-04",
-  "file": "oneshots/tr808/cymbal/tr808-cymbal-04.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "tr808",
-  "cat": "cymb"
- },
- {
-  "name": "tr808-cymbal-05",
-  "file": "oneshots/tr808/cymbal/tr808-cymbal-05.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "tr808",
-  "cat": "cymb"
- },
- {
-  "name": "tr808-cymbal-06",
-  "file": "oneshots/tr808/cymbal/tr808-cymbal-06.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "tr808",
-  "cat": "cymb"
- },
- {
-  "name": "tr808-cymbal-07",
-  "file": "oneshots/tr808/cymbal/tr808-cymbal-07.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "tr808",
-  "cat": "cymb"
- },
- {
-  "name": "tr808-cymbal-08",
-  "file": "oneshots/tr808/cymbal/tr808-cymbal-08.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "tr808",
-  "cat": "cymb"
- },
- {
-  "name": "tr808-cymbal-09",
-  "file": "oneshots/tr808/cymbal/tr808-cymbal-09.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "tr808",
-  "cat": "cymb"
- },
- {
-  "name": "tr808-cymbal-10",
-  "file": "oneshots/tr808/cymbal/tr808-cymbal-10.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "tr808",
-  "cat": "cymb"
- },
- {
-  "name": "tr808-cymbal-11",
-  "file": "oneshots/tr808/cymbal/tr808-cymbal-11.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "tr808",
-  "cat": "cymb"
- },
- {
-  "name": "tr808-cymbal-12",
-  "file": "oneshots/tr808/cymbal/tr808-cymbal-12.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "tr808",
-  "cat": "cymb"
- },
- {
-  "name": "tr808-cymbal-13",
-  "file": "oneshots/tr808/cymbal/tr808-cymbal-13.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "tr808",
-  "cat": "cymb"
- },
- {
-  "name": "tr808-cymbal-14",
-  "file": "oneshots/tr808/cymbal/tr808-cymbal-14.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "tr808",
-  "cat": "cymb"
- },
- {
-  "name": "tr808-cymbal-15",
-  "file": "oneshots/tr808/cymbal/tr808-cymbal-15.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "tr808",
-  "cat": "cymb"
- },
- {
-  "name": "tr808-cymbal-16",
-  "file": "oneshots/tr808/cymbal/tr808-cymbal-16.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "tr808",
-  "cat": "cymb"
- },
- {
-  "name": "tr808-cymbal-17",
-  "file": "oneshots/tr808/cymbal/tr808-cymbal-17.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "tr808",
-  "cat": "cymb"
- },
- {
-  "name": "tr808-cymbal-18",
-  "file": "oneshots/tr808/cymbal/tr808-cymbal-18.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "tr808",
-  "cat": "cymb"
- },
- {
-  "name": "tr808-cymbal-19",
-  "file": "oneshots/tr808/cymbal/tr808-cymbal-19.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "tr808",
-  "cat": "cymb"
- },
- {
-  "name": "tr808-cymbal-20",
-  "file": "oneshots/tr808/cymbal/tr808-cymbal-20.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "tr808",
-  "cat": "cymb"
- },
- {
-  "name": "tr808-cymbal-21",
-  "file": "oneshots/tr808/cymbal/tr808-cymbal-21.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "tr808",
-  "cat": "cymb"
- },
- {
-  "name": "tr808-cymbal-22",
-  "file": "oneshots/tr808/cymbal/tr808-cymbal-22.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "tr808",
-  "cat": "cymb"
- },
- {
-  "name": "tr808-cymbal-23",
-  "file": "oneshots/tr808/cymbal/tr808-cymbal-23.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "tr808",
-  "cat": "cymb"
- },
- {
-  "name": "tr808-cymbal-24",
-  "file": "oneshots/tr808/cymbal/tr808-cymbal-24.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "tr808",
-  "cat": "cymb"
- },
- {
-  "name": "tr808-cymbal-25",
-  "file": "oneshots/tr808/cymbal/tr808-cymbal-25.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "tr808",
-  "cat": "cymb"
- },
- {
-  "name": "tr808-tom-01",
-  "file": "oneshots/tr808/tom/tr808-tom-01.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr808",
-  "cat": "tom"
- },
- {
-  "name": "tr808-tom-02",
-  "file": "oneshots/tr808/tom/tr808-tom-02.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr808",
-  "cat": "tom"
- },
- {
-  "name": "tr808-tom-03",
-  "file": "oneshots/tr808/tom/tr808-tom-03.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr808",
-  "cat": "tom"
- },
- {
-  "name": "tr808-tom-04",
-  "file": "oneshots/tr808/tom/tr808-tom-04.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr808",
-  "cat": "tom"
- },
- {
-  "name": "tr808-tom-05",
-  "file": "oneshots/tr808/tom/tr808-tom-05.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr808",
-  "cat": "tom"
- },
- {
-  "name": "tr808-tom-06",
-  "file": "oneshots/tr808/tom/tr808-tom-06.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr808",
-  "cat": "tom"
- },
- {
-  "name": "tr808-tom-07",
-  "file": "oneshots/tr808/tom/tr808-tom-07.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr808",
-  "cat": "tom"
- },
- {
-  "name": "tr808-tom-08",
-  "file": "oneshots/tr808/tom/tr808-tom-08.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr808",
-  "cat": "tom"
- },
- {
-  "name": "tr808-tom-09",
-  "file": "oneshots/tr808/tom/tr808-tom-09.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr808",
-  "cat": "tom"
- },
- {
-  "name": "tr808-tom-10",
-  "file": "oneshots/tr808/tom/tr808-tom-10.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr808",
-  "cat": "tom"
- },
- {
-  "name": "tr808-tom-11",
-  "file": "oneshots/tr808/tom/tr808-tom-11.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr808",
-  "cat": "tom"
- },
- {
-  "name": "tr808-tom-12",
-  "file": "oneshots/tr808/tom/tr808-tom-12.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr808",
-  "cat": "tom"
- },
- {
-  "name": "tr808-tom-13",
-  "file": "oneshots/tr808/tom/tr808-tom-13.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr808",
-  "cat": "tom"
- },
- {
-  "name": "tr808-tom-14",
-  "file": "oneshots/tr808/tom/tr808-tom-14.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr808",
-  "cat": "tom"
- },
- {
-  "name": "tr808-tom-15",
-  "file": "oneshots/tr808/tom/tr808-tom-15.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr808",
-  "cat": "tom"
- },
- {
-  "name": "tr808-conga-01",
-  "file": "oneshots/tr808/conga/tr808-conga-01.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "tr808",
-  "cat": "perc"
- },
- {
-  "name": "tr808-conga-02",
-  "file": "oneshots/tr808/conga/tr808-conga-02.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "tr808",
-  "cat": "perc"
- },
- {
-  "name": "tr808-conga-03",
-  "file": "oneshots/tr808/conga/tr808-conga-03.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "tr808",
-  "cat": "perc"
- },
- {
-  "name": "tr808-conga-04",
-  "file": "oneshots/tr808/conga/tr808-conga-04.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "tr808",
-  "cat": "perc"
- },
- {
-  "name": "tr808-conga-05",
-  "file": "oneshots/tr808/conga/tr808-conga-05.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "tr808",
-  "cat": "perc"
- },
- {
-  "name": "tr808-conga-06",
-  "file": "oneshots/tr808/conga/tr808-conga-06.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "tr808",
-  "cat": "perc"
- },
- {
-  "name": "tr808-conga-07",
-  "file": "oneshots/tr808/conga/tr808-conga-07.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "tr808",
-  "cat": "perc"
- },
- {
-  "name": "tr808-conga-08",
-  "file": "oneshots/tr808/conga/tr808-conga-08.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "tr808",
-  "cat": "perc"
- },
- {
-  "name": "tr808-conga-09",
-  "file": "oneshots/tr808/conga/tr808-conga-09.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "tr808",
-  "cat": "perc"
- },
- {
-  "name": "tr808-conga-10",
-  "file": "oneshots/tr808/conga/tr808-conga-10.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "tr808",
-  "cat": "perc"
- },
- {
-  "name": "tr808-conga-11",
-  "file": "oneshots/tr808/conga/tr808-conga-11.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "tr808",
-  "cat": "perc"
- },
- {
-  "name": "tr808-conga-12",
-  "file": "oneshots/tr808/conga/tr808-conga-12.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "tr808",
-  "cat": "perc"
- },
- {
-  "name": "tr808-conga-13",
-  "file": "oneshots/tr808/conga/tr808-conga-13.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "tr808",
-  "cat": "perc"
- },
- {
-  "name": "tr808-conga-14",
-  "file": "oneshots/tr808/conga/tr808-conga-14.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "tr808",
-  "cat": "perc"
- },
- {
-  "name": "tr808-conga-15",
-  "file": "oneshots/tr808/conga/tr808-conga-15.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "tr808",
-  "cat": "perc"
- },
- {
-  "name": "tr808-cowbell-01",
-  "file": "oneshots/tr808/cowbell/tr808-cowbell-01.flac",
-  "kind": "one",
-  "inst": "cowbell",
-  "style": "tr808",
-  "cat": "perc"
- },
- {
-  "name": "tr808-clave-01",
-  "file": "oneshots/tr808/clave/tr808-clave-01.flac",
-  "kind": "one",
-  "inst": "clave",
-  "style": "tr808",
-  "cat": "wood"
- },
- {
-  "name": "tr808-shaker-01",
-  "file": "oneshots/tr808/shaker/tr808-shaker-01.flac",
-  "kind": "one",
-  "inst": "shaker",
-  "style": "tr808",
-  "cat": "perc"
- },
- {
-  "name": "cr78-kick-01",
-  "file": "oneshots/cr78/kick/cr78-kick-01.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "cr78",
   "cat": "kik"
  },
  {
   "name": "cr78-kick-02",
-  "file": "oneshots/cr78/kick/cr78-kick-02.flac",
+  "file": "oneshots/kick/cr78-kick-02.flac",
   "kind": "one",
   "inst": "kick",
   "style": "cr78",
   "cat": "kik"
  },
  {
-  "name": "cr78-snare-01",
-  "file": "oneshots/cr78/snare/cr78-snare-01.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "cr78",
-  "cat": "snr"
- },
- {
-  "name": "cr78-snare-02",
-  "file": "oneshots/cr78/snare/cr78-snare-02.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "cr78",
-  "cat": "snr"
- },
- {
-  "name": "cr78-rim-01",
-  "file": "oneshots/cr78/rim/cr78-rim-01.flac",
-  "kind": "one",
-  "inst": "rim",
-  "style": "cr78",
-  "cat": "snr"
- },
- {
-  "name": "cr78-hat-closed-01",
-  "file": "oneshots/cr78/hat-closed/cr78-hat-closed-01.flac",
-  "kind": "one",
-  "inst": "hat-closed",
-  "style": "cr78",
-  "cat": "hh"
- },
- {
-  "name": "cr78-hat-closed-02",
-  "file": "oneshots/cr78/hat-closed/cr78-hat-closed-02.flac",
-  "kind": "one",
-  "inst": "hat-closed",
-  "style": "cr78",
-  "cat": "hh"
- },
- {
-  "name": "cr78-hat-closed-03",
-  "file": "oneshots/cr78/hat-closed/cr78-hat-closed-03.flac",
-  "kind": "one",
-  "inst": "hat-closed",
-  "style": "cr78",
-  "cat": "hh"
- },
- {
-  "name": "cr78-cymbal-01",
-  "file": "oneshots/cr78/cymbal/cr78-cymbal-01.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "cr78",
-  "cat": "cymb"
- },
- {
-  "name": "cr78-conga-01",
-  "file": "oneshots/cr78/conga/cr78-conga-01.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "cr78",
-  "cat": "perc"
- },
- {
-  "name": "cr78-bongo-01",
-  "file": "oneshots/cr78/bongo/cr78-bongo-01.flac",
-  "kind": "one",
-  "inst": "bongo",
-  "style": "cr78",
-  "cat": "perc"
- },
- {
-  "name": "cr78-bongo-02",
-  "file": "oneshots/cr78/bongo/cr78-bongo-02.flac",
-  "kind": "one",
-  "inst": "bongo",
-  "style": "cr78",
-  "cat": "perc"
- },
- {
-  "name": "cr78-cowbell-01",
-  "file": "oneshots/cr78/cowbell/cr78-cowbell-01.flac",
-  "kind": "one",
-  "inst": "cowbell",
-  "style": "cr78",
-  "cat": "perc"
- },
- {
-  "name": "cr78-wood-01",
-  "file": "oneshots/cr78/wood/cr78-wood-01.flac",
-  "kind": "one",
-  "inst": "wood",
-  "style": "cr78",
-  "cat": "wood"
- },
- {
-  "name": "cr78-wood-02",
-  "file": "oneshots/cr78/wood/cr78-wood-02.flac",
-  "kind": "one",
-  "inst": "wood",
-  "style": "cr78",
-  "cat": "wood"
- },
- {
-  "name": "cr78-shaker-01",
-  "file": "oneshots/cr78/shaker/cr78-shaker-01.flac",
-  "kind": "one",
-  "inst": "shaker",
-  "style": "cr78",
-  "cat": "perc"
- },
- {
-  "name": "cr78-shaker-02",
-  "file": "oneshots/cr78/shaker/cr78-shaker-02.flac",
-  "kind": "one",
-  "inst": "shaker",
-  "style": "cr78",
-  "cat": "perc"
- },
- {
   "name": "linn-kick-01",
-  "file": "oneshots/linn/kick/linn-kick-01.flac",
+  "file": "oneshots/kick/linn-kick-01.flac",
   "kind": "one",
   "inst": "kick",
   "style": "linn",
@@ -1073,471 +49,31 @@
  },
  {
   "name": "linn-kick-02",
-  "file": "oneshots/linn/kick/linn-kick-02.flac",
+  "file": "oneshots/kick/linn-kick-02.flac",
   "kind": "one",
   "inst": "kick",
   "style": "linn",
   "cat": "kik"
- },
- {
-  "name": "linn-snare-01",
-  "file": "oneshots/linn/snare/linn-snare-01.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "linn",
-  "cat": "snr"
- },
- {
-  "name": "linn-snare-02",
-  "file": "oneshots/linn/snare/linn-snare-02.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "linn",
-  "cat": "snr"
- },
- {
-  "name": "linn-snare-03",
-  "file": "oneshots/linn/snare/linn-snare-03.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "linn",
-  "cat": "snr"
- },
- {
-  "name": "linn-clap-01",
-  "file": "oneshots/linn/clap/linn-clap-01.flac",
-  "kind": "one",
-  "inst": "clap",
-  "style": "linn",
-  "cat": "snr"
- },
- {
-  "name": "linn-rim-01",
-  "file": "oneshots/linn/rim/linn-rim-01.flac",
-  "kind": "one",
-  "inst": "rim",
-  "style": "linn",
-  "cat": "snr"
- },
- {
-  "name": "linn-rim-02",
-  "file": "oneshots/linn/rim/linn-rim-02.flac",
-  "kind": "one",
-  "inst": "rim",
-  "style": "linn",
-  "cat": "snr"
- },
- {
-  "name": "linn-rim-03",
-  "file": "oneshots/linn/rim/linn-rim-03.flac",
-  "kind": "one",
-  "inst": "rim",
-  "style": "linn",
-  "cat": "snr"
- },
- {
-  "name": "linn-hat-closed-01",
-  "file": "oneshots/linn/hat-closed/linn-hat-closed-01.flac",
-  "kind": "one",
-  "inst": "hat-closed",
-  "style": "linn",
-  "cat": "hh"
- },
- {
-  "name": "linn-hat-closed-02",
-  "file": "oneshots/linn/hat-closed/linn-hat-closed-02.flac",
-  "kind": "one",
-  "inst": "hat-closed",
-  "style": "linn",
-  "cat": "hh"
- },
- {
-  "name": "linn-hat-closed-03",
-  "file": "oneshots/linn/hat-closed/linn-hat-closed-03.flac",
-  "kind": "one",
-  "inst": "hat-closed",
-  "style": "linn",
-  "cat": "hh"
- },
- {
-  "name": "linn-hat-closed-04",
-  "file": "oneshots/linn/hat-closed/linn-hat-closed-04.flac",
-  "kind": "one",
-  "inst": "hat-closed",
-  "style": "linn",
-  "cat": "hh"
- },
- {
-  "name": "linn-hat-closed-05",
-  "file": "oneshots/linn/hat-closed/linn-hat-closed-05.flac",
-  "kind": "one",
-  "inst": "hat-closed",
-  "style": "linn",
-  "cat": "hh"
- },
- {
-  "name": "linn-hat-open-01",
-  "file": "oneshots/linn/hat-open/linn-hat-open-01.flac",
-  "kind": "one",
-  "inst": "hat-open",
-  "style": "linn",
-  "cat": "hh"
- },
- {
-  "name": "linn-cymbal-01",
-  "file": "oneshots/linn/cymbal/linn-cymbal-01.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "linn",
-  "cat": "cymb"
- },
- {
-  "name": "linn-ride-01",
-  "file": "oneshots/linn/ride/linn-ride-01.flac",
-  "kind": "one",
-  "inst": "ride",
-  "style": "linn",
-  "cat": "cymb"
- },
- {
-  "name": "linn-tom-01",
-  "file": "oneshots/linn/tom/linn-tom-01.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "linn",
-  "cat": "tom"
- },
- {
-  "name": "linn-tom-02",
-  "file": "oneshots/linn/tom/linn-tom-02.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "linn",
-  "cat": "tom"
- },
- {
-  "name": "linn-tom-03",
-  "file": "oneshots/linn/tom/linn-tom-03.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "linn",
-  "cat": "tom"
- },
- {
-  "name": "linn-tom-04",
-  "file": "oneshots/linn/tom/linn-tom-04.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "linn",
-  "cat": "tom"
- },
- {
-  "name": "linn-conga-01",
-  "file": "oneshots/linn/conga/linn-conga-01.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "linn",
-  "cat": "perc"
- },
- {
-  "name": "linn-conga-02",
-  "file": "oneshots/linn/conga/linn-conga-02.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "linn",
-  "cat": "perc"
- },
- {
-  "name": "linn-conga-03",
-  "file": "oneshots/linn/conga/linn-conga-03.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "linn",
-  "cat": "perc"
- },
- {
-  "name": "linn-conga-04",
-  "file": "oneshots/linn/conga/linn-conga-04.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "linn",
-  "cat": "perc"
- },
- {
-  "name": "linn-conga-05",
-  "file": "oneshots/linn/conga/linn-conga-05.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "linn",
-  "cat": "perc"
- },
- {
-  "name": "linn-cowbell-01",
-  "file": "oneshots/linn/cowbell/linn-cowbell-01.flac",
-  "kind": "one",
-  "inst": "cowbell",
-  "style": "linn",
-  "cat": "perc"
- },
- {
-  "name": "linn-shaker-01",
-  "file": "oneshots/linn/shaker/linn-shaker-01.flac",
-  "kind": "one",
-  "inst": "shaker",
-  "style": "linn",
-  "cat": "perc"
- },
- {
-  "name": "linn-shaker-02",
-  "file": "oneshots/linn/shaker/linn-shaker-02.flac",
-  "kind": "one",
-  "inst": "shaker",
-  "style": "linn",
-  "cat": "perc"
  },
  {
   "name": "mrk2-kick-01",
-  "file": "oneshots/mrk2/kick/mrk2-kick-01.flac",
+  "file": "oneshots/kick/mrk2-kick-01.flac",
   "kind": "one",
   "inst": "kick",
   "style": "mrk2",
   "cat": "kik"
- },
- {
-  "name": "mrk2-snare-01",
-  "file": "oneshots/mrk2/snare/mrk2-snare-01.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "mrk2",
-  "cat": "snr"
- },
- {
-  "name": "mrk2-hat-closed-01",
-  "file": "oneshots/mrk2/hat-closed/mrk2-hat-closed-01.flac",
-  "kind": "one",
-  "inst": "hat-closed",
-  "style": "mrk2",
-  "cat": "hh"
- },
- {
-  "name": "mrk2-hat-open-01",
-  "file": "oneshots/mrk2/hat-open/mrk2-hat-open-01.flac",
-  "kind": "one",
-  "inst": "hat-open",
-  "style": "mrk2",
-  "cat": "hh"
- },
- {
-  "name": "mrk2-cymbal-01",
-  "file": "oneshots/mrk2/cymbal/mrk2-cymbal-01.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "mrk2",
-  "cat": "cymb"
- },
- {
-  "name": "mrk2-cymbal-02",
-  "file": "oneshots/mrk2/cymbal/mrk2-cymbal-02.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "mrk2",
-  "cat": "cymb"
- },
- {
-  "name": "mrk2-tom-01",
-  "file": "oneshots/mrk2/tom/mrk2-tom-01.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "mrk2",
-  "cat": "tom"
- },
- {
-  "name": "mrk2-bongo-01",
-  "file": "oneshots/mrk2/bongo/mrk2-bongo-01.flac",
-  "kind": "one",
-  "inst": "bongo",
-  "style": "mrk2",
-  "cat": "perc"
- },
- {
-  "name": "mrk2-clave-01",
-  "file": "oneshots/mrk2/clave/mrk2-clave-01.flac",
-  "kind": "one",
-  "inst": "clave",
-  "style": "mrk2",
-  "cat": "wood"
- },
- {
-  "name": "mrk2-wood-01",
-  "file": "oneshots/mrk2/wood/mrk2-wood-01.flac",
-  "kind": "one",
-  "inst": "wood",
-  "style": "mrk2",
-  "cat": "wood"
  },
  {
   "name": "tr505-kick-01",
-  "file": "oneshots/tr505/kick/tr505-kick-01.flac",
+  "file": "oneshots/kick/tr505-kick-01.flac",
   "kind": "one",
   "inst": "kick",
   "style": "tr505",
-  "cat": "kik"
- },
- {
-  "name": "tr505-snare-01",
-  "file": "oneshots/tr505/snare/tr505-snare-01.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "tr505",
-  "cat": "snr"
- },
- {
-  "name": "tr505-clap-01",
-  "file": "oneshots/tr505/clap/tr505-clap-01.flac",
-  "kind": "one",
-  "inst": "clap",
-  "style": "tr505",
-  "cat": "snr"
- },
- {
-  "name": "tr505-rim-01",
-  "file": "oneshots/tr505/rim/tr505-rim-01.flac",
-  "kind": "one",
-  "inst": "rim",
-  "style": "tr505",
-  "cat": "snr"
- },
- {
-  "name": "tr505-hat-closed-01",
-  "file": "oneshots/tr505/hat-closed/tr505-hat-closed-01.flac",
-  "kind": "one",
-  "inst": "hat-closed",
-  "style": "tr505",
-  "cat": "hh"
- },
- {
-  "name": "tr505-hat-open-01",
-  "file": "oneshots/tr505/hat-open/tr505-hat-open-01.flac",
-  "kind": "one",
-  "inst": "hat-open",
-  "style": "tr505",
-  "cat": "hh"
- },
- {
-  "name": "tr505-cymbal-01",
-  "file": "oneshots/tr505/cymbal/tr505-cymbal-01.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "tr505",
-  "cat": "cymb"
- },
- {
-  "name": "tr505-ride-01",
-  "file": "oneshots/tr505/ride/tr505-ride-01.flac",
-  "kind": "one",
-  "inst": "ride",
-  "style": "tr505",
-  "cat": "cymb"
- },
- {
-  "name": "tr505-tom-01",
-  "file": "oneshots/tr505/tom/tr505-tom-01.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr505",
-  "cat": "tom"
- },
- {
-  "name": "tr505-tom-02",
-  "file": "oneshots/tr505/tom/tr505-tom-02.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr505",
-  "cat": "tom"
- },
- {
-  "name": "tr505-tom-03",
-  "file": "oneshots/tr505/tom/tr505-tom-03.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr505",
-  "cat": "tom"
- },
- {
-  "name": "tr505-conga-01",
-  "file": "oneshots/tr505/conga/tr505-conga-01.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "tr505",
-  "cat": "perc"
- },
- {
-  "name": "tr505-conga-02",
-  "file": "oneshots/tr505/conga/tr505-conga-02.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "tr505",
-  "cat": "perc"
- },
- {
-  "name": "tr505-cowbell-01",
-  "file": "oneshots/tr505/cowbell/tr505-cowbell-01.flac",
-  "kind": "one",
-  "inst": "cowbell",
-  "style": "tr505",
-  "cat": "perc"
- },
- {
-  "name": "tr505-cowbell-02",
-  "file": "oneshots/tr505/cowbell/tr505-cowbell-02.flac",
-  "kind": "one",
-  "inst": "cowbell",
-  "style": "tr505",
-  "cat": "perc"
- },
- {
-  "name": "tr505-timbale-01",
-  "file": "oneshots/tr505/timbale/tr505-timbale-01.flac",
-  "kind": "one",
-  "inst": "timbale",
-  "style": "tr505",
-  "cat": "perc"
- },
- {
-  "name": "rx5-kick-01",
-  "file": "oneshots/rx5/kick/rx5-kick-01.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "rx5",
-  "cat": "kik"
- },
- {
-  "name": "rx5-kick-02",
-  "file": "oneshots/rx5/kick/rx5-kick-02.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "rx5",
-  "cat": "kik"
- },
- {
-  "name": "rx5-kick-03",
-  "file": "oneshots/rx5/kick/rx5-kick-03.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "rx5",
   "cat": "kik"
  },
  {
   "name": "rx5-kick-04",
-  "file": "oneshots/rx5/kick/rx5-kick-04.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "rx5",
-  "cat": "kik"
- },
- {
-  "name": "rx5-kick-05",
-  "file": "oneshots/rx5/kick/rx5-kick-05.flac",
+  "file": "oneshots/kick/rx5-kick-04.flac",
   "kind": "one",
   "inst": "kick",
   "style": "rx5",
@@ -1545,7 +81,7 @@
  },
  {
   "name": "rx5-kick-06",
-  "file": "oneshots/rx5/kick/rx5-kick-06.flac",
+  "file": "oneshots/kick/rx5-kick-06.flac",
   "kind": "one",
   "inst": "kick",
   "style": "rx5",
@@ -1553,7 +89,7 @@
  },
  {
   "name": "rx5-kick-07",
-  "file": "oneshots/rx5/kick/rx5-kick-07.flac",
+  "file": "oneshots/kick/rx5-kick-07.flac",
   "kind": "one",
   "inst": "kick",
   "style": "rx5",
@@ -1561,7 +97,7 @@
  },
  {
   "name": "rx5-kick-08",
-  "file": "oneshots/rx5/kick/rx5-kick-08.flac",
+  "file": "oneshots/kick/rx5-kick-08.flac",
   "kind": "one",
   "inst": "kick",
   "style": "rx5",
@@ -1569,15 +105,7 @@
  },
  {
   "name": "rx5-kick-09",
-  "file": "oneshots/rx5/kick/rx5-kick-09.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "rx5",
-  "cat": "kik"
- },
- {
-  "name": "rx5-kick-10",
-  "file": "oneshots/rx5/kick/rx5-kick-10.flac",
+  "file": "oneshots/kick/rx5-kick-09.flac",
   "kind": "one",
   "inst": "kick",
   "style": "rx5",
@@ -1585,23 +113,7 @@
  },
  {
   "name": "rx5-kick-11",
-  "file": "oneshots/rx5/kick/rx5-kick-11.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "rx5",
-  "cat": "kik"
- },
- {
-  "name": "rx5-kick-12",
-  "file": "oneshots/rx5/kick/rx5-kick-12.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "rx5",
-  "cat": "kik"
- },
- {
-  "name": "rx5-kick-13",
-  "file": "oneshots/rx5/kick/rx5-kick-13.flac",
+  "file": "oneshots/kick/rx5-kick-11.flac",
   "kind": "one",
   "inst": "kick",
   "style": "rx5",
@@ -1609,807 +121,15 @@
  },
  {
   "name": "rx5-kick-14",
-  "file": "oneshots/rx5/kick/rx5-kick-14.flac",
+  "file": "oneshots/kick/rx5-kick-14.flac",
   "kind": "one",
   "inst": "kick",
   "style": "rx5",
-  "cat": "kik"
- },
- {
-  "name": "rx5-snare-01",
-  "file": "oneshots/rx5/snare/rx5-snare-01.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "rx5",
-  "cat": "snr"
- },
- {
-  "name": "rx5-snare-02",
-  "file": "oneshots/rx5/snare/rx5-snare-02.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "rx5",
-  "cat": "snr"
- },
- {
-  "name": "rx5-snare-03",
-  "file": "oneshots/rx5/snare/rx5-snare-03.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "rx5",
-  "cat": "snr"
- },
- {
-  "name": "rx5-snare-04",
-  "file": "oneshots/rx5/snare/rx5-snare-04.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "rx5",
-  "cat": "snr"
- },
- {
-  "name": "rx5-snare-05",
-  "file": "oneshots/rx5/snare/rx5-snare-05.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "rx5",
-  "cat": "snr"
- },
- {
-  "name": "rx5-snare-06",
-  "file": "oneshots/rx5/snare/rx5-snare-06.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "rx5",
-  "cat": "snr"
- },
- {
-  "name": "rx5-snare-07",
-  "file": "oneshots/rx5/snare/rx5-snare-07.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "rx5",
-  "cat": "snr"
- },
- {
-  "name": "rx5-snare-08",
-  "file": "oneshots/rx5/snare/rx5-snare-08.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "rx5",
-  "cat": "snr"
- },
- {
-  "name": "rx5-snare-09",
-  "file": "oneshots/rx5/snare/rx5-snare-09.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "rx5",
-  "cat": "snr"
- },
- {
-  "name": "rx5-snare-10",
-  "file": "oneshots/rx5/snare/rx5-snare-10.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "rx5",
-  "cat": "snr"
- },
- {
-  "name": "rx5-snare-11",
-  "file": "oneshots/rx5/snare/rx5-snare-11.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "rx5",
-  "cat": "snr"
- },
- {
-  "name": "rx5-snare-12",
-  "file": "oneshots/rx5/snare/rx5-snare-12.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "rx5",
-  "cat": "snr"
- },
- {
-  "name": "rx5-snare-13",
-  "file": "oneshots/rx5/snare/rx5-snare-13.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "rx5",
-  "cat": "snr"
- },
- {
-  "name": "rx5-snare-14",
-  "file": "oneshots/rx5/snare/rx5-snare-14.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "rx5",
-  "cat": "snr"
- },
- {
-  "name": "rx5-snare-15",
-  "file": "oneshots/rx5/snare/rx5-snare-15.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "rx5",
-  "cat": "snr"
- },
- {
-  "name": "rx5-snare-16",
-  "file": "oneshots/rx5/snare/rx5-snare-16.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "rx5",
-  "cat": "snr"
- },
- {
-  "name": "rx5-snare-17",
-  "file": "oneshots/rx5/snare/rx5-snare-17.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "rx5",
-  "cat": "snr"
- },
- {
-  "name": "rx5-snare-18",
-  "file": "oneshots/rx5/snare/rx5-snare-18.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "rx5",
-  "cat": "snr"
- },
- {
-  "name": "rx5-snare-19",
-  "file": "oneshots/rx5/snare/rx5-snare-19.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "rx5",
-  "cat": "snr"
- },
- {
-  "name": "rx5-clap-01",
-  "file": "oneshots/rx5/clap/rx5-clap-01.flac",
-  "kind": "one",
-  "inst": "clap",
-  "style": "rx5",
-  "cat": "snr"
- },
- {
-  "name": "rx5-rim-01",
-  "file": "oneshots/rx5/rim/rx5-rim-01.flac",
-  "kind": "one",
-  "inst": "rim",
-  "style": "rx5",
-  "cat": "snr"
- },
- {
-  "name": "rx5-rim-02",
-  "file": "oneshots/rx5/rim/rx5-rim-02.flac",
-  "kind": "one",
-  "inst": "rim",
-  "style": "rx5",
-  "cat": "snr"
- },
- {
-  "name": "rx5-rim-03",
-  "file": "oneshots/rx5/rim/rx5-rim-03.flac",
-  "kind": "one",
-  "inst": "rim",
-  "style": "rx5",
-  "cat": "snr"
- },
- {
-  "name": "rx5-hat-closed-01",
-  "file": "oneshots/rx5/hat-closed/rx5-hat-closed-01.flac",
-  "kind": "one",
-  "inst": "hat-closed",
-  "style": "rx5",
-  "cat": "hh"
- },
- {
-  "name": "rx5-hat-closed-02",
-  "file": "oneshots/rx5/hat-closed/rx5-hat-closed-02.flac",
-  "kind": "one",
-  "inst": "hat-closed",
-  "style": "rx5",
-  "cat": "hh"
- },
- {
-  "name": "rx5-hat-closed-03",
-  "file": "oneshots/rx5/hat-closed/rx5-hat-closed-03.flac",
-  "kind": "one",
-  "inst": "hat-closed",
-  "style": "rx5",
-  "cat": "hh"
- },
- {
-  "name": "rx5-hat-open-01",
-  "file": "oneshots/rx5/hat-open/rx5-hat-open-01.flac",
-  "kind": "one",
-  "inst": "hat-open",
-  "style": "rx5",
-  "cat": "hh"
- },
- {
-  "name": "rx5-hat-open-02",
-  "file": "oneshots/rx5/hat-open/rx5-hat-open-02.flac",
-  "kind": "one",
-  "inst": "hat-open",
-  "style": "rx5",
-  "cat": "hh"
- },
- {
-  "name": "rx5-cymbal-01",
-  "file": "oneshots/rx5/cymbal/rx5-cymbal-01.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "rx5",
-  "cat": "cymb"
- },
- {
-  "name": "rx5-cymbal-02",
-  "file": "oneshots/rx5/cymbal/rx5-cymbal-02.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "rx5",
-  "cat": "cymb"
- },
- {
-  "name": "rx5-cymbal-03",
-  "file": "oneshots/rx5/cymbal/rx5-cymbal-03.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "rx5",
-  "cat": "cymb"
- },
- {
-  "name": "rx5-cymbal-04",
-  "file": "oneshots/rx5/cymbal/rx5-cymbal-04.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "rx5",
-  "cat": "cymb"
- },
- {
-  "name": "rx5-cymbal-05",
-  "file": "oneshots/rx5/cymbal/rx5-cymbal-05.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "rx5",
-  "cat": "cymb"
- },
- {
-  "name": "rx5-cymbal-06",
-  "file": "oneshots/rx5/cymbal/rx5-cymbal-06.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "rx5",
-  "cat": "cymb"
- },
- {
-  "name": "rx5-ride-01",
-  "file": "oneshots/rx5/ride/rx5-ride-01.flac",
-  "kind": "one",
-  "inst": "ride",
-  "style": "rx5",
-  "cat": "cymb"
- },
- {
-  "name": "rx5-ride-02",
-  "file": "oneshots/rx5/ride/rx5-ride-02.flac",
-  "kind": "one",
-  "inst": "ride",
-  "style": "rx5",
-  "cat": "cymb"
- },
- {
-  "name": "rx5-ride-03",
-  "file": "oneshots/rx5/ride/rx5-ride-03.flac",
-  "kind": "one",
-  "inst": "ride",
-  "style": "rx5",
-  "cat": "cymb"
- },
- {
-  "name": "rx5-tom-01",
-  "file": "oneshots/rx5/tom/rx5-tom-01.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "rx5",
-  "cat": "tom"
- },
- {
-  "name": "rx5-tom-02",
-  "file": "oneshots/rx5/tom/rx5-tom-02.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "rx5",
-  "cat": "tom"
- },
- {
-  "name": "rx5-tom-03",
-  "file": "oneshots/rx5/tom/rx5-tom-03.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "rx5",
-  "cat": "tom"
- },
- {
-  "name": "rx5-tom-04",
-  "file": "oneshots/rx5/tom/rx5-tom-04.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "rx5",
-  "cat": "tom"
- },
- {
-  "name": "rx5-tom-05",
-  "file": "oneshots/rx5/tom/rx5-tom-05.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "rx5",
-  "cat": "tom"
- },
- {
-  "name": "rx5-tom-06",
-  "file": "oneshots/rx5/tom/rx5-tom-06.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "rx5",
-  "cat": "tom"
- },
- {
-  "name": "rx5-tom-07",
-  "file": "oneshots/rx5/tom/rx5-tom-07.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "rx5",
-  "cat": "tom"
- },
- {
-  "name": "rx5-tom-08",
-  "file": "oneshots/rx5/tom/rx5-tom-08.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "rx5",
-  "cat": "tom"
- },
- {
-  "name": "rx5-tom-09",
-  "file": "oneshots/rx5/tom/rx5-tom-09.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "rx5",
-  "cat": "tom"
- },
- {
-  "name": "rx5-tom-10",
-  "file": "oneshots/rx5/tom/rx5-tom-10.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "rx5",
-  "cat": "tom"
- },
- {
-  "name": "rx5-tom-11",
-  "file": "oneshots/rx5/tom/rx5-tom-11.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "rx5",
-  "cat": "tom"
- },
- {
-  "name": "rx5-tom-12",
-  "file": "oneshots/rx5/tom/rx5-tom-12.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "rx5",
-  "cat": "tom"
- },
- {
-  "name": "rx5-tom-13",
-  "file": "oneshots/rx5/tom/rx5-tom-13.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "rx5",
-  "cat": "tom"
- },
- {
-  "name": "rx5-tom-14",
-  "file": "oneshots/rx5/tom/rx5-tom-14.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "rx5",
-  "cat": "tom"
- },
- {
-  "name": "rx5-tom-15",
-  "file": "oneshots/rx5/tom/rx5-tom-15.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "rx5",
-  "cat": "tom"
- },
- {
-  "name": "rx5-tom-16",
-  "file": "oneshots/rx5/tom/rx5-tom-16.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "rx5",
-  "cat": "tom"
- },
- {
-  "name": "rx5-tom-17",
-  "file": "oneshots/rx5/tom/rx5-tom-17.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "rx5",
-  "cat": "tom"
- },
- {
-  "name": "rx5-tom-18",
-  "file": "oneshots/rx5/tom/rx5-tom-18.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "rx5",
-  "cat": "tom"
- },
- {
-  "name": "rx5-tom-19",
-  "file": "oneshots/rx5/tom/rx5-tom-19.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "rx5",
-  "cat": "tom"
- },
- {
-  "name": "rx5-tom-20",
-  "file": "oneshots/rx5/tom/rx5-tom-20.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "rx5",
-  "cat": "tom"
- },
- {
-  "name": "rx5-conga-01",
-  "file": "oneshots/rx5/conga/rx5-conga-01.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "rx5",
-  "cat": "perc"
- },
- {
-  "name": "rx5-conga-02",
-  "file": "oneshots/rx5/conga/rx5-conga-02.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "rx5",
-  "cat": "perc"
- },
- {
-  "name": "rx5-conga-03",
-  "file": "oneshots/rx5/conga/rx5-conga-03.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "rx5",
-  "cat": "perc"
- },
- {
-  "name": "rx5-bongo-01",
-  "file": "oneshots/rx5/bongo/rx5-bongo-01.flac",
-  "kind": "one",
-  "inst": "bongo",
-  "style": "rx5",
-  "cat": "perc"
- },
- {
-  "name": "rx5-bongo-02",
-  "file": "oneshots/rx5/bongo/rx5-bongo-02.flac",
-  "kind": "one",
-  "inst": "bongo",
-  "style": "rx5",
-  "cat": "perc"
- },
- {
-  "name": "rx5-cowbell-01",
-  "file": "oneshots/rx5/cowbell/rx5-cowbell-01.flac",
-  "kind": "one",
-  "inst": "cowbell",
-  "style": "rx5",
-  "cat": "perc"
- },
- {
-  "name": "rx5-cowbell-02",
-  "file": "oneshots/rx5/cowbell/rx5-cowbell-02.flac",
-  "kind": "one",
-  "inst": "cowbell",
-  "style": "rx5",
-  "cat": "perc"
- },
- {
-  "name": "rx5-shaker-01",
-  "file": "oneshots/rx5/shaker/rx5-shaker-01.flac",
-  "kind": "one",
-  "inst": "shaker",
-  "style": "rx5",
-  "cat": "perc"
- },
- {
-  "name": "rx5-shaker-02",
-  "file": "oneshots/rx5/shaker/rx5-shaker-02.flac",
-  "kind": "one",
-  "inst": "shaker",
-  "style": "rx5",
-  "cat": "perc"
- },
- {
-  "name": "rx5-timbale-01",
-  "file": "oneshots/rx5/timbale/rx5-timbale-01.flac",
-  "kind": "one",
-  "inst": "timbale",
-  "style": "rx5",
-  "cat": "perc"
- },
- {
-  "name": "rx5-timbale-02",
-  "file": "oneshots/rx5/timbale/rx5-timbale-02.flac",
-  "kind": "one",
-  "inst": "timbale",
-  "style": "rx5",
-  "cat": "perc"
- },
- {
-  "name": "rx5-perc-01",
-  "file": "oneshots/rx5/perc/rx5-perc-01.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "rx5",
-  "cat": "perc"
- },
- {
-  "name": "rx5-perc-02",
-  "file": "oneshots/rx5/perc/rx5-perc-02.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "rx5",
-  "cat": "perc"
- },
- {
-  "name": "rx5-perc-03",
-  "file": "oneshots/rx5/perc/rx5-perc-03.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "rx5",
-  "cat": "perc"
- },
- {
-  "name": "rx5-perc-04",
-  "file": "oneshots/rx5/perc/rx5-perc-04.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "rx5",
-  "cat": "perc"
- },
- {
-  "name": "rx5-perc-05",
-  "file": "oneshots/rx5/perc/rx5-perc-05.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "rx5",
-  "cat": "perc"
- },
- {
-  "name": "rx5-perc-06",
-  "file": "oneshots/rx5/perc/rx5-perc-06.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "rx5",
-  "cat": "perc"
- },
- {
-  "name": "rx5-perc-07",
-  "file": "oneshots/rx5/perc/rx5-perc-07.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "rx5",
-  "cat": "perc"
- },
- {
-  "name": "rx5-perc-08",
-  "file": "oneshots/rx5/perc/rx5-perc-08.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "rx5",
-  "cat": "perc"
- },
- {
-  "name": "rx5-perc-09",
-  "file": "oneshots/rx5/perc/rx5-perc-09.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "rx5",
-  "cat": "perc"
- },
- {
-  "name": "rx5-perc-10",
-  "file": "oneshots/rx5/perc/rx5-perc-10.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "rx5",
-  "cat": "perc"
- },
- {
-  "name": "rx5-perc-11",
-  "file": "oneshots/rx5/perc/rx5-perc-11.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "rx5",
-  "cat": "perc"
- },
- {
-  "name": "rx5-perc-12",
-  "file": "oneshots/rx5/perc/rx5-perc-12.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "rx5",
-  "cat": "perc"
- },
- {
-  "name": "rx5-perc-13",
-  "file": "oneshots/rx5/perc/rx5-perc-13.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "rx5",
-  "cat": "perc"
- },
- {
-  "name": "rx5-perc-14",
-  "file": "oneshots/rx5/perc/rx5-perc-14.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "rx5",
-  "cat": "perc"
- },
- {
-  "name": "rx5-perc-15",
-  "file": "oneshots/rx5/perc/rx5-perc-15.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "rx5",
-  "cat": "perc"
- },
- {
-  "name": "rx5-perc-16",
-  "file": "oneshots/rx5/perc/rx5-perc-16.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "rx5",
-  "cat": "perc"
- },
- {
-  "name": "rx5-perc-17",
-  "file": "oneshots/rx5/perc/rx5-perc-17.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "rx5",
-  "cat": "perc"
- },
- {
-  "name": "rx5-perc-18",
-  "file": "oneshots/rx5/perc/rx5-perc-18.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "rx5",
-  "cat": "perc"
- },
- {
-  "name": "rx5-perc-19",
-  "file": "oneshots/rx5/perc/rx5-perc-19.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "rx5",
-  "cat": "perc"
- },
- {
-  "name": "rx5-perc-20",
-  "file": "oneshots/rx5/perc/rx5-perc-20.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "rx5",
-  "cat": "perc"
- },
- {
-  "name": "rx5-perc-21",
-  "file": "oneshots/rx5/perc/rx5-perc-21.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "rx5",
-  "cat": "perc"
- },
- {
-  "name": "rx5-perc-22",
-  "file": "oneshots/rx5/perc/rx5-perc-22.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "rx5",
-  "cat": "perc"
- },
- {
-  "name": "rx5-perc-23",
-  "file": "oneshots/rx5/perc/rx5-perc-23.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "rx5",
-  "cat": "perc"
- },
- {
-  "name": "rx5-perc-24",
-  "file": "oneshots/rx5/perc/rx5-perc-24.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "rx5",
-  "cat": "perc"
- },
- {
-  "name": "rx5-perc-25",
-  "file": "oneshots/rx5/perc/rx5-perc-25.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "rx5",
-  "cat": "perc"
- },
- {
-  "name": "tr8-kick-01",
-  "file": "oneshots/tr8/kick/tr8-kick-01.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "tr8",
   "cat": "kik"
  },
  {
   "name": "tr8-kick-02",
-  "file": "oneshots/tr8/kick/tr8-kick-02.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "tr8",
-  "cat": "kik"
- },
- {
-  "name": "tr8-kick-03",
-  "file": "oneshots/tr8/kick/tr8-kick-03.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "tr8",
-  "cat": "kik"
- },
- {
-  "name": "tr8-kick-04",
-  "file": "oneshots/tr8/kick/tr8-kick-04.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "tr8",
-  "cat": "kik"
- },
- {
-  "name": "tr8-kick-05",
-  "file": "oneshots/tr8/kick/tr8-kick-05.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "tr8",
-  "cat": "kik"
- },
- {
-  "name": "tr8-kick-06",
-  "file": "oneshots/tr8/kick/tr8-kick-06.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "tr8",
-  "cat": "kik"
- },
- {
-  "name": "tr8-kick-07",
-  "file": "oneshots/tr8/kick/tr8-kick-07.flac",
+  "file": "oneshots/kick/tr8-kick-02.flac",
   "kind": "one",
   "inst": "kick",
   "style": "tr8",
@@ -2417,31 +137,7 @@
  },
  {
   "name": "tr8-kick-08",
-  "file": "oneshots/tr8/kick/tr8-kick-08.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "tr8",
-  "cat": "kik"
- },
- {
-  "name": "tr8-kick-09",
-  "file": "oneshots/tr8/kick/tr8-kick-09.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "tr8",
-  "cat": "kik"
- },
- {
-  "name": "tr8-kick-10",
-  "file": "oneshots/tr8/kick/tr8-kick-10.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "tr8",
-  "cat": "kik"
- },
- {
-  "name": "tr8-kick-11",
-  "file": "oneshots/tr8/kick/tr8-kick-11.flac",
+  "file": "oneshots/kick/tr8-kick-08.flac",
   "kind": "one",
   "inst": "kick",
   "style": "tr8",
@@ -2449,23 +145,7 @@
  },
  {
   "name": "tr8-kick-12",
-  "file": "oneshots/tr8/kick/tr8-kick-12.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "tr8",
-  "cat": "kik"
- },
- {
-  "name": "tr8-kick-13",
-  "file": "oneshots/tr8/kick/tr8-kick-13.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "tr8",
-  "cat": "kik"
- },
- {
-  "name": "tr8-kick-14",
-  "file": "oneshots/tr8/kick/tr8-kick-14.flac",
+  "file": "oneshots/kick/tr8-kick-12.flac",
   "kind": "one",
   "inst": "kick",
   "style": "tr8",
@@ -2473,1143 +153,15 @@
  },
  {
   "name": "tr8-kick-15",
-  "file": "oneshots/tr8/kick/tr8-kick-15.flac",
+  "file": "oneshots/kick/tr8-kick-15.flac",
   "kind": "one",
   "inst": "kick",
   "style": "tr8",
-  "cat": "kik"
- },
- {
-  "name": "tr8-kick-16",
-  "file": "oneshots/tr8/kick/tr8-kick-16.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "tr8",
-  "cat": "kik"
- },
- {
-  "name": "tr8-kick-17",
-  "file": "oneshots/tr8/kick/tr8-kick-17.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "tr8",
-  "cat": "kik"
- },
- {
-  "name": "tr8-sub-01",
-  "file": "oneshots/tr8/sub/tr8-sub-01.flac",
-  "kind": "one",
-  "inst": "sub",
-  "style": "tr8",
-  "cat": "kik"
- },
- {
-  "name": "tr8-sub-02",
-  "file": "oneshots/tr8/sub/tr8-sub-02.flac",
-  "kind": "one",
-  "inst": "sub",
-  "style": "tr8",
-  "cat": "kik"
- },
- {
-  "name": "tr8-snare-01",
-  "file": "oneshots/tr8/snare/tr8-snare-01.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "tr8",
-  "cat": "snr"
- },
- {
-  "name": "tr8-snare-02",
-  "file": "oneshots/tr8/snare/tr8-snare-02.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "tr8",
-  "cat": "snr"
- },
- {
-  "name": "tr8-snare-03",
-  "file": "oneshots/tr8/snare/tr8-snare-03.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "tr8",
-  "cat": "snr"
- },
- {
-  "name": "tr8-snare-04",
-  "file": "oneshots/tr8/snare/tr8-snare-04.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "tr8",
-  "cat": "snr"
- },
- {
-  "name": "tr8-snare-05",
-  "file": "oneshots/tr8/snare/tr8-snare-05.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "tr8",
-  "cat": "snr"
- },
- {
-  "name": "tr8-snare-06",
-  "file": "oneshots/tr8/snare/tr8-snare-06.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "tr8",
-  "cat": "snr"
- },
- {
-  "name": "tr8-snare-07",
-  "file": "oneshots/tr8/snare/tr8-snare-07.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "tr8",
-  "cat": "snr"
- },
- {
-  "name": "tr8-snare-08",
-  "file": "oneshots/tr8/snare/tr8-snare-08.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "tr8",
-  "cat": "snr"
- },
- {
-  "name": "tr8-snare-09",
-  "file": "oneshots/tr8/snare/tr8-snare-09.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "tr8",
-  "cat": "snr"
- },
- {
-  "name": "tr8-snare-10",
-  "file": "oneshots/tr8/snare/tr8-snare-10.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "tr8",
-  "cat": "snr"
- },
- {
-  "name": "tr8-snare-11",
-  "file": "oneshots/tr8/snare/tr8-snare-11.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "tr8",
-  "cat": "snr"
- },
- {
-  "name": "tr8-snare-12",
-  "file": "oneshots/tr8/snare/tr8-snare-12.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "tr8",
-  "cat": "snr"
- },
- {
-  "name": "tr8-snare-13",
-  "file": "oneshots/tr8/snare/tr8-snare-13.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "tr8",
-  "cat": "snr"
- },
- {
-  "name": "tr8-snare-14",
-  "file": "oneshots/tr8/snare/tr8-snare-14.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "tr8",
-  "cat": "snr"
- },
- {
-  "name": "tr8-snare-15",
-  "file": "oneshots/tr8/snare/tr8-snare-15.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "tr8",
-  "cat": "snr"
- },
- {
-  "name": "tr8-snare-16",
-  "file": "oneshots/tr8/snare/tr8-snare-16.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "tr8",
-  "cat": "snr"
- },
- {
-  "name": "tr8-clap-01",
-  "file": "oneshots/tr8/clap/tr8-clap-01.flac",
-  "kind": "one",
-  "inst": "clap",
-  "style": "tr8",
-  "cat": "snr"
- },
- {
-  "name": "tr8-clap-02",
-  "file": "oneshots/tr8/clap/tr8-clap-02.flac",
-  "kind": "one",
-  "inst": "clap",
-  "style": "tr8",
-  "cat": "snr"
- },
- {
-  "name": "tr8-clap-03",
-  "file": "oneshots/tr8/clap/tr8-clap-03.flac",
-  "kind": "one",
-  "inst": "clap",
-  "style": "tr8",
-  "cat": "snr"
- },
- {
-  "name": "tr8-clap-04",
-  "file": "oneshots/tr8/clap/tr8-clap-04.flac",
-  "kind": "one",
-  "inst": "clap",
-  "style": "tr8",
-  "cat": "snr"
- },
- {
-  "name": "tr8-clap-05",
-  "file": "oneshots/tr8/clap/tr8-clap-05.flac",
-  "kind": "one",
-  "inst": "clap",
-  "style": "tr8",
-  "cat": "snr"
- },
- {
-  "name": "tr8-clap-06",
-  "file": "oneshots/tr8/clap/tr8-clap-06.flac",
-  "kind": "one",
-  "inst": "clap",
-  "style": "tr8",
-  "cat": "snr"
- },
- {
-  "name": "tr8-clap-07",
-  "file": "oneshots/tr8/clap/tr8-clap-07.flac",
-  "kind": "one",
-  "inst": "clap",
-  "style": "tr8",
-  "cat": "snr"
- },
- {
-  "name": "tr8-rim-01",
-  "file": "oneshots/tr8/rim/tr8-rim-01.flac",
-  "kind": "one",
-  "inst": "rim",
-  "style": "tr8",
-  "cat": "snr"
- },
- {
-  "name": "tr8-rim-02",
-  "file": "oneshots/tr8/rim/tr8-rim-02.flac",
-  "kind": "one",
-  "inst": "rim",
-  "style": "tr8",
-  "cat": "snr"
- },
- {
-  "name": "tr8-rim-03",
-  "file": "oneshots/tr8/rim/tr8-rim-03.flac",
-  "kind": "one",
-  "inst": "rim",
-  "style": "tr8",
-  "cat": "snr"
- },
- {
-  "name": "tr8-rim-04",
-  "file": "oneshots/tr8/rim/tr8-rim-04.flac",
-  "kind": "one",
-  "inst": "rim",
-  "style": "tr8",
-  "cat": "snr"
- },
- {
-  "name": "tr8-hat-closed-01",
-  "file": "oneshots/tr8/hat-closed/tr8-hat-closed-01.flac",
-  "kind": "one",
-  "inst": "hat-closed",
-  "style": "tr8",
-  "cat": "hh"
- },
- {
-  "name": "tr8-hat-closed-02",
-  "file": "oneshots/tr8/hat-closed/tr8-hat-closed-02.flac",
-  "kind": "one",
-  "inst": "hat-closed",
-  "style": "tr8",
-  "cat": "hh"
- },
- {
-  "name": "tr8-hat-closed-03",
-  "file": "oneshots/tr8/hat-closed/tr8-hat-closed-03.flac",
-  "kind": "one",
-  "inst": "hat-closed",
-  "style": "tr8",
-  "cat": "hh"
- },
- {
-  "name": "tr8-hat-closed-04",
-  "file": "oneshots/tr8/hat-closed/tr8-hat-closed-04.flac",
-  "kind": "one",
-  "inst": "hat-closed",
-  "style": "tr8",
-  "cat": "hh"
- },
- {
-  "name": "tr8-hat-closed-05",
-  "file": "oneshots/tr8/hat-closed/tr8-hat-closed-05.flac",
-  "kind": "one",
-  "inst": "hat-closed",
-  "style": "tr8",
-  "cat": "hh"
- },
- {
-  "name": "tr8-hat-closed-06",
-  "file": "oneshots/tr8/hat-closed/tr8-hat-closed-06.flac",
-  "kind": "one",
-  "inst": "hat-closed",
-  "style": "tr8",
-  "cat": "hh"
- },
- {
-  "name": "tr8-hat-closed-07",
-  "file": "oneshots/tr8/hat-closed/tr8-hat-closed-07.flac",
-  "kind": "one",
-  "inst": "hat-closed",
-  "style": "tr8",
-  "cat": "hh"
- },
- {
-  "name": "tr8-hat-open-01",
-  "file": "oneshots/tr8/hat-open/tr8-hat-open-01.flac",
-  "kind": "one",
-  "inst": "hat-open",
-  "style": "tr8",
-  "cat": "hh"
- },
- {
-  "name": "tr8-hat-open-02",
-  "file": "oneshots/tr8/hat-open/tr8-hat-open-02.flac",
-  "kind": "one",
-  "inst": "hat-open",
-  "style": "tr8",
-  "cat": "hh"
- },
- {
-  "name": "tr8-hat-open-03",
-  "file": "oneshots/tr8/hat-open/tr8-hat-open-03.flac",
-  "kind": "one",
-  "inst": "hat-open",
-  "style": "tr8",
-  "cat": "hh"
- },
- {
-  "name": "tr8-hat-open-04",
-  "file": "oneshots/tr8/hat-open/tr8-hat-open-04.flac",
-  "kind": "one",
-  "inst": "hat-open",
-  "style": "tr8",
-  "cat": "hh"
- },
- {
-  "name": "tr8-hat-open-05",
-  "file": "oneshots/tr8/hat-open/tr8-hat-open-05.flac",
-  "kind": "one",
-  "inst": "hat-open",
-  "style": "tr8",
-  "cat": "hh"
- },
- {
-  "name": "tr8-hat-open-06",
-  "file": "oneshots/tr8/hat-open/tr8-hat-open-06.flac",
-  "kind": "one",
-  "inst": "hat-open",
-  "style": "tr8",
-  "cat": "hh"
- },
- {
-  "name": "tr8-hat-open-07",
-  "file": "oneshots/tr8/hat-open/tr8-hat-open-07.flac",
-  "kind": "one",
-  "inst": "hat-open",
-  "style": "tr8",
-  "cat": "hh"
- },
- {
-  "name": "tr8-hat-open-08",
-  "file": "oneshots/tr8/hat-open/tr8-hat-open-08.flac",
-  "kind": "one",
-  "inst": "hat-open",
-  "style": "tr8",
-  "cat": "hh"
- },
- {
-  "name": "tr8-hat-open-09",
-  "file": "oneshots/tr8/hat-open/tr8-hat-open-09.flac",
-  "kind": "one",
-  "inst": "hat-open",
-  "style": "tr8",
-  "cat": "hh"
- },
- {
-  "name": "tr8-cymbal-01",
-  "file": "oneshots/tr8/cymbal/tr8-cymbal-01.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "tr8",
-  "cat": "cymb"
- },
- {
-  "name": "tr8-cymbal-02",
-  "file": "oneshots/tr8/cymbal/tr8-cymbal-02.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "tr8",
-  "cat": "cymb"
- },
- {
-  "name": "tr8-cymbal-03",
-  "file": "oneshots/tr8/cymbal/tr8-cymbal-03.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "tr8",
-  "cat": "cymb"
- },
- {
-  "name": "tr8-cymbal-04",
-  "file": "oneshots/tr8/cymbal/tr8-cymbal-04.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "tr8",
-  "cat": "cymb"
- },
- {
-  "name": "tr8-cymbal-05",
-  "file": "oneshots/tr8/cymbal/tr8-cymbal-05.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "tr8",
-  "cat": "cymb"
- },
- {
-  "name": "tr8-cymbal-06",
-  "file": "oneshots/tr8/cymbal/tr8-cymbal-06.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "tr8",
-  "cat": "cymb"
- },
- {
-  "name": "tr8-cymbal-07",
-  "file": "oneshots/tr8/cymbal/tr8-cymbal-07.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "tr8",
-  "cat": "cymb"
- },
- {
-  "name": "tr8-cymbal-08",
-  "file": "oneshots/tr8/cymbal/tr8-cymbal-08.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "tr8",
-  "cat": "cymb"
- },
- {
-  "name": "tr8-cymbal-09",
-  "file": "oneshots/tr8/cymbal/tr8-cymbal-09.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "tr8",
-  "cat": "cymb"
- },
- {
-  "name": "tr8-ride-01",
-  "file": "oneshots/tr8/ride/tr8-ride-01.flac",
-  "kind": "one",
-  "inst": "ride",
-  "style": "tr8",
-  "cat": "cymb"
- },
- {
-  "name": "tr8-ride-02",
-  "file": "oneshots/tr8/ride/tr8-ride-02.flac",
-  "kind": "one",
-  "inst": "ride",
-  "style": "tr8",
-  "cat": "cymb"
- },
- {
-  "name": "tr8-ride-03",
-  "file": "oneshots/tr8/ride/tr8-ride-03.flac",
-  "kind": "one",
-  "inst": "ride",
-  "style": "tr8",
-  "cat": "cymb"
- },
- {
-  "name": "tr8-ride-04",
-  "file": "oneshots/tr8/ride/tr8-ride-04.flac",
-  "kind": "one",
-  "inst": "ride",
-  "style": "tr8",
-  "cat": "cymb"
- },
- {
-  "name": "tr8-tom-01",
-  "file": "oneshots/tr8/tom/tr8-tom-01.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr8",
-  "cat": "tom"
- },
- {
-  "name": "tr8-tom-02",
-  "file": "oneshots/tr8/tom/tr8-tom-02.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr8",
-  "cat": "tom"
- },
- {
-  "name": "tr8-tom-03",
-  "file": "oneshots/tr8/tom/tr8-tom-03.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr8",
-  "cat": "tom"
- },
- {
-  "name": "tr8-tom-04",
-  "file": "oneshots/tr8/tom/tr8-tom-04.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr8",
-  "cat": "tom"
- },
- {
-  "name": "tr8-tom-05",
-  "file": "oneshots/tr8/tom/tr8-tom-05.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr8",
-  "cat": "tom"
- },
- {
-  "name": "tr8-tom-06",
-  "file": "oneshots/tr8/tom/tr8-tom-06.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr8",
-  "cat": "tom"
- },
- {
-  "name": "tr8-tom-07",
-  "file": "oneshots/tr8/tom/tr8-tom-07.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr8",
-  "cat": "tom"
- },
- {
-  "name": "tr8-tom-08",
-  "file": "oneshots/tr8/tom/tr8-tom-08.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr8",
-  "cat": "tom"
- },
- {
-  "name": "tr8-tom-09",
-  "file": "oneshots/tr8/tom/tr8-tom-09.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr8",
-  "cat": "tom"
- },
- {
-  "name": "tr8-tom-10",
-  "file": "oneshots/tr8/tom/tr8-tom-10.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr8",
-  "cat": "tom"
- },
- {
-  "name": "tr8-tom-11",
-  "file": "oneshots/tr8/tom/tr8-tom-11.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr8",
-  "cat": "tom"
- },
- {
-  "name": "tr8-tom-12",
-  "file": "oneshots/tr8/tom/tr8-tom-12.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr8",
-  "cat": "tom"
- },
- {
-  "name": "tr8-tom-13",
-  "file": "oneshots/tr8/tom/tr8-tom-13.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr8",
-  "cat": "tom"
- },
- {
-  "name": "tr8-tom-14",
-  "file": "oneshots/tr8/tom/tr8-tom-14.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr8",
-  "cat": "tom"
- },
- {
-  "name": "tr8-tom-15",
-  "file": "oneshots/tr8/tom/tr8-tom-15.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr8",
-  "cat": "tom"
- },
- {
-  "name": "tr8-tom-16",
-  "file": "oneshots/tr8/tom/tr8-tom-16.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr8",
-  "cat": "tom"
- },
- {
-  "name": "tr8-tom-17",
-  "file": "oneshots/tr8/tom/tr8-tom-17.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr8",
-  "cat": "tom"
- },
- {
-  "name": "tr8-tom-18",
-  "file": "oneshots/tr8/tom/tr8-tom-18.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr8",
-  "cat": "tom"
- },
- {
-  "name": "tr8-tom-19",
-  "file": "oneshots/tr8/tom/tr8-tom-19.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr8",
-  "cat": "tom"
- },
- {
-  "name": "tr8-tom-20",
-  "file": "oneshots/tr8/tom/tr8-tom-20.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr8",
-  "cat": "tom"
- },
- {
-  "name": "tr8-tom-21",
-  "file": "oneshots/tr8/tom/tr8-tom-21.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr8",
-  "cat": "tom"
- },
- {
-  "name": "tr8-tom-22",
-  "file": "oneshots/tr8/tom/tr8-tom-22.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr8",
-  "cat": "tom"
- },
- {
-  "name": "tr8-tom-23",
-  "file": "oneshots/tr8/tom/tr8-tom-23.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr8",
-  "cat": "tom"
- },
- {
-  "name": "tr8-tom-24",
-  "file": "oneshots/tr8/tom/tr8-tom-24.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr8",
-  "cat": "tom"
- },
- {
-  "name": "tr8-tom-25",
-  "file": "oneshots/tr8/tom/tr8-tom-25.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr8",
-  "cat": "tom"
- },
- {
-  "name": "tr8-tom-26",
-  "file": "oneshots/tr8/tom/tr8-tom-26.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr8",
-  "cat": "tom"
- },
- {
-  "name": "tr8-tom-27",
-  "file": "oneshots/tr8/tom/tr8-tom-27.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr8",
-  "cat": "tom"
- },
- {
-  "name": "tr8-tom-28",
-  "file": "oneshots/tr8/tom/tr8-tom-28.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr8",
-  "cat": "tom"
- },
- {
-  "name": "tr8-tom-29",
-  "file": "oneshots/tr8/tom/tr8-tom-29.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr8",
-  "cat": "tom"
- },
- {
-  "name": "tr8-tom-30",
-  "file": "oneshots/tr8/tom/tr8-tom-30.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr8",
-  "cat": "tom"
- },
- {
-  "name": "tr8-tom-31",
-  "file": "oneshots/tr8/tom/tr8-tom-31.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr8",
-  "cat": "tom"
- },
- {
-  "name": "tr8-tom-32",
-  "file": "oneshots/tr8/tom/tr8-tom-32.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr8",
-  "cat": "tom"
- },
- {
-  "name": "tr8-tom-33",
-  "file": "oneshots/tr8/tom/tr8-tom-33.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "tr8",
-  "cat": "tom"
- },
- {
-  "name": "tr8-conga-01",
-  "file": "oneshots/tr8/conga/tr8-conga-01.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "tr8",
-  "cat": "perc"
- },
- {
-  "name": "tr8-conga-02",
-  "file": "oneshots/tr8/conga/tr8-conga-02.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "tr8",
-  "cat": "perc"
- },
- {
-  "name": "tr8-conga-03",
-  "file": "oneshots/tr8/conga/tr8-conga-03.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "tr8",
-  "cat": "perc"
- },
- {
-  "name": "tr8-conga-04",
-  "file": "oneshots/tr8/conga/tr8-conga-04.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "tr8",
-  "cat": "perc"
- },
- {
-  "name": "tr8-conga-05",
-  "file": "oneshots/tr8/conga/tr8-conga-05.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "tr8",
-  "cat": "perc"
- },
- {
-  "name": "tr8-conga-06",
-  "file": "oneshots/tr8/conga/tr8-conga-06.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "tr8",
-  "cat": "perc"
- },
- {
-  "name": "tr8-conga-07",
-  "file": "oneshots/tr8/conga/tr8-conga-07.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "tr8",
-  "cat": "perc"
- },
- {
-  "name": "tr8-conga-08",
-  "file": "oneshots/tr8/conga/tr8-conga-08.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "tr8",
-  "cat": "perc"
- },
- {
-  "name": "tr8-conga-09",
-  "file": "oneshots/tr8/conga/tr8-conga-09.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "tr8",
-  "cat": "perc"
- },
- {
-  "name": "tr8-bongo-01",
-  "file": "oneshots/tr8/bongo/tr8-bongo-01.flac",
-  "kind": "one",
-  "inst": "bongo",
-  "style": "tr8",
-  "cat": "perc"
- },
- {
-  "name": "tr8-bongo-02",
-  "file": "oneshots/tr8/bongo/tr8-bongo-02.flac",
-  "kind": "one",
-  "inst": "bongo",
-  "style": "tr8",
-  "cat": "perc"
- },
- {
-  "name": "tr8-cowbell-01",
-  "file": "oneshots/tr8/cowbell/tr8-cowbell-01.flac",
-  "kind": "one",
-  "inst": "cowbell",
-  "style": "tr8",
-  "cat": "perc"
- },
- {
-  "name": "tr8-cowbell-02",
-  "file": "oneshots/tr8/cowbell/tr8-cowbell-02.flac",
-  "kind": "one",
-  "inst": "cowbell",
-  "style": "tr8",
-  "cat": "perc"
- },
- {
-  "name": "tr8-clave-01",
-  "file": "oneshots/tr8/clave/tr8-clave-01.flac",
-  "kind": "one",
-  "inst": "clave",
-  "style": "tr8",
-  "cat": "wood"
- },
- {
-  "name": "tr8-clave-02",
-  "file": "oneshots/tr8/clave/tr8-clave-02.flac",
-  "kind": "one",
-  "inst": "clave",
-  "style": "tr8",
-  "cat": "wood"
- },
- {
-  "name": "tr8-shaker-01",
-  "file": "oneshots/tr8/shaker/tr8-shaker-01.flac",
-  "kind": "one",
-  "inst": "shaker",
-  "style": "tr8",
-  "cat": "perc"
- },
- {
-  "name": "tr8-shaker-02",
-  "file": "oneshots/tr8/shaker/tr8-shaker-02.flac",
-  "kind": "one",
-  "inst": "shaker",
-  "style": "tr8",
-  "cat": "perc"
- },
- {
-  "name": "tr8-shaker-03",
-  "file": "oneshots/tr8/shaker/tr8-shaker-03.flac",
-  "kind": "one",
-  "inst": "shaker",
-  "style": "tr8",
-  "cat": "perc"
- },
- {
-  "name": "tr8-shaker-04",
-  "file": "oneshots/tr8/shaker/tr8-shaker-04.flac",
-  "kind": "one",
-  "inst": "shaker",
-  "style": "tr8",
-  "cat": "perc"
- },
- {
-  "name": "tr8-timbale-01",
-  "file": "oneshots/tr8/timbale/tr8-timbale-01.flac",
-  "kind": "one",
-  "inst": "timbale",
-  "style": "tr8",
-  "cat": "perc"
- },
- {
-  "name": "tr8-timbale-02",
-  "file": "oneshots/tr8/timbale/tr8-timbale-02.flac",
-  "kind": "one",
-  "inst": "timbale",
-  "style": "tr8",
-  "cat": "perc"
- },
- {
-  "name": "tr8-perc-01",
-  "file": "oneshots/tr8/perc/tr8-perc-01.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "tr8",
-  "cat": "perc"
- },
- {
-  "name": "tr8-perc-02",
-  "file": "oneshots/tr8/perc/tr8-perc-02.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "tr8",
-  "cat": "perc"
- },
- {
-  "name": "tr8-perc-03",
-  "file": "oneshots/tr8/perc/tr8-perc-03.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "tr8",
-  "cat": "perc"
- },
- {
-  "name": "tr8-perc-04",
-  "file": "oneshots/tr8/perc/tr8-perc-04.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "tr8",
-  "cat": "perc"
- },
- {
-  "name": "tr8-perc-05",
-  "file": "oneshots/tr8/perc/tr8-perc-05.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "tr8",
-  "cat": "perc"
- },
- {
-  "name": "tr8-perc-06",
-  "file": "oneshots/tr8/perc/tr8-perc-06.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "tr8",
-  "cat": "perc"
- },
- {
-  "name": "tr8-perc-07",
-  "file": "oneshots/tr8/perc/tr8-perc-07.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "tr8",
-  "cat": "perc"
- },
- {
-  "name": "tr8-perc-08",
-  "file": "oneshots/tr8/perc/tr8-perc-08.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "tr8",
-  "cat": "perc"
- },
- {
-  "name": "dr5-kick-01",
-  "file": "oneshots/dr5/kick/dr5-kick-01.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "dr5",
-  "cat": "kik"
- },
- {
-  "name": "dr5-kick-02",
-  "file": "oneshots/dr5/kick/dr5-kick-02.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "dr5",
-  "cat": "kik"
- },
- {
-  "name": "dr5-kick-03",
-  "file": "oneshots/dr5/kick/dr5-kick-03.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "dr5",
-  "cat": "kik"
- },
- {
-  "name": "dr5-kick-04",
-  "file": "oneshots/dr5/kick/dr5-kick-04.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "dr5",
-  "cat": "kik"
- },
- {
-  "name": "dr5-kick-05",
-  "file": "oneshots/dr5/kick/dr5-kick-05.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "dr5",
-  "cat": "kik"
- },
- {
-  "name": "dr5-kick-06",
-  "file": "oneshots/dr5/kick/dr5-kick-06.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "dr5",
-  "cat": "kik"
- },
- {
-  "name": "dr5-kick-07",
-  "file": "oneshots/dr5/kick/dr5-kick-07.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "dr5",
-  "cat": "kik"
- },
- {
-  "name": "dr5-kick-08",
-  "file": "oneshots/dr5/kick/dr5-kick-08.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "dr5",
-  "cat": "kik"
- },
- {
-  "name": "dr5-kick-09",
-  "file": "oneshots/dr5/kick/dr5-kick-09.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "dr5",
-  "cat": "kik"
- },
- {
-  "name": "dr5-kick-10",
-  "file": "oneshots/dr5/kick/dr5-kick-10.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "dr5",
   "cat": "kik"
  },
  {
   "name": "dr5-kick-11",
-  "file": "oneshots/dr5/kick/dr5-kick-11.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "dr5",
-  "cat": "kik"
- },
- {
-  "name": "dr5-kick-12",
-  "file": "oneshots/dr5/kick/dr5-kick-12.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "dr5",
-  "cat": "kik"
- },
- {
-  "name": "dr5-kick-13",
-  "file": "oneshots/dr5/kick/dr5-kick-13.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "dr5",
-  "cat": "kik"
- },
- {
-  "name": "dr5-kick-14",
-  "file": "oneshots/dr5/kick/dr5-kick-14.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "dr5",
-  "cat": "kik"
- },
- {
-  "name": "dr5-kick-15",
-  "file": "oneshots/dr5/kick/dr5-kick-15.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "dr5",
-  "cat": "kik"
- },
- {
-  "name": "dr5-kick-16",
-  "file": "oneshots/dr5/kick/dr5-kick-16.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "dr5",
-  "cat": "kik"
- },
- {
-  "name": "dr5-kick-17",
-  "file": "oneshots/dr5/kick/dr5-kick-17.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "dr5",
-  "cat": "kik"
- },
- {
-  "name": "dr5-kick-18",
-  "file": "oneshots/dr5/kick/dr5-kick-18.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "dr5",
-  "cat": "kik"
- },
- {
-  "name": "dr5-kick-19",
-  "file": "oneshots/dr5/kick/dr5-kick-19.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "dr5",
-  "cat": "kik"
- },
- {
-  "name": "dr5-kick-20",
-  "file": "oneshots/dr5/kick/dr5-kick-20.flac",
+  "file": "oneshots/kick/dr5-kick-11.flac",
   "kind": "one",
   "inst": "kick",
   "style": "dr5",
@@ -3617,39 +169,7 @@
  },
  {
   "name": "dr5-kick-21",
-  "file": "oneshots/dr5/kick/dr5-kick-21.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "dr5",
-  "cat": "kik"
- },
- {
-  "name": "dr5-kick-22",
-  "file": "oneshots/dr5/kick/dr5-kick-22.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "dr5",
-  "cat": "kik"
- },
- {
-  "name": "dr5-kick-23",
-  "file": "oneshots/dr5/kick/dr5-kick-23.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "dr5",
-  "cat": "kik"
- },
- {
-  "name": "dr5-kick-24",
-  "file": "oneshots/dr5/kick/dr5-kick-24.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "dr5",
-  "cat": "kik"
- },
- {
-  "name": "dr5-kick-25",
-  "file": "oneshots/dr5/kick/dr5-kick-25.flac",
+  "file": "oneshots/kick/dr5-kick-21.flac",
   "kind": "one",
   "inst": "kick",
   "style": "dr5",
@@ -3657,31 +177,7 @@
  },
  {
   "name": "dr5-kick-26",
-  "file": "oneshots/dr5/kick/dr5-kick-26.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "dr5",
-  "cat": "kik"
- },
- {
-  "name": "dr5-kick-27",
-  "file": "oneshots/dr5/kick/dr5-kick-27.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "dr5",
-  "cat": "kik"
- },
- {
-  "name": "dr5-kick-28",
-  "file": "oneshots/dr5/kick/dr5-kick-28.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "dr5",
-  "cat": "kik"
- },
- {
-  "name": "dr5-kick-29",
-  "file": "oneshots/dr5/kick/dr5-kick-29.flac",
+  "file": "oneshots/kick/dr5-kick-26.flac",
   "kind": "one",
   "inst": "kick",
   "style": "dr5",
@@ -3689,23 +185,7 @@
  },
  {
   "name": "dr5-kick-30",
-  "file": "oneshots/dr5/kick/dr5-kick-30.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "dr5",
-  "cat": "kik"
- },
- {
-  "name": "dr5-kick-31",
-  "file": "oneshots/dr5/kick/dr5-kick-31.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "dr5",
-  "cat": "kik"
- },
- {
-  "name": "dr5-kick-32",
-  "file": "oneshots/dr5/kick/dr5-kick-32.flac",
+  "file": "oneshots/kick/dr5-kick-30.flac",
   "kind": "one",
   "inst": "kick",
   "style": "dr5",
@@ -3713,1455 +193,15 @@
  },
  {
   "name": "dr5-kick-33",
-  "file": "oneshots/dr5/kick/dr5-kick-33.flac",
+  "file": "oneshots/kick/dr5-kick-33.flac",
   "kind": "one",
   "inst": "kick",
   "style": "dr5",
   "cat": "kik"
- },
- {
-  "name": "dr5-snare-01",
-  "file": "oneshots/dr5/snare/dr5-snare-01.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-snare-02",
-  "file": "oneshots/dr5/snare/dr5-snare-02.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-snare-03",
-  "file": "oneshots/dr5/snare/dr5-snare-03.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-snare-04",
-  "file": "oneshots/dr5/snare/dr5-snare-04.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-snare-05",
-  "file": "oneshots/dr5/snare/dr5-snare-05.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-snare-06",
-  "file": "oneshots/dr5/snare/dr5-snare-06.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-snare-07",
-  "file": "oneshots/dr5/snare/dr5-snare-07.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-snare-08",
-  "file": "oneshots/dr5/snare/dr5-snare-08.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-snare-09",
-  "file": "oneshots/dr5/snare/dr5-snare-09.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-snare-10",
-  "file": "oneshots/dr5/snare/dr5-snare-10.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-snare-11",
-  "file": "oneshots/dr5/snare/dr5-snare-11.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-snare-12",
-  "file": "oneshots/dr5/snare/dr5-snare-12.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-snare-13",
-  "file": "oneshots/dr5/snare/dr5-snare-13.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-snare-14",
-  "file": "oneshots/dr5/snare/dr5-snare-14.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-snare-15",
-  "file": "oneshots/dr5/snare/dr5-snare-15.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-snare-16",
-  "file": "oneshots/dr5/snare/dr5-snare-16.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-snare-17",
-  "file": "oneshots/dr5/snare/dr5-snare-17.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-snare-18",
-  "file": "oneshots/dr5/snare/dr5-snare-18.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-snare-19",
-  "file": "oneshots/dr5/snare/dr5-snare-19.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-snare-20",
-  "file": "oneshots/dr5/snare/dr5-snare-20.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-snare-21",
-  "file": "oneshots/dr5/snare/dr5-snare-21.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-snare-22",
-  "file": "oneshots/dr5/snare/dr5-snare-22.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-snare-23",
-  "file": "oneshots/dr5/snare/dr5-snare-23.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-snare-24",
-  "file": "oneshots/dr5/snare/dr5-snare-24.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-snare-25",
-  "file": "oneshots/dr5/snare/dr5-snare-25.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-snare-26",
-  "file": "oneshots/dr5/snare/dr5-snare-26.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-snare-27",
-  "file": "oneshots/dr5/snare/dr5-snare-27.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-snare-28",
-  "file": "oneshots/dr5/snare/dr5-snare-28.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-snare-29",
-  "file": "oneshots/dr5/snare/dr5-snare-29.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-snare-30",
-  "file": "oneshots/dr5/snare/dr5-snare-30.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-snare-31",
-  "file": "oneshots/dr5/snare/dr5-snare-31.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-snare-32",
-  "file": "oneshots/dr5/snare/dr5-snare-32.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-snare-33",
-  "file": "oneshots/dr5/snare/dr5-snare-33.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-snare-34",
-  "file": "oneshots/dr5/snare/dr5-snare-34.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-snare-35",
-  "file": "oneshots/dr5/snare/dr5-snare-35.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-snare-36",
-  "file": "oneshots/dr5/snare/dr5-snare-36.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-snare-37",
-  "file": "oneshots/dr5/snare/dr5-snare-37.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-snare-38",
-  "file": "oneshots/dr5/snare/dr5-snare-38.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-clap-01",
-  "file": "oneshots/dr5/clap/dr5-clap-01.flac",
-  "kind": "one",
-  "inst": "clap",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-clap-02",
-  "file": "oneshots/dr5/clap/dr5-clap-02.flac",
-  "kind": "one",
-  "inst": "clap",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-rim-01",
-  "file": "oneshots/dr5/rim/dr5-rim-01.flac",
-  "kind": "one",
-  "inst": "rim",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-rim-02",
-  "file": "oneshots/dr5/rim/dr5-rim-02.flac",
-  "kind": "one",
-  "inst": "rim",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-rim-03",
-  "file": "oneshots/dr5/rim/dr5-rim-03.flac",
-  "kind": "one",
-  "inst": "rim",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-rim-04",
-  "file": "oneshots/dr5/rim/dr5-rim-04.flac",
-  "kind": "one",
-  "inst": "rim",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-rim-05",
-  "file": "oneshots/dr5/rim/dr5-rim-05.flac",
-  "kind": "one",
-  "inst": "rim",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-rim-06",
-  "file": "oneshots/dr5/rim/dr5-rim-06.flac",
-  "kind": "one",
-  "inst": "rim",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-rim-07",
-  "file": "oneshots/dr5/rim/dr5-rim-07.flac",
-  "kind": "one",
-  "inst": "rim",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-rim-08",
-  "file": "oneshots/dr5/rim/dr5-rim-08.flac",
-  "kind": "one",
-  "inst": "rim",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-rim-09",
-  "file": "oneshots/dr5/rim/dr5-rim-09.flac",
-  "kind": "one",
-  "inst": "rim",
-  "style": "dr5",
-  "cat": "snr"
- },
- {
-  "name": "dr5-hat-closed-01",
-  "file": "oneshots/dr5/hat-closed/dr5-hat-closed-01.flac",
-  "kind": "one",
-  "inst": "hat-closed",
-  "style": "dr5",
-  "cat": "hh"
- },
- {
-  "name": "dr5-hat-closed-02",
-  "file": "oneshots/dr5/hat-closed/dr5-hat-closed-02.flac",
-  "kind": "one",
-  "inst": "hat-closed",
-  "style": "dr5",
-  "cat": "hh"
- },
- {
-  "name": "dr5-hat-closed-03",
-  "file": "oneshots/dr5/hat-closed/dr5-hat-closed-03.flac",
-  "kind": "one",
-  "inst": "hat-closed",
-  "style": "dr5",
-  "cat": "hh"
- },
- {
-  "name": "dr5-hat-closed-04",
-  "file": "oneshots/dr5/hat-closed/dr5-hat-closed-04.flac",
-  "kind": "one",
-  "inst": "hat-closed",
-  "style": "dr5",
-  "cat": "hh"
- },
- {
-  "name": "dr5-hat-closed-05",
-  "file": "oneshots/dr5/hat-closed/dr5-hat-closed-05.flac",
-  "kind": "one",
-  "inst": "hat-closed",
-  "style": "dr5",
-  "cat": "hh"
- },
- {
-  "name": "dr5-hat-closed-06",
-  "file": "oneshots/dr5/hat-closed/dr5-hat-closed-06.flac",
-  "kind": "one",
-  "inst": "hat-closed",
-  "style": "dr5",
-  "cat": "hh"
- },
- {
-  "name": "dr5-hat-open-01",
-  "file": "oneshots/dr5/hat-open/dr5-hat-open-01.flac",
-  "kind": "one",
-  "inst": "hat-open",
-  "style": "dr5",
-  "cat": "hh"
- },
- {
-  "name": "dr5-hat-open-02",
-  "file": "oneshots/dr5/hat-open/dr5-hat-open-02.flac",
-  "kind": "one",
-  "inst": "hat-open",
-  "style": "dr5",
-  "cat": "hh"
- },
- {
-  "name": "dr5-hat-open-03",
-  "file": "oneshots/dr5/hat-open/dr5-hat-open-03.flac",
-  "kind": "one",
-  "inst": "hat-open",
-  "style": "dr5",
-  "cat": "hh"
- },
- {
-  "name": "dr5-hat-open-04",
-  "file": "oneshots/dr5/hat-open/dr5-hat-open-04.flac",
-  "kind": "one",
-  "inst": "hat-open",
-  "style": "dr5",
-  "cat": "hh"
- },
- {
-  "name": "dr5-cymbal-01",
-  "file": "oneshots/dr5/cymbal/dr5-cymbal-01.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "dr5",
-  "cat": "cymb"
- },
- {
-  "name": "dr5-cymbal-02",
-  "file": "oneshots/dr5/cymbal/dr5-cymbal-02.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "dr5",
-  "cat": "cymb"
- },
- {
-  "name": "dr5-cymbal-03",
-  "file": "oneshots/dr5/cymbal/dr5-cymbal-03.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "dr5",
-  "cat": "cymb"
- },
- {
-  "name": "dr5-cymbal-04",
-  "file": "oneshots/dr5/cymbal/dr5-cymbal-04.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "dr5",
-  "cat": "cymb"
- },
- {
-  "name": "dr5-ride-01",
-  "file": "oneshots/dr5/ride/dr5-ride-01.flac",
-  "kind": "one",
-  "inst": "ride",
-  "style": "dr5",
-  "cat": "cymb"
- },
- {
-  "name": "dr5-ride-02",
-  "file": "oneshots/dr5/ride/dr5-ride-02.flac",
-  "kind": "one",
-  "inst": "ride",
-  "style": "dr5",
-  "cat": "cymb"
- },
- {
-  "name": "dr5-ride-03",
-  "file": "oneshots/dr5/ride/dr5-ride-03.flac",
-  "kind": "one",
-  "inst": "ride",
-  "style": "dr5",
-  "cat": "cymb"
- },
- {
-  "name": "dr5-ride-04",
-  "file": "oneshots/dr5/ride/dr5-ride-04.flac",
-  "kind": "one",
-  "inst": "ride",
-  "style": "dr5",
-  "cat": "cymb"
- },
- {
-  "name": "dr5-tom-01",
-  "file": "oneshots/dr5/tom/dr5-tom-01.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "dr5",
-  "cat": "tom"
- },
- {
-  "name": "dr5-tom-02",
-  "file": "oneshots/dr5/tom/dr5-tom-02.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "dr5",
-  "cat": "tom"
- },
- {
-  "name": "dr5-tom-03",
-  "file": "oneshots/dr5/tom/dr5-tom-03.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "dr5",
-  "cat": "tom"
- },
- {
-  "name": "dr5-tom-04",
-  "file": "oneshots/dr5/tom/dr5-tom-04.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "dr5",
-  "cat": "tom"
- },
- {
-  "name": "dr5-tom-05",
-  "file": "oneshots/dr5/tom/dr5-tom-05.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "dr5",
-  "cat": "tom"
- },
- {
-  "name": "dr5-tom-06",
-  "file": "oneshots/dr5/tom/dr5-tom-06.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "dr5",
-  "cat": "tom"
- },
- {
-  "name": "dr5-tom-07",
-  "file": "oneshots/dr5/tom/dr5-tom-07.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "dr5",
-  "cat": "tom"
- },
- {
-  "name": "dr5-tom-08",
-  "file": "oneshots/dr5/tom/dr5-tom-08.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "dr5",
-  "cat": "tom"
- },
- {
-  "name": "dr5-tom-09",
-  "file": "oneshots/dr5/tom/dr5-tom-09.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "dr5",
-  "cat": "tom"
- },
- {
-  "name": "dr5-tom-10",
-  "file": "oneshots/dr5/tom/dr5-tom-10.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "dr5",
-  "cat": "tom"
- },
- {
-  "name": "dr5-tom-11",
-  "file": "oneshots/dr5/tom/dr5-tom-11.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "dr5",
-  "cat": "tom"
- },
- {
-  "name": "dr5-tom-12",
-  "file": "oneshots/dr5/tom/dr5-tom-12.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "dr5",
-  "cat": "tom"
- },
- {
-  "name": "dr5-tom-13",
-  "file": "oneshots/dr5/tom/dr5-tom-13.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "dr5",
-  "cat": "tom"
- },
- {
-  "name": "dr5-tom-14",
-  "file": "oneshots/dr5/tom/dr5-tom-14.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "dr5",
-  "cat": "tom"
- },
- {
-  "name": "dr5-tom-15",
-  "file": "oneshots/dr5/tom/dr5-tom-15.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "dr5",
-  "cat": "tom"
- },
- {
-  "name": "dr5-tom-16",
-  "file": "oneshots/dr5/tom/dr5-tom-16.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "dr5",
-  "cat": "tom"
- },
- {
-  "name": "dr5-tom-17",
-  "file": "oneshots/dr5/tom/dr5-tom-17.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "dr5",
-  "cat": "tom"
- },
- {
-  "name": "dr5-tom-18",
-  "file": "oneshots/dr5/tom/dr5-tom-18.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "dr5",
-  "cat": "tom"
- },
- {
-  "name": "dr5-tom-19",
-  "file": "oneshots/dr5/tom/dr5-tom-19.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "dr5",
-  "cat": "tom"
- },
- {
-  "name": "dr5-tom-20",
-  "file": "oneshots/dr5/tom/dr5-tom-20.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "dr5",
-  "cat": "tom"
- },
- {
-  "name": "dr5-tom-21",
-  "file": "oneshots/dr5/tom/dr5-tom-21.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "dr5",
-  "cat": "tom"
- },
- {
-  "name": "dr5-tom-22",
-  "file": "oneshots/dr5/tom/dr5-tom-22.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "dr5",
-  "cat": "tom"
- },
- {
-  "name": "dr5-tom-23",
-  "file": "oneshots/dr5/tom/dr5-tom-23.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "dr5",
-  "cat": "tom"
- },
- {
-  "name": "dr5-conga-01",
-  "file": "oneshots/dr5/conga/dr5-conga-01.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "dr5",
-  "cat": "perc"
- },
- {
-  "name": "dr5-conga-02",
-  "file": "oneshots/dr5/conga/dr5-conga-02.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "dr5",
-  "cat": "perc"
- },
- {
-  "name": "dr5-conga-03",
-  "file": "oneshots/dr5/conga/dr5-conga-03.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "dr5",
-  "cat": "perc"
- },
- {
-  "name": "dr5-conga-04",
-  "file": "oneshots/dr5/conga/dr5-conga-04.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "dr5",
-  "cat": "perc"
- },
- {
-  "name": "dr5-conga-05",
-  "file": "oneshots/dr5/conga/dr5-conga-05.flac",
-  "kind": "one",
-  "inst": "conga",
-  "style": "dr5",
-  "cat": "perc"
- },
- {
-  "name": "dr5-bongo-01",
-  "file": "oneshots/dr5/bongo/dr5-bongo-01.flac",
-  "kind": "one",
-  "inst": "bongo",
-  "style": "dr5",
-  "cat": "perc"
- },
- {
-  "name": "dr5-bongo-02",
-  "file": "oneshots/dr5/bongo/dr5-bongo-02.flac",
-  "kind": "one",
-  "inst": "bongo",
-  "style": "dr5",
-  "cat": "perc"
- },
- {
-  "name": "dr5-cowbell-01",
-  "file": "oneshots/dr5/cowbell/dr5-cowbell-01.flac",
-  "kind": "one",
-  "inst": "cowbell",
-  "style": "dr5",
-  "cat": "perc"
- },
- {
-  "name": "dr5-cowbell-02",
-  "file": "oneshots/dr5/cowbell/dr5-cowbell-02.flac",
-  "kind": "one",
-  "inst": "cowbell",
-  "style": "dr5",
-  "cat": "perc"
- },
- {
-  "name": "dr5-cowbell-03",
-  "file": "oneshots/dr5/cowbell/dr5-cowbell-03.flac",
-  "kind": "one",
-  "inst": "cowbell",
-  "style": "dr5",
-  "cat": "perc"
- },
- {
-  "name": "dr5-clave-01",
-  "file": "oneshots/dr5/clave/dr5-clave-01.flac",
-  "kind": "one",
-  "inst": "clave",
-  "style": "dr5",
-  "cat": "wood"
- },
- {
-  "name": "dr5-wood-01",
-  "file": "oneshots/dr5/wood/dr5-wood-01.flac",
-  "kind": "one",
-  "inst": "wood",
-  "style": "dr5",
-  "cat": "wood"
- },
- {
-  "name": "dr5-wood-02",
-  "file": "oneshots/dr5/wood/dr5-wood-02.flac",
-  "kind": "one",
-  "inst": "wood",
-  "style": "dr5",
-  "cat": "wood"
- },
- {
-  "name": "dr5-wood-03",
-  "file": "oneshots/dr5/wood/dr5-wood-03.flac",
-  "kind": "one",
-  "inst": "wood",
-  "style": "dr5",
-  "cat": "wood"
- },
- {
-  "name": "dr5-wood-04",
-  "file": "oneshots/dr5/wood/dr5-wood-04.flac",
-  "kind": "one",
-  "inst": "wood",
-  "style": "dr5",
-  "cat": "wood"
- },
- {
-  "name": "dr5-wood-05",
-  "file": "oneshots/dr5/wood/dr5-wood-05.flac",
-  "kind": "one",
-  "inst": "wood",
-  "style": "dr5",
-  "cat": "wood"
- },
- {
-  "name": "dr5-shaker-01",
-  "file": "oneshots/dr5/shaker/dr5-shaker-01.flac",
-  "kind": "one",
-  "inst": "shaker",
-  "style": "dr5",
-  "cat": "perc"
- },
- {
-  "name": "dr5-shaker-02",
-  "file": "oneshots/dr5/shaker/dr5-shaker-02.flac",
-  "kind": "one",
-  "inst": "shaker",
-  "style": "dr5",
-  "cat": "perc"
- },
- {
-  "name": "dr5-shaker-03",
-  "file": "oneshots/dr5/shaker/dr5-shaker-03.flac",
-  "kind": "one",
-  "inst": "shaker",
-  "style": "dr5",
-  "cat": "perc"
- },
- {
-  "name": "dr5-shaker-04",
-  "file": "oneshots/dr5/shaker/dr5-shaker-04.flac",
-  "kind": "one",
-  "inst": "shaker",
-  "style": "dr5",
-  "cat": "perc"
- },
- {
-  "name": "dr5-shaker-05",
-  "file": "oneshots/dr5/shaker/dr5-shaker-05.flac",
-  "kind": "one",
-  "inst": "shaker",
-  "style": "dr5",
-  "cat": "perc"
- },
- {
-  "name": "dr5-shaker-06",
-  "file": "oneshots/dr5/shaker/dr5-shaker-06.flac",
-  "kind": "one",
-  "inst": "shaker",
-  "style": "dr5",
-  "cat": "perc"
- },
- {
-  "name": "dr5-timbale-01",
-  "file": "oneshots/dr5/timbale/dr5-timbale-01.flac",
-  "kind": "one",
-  "inst": "timbale",
-  "style": "dr5",
-  "cat": "perc"
- },
- {
-  "name": "dr5-perc-01",
-  "file": "oneshots/dr5/perc/dr5-perc-01.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "dr5",
-  "cat": "perc"
- },
- {
-  "name": "dr5-perc-02",
-  "file": "oneshots/dr5/perc/dr5-perc-02.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "dr5",
-  "cat": "perc"
- },
- {
-  "name": "dr5-perc-03",
-  "file": "oneshots/dr5/perc/dr5-perc-03.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "dr5",
-  "cat": "perc"
- },
- {
-  "name": "dr5-perc-04",
-  "file": "oneshots/dr5/perc/dr5-perc-04.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "dr5",
-  "cat": "perc"
- },
- {
-  "name": "dr5-perc-05",
-  "file": "oneshots/dr5/perc/dr5-perc-05.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "dr5",
-  "cat": "perc"
- },
- {
-  "name": "dr5-perc-06",
-  "file": "oneshots/dr5/perc/dr5-perc-06.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "dr5",
-  "cat": "perc"
- },
- {
-  "name": "dr5-perc-07",
-  "file": "oneshots/dr5/perc/dr5-perc-07.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "dr5",
-  "cat": "perc"
- },
- {
-  "name": "dr5-perc-08",
-  "file": "oneshots/dr5/perc/dr5-perc-08.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "dr5",
-  "cat": "perc"
- },
- {
-  "name": "dr5-perc-09",
-  "file": "oneshots/dr5/perc/dr5-perc-09.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "dr5",
-  "cat": "perc"
- },
- {
-  "name": "dr5-perc-10",
-  "file": "oneshots/dr5/perc/dr5-perc-10.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "dr5",
-  "cat": "perc"
- },
- {
-  "name": "dr5-perc-11",
-  "file": "oneshots/dr5/perc/dr5-perc-11.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "dr5",
-  "cat": "perc"
- },
- {
-  "name": "dr5-perc-12",
-  "file": "oneshots/dr5/perc/dr5-perc-12.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "dr5",
-  "cat": "perc"
- },
- {
-  "name": "dr5-perc-13",
-  "file": "oneshots/dr5/perc/dr5-perc-13.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "dr5",
-  "cat": "perc"
- },
- {
-  "name": "dr5-perc-14",
-  "file": "oneshots/dr5/perc/dr5-perc-14.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "dr5",
-  "cat": "perc"
- },
- {
-  "name": "dr5-perc-15",
-  "file": "oneshots/dr5/perc/dr5-perc-15.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "dr5",
-  "cat": "perc"
- },
- {
-  "name": "dr5-perc-16",
-  "file": "oneshots/dr5/perc/dr5-perc-16.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "dr5",
-  "cat": "perc"
- },
- {
-  "name": "dr5-perc-17",
-  "file": "oneshots/dr5/perc/dr5-perc-17.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "dr5",
-  "cat": "perc"
- },
- {
-  "name": "dr5-fx-01",
-  "file": "oneshots/dr5/fx/dr5-fx-01.flac",
-  "kind": "one",
-  "inst": "fx",
-  "style": "dr5",
-  "cat": "zap"
- },
- {
-  "name": "dr5-fx-02",
-  "file": "oneshots/dr5/fx/dr5-fx-02.flac",
-  "kind": "one",
-  "inst": "fx",
-  "style": "dr5",
-  "cat": "zap"
- },
- {
-  "name": "dr5-fx-03",
-  "file": "oneshots/dr5/fx/dr5-fx-03.flac",
-  "kind": "one",
-  "inst": "fx",
-  "style": "dr5",
-  "cat": "zap"
- },
- {
-  "name": "dr5-fx-04",
-  "file": "oneshots/dr5/fx/dr5-fx-04.flac",
-  "kind": "one",
-  "inst": "fx",
-  "style": "dr5",
-  "cat": "zap"
- },
- {
-  "name": "dr5-fx-05",
-  "file": "oneshots/dr5/fx/dr5-fx-05.flac",
-  "kind": "one",
-  "inst": "fx",
-  "style": "dr5",
-  "cat": "zap"
- },
- {
-  "name": "dr5-fx-06",
-  "file": "oneshots/dr5/fx/dr5-fx-06.flac",
-  "kind": "one",
-  "inst": "fx",
-  "style": "dr5",
-  "cat": "zap"
- },
- {
-  "name": "dr5-fx-07",
-  "file": "oneshots/dr5/fx/dr5-fx-07.flac",
-  "kind": "one",
-  "inst": "fx",
-  "style": "dr5",
-  "cat": "zap"
- },
- {
-  "name": "dr5-fx-08",
-  "file": "oneshots/dr5/fx/dr5-fx-08.flac",
-  "kind": "one",
-  "inst": "fx",
-  "style": "dr5",
-  "cat": "zap"
- },
- {
-  "name": "dr5-fx-09",
-  "file": "oneshots/dr5/fx/dr5-fx-09.flac",
-  "kind": "one",
-  "inst": "fx",
-  "style": "dr5",
-  "cat": "zap"
- },
- {
-  "name": "dr5-fx-10",
-  "file": "oneshots/dr5/fx/dr5-fx-10.flac",
-  "kind": "one",
-  "inst": "fx",
-  "style": "dr5",
-  "cat": "zap"
- },
- {
-  "name": "dr5-fx-11",
-  "file": "oneshots/dr5/fx/dr5-fx-11.flac",
-  "kind": "one",
-  "inst": "fx",
-  "style": "dr5",
-  "cat": "zap"
- },
- {
-  "name": "dr5-fx-12",
-  "file": "oneshots/dr5/fx/dr5-fx-12.flac",
-  "kind": "one",
-  "inst": "fx",
-  "style": "dr5",
-  "cat": "zap"
- },
- {
-  "name": "dr5-fx-13",
-  "file": "oneshots/dr5/fx/dr5-fx-13.flac",
-  "kind": "one",
-  "inst": "fx",
-  "style": "dr5",
-  "cat": "zap"
- },
- {
-  "name": "dr5-fx-14",
-  "file": "oneshots/dr5/fx/dr5-fx-14.flac",
-  "kind": "one",
-  "inst": "fx",
-  "style": "dr5",
-  "cat": "zap"
- },
- {
-  "name": "trap-kick-01",
-  "file": "oneshots/trap/kick/trap-kick-01.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "trap",
-  "cat": "kik"
- },
- {
-  "name": "trap-kick-02",
-  "file": "oneshots/trap/kick/trap-kick-02.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "trap",
-  "cat": "kik"
- },
- {
-  "name": "trap-kick-03",
-  "file": "oneshots/trap/kick/trap-kick-03.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "trap",
-  "cat": "kik"
- },
- {
-  "name": "trap-sub-01",
-  "file": "oneshots/trap/sub/trap-sub-01.flac",
-  "kind": "one",
-  "inst": "sub",
-  "style": "trap",
-  "cat": "kik"
- },
- {
-  "name": "trap-sub-02",
-  "file": "oneshots/trap/sub/trap-sub-02.flac",
-  "kind": "one",
-  "inst": "sub",
-  "style": "trap",
-  "cat": "kik"
- },
- {
-  "name": "trap-sub-03",
-  "file": "oneshots/trap/sub/trap-sub-03.flac",
-  "kind": "one",
-  "inst": "sub",
-  "style": "trap",
-  "cat": "kik"
- },
- {
-  "name": "trap-snare-01",
-  "file": "oneshots/trap/snare/trap-snare-01.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "trap",
-  "cat": "snr"
- },
- {
-  "name": "trap-snare-02",
-  "file": "oneshots/trap/snare/trap-snare-02.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "trap",
-  "cat": "snr"
- },
- {
-  "name": "trap-snare-03",
-  "file": "oneshots/trap/snare/trap-snare-03.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "trap",
-  "cat": "snr"
- },
- {
-  "name": "trap-clap-01",
-  "file": "oneshots/trap/clap/trap-clap-01.flac",
-  "kind": "one",
-  "inst": "clap",
-  "style": "trap",
-  "cat": "snr"
- },
- {
-  "name": "trap-clap-02",
-  "file": "oneshots/trap/clap/trap-clap-02.flac",
-  "kind": "one",
-  "inst": "clap",
-  "style": "trap",
-  "cat": "snr"
- },
- {
-  "name": "trap-rim-01",
-  "file": "oneshots/trap/rim/trap-rim-01.flac",
-  "kind": "one",
-  "inst": "rim",
-  "style": "trap",
-  "cat": "snr"
- },
- {
-  "name": "trap-hat-closed-01",
-  "file": "oneshots/trap/hat-closed/trap-hat-closed-01.flac",
-  "kind": "one",
-  "inst": "hat-closed",
-  "style": "trap",
-  "cat": "hh"
- },
- {
-  "name": "trap-hat-closed-02",
-  "file": "oneshots/trap/hat-closed/trap-hat-closed-02.flac",
-  "kind": "one",
-  "inst": "hat-closed",
-  "style": "trap",
-  "cat": "hh"
- },
- {
-  "name": "trap-hat-open-01",
-  "file": "oneshots/trap/hat-open/trap-hat-open-01.flac",
-  "kind": "one",
-  "inst": "hat-open",
-  "style": "trap",
-  "cat": "hh"
- },
- {
-  "name": "trap-cymbal-01",
-  "file": "oneshots/trap/cymbal/trap-cymbal-01.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "trap",
-  "cat": "cymb"
- },
- {
-  "name": "trap-cymbal-02",
-  "file": "oneshots/trap/cymbal/trap-cymbal-02.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "trap",
-  "cat": "cymb"
- },
- {
-  "name": "trap-tom-01",
-  "file": "oneshots/trap/tom/trap-tom-01.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "trap",
-  "cat": "tom"
- },
- {
-  "name": "trap-cowbell-01",
-  "file": "oneshots/trap/cowbell/trap-cowbell-01.flac",
-  "kind": "one",
-  "inst": "cowbell",
-  "style": "trap",
-  "cat": "perc"
- },
- {
-  "name": "bounce-kick-01",
-  "file": "oneshots/bounce/kick/bounce-kick-01.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "bounce",
-  "cat": "kik"
- },
- {
-  "name": "bounce-kick-02",
-  "file": "oneshots/bounce/kick/bounce-kick-02.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "bounce",
-  "cat": "kik"
- },
- {
-  "name": "bounce-kick-03",
-  "file": "oneshots/bounce/kick/bounce-kick-03.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "bounce",
-  "cat": "kik"
- },
- {
-  "name": "bounce-sub-01",
-  "file": "oneshots/bounce/sub/bounce-sub-01.flac",
-  "kind": "one",
-  "inst": "sub",
-  "style": "bounce",
-  "cat": "kik"
- },
- {
-  "name": "bounce-sub-02",
-  "file": "oneshots/bounce/sub/bounce-sub-02.flac",
-  "kind": "one",
-  "inst": "sub",
-  "style": "bounce",
-  "cat": "kik"
- },
- {
-  "name": "bounce-sub-03",
-  "file": "oneshots/bounce/sub/bounce-sub-03.flac",
-  "kind": "one",
-  "inst": "sub",
-  "style": "bounce",
-  "cat": "kik"
- },
- {
-  "name": "bounce-snare-01",
-  "file": "oneshots/bounce/snare/bounce-snare-01.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "bounce",
-  "cat": "snr"
- },
- {
-  "name": "bounce-snare-02",
-  "file": "oneshots/bounce/snare/bounce-snare-02.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "bounce",
-  "cat": "snr"
- },
- {
-  "name": "bounce-snare-03",
-  "file": "oneshots/bounce/snare/bounce-snare-03.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "bounce",
-  "cat": "snr"
- },
- {
-  "name": "bounce-clap-01",
-  "file": "oneshots/bounce/clap/bounce-clap-01.flac",
-  "kind": "one",
-  "inst": "clap",
-  "style": "bounce",
-  "cat": "snr"
- },
- {
-  "name": "bounce-clap-02",
-  "file": "oneshots/bounce/clap/bounce-clap-02.flac",
-  "kind": "one",
-  "inst": "clap",
-  "style": "bounce",
-  "cat": "snr"
- },
- {
-  "name": "bounce-hat-closed-01",
-  "file": "oneshots/bounce/hat-closed/bounce-hat-closed-01.flac",
-  "kind": "one",
-  "inst": "hat-closed",
-  "style": "bounce",
-  "cat": "hh"
- },
- {
-  "name": "bounce-hat-open-01",
-  "file": "oneshots/bounce/hat-open/bounce-hat-open-01.flac",
-  "kind": "one",
-  "inst": "hat-open",
-  "style": "bounce",
-  "cat": "hh"
- },
- {
-  "name": "bounce-cymbal-01",
-  "file": "oneshots/bounce/cymbal/bounce-cymbal-01.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "bounce",
-  "cat": "cymb"
- },
- {
-  "name": "bounce-tom-01",
-  "file": "oneshots/bounce/tom/bounce-tom-01.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "bounce",
-  "cat": "tom"
- },
- {
-  "name": "bounce-tom-02",
-  "file": "oneshots/bounce/tom/bounce-tom-02.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "bounce",
-  "cat": "tom"
- },
- {
-  "name": "bounce-tom-03",
-  "file": "oneshots/bounce/tom/bounce-tom-03.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "bounce",
-  "cat": "tom"
  },
  {
   "name": "lofi-kick-01",
-  "file": "oneshots/lofi/kick/lofi-kick-01.flac",
+  "file": "oneshots/kick/lofi-kick-01.flac",
   "kind": "one",
   "inst": "kick",
   "style": "lofi",
@@ -5169,7 +209,7 @@
  },
  {
   "name": "lofi-kick-02",
-  "file": "oneshots/lofi/kick/lofi-kick-02.flac",
+  "file": "oneshots/kick/lofi-kick-02.flac",
   "kind": "one",
   "inst": "kick",
   "style": "lofi",
@@ -5177,39 +217,255 @@
  },
  {
   "name": "lofi-kick-03",
-  "file": "oneshots/lofi/kick/lofi-kick-03.flac",
+  "file": "oneshots/kick/lofi-kick-03.flac",
   "kind": "one",
   "inst": "kick",
   "style": "lofi",
   "cat": "kik"
  },
  {
+  "name": "tr8-sub-02",
+  "file": "oneshots/sub/tr8-sub-02.flac",
+  "kind": "one",
+  "inst": "sub",
+  "style": "tr8",
+  "cat": "kik"
+ },
+ {
+  "name": "trap-sub-01",
+  "file": "oneshots/sub/trap-sub-01.flac",
+  "kind": "one",
+  "inst": "sub",
+  "style": "trap",
+  "cat": "kik"
+ },
+ {
+  "name": "trap-sub-02",
+  "file": "oneshots/sub/trap-sub-02.flac",
+  "kind": "one",
+  "inst": "sub",
+  "style": "trap",
+  "cat": "kik"
+ },
+ {
   "name": "lofi-sub-01",
-  "file": "oneshots/lofi/sub/lofi-sub-01.flac",
+  "file": "oneshots/sub/lofi-sub-01.flac",
   "kind": "one",
   "inst": "sub",
   "style": "lofi",
   "cat": "kik"
  },
  {
-  "name": "lofi-sub-02",
-  "file": "oneshots/lofi/sub/lofi-sub-02.flac",
-  "kind": "one",
-  "inst": "sub",
-  "style": "lofi",
-  "cat": "kik"
- },
- {
-  "name": "lofi-snare-01",
-  "file": "oneshots/lofi/snare/lofi-snare-01.flac",
+  "name": "tr808-snare-03",
+  "file": "oneshots/snare/tr808-snare-03.flac",
   "kind": "one",
   "inst": "snare",
-  "style": "lofi",
+  "style": "tr808",
+  "cat": "snr"
+ },
+ {
+  "name": "tr808-snare-16",
+  "file": "oneshots/snare/tr808-snare-16.flac",
+  "kind": "one",
+  "inst": "snare",
+  "style": "tr808",
+  "cat": "snr"
+ },
+ {
+  "name": "tr808-snare-17",
+  "file": "oneshots/snare/tr808-snare-17.flac",
+  "kind": "one",
+  "inst": "snare",
+  "style": "tr808",
+  "cat": "snr"
+ },
+ {
+  "name": "tr808-snare-18",
+  "file": "oneshots/snare/tr808-snare-18.flac",
+  "kind": "one",
+  "inst": "snare",
+  "style": "tr808",
+  "cat": "snr"
+ },
+ {
+  "name": "tr808-snare-21",
+  "file": "oneshots/snare/tr808-snare-21.flac",
+  "kind": "one",
+  "inst": "snare",
+  "style": "tr808",
+  "cat": "snr"
+ },
+ {
+  "name": "tr808-snare-22",
+  "file": "oneshots/snare/tr808-snare-22.flac",
+  "kind": "one",
+  "inst": "snare",
+  "style": "tr808",
+  "cat": "snr"
+ },
+ {
+  "name": "cr78-snare-01",
+  "file": "oneshots/snare/cr78-snare-01.flac",
+  "kind": "one",
+  "inst": "snare",
+  "style": "cr78",
+  "cat": "snr"
+ },
+ {
+  "name": "linn-snare-01",
+  "file": "oneshots/snare/linn-snare-01.flac",
+  "kind": "one",
+  "inst": "snare",
+  "style": "linn",
+  "cat": "snr"
+ },
+ {
+  "name": "linn-snare-02",
+  "file": "oneshots/snare/linn-snare-02.flac",
+  "kind": "one",
+  "inst": "snare",
+  "style": "linn",
+  "cat": "snr"
+ },
+ {
+  "name": "linn-snare-03",
+  "file": "oneshots/snare/linn-snare-03.flac",
+  "kind": "one",
+  "inst": "snare",
+  "style": "linn",
+  "cat": "snr"
+ },
+ {
+  "name": "rx5-snare-03",
+  "file": "oneshots/snare/rx5-snare-03.flac",
+  "kind": "one",
+  "inst": "snare",
+  "style": "rx5",
+  "cat": "snr"
+ },
+ {
+  "name": "rx5-snare-04",
+  "file": "oneshots/snare/rx5-snare-04.flac",
+  "kind": "one",
+  "inst": "snare",
+  "style": "rx5",
+  "cat": "snr"
+ },
+ {
+  "name": "rx5-snare-10",
+  "file": "oneshots/snare/rx5-snare-10.flac",
+  "kind": "one",
+  "inst": "snare",
+  "style": "rx5",
+  "cat": "snr"
+ },
+ {
+  "name": "rx5-snare-13",
+  "file": "oneshots/snare/rx5-snare-13.flac",
+  "kind": "one",
+  "inst": "snare",
+  "style": "rx5",
+  "cat": "snr"
+ },
+ {
+  "name": "rx5-snare-14",
+  "file": "oneshots/snare/rx5-snare-14.flac",
+  "kind": "one",
+  "inst": "snare",
+  "style": "rx5",
+  "cat": "snr"
+ },
+ {
+  "name": "rx5-snare-15",
+  "file": "oneshots/snare/rx5-snare-15.flac",
+  "kind": "one",
+  "inst": "snare",
+  "style": "rx5",
+  "cat": "snr"
+ },
+ {
+  "name": "rx5-snare-19",
+  "file": "oneshots/snare/rx5-snare-19.flac",
+  "kind": "one",
+  "inst": "snare",
+  "style": "rx5",
+  "cat": "snr"
+ },
+ {
+  "name": "tr8-snare-01",
+  "file": "oneshots/snare/tr8-snare-01.flac",
+  "kind": "one",
+  "inst": "snare",
+  "style": "tr8",
+  "cat": "snr"
+ },
+ {
+  "name": "tr8-snare-03",
+  "file": "oneshots/snare/tr8-snare-03.flac",
+  "kind": "one",
+  "inst": "snare",
+  "style": "tr8",
+  "cat": "snr"
+ },
+ {
+  "name": "tr8-snare-07",
+  "file": "oneshots/snare/tr8-snare-07.flac",
+  "kind": "one",
+  "inst": "snare",
+  "style": "tr8",
+  "cat": "snr"
+ },
+ {
+  "name": "tr8-snare-12",
+  "file": "oneshots/snare/tr8-snare-12.flac",
+  "kind": "one",
+  "inst": "snare",
+  "style": "tr8",
+  "cat": "snr"
+ },
+ {
+  "name": "tr8-snare-14",
+  "file": "oneshots/snare/tr8-snare-14.flac",
+  "kind": "one",
+  "inst": "snare",
+  "style": "tr8",
+  "cat": "snr"
+ },
+ {
+  "name": "tr8-snare-15",
+  "file": "oneshots/snare/tr8-snare-15.flac",
+  "kind": "one",
+  "inst": "snare",
+  "style": "tr8",
+  "cat": "snr"
+ },
+ {
+  "name": "dr5-snare-01",
+  "file": "oneshots/snare/dr5-snare-01.flac",
+  "kind": "one",
+  "inst": "snare",
+  "style": "dr5",
+  "cat": "snr"
+ },
+ {
+  "name": "dr5-snare-04",
+  "file": "oneshots/snare/dr5-snare-04.flac",
+  "kind": "one",
+  "inst": "snare",
+  "style": "dr5",
+  "cat": "snr"
+ },
+ {
+  "name": "dr5-snare-35",
+  "file": "oneshots/snare/dr5-snare-35.flac",
+  "kind": "one",
+  "inst": "snare",
+  "style": "dr5",
   "cat": "snr"
  },
  {
   "name": "lofi-snare-02",
-  "file": "oneshots/lofi/snare/lofi-snare-02.flac",
+  "file": "oneshots/snare/lofi-snare-02.flac",
   "kind": "one",
   "inst": "snare",
   "style": "lofi",
@@ -5217,79 +473,927 @@
  },
  {
   "name": "lofi-snare-03",
-  "file": "oneshots/lofi/snare/lofi-snare-03.flac",
+  "file": "oneshots/snare/lofi-snare-03.flac",
   "kind": "one",
   "inst": "snare",
   "style": "lofi",
   "cat": "snr"
  },
  {
+  "name": "tr808-clap-01",
+  "file": "oneshots/clap/tr808-clap-01.flac",
+  "kind": "one",
+  "inst": "clap",
+  "style": "tr808",
+  "cat": "snr"
+ },
+ {
+  "name": "linn-clap-01",
+  "file": "oneshots/clap/linn-clap-01.flac",
+  "kind": "one",
+  "inst": "clap",
+  "style": "linn",
+  "cat": "snr"
+ },
+ {
+  "name": "tr505-clap-01",
+  "file": "oneshots/clap/tr505-clap-01.flac",
+  "kind": "one",
+  "inst": "clap",
+  "style": "tr505",
+  "cat": "snr"
+ },
+ {
+  "name": "tr8-clap-07",
+  "file": "oneshots/clap/tr8-clap-07.flac",
+  "kind": "one",
+  "inst": "clap",
+  "style": "tr8",
+  "cat": "snr"
+ },
+ {
+  "name": "dr5-clap-01",
+  "file": "oneshots/clap/dr5-clap-01.flac",
+  "kind": "one",
+  "inst": "clap",
+  "style": "dr5",
+  "cat": "snr"
+ },
+ {
+  "name": "trap-clap-01",
+  "file": "oneshots/clap/trap-clap-01.flac",
+  "kind": "one",
+  "inst": "clap",
+  "style": "trap",
+  "cat": "snr"
+ },
+ {
   "name": "lofi-clap-01",
-  "file": "oneshots/lofi/clap/lofi-clap-01.flac",
+  "file": "oneshots/clap/lofi-clap-01.flac",
   "kind": "one",
   "inst": "clap",
   "style": "lofi",
   "cat": "snr"
  },
  {
-  "name": "lofi-clap-02",
-  "file": "oneshots/lofi/clap/lofi-clap-02.flac",
+  "name": "tr808-rim-01",
+  "file": "oneshots/rim/tr808-rim-01.flac",
   "kind": "one",
-  "inst": "clap",
-  "style": "lofi",
+  "inst": "rim",
+  "style": "tr808",
   "cat": "snr"
+ },
+ {
+  "name": "cr78-rim-01",
+  "file": "oneshots/rim/cr78-rim-01.flac",
+  "kind": "one",
+  "inst": "rim",
+  "style": "cr78",
+  "cat": "snr"
+ },
+ {
+  "name": "linn-rim-01",
+  "file": "oneshots/rim/linn-rim-01.flac",
+  "kind": "one",
+  "inst": "rim",
+  "style": "linn",
+  "cat": "snr"
+ },
+ {
+  "name": "linn-rim-02",
+  "file": "oneshots/rim/linn-rim-02.flac",
+  "kind": "one",
+  "inst": "rim",
+  "style": "linn",
+  "cat": "snr"
+ },
+ {
+  "name": "linn-rim-03",
+  "file": "oneshots/rim/linn-rim-03.flac",
+  "kind": "one",
+  "inst": "rim",
+  "style": "linn",
+  "cat": "snr"
+ },
+ {
+  "name": "tr505-rim-01",
+  "file": "oneshots/rim/tr505-rim-01.flac",
+  "kind": "one",
+  "inst": "rim",
+  "style": "tr505",
+  "cat": "snr"
+ },
+ {
+  "name": "rx5-rim-01",
+  "file": "oneshots/rim/rx5-rim-01.flac",
+  "kind": "one",
+  "inst": "rim",
+  "style": "rx5",
+  "cat": "snr"
+ },
+ {
+  "name": "rx5-rim-03",
+  "file": "oneshots/rim/rx5-rim-03.flac",
+  "kind": "one",
+  "inst": "rim",
+  "style": "rx5",
+  "cat": "snr"
+ },
+ {
+  "name": "tr8-rim-02",
+  "file": "oneshots/rim/tr8-rim-02.flac",
+  "kind": "one",
+  "inst": "rim",
+  "style": "tr8",
+  "cat": "snr"
+ },
+ {
+  "name": "dr5-rim-05",
+  "file": "oneshots/rim/dr5-rim-05.flac",
+  "kind": "one",
+  "inst": "rim",
+  "style": "dr5",
+  "cat": "snr"
+ },
+ {
+  "name": "dr5-rim-06",
+  "file": "oneshots/rim/dr5-rim-06.flac",
+  "kind": "one",
+  "inst": "rim",
+  "style": "dr5",
+  "cat": "snr"
+ },
+ {
+  "name": "dr5-rim-07",
+  "file": "oneshots/rim/dr5-rim-07.flac",
+  "kind": "one",
+  "inst": "rim",
+  "style": "dr5",
+  "cat": "snr"
+ },
+ {
+  "name": "dr5-rim-08",
+  "file": "oneshots/rim/dr5-rim-08.flac",
+  "kind": "one",
+  "inst": "rim",
+  "style": "dr5",
+  "cat": "snr"
+ },
+ {
+  "name": "dr5-rim-09",
+  "file": "oneshots/rim/dr5-rim-09.flac",
+  "kind": "one",
+  "inst": "rim",
+  "style": "dr5",
+  "cat": "snr"
+ },
+ {
+  "name": "tr808-hat-closed-01",
+  "file": "oneshots/hat-closed/tr808-hat-closed-01.flac",
+  "kind": "one",
+  "inst": "hat-closed",
+  "style": "tr808",
+  "cat": "hh"
+ },
+ {
+  "name": "cr78-hat-closed-01",
+  "file": "oneshots/hat-closed/cr78-hat-closed-01.flac",
+  "kind": "one",
+  "inst": "hat-closed",
+  "style": "cr78",
+  "cat": "hh"
+ },
+ {
+  "name": "cr78-hat-closed-02",
+  "file": "oneshots/hat-closed/cr78-hat-closed-02.flac",
+  "kind": "one",
+  "inst": "hat-closed",
+  "style": "cr78",
+  "cat": "hh"
+ },
+ {
+  "name": "cr78-hat-closed-03",
+  "file": "oneshots/hat-closed/cr78-hat-closed-03.flac",
+  "kind": "one",
+  "inst": "hat-closed",
+  "style": "cr78",
+  "cat": "hh"
+ },
+ {
+  "name": "linn-hat-closed-01",
+  "file": "oneshots/hat-closed/linn-hat-closed-01.flac",
+  "kind": "one",
+  "inst": "hat-closed",
+  "style": "linn",
+  "cat": "hh"
+ },
+ {
+  "name": "linn-hat-closed-02",
+  "file": "oneshots/hat-closed/linn-hat-closed-02.flac",
+  "kind": "one",
+  "inst": "hat-closed",
+  "style": "linn",
+  "cat": "hh"
+ },
+ {
+  "name": "linn-hat-closed-03",
+  "file": "oneshots/hat-closed/linn-hat-closed-03.flac",
+  "kind": "one",
+  "inst": "hat-closed",
+  "style": "linn",
+  "cat": "hh"
+ },
+ {
+  "name": "linn-hat-closed-04",
+  "file": "oneshots/hat-closed/linn-hat-closed-04.flac",
+  "kind": "one",
+  "inst": "hat-closed",
+  "style": "linn",
+  "cat": "hh"
+ },
+ {
+  "name": "linn-hat-closed-05",
+  "file": "oneshots/hat-closed/linn-hat-closed-05.flac",
+  "kind": "one",
+  "inst": "hat-closed",
+  "style": "linn",
+  "cat": "hh"
+ },
+ {
+  "name": "mrk2-hat-closed-01",
+  "file": "oneshots/hat-closed/mrk2-hat-closed-01.flac",
+  "kind": "one",
+  "inst": "hat-closed",
+  "style": "mrk2",
+  "cat": "hh"
+ },
+ {
+  "name": "rx5-hat-closed-02",
+  "file": "oneshots/hat-closed/rx5-hat-closed-02.flac",
+  "kind": "one",
+  "inst": "hat-closed",
+  "style": "rx5",
+  "cat": "hh"
+ },
+ {
+  "name": "tr8-hat-closed-06",
+  "file": "oneshots/hat-closed/tr8-hat-closed-06.flac",
+  "kind": "one",
+  "inst": "hat-closed",
+  "style": "tr8",
+  "cat": "hh"
+ },
+ {
+  "name": "tr8-hat-closed-07",
+  "file": "oneshots/hat-closed/tr8-hat-closed-07.flac",
+  "kind": "one",
+  "inst": "hat-closed",
+  "style": "tr8",
+  "cat": "hh"
  },
  {
   "name": "lofi-hat-closed-01",
-  "file": "oneshots/lofi/hat-closed/lofi-hat-closed-01.flac",
+  "file": "oneshots/hat-closed/lofi-hat-closed-01.flac",
   "kind": "one",
   "inst": "hat-closed",
   "style": "lofi",
   "cat": "hh"
  },
  {
-  "name": "lofi-hat-closed-02",
-  "file": "oneshots/lofi/hat-closed/lofi-hat-closed-02.flac",
+  "name": "tr808-hat-open-01",
+  "file": "oneshots/hat-open/tr808-hat-open-01.flac",
   "kind": "one",
-  "inst": "hat-closed",
-  "style": "lofi",
+  "inst": "hat-open",
+  "style": "tr808",
+  "cat": "hh"
+ },
+ {
+  "name": "tr808-hat-open-02",
+  "file": "oneshots/hat-open/tr808-hat-open-02.flac",
+  "kind": "one",
+  "inst": "hat-open",
+  "style": "tr808",
+  "cat": "hh"
+ },
+ {
+  "name": "tr808-hat-open-03",
+  "file": "oneshots/hat-open/tr808-hat-open-03.flac",
+  "kind": "one",
+  "inst": "hat-open",
+  "style": "tr808",
+  "cat": "hh"
+ },
+ {
+  "name": "linn-hat-open-01",
+  "file": "oneshots/hat-open/linn-hat-open-01.flac",
+  "kind": "one",
+  "inst": "hat-open",
+  "style": "linn",
+  "cat": "hh"
+ },
+ {
+  "name": "mrk2-hat-open-01",
+  "file": "oneshots/hat-open/mrk2-hat-open-01.flac",
+  "kind": "one",
+  "inst": "hat-open",
+  "style": "mrk2",
+  "cat": "hh"
+ },
+ {
+  "name": "tr505-hat-open-01",
+  "file": "oneshots/hat-open/tr505-hat-open-01.flac",
+  "kind": "one",
+  "inst": "hat-open",
+  "style": "tr505",
+  "cat": "hh"
+ },
+ {
+  "name": "rx5-hat-open-01",
+  "file": "oneshots/hat-open/rx5-hat-open-01.flac",
+  "kind": "one",
+  "inst": "hat-open",
+  "style": "rx5",
+  "cat": "hh"
+ },
+ {
+  "name": "rx5-hat-open-02",
+  "file": "oneshots/hat-open/rx5-hat-open-02.flac",
+  "kind": "one",
+  "inst": "hat-open",
+  "style": "rx5",
+  "cat": "hh"
+ },
+ {
+  "name": "tr8-hat-open-01",
+  "file": "oneshots/hat-open/tr8-hat-open-01.flac",
+  "kind": "one",
+  "inst": "hat-open",
+  "style": "tr8",
+  "cat": "hh"
+ },
+ {
+  "name": "tr8-hat-open-04",
+  "file": "oneshots/hat-open/tr8-hat-open-04.flac",
+  "kind": "one",
+  "inst": "hat-open",
+  "style": "tr8",
+  "cat": "hh"
+ },
+ {
+  "name": "tr8-hat-open-07",
+  "file": "oneshots/hat-open/tr8-hat-open-07.flac",
+  "kind": "one",
+  "inst": "hat-open",
+  "style": "tr8",
+  "cat": "hh"
+ },
+ {
+  "name": "tr8-hat-open-09",
+  "file": "oneshots/hat-open/tr8-hat-open-09.flac",
+  "kind": "one",
+  "inst": "hat-open",
+  "style": "tr8",
   "cat": "hh"
  },
  {
   "name": "lofi-hat-open-01",
-  "file": "oneshots/lofi/hat-open/lofi-hat-open-01.flac",
+  "file": "oneshots/hat-open/lofi-hat-open-01.flac",
   "kind": "one",
   "inst": "hat-open",
   "style": "lofi",
   "cat": "hh"
  },
  {
-  "name": "lofi-hat-open-02",
-  "file": "oneshots/lofi/hat-open/lofi-hat-open-02.flac",
-  "kind": "one",
-  "inst": "hat-open",
-  "style": "lofi",
-  "cat": "hh"
- },
- {
-  "name": "lofi-cymbal-01",
-  "file": "oneshots/lofi/cymbal/lofi-cymbal-01.flac",
+  "name": "tr808-cymbal-12",
+  "file": "oneshots/cymbal/tr808-cymbal-12.flac",
   "kind": "one",
   "inst": "cymbal",
-  "style": "lofi",
+  "style": "tr808",
   "cat": "cymb"
  },
  {
-  "name": "lofi-cymbal-02",
-  "file": "oneshots/lofi/cymbal/lofi-cymbal-02.flac",
+  "name": "tr808-cymbal-14",
+  "file": "oneshots/cymbal/tr808-cymbal-14.flac",
   "kind": "one",
   "inst": "cymbal",
-  "style": "lofi",
+  "style": "tr808",
   "cat": "cymb"
+ },
+ {
+  "name": "cr78-cymbal-01",
+  "file": "oneshots/cymbal/cr78-cymbal-01.flac",
+  "kind": "one",
+  "inst": "cymbal",
+  "style": "cr78",
+  "cat": "cymb"
+ },
+ {
+  "name": "linn-cymbal-01",
+  "file": "oneshots/cymbal/linn-cymbal-01.flac",
+  "kind": "one",
+  "inst": "cymbal",
+  "style": "linn",
+  "cat": "cymb"
+ },
+ {
+  "name": "mrk2-cymbal-01",
+  "file": "oneshots/cymbal/mrk2-cymbal-01.flac",
+  "kind": "one",
+  "inst": "cymbal",
+  "style": "mrk2",
+  "cat": "cymb"
+ },
+ {
+  "name": "mrk2-cymbal-02",
+  "file": "oneshots/cymbal/mrk2-cymbal-02.flac",
+  "kind": "one",
+  "inst": "cymbal",
+  "style": "mrk2",
+  "cat": "cymb"
+ },
+ {
+  "name": "tr505-cymbal-01",
+  "file": "oneshots/cymbal/tr505-cymbal-01.flac",
+  "kind": "one",
+  "inst": "cymbal",
+  "style": "tr505",
+  "cat": "cymb"
+ },
+ {
+  "name": "rx5-cymbal-01",
+  "file": "oneshots/cymbal/rx5-cymbal-01.flac",
+  "kind": "one",
+  "inst": "cymbal",
+  "style": "rx5",
+  "cat": "cymb"
+ },
+ {
+  "name": "rx5-cymbal-02",
+  "file": "oneshots/cymbal/rx5-cymbal-02.flac",
+  "kind": "one",
+  "inst": "cymbal",
+  "style": "rx5",
+  "cat": "cymb"
+ },
+ {
+  "name": "rx5-cymbal-03",
+  "file": "oneshots/cymbal/rx5-cymbal-03.flac",
+  "kind": "one",
+  "inst": "cymbal",
+  "style": "rx5",
+  "cat": "cymb"
+ },
+ {
+  "name": "rx5-cymbal-04",
+  "file": "oneshots/cymbal/rx5-cymbal-04.flac",
+  "kind": "one",
+  "inst": "cymbal",
+  "style": "rx5",
+  "cat": "cymb"
+ },
+ {
+  "name": "rx5-cymbal-05",
+  "file": "oneshots/cymbal/rx5-cymbal-05.flac",
+  "kind": "one",
+  "inst": "cymbal",
+  "style": "rx5",
+  "cat": "cymb"
+ },
+ {
+  "name": "rx5-cymbal-06",
+  "file": "oneshots/cymbal/rx5-cymbal-06.flac",
+  "kind": "one",
+  "inst": "cymbal",
+  "style": "rx5",
+  "cat": "cymb"
+ },
+ {
+  "name": "tr8-cymbal-04",
+  "file": "oneshots/cymbal/tr8-cymbal-04.flac",
+  "kind": "one",
+  "inst": "cymbal",
+  "style": "tr8",
+  "cat": "cymb"
+ },
+ {
+  "name": "dr5-cymbal-01",
+  "file": "oneshots/cymbal/dr5-cymbal-01.flac",
+  "kind": "one",
+  "inst": "cymbal",
+  "style": "dr5",
+  "cat": "cymb"
+ },
+ {
+  "name": "linn-ride-01",
+  "file": "oneshots/ride/linn-ride-01.flac",
+  "kind": "one",
+  "inst": "ride",
+  "style": "linn",
+  "cat": "cymb"
+ },
+ {
+  "name": "tr505-ride-01",
+  "file": "oneshots/ride/tr505-ride-01.flac",
+  "kind": "one",
+  "inst": "ride",
+  "style": "tr505",
+  "cat": "cymb"
+ },
+ {
+  "name": "rx5-ride-01",
+  "file": "oneshots/ride/rx5-ride-01.flac",
+  "kind": "one",
+  "inst": "ride",
+  "style": "rx5",
+  "cat": "cymb"
+ },
+ {
+  "name": "rx5-ride-02",
+  "file": "oneshots/ride/rx5-ride-02.flac",
+  "kind": "one",
+  "inst": "ride",
+  "style": "rx5",
+  "cat": "cymb"
+ },
+ {
+  "name": "rx5-ride-03",
+  "file": "oneshots/ride/rx5-ride-03.flac",
+  "kind": "one",
+  "inst": "ride",
+  "style": "rx5",
+  "cat": "cymb"
+ },
+ {
+  "name": "tr8-ride-01",
+  "file": "oneshots/ride/tr8-ride-01.flac",
+  "kind": "one",
+  "inst": "ride",
+  "style": "tr8",
+  "cat": "cymb"
+ },
+ {
+  "name": "tr8-ride-04",
+  "file": "oneshots/ride/tr8-ride-04.flac",
+  "kind": "one",
+  "inst": "ride",
+  "style": "tr8",
+  "cat": "cymb"
+ },
+ {
+  "name": "tr808-tom-02",
+  "file": "oneshots/tom/tr808-tom-02.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "tr808",
+  "cat": "tom"
+ },
+ {
+  "name": "tr808-tom-09",
+  "file": "oneshots/tom/tr808-tom-09.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "tr808",
+  "cat": "tom"
+ },
+ {
+  "name": "linn-tom-01",
+  "file": "oneshots/tom/linn-tom-01.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "linn",
+  "cat": "tom"
+ },
+ {
+  "name": "linn-tom-02",
+  "file": "oneshots/tom/linn-tom-02.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "linn",
+  "cat": "tom"
+ },
+ {
+  "name": "linn-tom-03",
+  "file": "oneshots/tom/linn-tom-03.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "linn",
+  "cat": "tom"
+ },
+ {
+  "name": "linn-tom-04",
+  "file": "oneshots/tom/linn-tom-04.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "linn",
+  "cat": "tom"
+ },
+ {
+  "name": "mrk2-tom-01",
+  "file": "oneshots/tom/mrk2-tom-01.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "mrk2",
+  "cat": "tom"
+ },
+ {
+  "name": "tr505-tom-01",
+  "file": "oneshots/tom/tr505-tom-01.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "tr505",
+  "cat": "tom"
+ },
+ {
+  "name": "tr505-tom-02",
+  "file": "oneshots/tom/tr505-tom-02.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "tr505",
+  "cat": "tom"
+ },
+ {
+  "name": "tr505-tom-03",
+  "file": "oneshots/tom/tr505-tom-03.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "tr505",
+  "cat": "tom"
+ },
+ {
+  "name": "rx5-tom-02",
+  "file": "oneshots/tom/rx5-tom-02.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "rx5",
+  "cat": "tom"
+ },
+ {
+  "name": "rx5-tom-03",
+  "file": "oneshots/tom/rx5-tom-03.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "rx5",
+  "cat": "tom"
+ },
+ {
+  "name": "rx5-tom-04",
+  "file": "oneshots/tom/rx5-tom-04.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "rx5",
+  "cat": "tom"
+ },
+ {
+  "name": "rx5-tom-05",
+  "file": "oneshots/tom/rx5-tom-05.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "rx5",
+  "cat": "tom"
+ },
+ {
+  "name": "rx5-tom-06",
+  "file": "oneshots/tom/rx5-tom-06.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "rx5",
+  "cat": "tom"
+ },
+ {
+  "name": "rx5-tom-07",
+  "file": "oneshots/tom/rx5-tom-07.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "rx5",
+  "cat": "tom"
+ },
+ {
+  "name": "rx5-tom-10",
+  "file": "oneshots/tom/rx5-tom-10.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "rx5",
+  "cat": "tom"
+ },
+ {
+  "name": "rx5-tom-11",
+  "file": "oneshots/tom/rx5-tom-11.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "rx5",
+  "cat": "tom"
+ },
+ {
+  "name": "rx5-tom-12",
+  "file": "oneshots/tom/rx5-tom-12.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "rx5",
+  "cat": "tom"
+ },
+ {
+  "name": "rx5-tom-14",
+  "file": "oneshots/tom/rx5-tom-14.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "rx5",
+  "cat": "tom"
+ },
+ {
+  "name": "rx5-tom-15",
+  "file": "oneshots/tom/rx5-tom-15.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "rx5",
+  "cat": "tom"
+ },
+ {
+  "name": "rx5-tom-16",
+  "file": "oneshots/tom/rx5-tom-16.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "rx5",
+  "cat": "tom"
+ },
+ {
+  "name": "rx5-tom-18",
+  "file": "oneshots/tom/rx5-tom-18.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "rx5",
+  "cat": "tom"
+ },
+ {
+  "name": "rx5-tom-19",
+  "file": "oneshots/tom/rx5-tom-19.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "rx5",
+  "cat": "tom"
+ },
+ {
+  "name": "rx5-tom-20",
+  "file": "oneshots/tom/rx5-tom-20.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "rx5",
+  "cat": "tom"
+ },
+ {
+  "name": "tr8-tom-01",
+  "file": "oneshots/tom/tr8-tom-01.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "tr8",
+  "cat": "tom"
+ },
+ {
+  "name": "tr8-tom-02",
+  "file": "oneshots/tom/tr8-tom-02.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "tr8",
+  "cat": "tom"
+ },
+ {
+  "name": "tr8-tom-07",
+  "file": "oneshots/tom/tr8-tom-07.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "tr8",
+  "cat": "tom"
+ },
+ {
+  "name": "tr8-tom-08",
+  "file": "oneshots/tom/tr8-tom-08.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "tr8",
+  "cat": "tom"
+ },
+ {
+  "name": "tr8-tom-09",
+  "file": "oneshots/tom/tr8-tom-09.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "tr8",
+  "cat": "tom"
+ },
+ {
+  "name": "tr8-tom-11",
+  "file": "oneshots/tom/tr8-tom-11.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "tr8",
+  "cat": "tom"
+ },
+ {
+  "name": "tr8-tom-16",
+  "file": "oneshots/tom/tr8-tom-16.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "tr8",
+  "cat": "tom"
+ },
+ {
+  "name": "tr8-tom-20",
+  "file": "oneshots/tom/tr8-tom-20.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "tr8",
+  "cat": "tom"
+ },
+ {
+  "name": "tr8-tom-21",
+  "file": "oneshots/tom/tr8-tom-21.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "tr8",
+  "cat": "tom"
+ },
+ {
+  "name": "tr8-tom-25",
+  "file": "oneshots/tom/tr8-tom-25.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "tr8",
+  "cat": "tom"
+ },
+ {
+  "name": "dr5-tom-01",
+  "file": "oneshots/tom/dr5-tom-01.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "dr5",
+  "cat": "tom"
+ },
+ {
+  "name": "dr5-tom-03",
+  "file": "oneshots/tom/dr5-tom-03.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "dr5",
+  "cat": "tom"
+ },
+ {
+  "name": "dr5-tom-04",
+  "file": "oneshots/tom/dr5-tom-04.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "dr5",
+  "cat": "tom"
+ },
+ {
+  "name": "dr5-tom-05",
+  "file": "oneshots/tom/dr5-tom-05.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "dr5",
+  "cat": "tom"
+ },
+ {
+  "name": "dr5-tom-09",
+  "file": "oneshots/tom/dr5-tom-09.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "dr5",
+  "cat": "tom"
+ },
+ {
+  "name": "dr5-tom-13",
+  "file": "oneshots/tom/dr5-tom-13.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "dr5",
+  "cat": "tom"
+ },
+ {
+  "name": "dr5-tom-19",
+  "file": "oneshots/tom/dr5-tom-19.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "dr5",
+  "cat": "tom"
+ },
+ {
+  "name": "dr5-tom-20",
+  "file": "oneshots/tom/dr5-tom-20.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "dr5",
+  "cat": "tom"
+ },
+ {
+  "name": "dr5-tom-21",
+  "file": "oneshots/tom/dr5-tom-21.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "dr5",
+  "cat": "tom"
  },
  {
   "name": "lofi-tom-01",
-  "file": "oneshots/lofi/tom/lofi-tom-01.flac",
+  "file": "oneshots/tom/lofi-tom-01.flac",
   "kind": "one",
   "inst": "tom",
   "style": "lofi",
@@ -5297,34 +1401,954 @@
  },
  {
   "name": "lofi-tom-02",
-  "file": "oneshots/lofi/tom/lofi-tom-02.flac",
+  "file": "oneshots/tom/lofi-tom-02.flac",
   "kind": "one",
   "inst": "tom",
   "style": "lofi",
   "cat": "tom"
  },
  {
-  "name": "lofi-tom-03",
-  "file": "oneshots/lofi/tom/lofi-tom-03.flac",
+  "name": "tr808-conga-02",
+  "file": "oneshots/conga/tr808-conga-02.flac",
   "kind": "one",
-  "inst": "tom",
-  "style": "lofi",
-  "cat": "tom"
+  "inst": "conga",
+  "style": "tr808",
+  "cat": "perc"
  },
  {
-  "name": "lofi-tom-04",
-  "file": "oneshots/lofi/tom/lofi-tom-04.flac",
+  "name": "tr808-conga-07",
+  "file": "oneshots/conga/tr808-conga-07.flac",
   "kind": "one",
-  "inst": "tom",
-  "style": "lofi",
-  "cat": "tom"
+  "inst": "conga",
+  "style": "tr808",
+  "cat": "perc"
+ },
+ {
+  "name": "tr808-conga-10",
+  "file": "oneshots/conga/tr808-conga-10.flac",
+  "kind": "one",
+  "inst": "conga",
+  "style": "tr808",
+  "cat": "perc"
+ },
+ {
+  "name": "tr808-conga-12",
+  "file": "oneshots/conga/tr808-conga-12.flac",
+  "kind": "one",
+  "inst": "conga",
+  "style": "tr808",
+  "cat": "perc"
+ },
+ {
+  "name": "tr808-conga-15",
+  "file": "oneshots/conga/tr808-conga-15.flac",
+  "kind": "one",
+  "inst": "conga",
+  "style": "tr808",
+  "cat": "perc"
+ },
+ {
+  "name": "cr78-conga-01",
+  "file": "oneshots/conga/cr78-conga-01.flac",
+  "kind": "one",
+  "inst": "conga",
+  "style": "cr78",
+  "cat": "perc"
+ },
+ {
+  "name": "linn-conga-01",
+  "file": "oneshots/conga/linn-conga-01.flac",
+  "kind": "one",
+  "inst": "conga",
+  "style": "linn",
+  "cat": "perc"
+ },
+ {
+  "name": "linn-conga-02",
+  "file": "oneshots/conga/linn-conga-02.flac",
+  "kind": "one",
+  "inst": "conga",
+  "style": "linn",
+  "cat": "perc"
+ },
+ {
+  "name": "linn-conga-03",
+  "file": "oneshots/conga/linn-conga-03.flac",
+  "kind": "one",
+  "inst": "conga",
+  "style": "linn",
+  "cat": "perc"
+ },
+ {
+  "name": "linn-conga-04",
+  "file": "oneshots/conga/linn-conga-04.flac",
+  "kind": "one",
+  "inst": "conga",
+  "style": "linn",
+  "cat": "perc"
+ },
+ {
+  "name": "linn-conga-05",
+  "file": "oneshots/conga/linn-conga-05.flac",
+  "kind": "one",
+  "inst": "conga",
+  "style": "linn",
+  "cat": "perc"
+ },
+ {
+  "name": "tr505-conga-01",
+  "file": "oneshots/conga/tr505-conga-01.flac",
+  "kind": "one",
+  "inst": "conga",
+  "style": "tr505",
+  "cat": "perc"
+ },
+ {
+  "name": "tr505-conga-02",
+  "file": "oneshots/conga/tr505-conga-02.flac",
+  "kind": "one",
+  "inst": "conga",
+  "style": "tr505",
+  "cat": "perc"
+ },
+ {
+  "name": "rx5-conga-01",
+  "file": "oneshots/conga/rx5-conga-01.flac",
+  "kind": "one",
+  "inst": "conga",
+  "style": "rx5",
+  "cat": "perc"
+ },
+ {
+  "name": "rx5-conga-03",
+  "file": "oneshots/conga/rx5-conga-03.flac",
+  "kind": "one",
+  "inst": "conga",
+  "style": "rx5",
+  "cat": "perc"
+ },
+ {
+  "name": "tr8-conga-01",
+  "file": "oneshots/conga/tr8-conga-01.flac",
+  "kind": "one",
+  "inst": "conga",
+  "style": "tr8",
+  "cat": "perc"
+ },
+ {
+  "name": "tr8-conga-03",
+  "file": "oneshots/conga/tr8-conga-03.flac",
+  "kind": "one",
+  "inst": "conga",
+  "style": "tr8",
+  "cat": "perc"
+ },
+ {
+  "name": "tr8-conga-04",
+  "file": "oneshots/conga/tr8-conga-04.flac",
+  "kind": "one",
+  "inst": "conga",
+  "style": "tr8",
+  "cat": "perc"
+ },
+ {
+  "name": "tr8-conga-05",
+  "file": "oneshots/conga/tr8-conga-05.flac",
+  "kind": "one",
+  "inst": "conga",
+  "style": "tr8",
+  "cat": "perc"
+ },
+ {
+  "name": "tr8-conga-06",
+  "file": "oneshots/conga/tr8-conga-06.flac",
+  "kind": "one",
+  "inst": "conga",
+  "style": "tr8",
+  "cat": "perc"
+ },
+ {
+  "name": "tr8-conga-07",
+  "file": "oneshots/conga/tr8-conga-07.flac",
+  "kind": "one",
+  "inst": "conga",
+  "style": "tr8",
+  "cat": "perc"
+ },
+ {
+  "name": "tr8-conga-08",
+  "file": "oneshots/conga/tr8-conga-08.flac",
+  "kind": "one",
+  "inst": "conga",
+  "style": "tr8",
+  "cat": "perc"
+ },
+ {
+  "name": "tr8-conga-09",
+  "file": "oneshots/conga/tr8-conga-09.flac",
+  "kind": "one",
+  "inst": "conga",
+  "style": "tr8",
+  "cat": "perc"
+ },
+ {
+  "name": "dr5-conga-04",
+  "file": "oneshots/conga/dr5-conga-04.flac",
+  "kind": "one",
+  "inst": "conga",
+  "style": "dr5",
+  "cat": "perc"
+ },
+ {
+  "name": "cr78-bongo-01",
+  "file": "oneshots/bongo/cr78-bongo-01.flac",
+  "kind": "one",
+  "inst": "bongo",
+  "style": "cr78",
+  "cat": "perc"
+ },
+ {
+  "name": "cr78-bongo-02",
+  "file": "oneshots/bongo/cr78-bongo-02.flac",
+  "kind": "one",
+  "inst": "bongo",
+  "style": "cr78",
+  "cat": "perc"
+ },
+ {
+  "name": "mrk2-bongo-01",
+  "file": "oneshots/bongo/mrk2-bongo-01.flac",
+  "kind": "one",
+  "inst": "bongo",
+  "style": "mrk2",
+  "cat": "perc"
+ },
+ {
+  "name": "rx5-bongo-01",
+  "file": "oneshots/bongo/rx5-bongo-01.flac",
+  "kind": "one",
+  "inst": "bongo",
+  "style": "rx5",
+  "cat": "perc"
+ },
+ {
+  "name": "rx5-bongo-02",
+  "file": "oneshots/bongo/rx5-bongo-02.flac",
+  "kind": "one",
+  "inst": "bongo",
+  "style": "rx5",
+  "cat": "perc"
+ },
+ {
+  "name": "tr808-cowbell-01",
+  "file": "oneshots/cowbell/tr808-cowbell-01.flac",
+  "kind": "one",
+  "inst": "cowbell",
+  "style": "tr808",
+  "cat": "perc"
+ },
+ {
+  "name": "cr78-cowbell-01",
+  "file": "oneshots/cowbell/cr78-cowbell-01.flac",
+  "kind": "one",
+  "inst": "cowbell",
+  "style": "cr78",
+  "cat": "perc"
+ },
+ {
+  "name": "linn-cowbell-01",
+  "file": "oneshots/cowbell/linn-cowbell-01.flac",
+  "kind": "one",
+  "inst": "cowbell",
+  "style": "linn",
+  "cat": "perc"
+ },
+ {
+  "name": "tr505-cowbell-01",
+  "file": "oneshots/cowbell/tr505-cowbell-01.flac",
+  "kind": "one",
+  "inst": "cowbell",
+  "style": "tr505",
+  "cat": "perc"
+ },
+ {
+  "name": "tr505-cowbell-02",
+  "file": "oneshots/cowbell/tr505-cowbell-02.flac",
+  "kind": "one",
+  "inst": "cowbell",
+  "style": "tr505",
+  "cat": "perc"
+ },
+ {
+  "name": "rx5-cowbell-01",
+  "file": "oneshots/cowbell/rx5-cowbell-01.flac",
+  "kind": "one",
+  "inst": "cowbell",
+  "style": "rx5",
+  "cat": "perc"
+ },
+ {
+  "name": "rx5-cowbell-02",
+  "file": "oneshots/cowbell/rx5-cowbell-02.flac",
+  "kind": "one",
+  "inst": "cowbell",
+  "style": "rx5",
+  "cat": "perc"
+ },
+ {
+  "name": "tr8-cowbell-02",
+  "file": "oneshots/cowbell/tr8-cowbell-02.flac",
+  "kind": "one",
+  "inst": "cowbell",
+  "style": "tr8",
+  "cat": "perc"
+ },
+ {
+  "name": "dr5-cowbell-01",
+  "file": "oneshots/cowbell/dr5-cowbell-01.flac",
+  "kind": "one",
+  "inst": "cowbell",
+  "style": "dr5",
+  "cat": "perc"
+ },
+ {
+  "name": "dr5-cowbell-02",
+  "file": "oneshots/cowbell/dr5-cowbell-02.flac",
+  "kind": "one",
+  "inst": "cowbell",
+  "style": "dr5",
+  "cat": "perc"
+ },
+ {
+  "name": "dr5-cowbell-03",
+  "file": "oneshots/cowbell/dr5-cowbell-03.flac",
+  "kind": "one",
+  "inst": "cowbell",
+  "style": "dr5",
+  "cat": "perc"
+ },
+ {
+  "name": "tr808-clave-01",
+  "file": "oneshots/clave/tr808-clave-01.flac",
+  "kind": "one",
+  "inst": "clave",
+  "style": "tr808",
+  "cat": "wood"
+ },
+ {
+  "name": "mrk2-clave-01",
+  "file": "oneshots/clave/mrk2-clave-01.flac",
+  "kind": "one",
+  "inst": "clave",
+  "style": "mrk2",
+  "cat": "wood"
+ },
+ {
+  "name": "tr8-clave-01",
+  "file": "oneshots/clave/tr8-clave-01.flac",
+  "kind": "one",
+  "inst": "clave",
+  "style": "tr8",
+  "cat": "wood"
+ },
+ {
+  "name": "tr8-clave-02",
+  "file": "oneshots/clave/tr8-clave-02.flac",
+  "kind": "one",
+  "inst": "clave",
+  "style": "tr8",
+  "cat": "wood"
+ },
+ {
+  "name": "cr78-wood-01",
+  "file": "oneshots/wood/cr78-wood-01.flac",
+  "kind": "one",
+  "inst": "wood",
+  "style": "cr78",
+  "cat": "wood"
+ },
+ {
+  "name": "cr78-wood-02",
+  "file": "oneshots/wood/cr78-wood-02.flac",
+  "kind": "one",
+  "inst": "wood",
+  "style": "cr78",
+  "cat": "wood"
+ },
+ {
+  "name": "mrk2-wood-01",
+  "file": "oneshots/wood/mrk2-wood-01.flac",
+  "kind": "one",
+  "inst": "wood",
+  "style": "mrk2",
+  "cat": "wood"
+ },
+ {
+  "name": "dr5-wood-01",
+  "file": "oneshots/wood/dr5-wood-01.flac",
+  "kind": "one",
+  "inst": "wood",
+  "style": "dr5",
+  "cat": "wood"
+ },
+ {
+  "name": "dr5-wood-03",
+  "file": "oneshots/wood/dr5-wood-03.flac",
+  "kind": "one",
+  "inst": "wood",
+  "style": "dr5",
+  "cat": "wood"
+ },
+ {
+  "name": "dr5-wood-04",
+  "file": "oneshots/wood/dr5-wood-04.flac",
+  "kind": "one",
+  "inst": "wood",
+  "style": "dr5",
+  "cat": "wood"
+ },
+ {
+  "name": "dr5-wood-05",
+  "file": "oneshots/wood/dr5-wood-05.flac",
+  "kind": "one",
+  "inst": "wood",
+  "style": "dr5",
+  "cat": "wood"
+ },
+ {
+  "name": "tr808-shaker-01",
+  "file": "oneshots/shaker/tr808-shaker-01.flac",
+  "kind": "one",
+  "inst": "shaker",
+  "style": "tr808",
+  "cat": "perc"
+ },
+ {
+  "name": "cr78-shaker-01",
+  "file": "oneshots/shaker/cr78-shaker-01.flac",
+  "kind": "one",
+  "inst": "shaker",
+  "style": "cr78",
+  "cat": "perc"
+ },
+ {
+  "name": "cr78-shaker-02",
+  "file": "oneshots/shaker/cr78-shaker-02.flac",
+  "kind": "one",
+  "inst": "shaker",
+  "style": "cr78",
+  "cat": "perc"
+ },
+ {
+  "name": "linn-shaker-01",
+  "file": "oneshots/shaker/linn-shaker-01.flac",
+  "kind": "one",
+  "inst": "shaker",
+  "style": "linn",
+  "cat": "perc"
+ },
+ {
+  "name": "linn-shaker-02",
+  "file": "oneshots/shaker/linn-shaker-02.flac",
+  "kind": "one",
+  "inst": "shaker",
+  "style": "linn",
+  "cat": "perc"
+ },
+ {
+  "name": "rx5-shaker-01",
+  "file": "oneshots/shaker/rx5-shaker-01.flac",
+  "kind": "one",
+  "inst": "shaker",
+  "style": "rx5",
+  "cat": "perc"
+ },
+ {
+  "name": "tr8-shaker-01",
+  "file": "oneshots/shaker/tr8-shaker-01.flac",
+  "kind": "one",
+  "inst": "shaker",
+  "style": "tr8",
+  "cat": "perc"
+ },
+ {
+  "name": "tr8-shaker-02",
+  "file": "oneshots/shaker/tr8-shaker-02.flac",
+  "kind": "one",
+  "inst": "shaker",
+  "style": "tr8",
+  "cat": "perc"
+ },
+ {
+  "name": "dr5-shaker-01",
+  "file": "oneshots/shaker/dr5-shaker-01.flac",
+  "kind": "one",
+  "inst": "shaker",
+  "style": "dr5",
+  "cat": "perc"
+ },
+ {
+  "name": "dr5-shaker-05",
+  "file": "oneshots/shaker/dr5-shaker-05.flac",
+  "kind": "one",
+  "inst": "shaker",
+  "style": "dr5",
+  "cat": "perc"
+ },
+ {
+  "name": "dr5-shaker-06",
+  "file": "oneshots/shaker/dr5-shaker-06.flac",
+  "kind": "one",
+  "inst": "shaker",
+  "style": "dr5",
+  "cat": "perc"
  },
  {
   "name": "lofi-shaker-01",
-  "file": "oneshots/lofi/shaker/lofi-shaker-01.flac",
+  "file": "oneshots/shaker/lofi-shaker-01.flac",
   "kind": "one",
   "inst": "shaker",
   "style": "lofi",
   "cat": "perc"
+ },
+ {
+  "name": "tr505-timbale-01",
+  "file": "oneshots/timbale/tr505-timbale-01.flac",
+  "kind": "one",
+  "inst": "timbale",
+  "style": "tr505",
+  "cat": "perc"
+ },
+ {
+  "name": "rx5-timbale-01",
+  "file": "oneshots/timbale/rx5-timbale-01.flac",
+  "kind": "one",
+  "inst": "timbale",
+  "style": "rx5",
+  "cat": "perc"
+ },
+ {
+  "name": "rx5-timbale-02",
+  "file": "oneshots/timbale/rx5-timbale-02.flac",
+  "kind": "one",
+  "inst": "timbale",
+  "style": "rx5",
+  "cat": "perc"
+ },
+ {
+  "name": "dr5-timbale-01",
+  "file": "oneshots/timbale/dr5-timbale-01.flac",
+  "kind": "one",
+  "inst": "timbale",
+  "style": "dr5",
+  "cat": "perc"
+ },
+ {
+  "name": "rx5-perc-01",
+  "file": "oneshots/perc/rx5-perc-01.flac",
+  "kind": "one",
+  "inst": "perc",
+  "style": "rx5",
+  "cat": "perc"
+ },
+ {
+  "name": "rx5-perc-02",
+  "file": "oneshots/perc/rx5-perc-02.flac",
+  "kind": "one",
+  "inst": "perc",
+  "style": "rx5",
+  "cat": "perc"
+ },
+ {
+  "name": "rx5-perc-03",
+  "file": "oneshots/perc/rx5-perc-03.flac",
+  "kind": "one",
+  "inst": "perc",
+  "style": "rx5",
+  "cat": "perc"
+ },
+ {
+  "name": "rx5-perc-04",
+  "file": "oneshots/perc/rx5-perc-04.flac",
+  "kind": "one",
+  "inst": "perc",
+  "style": "rx5",
+  "cat": "perc"
+ },
+ {
+  "name": "rx5-perc-05",
+  "file": "oneshots/perc/rx5-perc-05.flac",
+  "kind": "one",
+  "inst": "perc",
+  "style": "rx5",
+  "cat": "perc"
+ },
+ {
+  "name": "rx5-perc-06",
+  "file": "oneshots/perc/rx5-perc-06.flac",
+  "kind": "one",
+  "inst": "perc",
+  "style": "rx5",
+  "cat": "perc"
+ },
+ {
+  "name": "rx5-perc-08",
+  "file": "oneshots/perc/rx5-perc-08.flac",
+  "kind": "one",
+  "inst": "perc",
+  "style": "rx5",
+  "cat": "perc"
+ },
+ {
+  "name": "rx5-perc-09",
+  "file": "oneshots/perc/rx5-perc-09.flac",
+  "kind": "one",
+  "inst": "perc",
+  "style": "rx5",
+  "cat": "perc"
+ },
+ {
+  "name": "rx5-perc-10",
+  "file": "oneshots/perc/rx5-perc-10.flac",
+  "kind": "one",
+  "inst": "perc",
+  "style": "rx5",
+  "cat": "perc"
+ },
+ {
+  "name": "rx5-perc-11",
+  "file": "oneshots/perc/rx5-perc-11.flac",
+  "kind": "one",
+  "inst": "perc",
+  "style": "rx5",
+  "cat": "perc"
+ },
+ {
+  "name": "rx5-perc-13",
+  "file": "oneshots/perc/rx5-perc-13.flac",
+  "kind": "one",
+  "inst": "perc",
+  "style": "rx5",
+  "cat": "perc"
+ },
+ {
+  "name": "rx5-perc-14",
+  "file": "oneshots/perc/rx5-perc-14.flac",
+  "kind": "one",
+  "inst": "perc",
+  "style": "rx5",
+  "cat": "perc"
+ },
+ {
+  "name": "rx5-perc-15",
+  "file": "oneshots/perc/rx5-perc-15.flac",
+  "kind": "one",
+  "inst": "perc",
+  "style": "rx5",
+  "cat": "perc"
+ },
+ {
+  "name": "rx5-perc-16",
+  "file": "oneshots/perc/rx5-perc-16.flac",
+  "kind": "one",
+  "inst": "perc",
+  "style": "rx5",
+  "cat": "perc"
+ },
+ {
+  "name": "rx5-perc-17",
+  "file": "oneshots/perc/rx5-perc-17.flac",
+  "kind": "one",
+  "inst": "perc",
+  "style": "rx5",
+  "cat": "perc"
+ },
+ {
+  "name": "rx5-perc-18",
+  "file": "oneshots/perc/rx5-perc-18.flac",
+  "kind": "one",
+  "inst": "perc",
+  "style": "rx5",
+  "cat": "perc"
+ },
+ {
+  "name": "rx5-perc-19",
+  "file": "oneshots/perc/rx5-perc-19.flac",
+  "kind": "one",
+  "inst": "perc",
+  "style": "rx5",
+  "cat": "perc"
+ },
+ {
+  "name": "rx5-perc-20",
+  "file": "oneshots/perc/rx5-perc-20.flac",
+  "kind": "one",
+  "inst": "perc",
+  "style": "rx5",
+  "cat": "perc"
+ },
+ {
+  "name": "rx5-perc-21",
+  "file": "oneshots/perc/rx5-perc-21.flac",
+  "kind": "one",
+  "inst": "perc",
+  "style": "rx5",
+  "cat": "perc"
+ },
+ {
+  "name": "rx5-perc-22",
+  "file": "oneshots/perc/rx5-perc-22.flac",
+  "kind": "one",
+  "inst": "perc",
+  "style": "rx5",
+  "cat": "perc"
+ },
+ {
+  "name": "rx5-perc-24",
+  "file": "oneshots/perc/rx5-perc-24.flac",
+  "kind": "one",
+  "inst": "perc",
+  "style": "rx5",
+  "cat": "perc"
+ },
+ {
+  "name": "rx5-perc-25",
+  "file": "oneshots/perc/rx5-perc-25.flac",
+  "kind": "one",
+  "inst": "perc",
+  "style": "rx5",
+  "cat": "perc"
+ },
+ {
+  "name": "tr8-perc-04",
+  "file": "oneshots/perc/tr8-perc-04.flac",
+  "kind": "one",
+  "inst": "perc",
+  "style": "tr8",
+  "cat": "perc"
+ },
+ {
+  "name": "tr8-perc-05",
+  "file": "oneshots/perc/tr8-perc-05.flac",
+  "kind": "one",
+  "inst": "perc",
+  "style": "tr8",
+  "cat": "perc"
+ },
+ {
+  "name": "tr8-perc-06",
+  "file": "oneshots/perc/tr8-perc-06.flac",
+  "kind": "one",
+  "inst": "perc",
+  "style": "tr8",
+  "cat": "perc"
+ },
+ {
+  "name": "tr8-perc-07",
+  "file": "oneshots/perc/tr8-perc-07.flac",
+  "kind": "one",
+  "inst": "perc",
+  "style": "tr8",
+  "cat": "perc"
+ },
+ {
+  "name": "tr8-perc-08",
+  "file": "oneshots/perc/tr8-perc-08.flac",
+  "kind": "one",
+  "inst": "perc",
+  "style": "tr8",
+  "cat": "perc"
+ },
+ {
+  "name": "dr5-perc-01",
+  "file": "oneshots/perc/dr5-perc-01.flac",
+  "kind": "one",
+  "inst": "perc",
+  "style": "dr5",
+  "cat": "perc"
+ },
+ {
+  "name": "dr5-perc-02",
+  "file": "oneshots/perc/dr5-perc-02.flac",
+  "kind": "one",
+  "inst": "perc",
+  "style": "dr5",
+  "cat": "perc"
+ },
+ {
+  "name": "dr5-perc-03",
+  "file": "oneshots/perc/dr5-perc-03.flac",
+  "kind": "one",
+  "inst": "perc",
+  "style": "dr5",
+  "cat": "perc"
+ },
+ {
+  "name": "dr5-perc-05",
+  "file": "oneshots/perc/dr5-perc-05.flac",
+  "kind": "one",
+  "inst": "perc",
+  "style": "dr5",
+  "cat": "perc"
+ },
+ {
+  "name": "dr5-perc-07",
+  "file": "oneshots/perc/dr5-perc-07.flac",
+  "kind": "one",
+  "inst": "perc",
+  "style": "dr5",
+  "cat": "perc"
+ },
+ {
+  "name": "dr5-perc-10",
+  "file": "oneshots/perc/dr5-perc-10.flac",
+  "kind": "one",
+  "inst": "perc",
+  "style": "dr5",
+  "cat": "perc"
+ },
+ {
+  "name": "dr5-perc-11",
+  "file": "oneshots/perc/dr5-perc-11.flac",
+  "kind": "one",
+  "inst": "perc",
+  "style": "dr5",
+  "cat": "perc"
+ },
+ {
+  "name": "dr5-perc-12",
+  "file": "oneshots/perc/dr5-perc-12.flac",
+  "kind": "one",
+  "inst": "perc",
+  "style": "dr5",
+  "cat": "perc"
+ },
+ {
+  "name": "dr5-perc-13",
+  "file": "oneshots/perc/dr5-perc-13.flac",
+  "kind": "one",
+  "inst": "perc",
+  "style": "dr5",
+  "cat": "perc"
+ },
+ {
+  "name": "dr5-perc-15",
+  "file": "oneshots/perc/dr5-perc-15.flac",
+  "kind": "one",
+  "inst": "perc",
+  "style": "dr5",
+  "cat": "perc"
+ },
+ {
+  "name": "dr5-perc-16",
+  "file": "oneshots/perc/dr5-perc-16.flac",
+  "kind": "one",
+  "inst": "perc",
+  "style": "dr5",
+  "cat": "perc"
+ },
+ {
+  "name": "dr5-fx-01",
+  "file": "oneshots/fx/dr5-fx-01.flac",
+  "kind": "one",
+  "inst": "fx",
+  "style": "dr5",
+  "cat": "zap"
+ },
+ {
+  "name": "dr5-fx-02",
+  "file": "oneshots/fx/dr5-fx-02.flac",
+  "kind": "one",
+  "inst": "fx",
+  "style": "dr5",
+  "cat": "zap"
+ },
+ {
+  "name": "dr5-fx-03",
+  "file": "oneshots/fx/dr5-fx-03.flac",
+  "kind": "one",
+  "inst": "fx",
+  "style": "dr5",
+  "cat": "zap"
+ },
+ {
+  "name": "dr5-fx-04",
+  "file": "oneshots/fx/dr5-fx-04.flac",
+  "kind": "one",
+  "inst": "fx",
+  "style": "dr5",
+  "cat": "zap"
+ },
+ {
+  "name": "dr5-fx-05",
+  "file": "oneshots/fx/dr5-fx-05.flac",
+  "kind": "one",
+  "inst": "fx",
+  "style": "dr5",
+  "cat": "zap"
+ },
+ {
+  "name": "dr5-fx-06",
+  "file": "oneshots/fx/dr5-fx-06.flac",
+  "kind": "one",
+  "inst": "fx",
+  "style": "dr5",
+  "cat": "zap"
+ },
+ {
+  "name": "dr5-fx-07",
+  "file": "oneshots/fx/dr5-fx-07.flac",
+  "kind": "one",
+  "inst": "fx",
+  "style": "dr5",
+  "cat": "zap"
+ },
+ {
+  "name": "dr5-fx-08",
+  "file": "oneshots/fx/dr5-fx-08.flac",
+  "kind": "one",
+  "inst": "fx",
+  "style": "dr5",
+  "cat": "zap"
+ },
+ {
+  "name": "dr5-fx-09",
+  "file": "oneshots/fx/dr5-fx-09.flac",
+  "kind": "one",
+  "inst": "fx",
+  "style": "dr5",
+  "cat": "zap"
+ },
+ {
+  "name": "dr5-fx-10",
+  "file": "oneshots/fx/dr5-fx-10.flac",
+  "kind": "one",
+  "inst": "fx",
+  "style": "dr5",
+  "cat": "zap"
+ },
+ {
+  "name": "dr5-fx-12",
+  "file": "oneshots/fx/dr5-fx-12.flac",
+  "kind": "one",
+  "inst": "fx",
+  "style": "dr5",
+  "cat": "zap"
+ },
+ {
+  "name": "dr5-fx-13",
+  "file": "oneshots/fx/dr5-fx-13.flac",
+  "kind": "one",
+  "inst": "fx",
+  "style": "dr5",
+  "cat": "zap"
+ },
+ {
+  "name": "dr5-fx-14",
+  "file": "oneshots/fx/dr5-fx-14.flac",
+  "kind": "one",
+  "inst": "fx",
+  "style": "dr5",
+  "cat": "zap"
  }
 ]

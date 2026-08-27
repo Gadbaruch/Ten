@@ -36,6 +36,8 @@ TWO AXES, and together they ARE the categorisation system:
 Both travel in the manifest, so browsing can move along either one.
 """
 import argparse, json, pathlib, re, shutil, subprocess
+import numpy as np
+from scipy.cluster.hierarchy import linkage, fcluster
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 OUT = ROOT / 'samples' / 'oneshots'
@@ -179,6 +181,15 @@ def encode(src, dst):
 
 
 def build(srcroot):
+    """Encode every source file into samples/oneshots/<instrument>/.
+
+    LAID OUT BY TYPE, NOT BY PACK (Gad, 2026-08-27): "we dont need to stick to
+    the pack folders as they come, you can put them in type folders and have
+    their names represent the kit ID so when we have kits we can put them
+    together properly." The machine is the name's prefix — tr808-kick-03 — so
+    every kick in the world sits in one folder and a kit can still be
+    reassembled by prefix later.
+    """
     if OUT.exists():
         shutil.rmtree(OUT)
     total = 0
@@ -195,7 +206,7 @@ def build(srcroot):
             inst = instr_of(f.stem, hint)
             i = seen.get(inst, 0) + 1
             seen[inst] = i
-            dst = OUT / s['key'] / inst / ('%s-%s-%02d.flac' % (s['key'], inst, i))
+            dst = OUT / inst / ('%s-%s-%02d.flac' % (s['key'], inst, i))
             if encode(f, dst):
                 n += 1
         total += n
@@ -203,43 +214,185 @@ def build(srcroot):
     return total
 
 
-def manifest():
-    """Read the tree back off disk. Pruning a folder IS the edit."""
-    out = []
-    for s in SOURCES:                     # SOURCES order IS the shelf order
-        mach = OUT / s['key']
-        if not mach.is_dir():
+# ---- TELLING TWO SOUNDS APART -------------------------------------------
+# Gad, inspecting the first build: "there seem to be a lot of duplicates or
+# VERY similar sounds that we can prune." True by construction — the TR-808
+# set alone is a 5x5 tone x decay grid per voice, and half of any such grid is
+# a step nobody can hear.
+#
+# Similarity is MEASURED, on three things that are what actually make two hits
+# sound alike, each normalised so the comparison is about the SOUND and not
+# about how loud the file happens to be:
+#   spectrum   24 log-spaced band energies in dB over the whole hit — timbre
+#   envelope   16 RMS points over the first second — attack and decay shape
+#   length     log duration, lightly weighted; a 0.1s and a 2s hit are not the
+#              same sound however alike their spectra
+# Only ever compared WITHIN one instrument folder: a kick and a tom being
+# far apart is not information.
+FEAT_SR = 22050
+
+
+def feats(path):
+    raw = subprocess.run(['ffmpeg', '-v', 'error', '-i', str(path), '-ac', '1',
+                          '-ar', str(FEAT_SR), '-f', 'f32le', '-'],
+                         capture_output=True).stdout
+    x = np.frombuffer(raw, dtype=np.float32)
+    if x.size < 256:
+        return None
+    x = x / (np.abs(x).max() + 1e-9)
+    seg = x[:FEAT_SR]                                  # the first second decides it
+    env = np.array([np.sqrt(np.mean(c.astype(np.float64) ** 2))
+                    for c in np.array_split(seg, 16)])
+    env = env / (env.max() + 1e-9)
+    # Spectrum averaged over frames across up to a second, not one window at
+    # the head: a cymbal and a hat share an attack and differ in the tail, and
+    # a single 186ms frame cannot see that. Short files get a Hann of their own
+    # length -- windowing a 3000-sample hit with the first 3000 points of a
+    # 4096-point Hann attenuates the attack, which is the one part that matters.
+    N = 4096
+    acc = np.zeros(N // 2 + 1)
+    frames = 0
+    for st in range(0, min(x.size, FEAT_SR), N // 2):
+        c = x[st:st + N]
+        if c.size < 256:
+            break
+        acc += np.abs(np.fft.rfft(c * np.hanning(c.size), N))
+        frames += 1
+    mag = acc / max(frames, 1)
+    edges = np.geomspace(40, 10000, 25) * N / FEAT_SR
+    bands = np.array([mag[int(edges[i]):max(int(edges[i]) + 1, int(edges[i + 1]))].mean()
+                      for i in range(24)])
+    bands = 20 * np.log10(bands / (bands.max() + 1e-12) + 1e-6)
+    bands = (bands + 120) / 120                        # 0..1
+    dur = np.log2(max(x.size / FEAT_SR, 1e-3))
+    return np.concatenate([bands * 1.0, env * 0.6, [dur * 0.5]])
+
+
+def dedupe(tight, loose):
+    """Prune the certain duplicates; park the uncertain groups for a human ear.
+
+    Two bands, because "is this the same sound" has a middle:
+      below `tight`   the same sound. One is kept and the rest are DELETED.
+      below `loose`   probably the same sound. One is kept in the library and
+                      EVERY member of the group is also copied to _similar/,
+                      named gNN-... so a group sorts together and can be
+                      auditioned side by side.
+    _similar/ is deliberately NOT in the manifest — it is a review pen, not
+    part of the library, so nothing there is loaded or browsed.
+    Which member is kept: the machine earliest in SOURCES (a curatorial order,
+    most famous first), then the longest take.
+    """
+    rank = {s['key']: i for i, s in enumerate(SOURCES)}
+    pen = OUT / '_similar'
+    if pen.exists():
+        shutil.rmtree(pen)
+    dropped, parked, groups = 0, 0, 0
+    report = []
+    for instdir in sorted(p for p in OUT.iterdir() if p.is_dir()):
+        files = sorted(instdir.glob('*.flac'))
+        if len(files) < 2:
             continue
-        for instdir in sorted((p for p in mach.iterdir() if p.is_dir()),
-                              key=lambda d: (SHELF.index(d.name)
-                                             if d.name in SHELF else len(SHELF), d.name)):
-            for f in sorted(instdir.glob('*.flac')):
-                out.append({
-                    'name': f.stem,
-                    'file': 'oneshots/%s/%s/%s' % (mach.name, instdir.name, f.name),
-                    'kind': 'one',          # the whole shelf is one-shots, by construction
-                    'inst': instdir.name,   # the INSTRUMENT axis
-                    'style': mach.name,     # the STYLE axis — which machine
-                    'cat': INSTR.get(instdir.name, 'perc'),   # TEN's own DRUMCATS
-                })
+        F, keep = [], []
+        for f in files:
+            v = feats(f)
+            if v is not None:
+                F.append(v); keep.append(f)
+        if len(keep) < 2:
+            continue
+        F = np.array(F)
+        Z = linkage(F, method='average', metric='euclidean')
+        for thr, kill in ((tight, True), (loose, False)):
+            lab = fcluster(Z, t=thr, criterion='distance')
+            for c in set(lab):
+                idx = [i for i in range(len(keep)) if lab[i] == c and keep[i].exists()]
+                if len(idx) < 2:
+                    continue
+                idx.sort(key=lambda i: (rank.get(keep[i].name.split('-')[0], 99),
+                                        -keep[i].stat().st_size))
+                best, rest = idx[0], idx[1:]
+                if kill:
+                    for i in rest:
+                        keep[i].unlink(); dropped += 1
+                    report.append('%-11s kept %-22s dropped %d identical'
+                                  % (instdir.name, keep[best].name, len(rest)))
+                else:
+                    groups += 1
+                    gd = pen / instdir.name
+                    gd.mkdir(parents=True, exist_ok=True)
+                    for i in idx:
+                        shutil.copy2(keep[i], gd / ('g%02d-%s' % (groups, keep[i].name)))
+                        parked += 1
+                    for i in rest:
+                        keep[i].unlink()
+                    report.append('%-11s kept %-22s parked %d for your ear (g%02d)'
+                                  % (instdir.name, keep[best].name, len(rest), groups))
+    (OUT / 'PRUNED.md').write_text(
+        '# What the dedupe pass did\n\n'
+        'Measured with `tools/build_oneshots.py` — 24 log spectral bands, a 16-point\n'
+        'RMS envelope and log duration, compared only WITHIN an instrument folder,\n'
+        'every file peak-normalised first so this is about timbre and not level.\n\n'
+        '- **%d deleted** as the same sound (distance < %.2f)\n'
+        '- **%d copied into `_similar/`** as probably-the-same (distance < %.2f),\n'
+        '  grouped by a `gNN-` prefix so a group sorts together. Nothing in\n'
+        '  `_similar/` is in the manifest, so nothing there loads — audition it,\n'
+        '  keep what you want by moving it back up into its instrument folder,\n'
+        '  and delete the rest.\n\n```\n%s\n```\n'
+        % (dropped, tight, parked, loose, '\n'.join(report)))
+    return dropped, parked, groups
+
+
+def manifest():
+    """Read the tree back off disk. Pruning a folder IS the edit.
+
+    Layout is samples/oneshots/<instrument>/<machine>-<instrument>-NN.flac, so
+    the STYLE axis is recovered from the name's prefix — one fact, stored once,
+    and a file moved by hand between instrument folders still says which
+    machine it came from.
+    `_similar/` is skipped: it is the review pen, not the library.
+    """
+    by = {s['key']: s for s in SOURCES}
+    out = []
+    order = {k: i for i, k in enumerate(SHELF)}
+    for instdir in sorted((p for p in OUT.iterdir() if p.is_dir() and not p.name.startswith('_')),
+                          key=lambda d: (order.get(d.name, len(SHELF)), d.name)):
+        rows = []
+        for f in sorted(instdir.glob('*.flac')):
+            style = f.stem.split('-')[0]
+            if style not in by:
+                continue
+            rows.append((by[style]['rank'], f.stem, style, f))
+        rows.sort(key=lambda r: (r[0], r[1]))
+        for _, stem, style, f in rows:
+            out.append({
+                'name': stem,
+                'file': 'oneshots/%s/%s' % (instdir.name, f.name),
+                'kind': 'one',              # the whole shelf is one-shots, by construction
+                'inst': instdir.name,       # the INSTRUMENT axis
+                'style': style,             # the STYLE axis — which machine
+                'cat': INSTR.get(instdir.name, 'perc'),   # TEN's own DRUMCATS
+            })
     (OUT / 'manifest.json').write_text(json.dumps(out, indent=1) + '\n')
 
+    have = {x['style'] for x in out}
     lic = ['# Where every one-shot here came from, and under what licence', '',
-           'Generated by `tools/build_oneshots.py`. Delete any folder you do not want,',
-           'then run `python3 tools/build_oneshots.py --manifest-only` to re-index.',
+           'Generated by `tools/build_oneshots.py`. Sounds are filed by INSTRUMENT;',
+           'the machine is the name prefix (`tr808-kick-03`), so a kit can be',
+           'reassembled by prefix. Delete anything you do not want, then run',
+           '`python3 tools/build_oneshots.py --manifest-only` to re-index.',
            '', 'Everything ships as 44.1kHz 16-bit mono FLAC — lossless, and measured',
            'bit-identical through decodeAudioData where Opus arrives 2.9ms late and',
-           'AAC pre-echoes ahead of the transient.', '']
-    for s in SOURCES:
-        d = OUT / s['key']
-        if not d.exists():
+           'AAC pre-echoes ahead of the transient.', '',
+           'See `PRUNED.md` for what the dedupe pass removed and what is parked in',
+           '`_similar/` waiting on your ear.', '']
+    for s2 in SOURCES:
+        if s2['key'] not in have:
             continue
-        lic += ['## %s — `%s/` (%d sounds)' % (s['label'], s['key'],
-                                               len(list(d.rglob('*.flac')))),
-                '', '- licence: **%s**' % s['lic'],
-                '- source: %s' % s['url'],
-                '- repo: `%s`' % s['repo'],
-                '- %s' % s['note'], '']
+        n = sum(1 for x in out if x['style'] == s2['key'])
+        lic += ['## %s — `%s-*` (%d sounds)' % (s2['label'], s2['key'], n),
+                '', '- licence: **%s**' % s2['lic'],
+                '- source: %s' % s2['url'],
+                '- repo: `%s`' % s2['repo'],
+                '- %s' % s2['note'], '']
     lic += ['## Deliberately NOT included', '',
             'These read `"license": "None"` and trace to a blog post of "free kits" —',
             'unspecified provenance, so they are not in the repo:', '']
@@ -251,16 +404,29 @@ def manifest():
     return out
 
 
+for _i, _s in enumerate(SOURCES):
+    _s['rank'] = _i                       # curatorial order: most famous machine first
+
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument('--src', default=str(ROOT / '_dl'),
                     help='where the source repos were cloned')
     ap.add_argument('--manifest-only', action='store_true',
                     help='re-index the tree as it stands on disk; encode nothing')
+    ap.add_argument('--tight', type=float, default=0.9,
+                    help='below this distance two sounds are the same and one is deleted')
+    ap.add_argument('--loose', type=float, default=1.5,
+                    help='below this they are probably the same and go to _similar/')
+    ap.add_argument('--no-dedupe', action='store_true')
     a = ap.parse_args()
     if not a.manifest_only:
         print('encoding to 44.1k/16-bit mono FLAC …')
         build(pathlib.Path(a.src))
+        if not a.no_dedupe:
+            print('measuring similarity …')
+            d, pk, g = dedupe(a.tight, a.loose)
+            print('  %d deleted as identical · %d parked in _similar/ across %d groups'
+                  % (d, pk, g))
     m = manifest()
     mb = sum(f.stat().st_size for f in OUT.rglob('*.flac')) / 1048576
     print('%d sounds  %.1f MB  %d machines  %d instruments'

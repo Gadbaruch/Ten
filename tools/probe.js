@@ -2433,7 +2433,11 @@ async function probePoolKind() {
   };
   notes.push('audio dial 0..7: ' + dial(typeof GRANF !== 'undefined' ? GRANF : null, 'loop'));
   notes.push('smp op  0..7: ' + dial(typeof OSC_P !== 'undefined' ? OSC_P({ wav: 9 }) : null, 'one'));
-  const view = n => poolView(n).map(i => (POOL[i].kind === n ? '' : '| ') + POOL[i].name).join(' ');
+  /* the head of each view and nothing more: the pool is 300+ and printing all
+     of it is the "re-dumping results" waste NEXT.md warns about */
+  const view = n => { const V = poolView(n);
+    return V.slice(0, 12).map(i => (POOL[i].kind === n ? '' : '| ') + POOL[i].name).join(' ') +
+           (V.length > 12 ? '  … +' + (V.length - 12) : ''); };
   notes.push('loop view: ' + view('loop'));
   notes.push('one  view: ' + view('one'));
   notes.push('counts: ' + POOL.filter(e => e.kind === 'loop').length + ' loop, ' +
@@ -2482,6 +2486,139 @@ async function probeSmpLib() {
   return { cols: ['inst', 'style', 'cat', 'kind', 'dur', 'peak', 'rms', 'centroid'], rows };
 }
 
+/* ---------------- genqual: what the patch randomiser actually produces ---
+ * Gad's rule for this work: a ROLL must stay instant, so there is no
+ * render-and-check at roll time. This is the development half of that deal —
+ * roll N patches, install each, play a note, read the bus, and say which ones
+ * are duds before he ever hears them.
+ *
+ *     tools/probe.sh genqual cat=bass n=10 wild=35 seed=1
+ *     tools/probe.sh genqual cat=lead n=10 wild=80
+ *
+ * SEEDED, so a round is reproducible: seed s gives roll i the stream
+ * mulberry32(s*1000+i), and "number 4 of that ten was the good one" survives
+ * the session. Verdicts, and why each is the one worth counting:
+ *   SILENT   peak < 0.02   the patch makes no sound at all. The single worst
+ *                          outcome and the one genPreset's own comments record
+ *                          shipping three times (bass, snares, hats), always
+ *                          the same way: a filter sitting where the tone is not.
+ *   QUIET    peak < 0.08   audible only if you go looking
+ *   HARSH    centroid > 6k all fizz, no body
+ *   MUD      centroid < 250 on a category that is not a bass or a kick
+ *   FLAT     the roll landed within 3% of the previous one on every axis —
+ *            ten of the same patch is the OTHER failure, and a summary that
+ *            only counts duds cannot see it
+ */
+async function probeGenQual() {
+  if (typeof genPreset !== 'function') return { cols: [], rows: [], err: 'no genPreset on this build' };
+  const cat = str(P.cat, 'bass');
+  const n = Math.max(1, Math.min(24, Math.round(num(P.n, 10))));
+  const wild = Math.max(0, Math.min(1, num(P.wild, 35) / 100));
+  const seed = Math.round(num(P.seed, 1));
+  const ch = CH;
+  const low = /bass|kik|kick/.test(cat);
+  const rows = [];
+  let prev = null, flat = 0;
+  for (let i = 0; i < n; i++) {
+    const rnd = mulberry32(seed * 1000 + i);
+    let pre;
+    try { pre = genPreset(cat, rnd, wild); }
+    catch (e) { rows.push({ k: cat + i, err: String(e).slice(0, 80) }); continue; }
+    setP(ch, pre.name, cat, presetData(pre));
+    engine.refresh(ch);
+    await sleep(20);
+    const r = await hit(ch, () => engine.noteOn(AC.currentTime + 0.02, ch, NOTE, VEL), MS);
+    const v = [];
+    if (!(r.peak > 0.02)) v.push('SILENT');
+    else if (!(r.peak > 0.08)) v.push('QUIET');
+    if (r.centroid > 6000) v.push('HARSH');
+    if (!low && r.centroid < 250) v.push('MUD');
+    if (prev && ['peak', 'rms', 'centroid', 'hz'].every(k =>
+        Math.abs((r[k] || 0) - (prev[k] || 0)) <= 0.03 * Math.max(Math.abs(r[k] || 0), 1e-9))) {
+      v.push('FLAT'); flat++;
+    }
+    prev = r;
+    const G = pre._gen || {};
+    rows.push({ k: pre.name, i, rung: G.rung, arch: G.arch,
+                ops: (pre.osc || []).filter(o => o && o.amt > 0.01).length,
+                flt: (pre.flt[0] || {}).typ || 0, fq: Math.round((pre.flt[0] || {}).frq || 0),
+                fx: (pre.fx[0] || {}).typ || 0,
+                peak: r.peak, rms: r.rms, hz: r.hz, centroid: r.centroid,
+                verdict: v.join('+') || 'ok' });
+    try { engine.allOff(); } catch (_) {}
+    await sleep(40);
+  }
+  const bad = rows.filter(r => r.verdict && r.verdict !== 'ok' && !r.err);
+  const cs = rows.filter(r => Number.isFinite(r.centroid)).map(r => r.centroid);
+  const ps = rows.filter(r => Number.isFinite(r.peak)).map(r => r.peak);
+  notes.push(cat + ' x' + n + ' @wild ' + Math.round(wild * 100) + '% seed ' + seed +
+             ' \u2014 ' + (rows.length - bad.length) + '/' + rows.length + ' clean');
+  if (bad.length) notes.push('duds: ' + bad.map(r => r.k + '(' + r.verdict + ')').join(' '));
+  if (cs.length) notes.push('centroid ' + Math.round(Math.min(...cs)) + '..' + Math.round(Math.max(...cs)) +
+                            '  peak ' + r3(Math.min(...ps)) + '..' + r3(Math.max(...ps)) +
+                            '  flat ' + flat);
+  const arch = {};
+  for (const r of rows) if (r.arch) arch[r.arch] = (arch[r.arch] || 0) + 1;
+  notes.push('archetypes: ' + Object.entries(arch).map(([k, v]) => k + ' x' + v).join(' '));
+  return { cols: ['i', 'rung', 'arch', 'ops', 'flt', 'fq', 'peak', 'rms', 'hz', 'centroid', 'verdict'], rows };
+}
+
+/* ---------------- archlvl: how loud is each archetype, really -----------
+ * The one thing that separates "every roll is a keeper" from "half of them
+ * are inaudible" is that different archetypes have genuinely different output
+ * — a blip is four operators quieter than a supersaw and no amount of
+ * reasoning about gain structure will tell you by how much. Rolls stay
+ * instant (no render-and-check at roll time, Gad's rule), so the trim is
+ * measured HERE, at development time, and baked into the archetype.
+ *
+ *     tools/probe.sh archlvl k=6          # every archetype, 6 rolls each
+ *     tools/probe.sh archlvl cat=bass k=8
+ *
+ * `mean` is what a trim should be computed against; `min` says whether the
+ * archetype has a quiet TAIL as well as a quiet average, which is the case
+ * a mean alone would hide.
+ */
+async function probeArchLvl() {
+  if (typeof genPreset !== 'function') return { cols: [], rows: [], err: 'no genPreset on this build' };
+  genPreset('pad', mulberry32(1), 0.5);            // one roll, to publish the table
+  const A = (typeof ARCHNAMES !== 'undefined' && ARCHNAMES) || null;
+  if (!A) return { cols: [], rows: [], err: 'no archetype table on this build' };
+  const only = str(P.cat, '');
+  const k = Math.max(1, Math.min(12, Math.round(num(P.k, 6))));
+  const ch = CH;
+  const rows = [];
+  for (const cat of Object.keys(A)) {
+    if (cat === 'misc') continue;
+    if (only && cat !== only) continue;
+    for (const an of Object.keys(A[cat])) {
+      const pk = [], ct = [];
+      for (let i = 0; i < k; i++) {
+        let pre;
+        try { pre = genPreset(cat, mulberry32(7000 + i * 31), 0.4, an); } catch (e) { continue; }
+        setP(ch, pre.name, cat, presetData(pre));
+        engine.refresh(ch);
+        await sleep(15);
+        const r = await hit(ch, () => engine.noteOn(AC.currentTime + 0.02, ch, NOTE, VEL), MS);
+        if (Number.isFinite(r.peak)) pk.push(r.peak);
+        if (Number.isFinite(r.centroid)) ct.push(r.centroid);
+        try { engine.allOff(); } catch (_) {}
+        await sleep(25);
+      }
+      if (!pk.length) { rows.push({ k: cat + '/' + an, err: 'no rolls' }); continue; }
+      const mean = pk.reduce((a, b) => a + b, 0) / pk.length;
+      rows.push({ k: cat + '/' + an, n: pk.length,
+                  mean: r3(mean), min: r3(Math.min(...pk)), max: r3(Math.max(...pk)),
+                  cent: Math.round(ct.reduce((a, b) => a + b, 0) / (ct.length || 1)),
+                  trim: r3(0.2 / Math.max(mean, 1e-4)) });
+    }
+  }
+  const ms = rows.filter(r => Number.isFinite(r.mean)).map(r => r.mean);
+  if (ms.length) notes.push('mean peak ' + r3(Math.min(...ms)) + '..' + r3(Math.max(...ms)) +
+                            '  spread x' + r3(Math.max(...ms) / Math.max(Math.min(...ms), 1e-6)) +
+                            '   (trim = what multiplier lands each on 0.20)');
+  return { cols: ['n', 'mean', 'min', 'max', 'cent', 'trim'], rows };
+}
+
 const HELP = {
   cols: ['args'],
   rows: [
@@ -2505,6 +2642,8 @@ const HELP = {
     { k: 'resamp',   args: 'ch=9 — master resample is pre-master-fx and replays exactly like live at mSum: take clean of a hot sat, unity dials, replay ratio ~1, mid-bounce rebuild survives' },
     { k: 'fxwire',   args: 'ch=8 — EXHAUSTIVE: every (fx type, param) FXMODOK claims, driven through the real applier — offered/claimed/moved. No audio, one call.' },
     { k: 'fxmod',    args: 'ch=8 — every wired fx (type,param) wobbles under a 5Hz lfo through the real ctrl path; arp rate mod moves note density' },
+    { k: 'archlvl',  args: 'cat=bass k=6 \u2014 mean peak of every ARCHETYPE, and the trim that would level them' },
+    { k: 'genqual',  args: 'cat=bass n=10 wild=35 seed=1 \u2014 roll N patches, play each, and name the duds: SILENT/QUIET/HARSH/MUD/FLAT' },
     { k: 'smplib',   args: 'ch=8 names=tr808-kick-01,linn-snare-01 \u2014 point a synth op at named library one-shots and hear whether they sound' },
     { k: 'poolkind', args: 'want=loop — every pool take: measured onsets/centroid, the kind it was called, and both dial views in order' },
     { k: '(any)',    args: '--ab <url> runs the same probe on a second build and diffs it' },
@@ -2548,7 +2687,9 @@ try {
                    fxmod: probeFxMod,
                    fxwire: probeFxWire,
                    poolkind: probePoolKind,
-                   smplib: probeSmpLib };
+                   smplib: probeSmpLib,
+                   genqual: probeGenQual,
+                   archlvl: probeArchLvl };
   const fn = PROBES[NAME];
   out = fn ? await fn() : (NAME === 'help' ? HELP : { cols: [], rows: [], err: 'no probe named ' + NAME });
 } catch (e) {

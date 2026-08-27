@@ -1245,7 +1245,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-27.0805';
+const BUILD='2026-08-27.0828';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -12594,7 +12594,9 @@ const LIBV=30;   // bump BOTH: libStore writes it, libAll checks it
 function libStore(a){libMigrated=true; libCache=null; libNoCache=null;
   const out=(a||[]).map(en=>en&&en.data?{...en,data:portPreset(en.data,true)}:en);
   try{localStorage.setItem(LIBKEY,JSON.stringify({v:LIBV,items:out}));}catch(_){} if(typeof prepCache!=='undefined')prepCache.clear();}
-function presetData(p){const {modLoop,...rest}=p;return JSON.parse(JSON.stringify(rest));}
+/* `_gen` is what a ROLL did — its rung, its archetype — and it is diagnostic
+   only: dropped here so it never reaches the library or a saved set. */
+function presetData(p){const {modLoop,_gen,...rest}=p;return JSON.parse(JSON.stringify(rest));}
 function mulberry32(a){return function(){let t=a+=0x6D2B79F5;t=Math.imul(t^t>>>15,t|1);
   t^=t+Math.imul(t^t>>>7,t|61);return((t^t>>>14)>>>0)/4294967296;}}
 function libInit(){
@@ -12746,7 +12748,344 @@ function genSpice(p,cat,wild,H){
   if(lm&&lm.routes.length<3&&P(0.35))
     lm.routes.push({dst:0,idx:0,amt:RI(15,40),ctr:0,tgt:null,addr:{...PANADDR}});
 }
-function genPreset(cat,rnd,wild=0.5){
+/* ---- THE TONAL HALF: ARCHETYPES, AND A FILTER THAT KNOWS WHERE THE TONE IS
+   The drum half of this generator has had archetypes since the day it stopped
+   making ten of the same kick (see DRGEN): a category is not one sound with
+   its dials shaken, it is a SET OF INSTRUMENTS, and the shaking happens inside
+   whichever one you land on. The tonal half never got them. It rolled every
+   dial independently against one `wild` scalar through
+   `P(b)=rnd()<b*(0.35+1.5*wild)`, which makes EVERY maybe more likely AT ONCE
+   — so turning wildness up did not produce a wilder patch, it produced all the
+   options half-on. That is the mud.
+
+   MEASURED, tools/probe.sh genqual, eight rolls per category at wild 80%:
+       bass 8/8 clean · lead 3/8 · pad 3/8 · plk 3/8
+   and four of the five pad duds were ONE bug, not five:
+
+       ZEP1  highpass 2175Hz  on a 131Hz note   peak 0.023  centroid 10936
+       FUT3  highpass 2361Hz                    peak 0.016
+       MEZ0  highpass 8683Hz                    peak 0.044
+       CIK1  bandpass 6366Hz                    peak 0.021
+
+   `frq` was drawn from 300*2^R(0,5.3) — 300Hz to 11.7kHz — with no reference
+   to the note the patch was about to play, so a highpass or bandpass landed
+   above the fundamental and took the sound away, leaving fizz. The drum half's
+   own comment already said it: "a bandpass only ever goes where the tone IS."
+   The rule simply was never applied here. Every filter below is placed as a
+   MULTIPLE OF THE SOUNDING FUNDAMENTAL and cannot make that mistake:
+
+       LP  above the fundamental, harmonics left to shape
+       HP  BELOW it, where all it can do is take off rumble
+       BP  on the body, never past the sixth harmonic
+
+   WILDNESS IS STEPPED, NOT A SLOPE (Gad, 2026-08-27). Four rungs, each a
+   coherent world, with the dial still varying continuously INSIDE one:
+
+       0  <25%   the canonical instruments of this category, held tight
+       1  25-55% any archetype of this category, its own full range
+       2  55-80% any archetype, plus a CHARACTER layer — drive, movement, an
+                 fx, more voices — laid over a patch that already works
+       3  >=80%  off the leash: an archetype borrowed from a NEIGHBOURING
+                 category, heavier character, stranger intervals
+
+   AND ATONAL LIVES IN `fx`, nowhere else (Gad's call). A tonal category at
+   rung 3 gets unusual; it does not get unpitched. The fx category is atonal at
+   every rung, which is what makes "wild" mean adventurous rather than broken.
+
+   ENV AND LFO DESTINATIONS ARE ON DIFFERENT SCALES and mixing them up is
+   silent — LFO2MD is the map. env dst: 1 amp · 2 pitch · 3 filter · 4 pan.
+   lfo dst: 1 pitch · 2 filter · 3 amp · 4 pan. */
+const TONEHZ = 440 * Math.pow(2, (48 - 69) / 12);   // 130.81Hz — KBBASE, the home key
+let ARCHNAMES = null;                              // diagnostic only: see genTonal
+
+function genTonal(p, cat, wild, H, force) {
+  const { R, RI, P, pick, rnd } = H;
+  const rung = wild < 0.25 ? 0 : wild < 0.55 ? 1 : wild < 0.8 ? 2 : 3;
+  /* how far INSIDE a rung we are, 0..1 — the gradient that still lives in the
+     step, so two rolls at 30% and 50% are not the same patch twice */
+  const lo = [0, 0.25, 0.55, 0.8][rung], hi = [0.25, 0.55, 0.8, 1.001][rung];
+  const g = clamp((wild - lo) / (hi - lo), 0, 1);
+
+  const hz = () => TONEHZ * (p.osc[0].rat || 1);
+  const LP = (a, b, q) => ({ typ: 1, frq: Math.round(clamp(hz() * R(a, b), 40, 18000)), q: +q.toFixed(1), gn: 0 });
+  const HP = (a, b, q) => ({ typ: 2, frq: Math.round(clamp(hz() * R(a, b), 20, 3000)), q: +q.toFixed(1), gn: 0 });
+  const BP = (a, b, q) => ({ typ: 3, frq: Math.round(clamp(hz() * R(a, b), 40, 12000)), q: +q.toFixed(1), gn: 0 });
+  const op = (i, o) => p.osc[i] = Object.assign({ wav: 0, mode: 0, dst: 0, rat: 1, amt: 0.3, fine: 0, ph: 0, phm: 0 }, o);
+  const env = (a, d, s, r) => Object.assign(p.env[0], { a, d, s, r });
+  const fenv = (amt, d, s) => p.env[1] = { dst: 3, idx: 1, amt, a: 0.003, d, s, r: 0.2 };
+  const penv = (amt, d) => p.env[2] = { dst: 2, idx: 1, amt, a: 0.001, d, s: 0, r: 0.05 };
+
+  /* ---- THE ARCHETYPES. Each lays a WHOLE coherent patch: wave, ops, envelope
+     and filter together, because those four are one decision. Order inside a
+     category matters — the first two are its canonical instruments and are the
+     only ones rung 0 will reach. */
+  const A = {
+    bass: {
+      sub: () => { p.osc[0].wav = pick([0, 0, 1]); p.osc[0].rat = pick([0.25, 0.25, 0.5]);
+        op(1, { wav: 0, rat: 2, amt: +R(0.04, 0.14).toFixed(2) });   // one partial for definition
+        env(0.005, R(0.25, 0.5), R(0.6, 0.85), R(0.08, 0.2));
+        p.flt[0] = LP(3, 7, R(0.7, 1.1)); },
+      acid: () => { p.osc[0].wav = pick([2, 3]); p.osc[0].rat = 0.5;
+        env(0.002, R(0.1, 0.25), R(0.05, 0.3), R(0.05, 0.12));
+        p.flt[0] = LP(2, 5, R(3, 5.5));
+        fenv(RI(12, 20) * 5, R(0.08, 0.25), R(0, 0.2));
+        p.vox.glide = +R(0.03, 0.09).toFixed(2);
+        p.amp[0] = { typ: 7, drv: +R(0.25, 0.45).toFixed(2), mix: +R(0.35, 0.6).toFixed(2), par: 0 }; },
+      reese: () => { p.osc[0].wav = 2; p.osc[0].rat = 0.5;
+        op(1, { wav: 2, rat: 0.5, amt: +R(0.5, 0.8).toFixed(2), fine: pick([-14, -10, 10, 14]) });
+        op(2, { wav: 2, rat: 1, amt: +R(0.2, 0.4).toFixed(2), fine: pick([-7, 7]) });
+        env(0.006, R(0.3, 0.6), R(0.6, 0.85), R(0.1, 0.25));
+        p.flt[0] = LP(4, 9, R(1.2, 2.2));
+        p.lfo[0] = { dst: 2, idx: 1, wav: 0, rate: +R(0.15, 0.7).toFixed(2), amt: RI(5, 9) * 5 }; },
+      fm: () => { p.osc[0].wav = 0; p.osc[0].rat = 0.5;
+        op(1, { wav: 0, mode: 1, rat: pick([1, 2, 2, 3]), amt: +R(0.35, 0.7).toFixed(2) });
+        env(0.003, R(0.15, 0.35), R(0.4, 0.7), R(0.08, 0.18));
+        p.flt[0] = LP(5, 12, R(0.8, 1.4)); },
+      pluck: () => { p.osc[0].wav = pick([2, 3]); p.osc[0].rat = 0.5;
+        env(0.002, R(0.08, 0.18), 0, R(0.06, 0.14));
+        p.flt[0] = LP(3, 8, R(1, 2));
+        fenv(RI(10, 16) * 5, R(0.05, 0.12), 0); },
+      upright: () => { p.osc[0].wav = 1; p.osc[0].rat = 0.5;
+        op(1, { wav: 2, rat: 1, amt: +R(0.12, 0.25).toFixed(2) });
+        op(2, { wav: 4, rat: 1, amt: +R(0.03, 0.08).toFixed(2), phm: 1 });   // finger noise
+        env(0.008, R(0.25, 0.5), R(0.25, 0.5), R(0.12, 0.3));
+        p.flt[0] = LP(3, 6, R(0.7, 1.2));
+        p.amp[0] = { typ: 3, drv: +R(0.1, 0.2).toFixed(2), mix: 0.3, par: 0 }; },
+    },
+    lead: {
+      saw: () => { p.osc[0].wav = 2;
+        op(1, { wav: 2, rat: 1, amt: +R(0.3, 0.6).toFixed(2), fine: pick([-10, -6, 6, 10]) });
+        env(0.004, R(0.1, 0.3), R(0.6, 0.85), R(0.1, 0.3));
+        p.flt[0] = LP(6, 16, R(1, 2.5));
+        fenv(RI(8, 15) * 5, R(0.1, 0.4), R(0.2, 0.5));
+        p.vox.glide = +R(0.02, 0.07).toFixed(2); Object.assign(p.vox, { uni: 3, sprd: RI(8, 14) * 2 }); },
+      hollow: () => { p.osc[0].wav = 3;
+        op(1, { wav: 3, rat: 2, amt: +R(0.15, 0.3).toFixed(2), fine: pick([-8, 8]) });
+        env(0.003, R(0.12, 0.3), R(0.55, 0.8), R(0.08, 0.22));
+        p.flt[0] = LP(5, 12, R(1.2, 3));
+        p.lfo[0] = { dst: 1, idx: 1, wav: 0, rate: +R(4, 6.5).toFixed(1), amt: RI(1, 3) * 5 }; },   // vibrato, a few cents
+      fmbell: () => { p.osc[0].wav = 0;
+        op(1, { wav: 0, mode: 1, rat: pick([2, 3, 3.5, 4]), amt: +R(0.3, 0.6).toFixed(2) });
+        env(0.002, R(0.2, 0.5), R(0.3, 0.6), R(0.2, 0.5));
+        p.flt[0] = LP(8, 20, R(0.7, 1.2)); },
+      super: () => { p.osc[0].wav = 2;
+        op(1, { wav: 2, rat: 1, amt: 0.6, fine: -12 }); op(2, { wav: 2, rat: 1, amt: 0.6, fine: 12 });
+        op(3, { wav: 2, rat: 2, amt: +R(0.1, 0.25).toFixed(2) });
+        env(0.006, R(0.15, 0.35), R(0.65, 0.9), R(0.15, 0.4));
+        p.flt[0] = LP(8, 20, R(0.8, 1.6));
+        Object.assign(p.vox, { uni: pick([5, 7]), sprd: RI(10, 16) * 2 }); },
+      reed: () => { p.osc[0].wav = pick([5, 7]);
+        op(1, { wav: 2, rat: 2, amt: +R(0.1, 0.22).toFixed(2) });
+        env(0.02, R(0.15, 0.3), R(0.6, 0.85), R(0.1, 0.25));
+        p.flt[0] = BP(1.5, 4, R(1.5, 3));
+        p.lfo[0] = { dst: 1, idx: 1, wav: 0, rate: +R(4.5, 6).toFixed(1), amt: RI(1, 3) * 5 }; },
+    },
+    pad: {
+      warm: () => { p.osc[0].wav = 2;
+        op(1, { wav: 2, rat: 1, amt: 0.55, fine: pick([-12, -8]) });
+        op(2, { wav: 2, rat: 2, amt: +R(0.12, 0.25).toFixed(2), fine: 8 });
+        env(R(0.3, 0.9), 0.5, R(0.7, 0.92), R(0.7, 1.6));
+        p.flt[0] = LP(4, 10, R(0.7, 1.3));
+        p.lfo[0] = { dst: 2, idx: 1, wav: 0, rate: +R(0.08, 0.4).toFixed(2), amt: RI(4, 8) * 5 };
+        p.fx[0] = { typ: 8, p1: +R(0.4, 0.62).toFixed(2), p2: 0, mix: +R(0.16, 0.3).toFixed(2) };
+        Object.assign(p.vox, { uni: pick([3, 5]), sprd: RI(10, 15) * 2 }); },
+      glass: () => { p.osc[0].wav = pick([6, 8]);
+        op(1, { wav: 0, rat: pick([2, 3, 4]), amt: +R(0.15, 0.35).toFixed(2) });
+        op(2, { wav: 0, rat: pick([5, 7]), amt: +R(0.06, 0.16).toFixed(2) });
+        env(R(0.2, 0.6), 0.6, R(0.55, 0.8), R(0.9, 1.8));
+        p.flt[0] = LP(8, 22, R(0.7, 1.2));
+        p.fx[0] = { typ: 25, p1: +R(0.45, 0.7).toFixed(2), p2: 0, mix: +R(0.2, 0.34).toFixed(2) }; },
+      choir: () => { p.osc[0].wav = 7;
+        op(1, { wav: 7, rat: 1, amt: 0.5, fine: pick([-10, 10]) });
+        env(R(0.35, 0.9), 0.5, R(0.7, 0.9), R(0.8, 1.6));
+        p.flt[0] = LP(4, 9, R(0.7, 1.1));
+        Object.assign(p.vox, { uni: 5, sprd: RI(10, 16) * 2 });
+        p.fx[0] = { typ: 8, p1: +R(0.45, 0.65).toFixed(2), p2: 0, mix: +R(0.18, 0.32).toFixed(2) }; },
+      drift: () => { p.osc[0].wav = pick([1, 2]);
+        op(1, { wav: 1, rat: pick([1, 1.5, 2]), amt: +R(0.25, 0.5).toFixed(2), fine: pick([-14, 14]) });
+        env(R(0.5, 1.2), 0.6, R(0.65, 0.9), R(1, 2));
+        p.flt[0] = LP(3, 8, R(1, 2));
+        p.lfo[0] = { dst: 2, idx: 1, wav: 0, rate: +R(0.05, 0.25).toFixed(2), amt: RI(6, 11) * 5 };
+        p.fx[0] = { typ: 26, p1: +R(0.3, 0.6).toFixed(2), p2: +R(0.2, 0.45).toFixed(2), mix: +R(0.15, 0.3).toFixed(2) }; },
+    },
+    keys: {
+      ep: () => { p.osc[0].wav = 0;                        // the tine: one fm partial with a fast decay
+        op(1, { wav: 0, mode: 1, rat: pick([3, 4, 6]), amt: +R(0.3, 0.6).toFixed(2) });
+        env(0.002, R(0.5, 1.1), R(0.15, 0.35), R(0.25, 0.5));
+        p.flt[0] = LP(6, 14, R(0.7, 1.1));
+        p.lfo[0] = { dst: 3, idx: 1, wav: 0, rate: +R(3, 6).toFixed(1), amt: RI(2, 5) * 5 }; },   // tremolo
+      organ: () => { p.osc[0].wav = 5;
+        op(1, { wav: 0, rat: 2, amt: +R(0.3, 0.55).toFixed(2) });
+        op(2, { wav: 0, rat: 3, amt: +R(0.15, 0.35).toFixed(2) });
+        op(3, { wav: 0, rat: 4, amt: +R(0.08, 0.2).toFixed(2) });
+        env(0.006, 0.1, R(0.85, 0.98), R(0.04, 0.1));      // an organ is a switch, not an envelope
+        p.flt[0] = LP(8, 20, R(0.7, 1)); },
+      bell: () => { p.osc[0].wav = 6;
+        op(1, { wav: 0, mode: 1, rat: pick([3.5, 5.5, 7]), amt: +R(0.25, 0.5).toFixed(2) });
+        env(0.001, R(0.8, 1.8), R(0.05, 0.2), R(0.5, 1.2));
+        p.flt[0] = LP(8, 22, R(0.7, 1.2)); },
+      clav: () => { p.osc[0].wav = 3;
+        op(1, { wav: 2, rat: 2, amt: +R(0.2, 0.4).toFixed(2) });
+        env(0.001, R(0.12, 0.3), R(0.05, 0.2), R(0.06, 0.15));
+        p.flt[0] = BP(2, 5, R(0.9, 1.8));
+        p.amp[0] = { typ: 7, drv: +R(0.2, 0.4).toFixed(2), mix: +R(0.3, 0.5).toFixed(2), par: 0 }; },
+    },
+    chord: {
+      stab: () => { p.osc[0].wav = 2;
+        op(1, { wav: 2, rat: 1, amt: 0.5, fine: pick([-10, 10]) });
+        env(0.004, R(0.12, 0.3), R(0.1, 0.35), R(0.15, 0.35));
+        p.flt[0] = LP(4, 10, R(1.2, 2.5));
+        fenv(RI(8, 14) * 5, R(0.08, 0.25), R(0.1, 0.3));
+        Object.assign(p.vox, { uni: 3, sprd: RI(8, 14) * 2 }); },
+      soft: () => { p.osc[0].wav = pick([5, 2]);
+        op(1, { wav: 0, rat: 2, amt: +R(0.15, 0.3).toFixed(2) });
+        env(R(0.05, 0.2), R(0.3, 0.6), R(0.6, 0.85), R(0.35, 0.8));
+        p.flt[0] = LP(4, 9, R(0.7, 1.2));
+        p.fx[0] = { typ: 8, p1: +R(0.4, 0.6).toFixed(2), p2: 0, mix: +R(0.14, 0.26).toFixed(2) }; },
+      brass: () => { p.osc[0].wav = 2;
+        op(1, { wav: 3, rat: 1, amt: +R(0.2, 0.4).toFixed(2), fine: pick([-6, 6]) });
+        env(R(0.03, 0.09), R(0.2, 0.4), R(0.6, 0.85), R(0.15, 0.35));
+        p.flt[0] = LP(3, 8, R(1.2, 2.4));
+        fenv(RI(12, 20) * 5, R(0.15, 0.4), R(0.3, 0.6));
+        p.amp[0] = { typ: 4, drv: +R(0.15, 0.3).toFixed(2), mix: +R(0.25, 0.45).toFixed(2), par: 0 }; },
+    },
+    plk: {
+      marimba: () => { p.osc[0].wav = 0;
+        op(1, { wav: 0, rat: 4, amt: +R(0.2, 0.4).toFixed(2) });     // the mallet's fourth partial
+        op(2, { wav: 4, rat: 1, amt: +R(0.02, 0.06).toFixed(2), phm: 1 });
+        env(0.001, R(0.15, 0.35), 0, R(0.1, 0.25));
+        p.flt[0] = LP(4, 10, R(0.8, 1.4)); },
+      koto: () => { p.osc[0].wav = 1;
+        op(1, { wav: 2, rat: 2, amt: +R(0.15, 0.3).toFixed(2) });
+        env(0.001, R(0.3, 0.7), 0, R(0.15, 0.35));
+        p.flt[0] = BP(1.2, 3.5, R(0.9, 1.7)); },
+      harp: () => { p.osc[0].wav = 1;
+        op(1, { wav: 0, rat: 2, amt: +R(0.2, 0.35).toFixed(2) });
+        op(2, { wav: 0, rat: 3, amt: +R(0.06, 0.15).toFixed(2) });
+        env(0.002, R(0.5, 1.1), 0, R(0.25, 0.6));
+        p.flt[0] = LP(6, 16, R(0.7, 1.2)); },
+      blip: () => { p.osc[0].wav = pick([3, 8]);
+        op(1, { wav: 0, mode: 1, rat: pick([2, 3, 5]), amt: +R(0.2, 0.45).toFixed(2) });
+        env(0.001, R(0.05, 0.14), 0, R(0.04, 0.1));
+        p.flt[0] = LP(5, 14, R(1, 2.5));
+        penv(RI(4, 12), R(0.02, 0.06)); },
+    },
+    /* ---- fx IS THE ATONAL HOME, at every rung. Nothing here has to be in
+       tune with anything, which is exactly why the tonal categories never have
+       to go here to be interesting. */
+    fx: {
+      /* NOISE HAS NO FUNDAMENTAL, so anchoring its filter to one is not just
+         pointless, it is wrong: measured, a bandpass placed off a 131Hz note
+         that is not there left mean peak 0.014 with a min of ZERO and a
+         centroid of 5391 — the filter and the energy were nowhere near each
+         other. For noise the filter IS the pitch, so it is placed absolutely
+         and wide, and blue noise (all of its energy up top) is out. */
+      noise: () => { p.osc[0].wav = pick([4, 4, 10]); p.osc[0].rat = 1;
+        env(R(0.01, 0.3), R(0.3, 1), R(0.2, 0.7), R(0.3, 1.2));
+        p.flt[0] = { typ: pick([1, 1, 3]), frq: Math.round(R(200, 5000)),
+                     q: +R(0.8, 2.4).toFixed(1), gn: 0 };
+        p.lfo[0] = { dst: 2, idx: 1, wav: RI(0, 3), rate: +R(0.1, 6).toFixed(1), amt: RI(10, 20) * 5 }; },
+      drone: () => { p.osc[0].wav = pick([2, 8, 5]);
+        op(1, { wav: pick([2, 8]), mode: 2, rat: +R(1.01, 2.7).toFixed(2), amt: +R(0.3, 0.7).toFixed(2) });
+        op(2, { wav: 0, mode: 1, rat: +R(0.13, 0.9).toFixed(2), amt: +R(0.2, 0.6).toFixed(2) });
+        env(R(0.2, 1), 0.6, R(0.6, 0.9), R(0.8, 2));
+        p.flt[0] = LP(2, 20, R(1, 6)); },
+      riser: () => { p.osc[0].wav = pick([4, 12, 2]);
+        env(R(0.25, 0.9), 0.4, R(0.6, 0.95), R(0.1, 0.4));
+        p.flt[0] = HP(0.3, 0.9, R(0.8, 2));
+        penv(RI(30, 120) * pick([1, -1]), R(0.4, 1.4));
+        p.lfo[0] = { dst: 2, idx: 1, wav: 1, rate: +R(0.1, 1).toFixed(2), amt: RI(12, 20) * 5 }; },
+      chaos: () => { p.osc[0].wav = RI(0, 8);
+        op(1, { wav: RI(0, 8), mode: pick([2, 3, 2]), rat: +R(0.2, 9).toFixed(2), amt: +R(0.4, 0.9).toFixed(2) });
+        op(2, { wav: RI(0, 8), mode: pick([1, 2]), rat: +R(0.1, 11).toFixed(2), amt: +R(0.3, 0.8).toFixed(2) });
+        env(R(0.001, 0.4), R(0.1, 1.2), R(0.1, 0.8), R(0.1, 1.2));
+        p.flt[0] = pick([LP(1, 24, R(1, 8)), BP(0.5, 12, R(2, 9))]);
+        p.mod[0] = { src: 5, rsel: 0, rate: +R(2, 20).toFixed(1),
+                     routes: [{ dst: pick([2, 3]), idx: 1, amt: RI(20, 60), ctr: 0, tgt: null }] }; },
+    },
+  };
+  A.misc = A.keys;
+  ARCHNAMES = A;                      // the harness reads the table off the last roll
+  const kinds = A[cat] || A.keys;
+
+  /* ---- WHICH ARCHETYPE. Rung 0 reaches only a category's first two — its
+     canonical instruments. Rung 3 may borrow from a NEIGHBOUR, which is what
+     makes it feel like somewhere else rather than like noise; the neighbour
+     map is by role, so a bass can turn into a pluck but never into a pad. */
+  const NEAR = { bass: ['plk', 'lead'], lead: ['keys', 'chord'], pad: ['chord', 'keys'],
+                 keys: ['plk', 'chord'], chord: ['pad', 'keys'], plk: ['keys', 'bass'],
+                 fx: ['fx'], misc: ['keys', 'plk'] };
+  let use = cat, names = Object.keys(kinds);
+  if (rung === 0) names = names.slice(0, 2);
+  if (rung === 3 && cat !== 'fx' && rnd() < 0.45) {
+    use = pick(NEAR[cat] || ['keys']);
+    names = Object.keys(A[use] || kinds);
+  }
+  /* `force` is the development harness asking for one named instrument —
+     tools/probe.sh archlvl. Nothing in the app passes it. */
+  let an = pick(names);
+  if (force) { for (const k in A) if (A[k][force]) { use = k; an = force; } }
+  (A[use] || kinds)[an]();
+  p.name = p.name.slice(0, 3) + an.slice(0, 2).toUpperCase();
+
+  /* ---- THE CHARACTER LAYER, rungs 2 and 3 only, laid OVER a patch that
+     already works rather than rolled alongside it. This is the whole
+     difference from the old generator: the wild in "wild" is an addition, not
+     a wider spread on every axis at once. */
+  if (rung >= 2) {
+    const heavy = rung === 3;
+    if (P(0.55) && !p.amp[0].typ)
+      p.amp[0] = { typ: pick(heavy ? [1, 2, 3, 4, 5, 7, 8] : [1, 4, 7]),
+                   drv: +R(0.15, heavy ? 0.55 : 0.35).toFixed(2),
+                   mix: +R(0.25, heavy ? 0.7 : 0.5).toFixed(2), par: 0 };
+    if (P(0.5) && !p.fx[0].typ)
+      p.fx[0] = { typ: pick(heavy ? [1, 2, 3, 5, 12, 25, 27, 28, 29] : [1, 5, 8, 12, 25]),
+                  p1: +R(0.15, 0.55).toFixed(2), p2: +R(0.15, 0.5).toFixed(2),
+                  mix: +R(0.12, heavy ? 0.45 : 0.3).toFixed(2) };
+    if (P(0.4) && !p.lfo[0].dst)
+      p.lfo[0] = { dst: pick([2, 2, 3, 4]), idx: 1, wav: RI(0, 3),
+                   rate: +R(0.1, heavy ? 12 : 5).toFixed(2), amt: RI(4, heavy ? 14 : 9) * 5 };
+    /* a second partial at an interval you would not have chosen — the one
+       place strangeness is allowed into a tonal patch, and it is still an
+       INTERVAL, so it is still in tune with itself */
+    if (heavy && P(0.4)) {
+      const free = p.osc.findIndex((o, i) => i > 0 && (!o || !(o.amt > 0.01)));
+      if (free > 0) op(free, { wav: RI(0, 8), mode: pick([0, 1, 2]),
+                               rat: pick([1.5, 2.5, 3.5, 5, 7, 0.75]),
+                               amt: +R(0.1, 0.35).toFixed(2), fine: RI(-6, 6) * 5 });
+    }
+    if (heavy && P(0.3)) p.vox.glide = +R(0.03, 0.14).toFixed(2);
+  }
+
+  /* ---- what every tonal patch gets regardless, and the two things the old
+     generator got right and kept: a bass ducks under channel 1's kick, and a
+     supporting level rather than a buried one. */
+  if (cat === 'chord' && P(0.6)) p.ply[0] = ply1({ typ: 1, p1: RI(0, 4), p2: +R(0, 0.02).toFixed(3), p3: 1 });
+  if ((cat === 'plk' || cat === 'lead') && rung >= 2 && P(0.25)) p.ply[0] = ply1({ typ: 2, p1: 2, p2: 0, p3: 1 });
+  if (cat === 'bass') { p.vox.mode = 1; p.vox.uni = 1;
+    p.fx[9] = { typ: 16, p1: 1, p2: +R(0.4, 0.65).toFixed(2), p3: 0.3, mix: 1 }; }
+  /* THE TRIM IS MEASURED, NOT REASONED (tools/probe.sh archlvl, 4 rolls each
+     at wild 40%, peak on the channel bus). Archetypes have genuinely different
+     output — a supersaw against a clav is not a gain-structure argument you
+     can win by thinking — and the quiet ones are exactly what makes half a
+     round of rolls feel like duds. Rolls stay instant, so this is the deal:
+     the render-and-check runs at DEVELOPMENT time and its answer is a number
+     in this table. Re-run archlvl after touching any archetype.
+         mean peak before          worst spread x4.3 (keys), x2.5 (lead)
+         target                    0.20 on every one */
+  const TRIM={sub:0.84,acid:1.22,reese:0.89,fm:0.99,pluck:1.07,upright:1.34,
+    saw:0.63,hollow:0.84,fmbell:0.90,super:1.00,reed:1.59,
+    warm:0.98,glass:1.28,choir:1.30,drift:1.16,
+    ep:0.61,organ:0.79,bell:0.88,clav:1.60,
+    stab:1.00,soft:0.90,brass:1.49,
+    marimba:1.19,koto:1.50,harp:1.32,blip:1.06,
+    noise:2.00,drone:1.12,riser:0.99,chaos:1.68};
+  p.mix.lvl = +clamp(R(0.25, 0.38) * (TRIM[an] || 1), 0.06, 0.95).toFixed(2);
+  foldMod(p);
+  genSpice(p, cat, wild, H);
+  return { rung, arch: an, from: use, g: +g.toFixed(2) };
+}
+function genPreset(cat,rnd,wild=0.5,force){
   const R=(a,b)=>a+rnd()*(b-a), RI=(a,b)=>Math.round(R(a,b));
   const pick=a=>a[Math.floor(rnd()*a.length)];
   const P=b=>rnd()<Math.min(0.97,b*(0.35+1.5*wild));   // wildness scales every "maybe"
@@ -12970,71 +13309,10 @@ function genPreset(cat,rnd,wild=0.5){
     genSpice(p,cat,wild,{R,RI,P,pick});
     return p;
   }
-  /* root wave: canonical per type when tame, anything goes when wild */
-  const CANON={bass:[2,3,1],keys:[1,5,6],chord:[5,2,1],lead:[2,3,7],
-    pad:[2,5,7,1],plk:[1,6,8],fx:[4,8,7],misc:[0,1,2,3,5]};
-  p.osc[0].wav=rnd()<wild*0.55?RI(0,8):pick(CANON[cat]||CANON.misc);
-  if(wild>0.35){p.osc[0].ph=pick([0,0,90,180]);p.osc[0].phm=pick([0,0,1]);}
-  /* A BASS SITS AN OCTAVE OR TWO DOWN, and that belongs on the oscillator
-     rather than on the part: a generated bass line written low but voiced at
-     ratio 1 reads as a mid-range synth playing bass notes. The ops go with it —
-     a partial at ratio 9 over a root at 0.25 is back up where it started. */
-  const low=cat==='bass'?pick([0.25,0.5,0.5]):1;
-  if(cat==='bass')p.osc[0].rat=low;
-  const opBase={pad:2,fx:2,chord:1.5,keys:1.2}[cat]??1;
-  const nOps=Math.min(9,Math.round(opBase*(0.3+wild*2))+(P(0.25)?1:0));
-  for(let i=1;i<=nOps;i++)p.osc[i]={wav:wild>0.6?RI(0,8):RI(0,3),
-    mode:pick(wild>0.5?[0,1,1,2]:[0,1,1]),dst:0,
-    rat:cat==='bass'
-      ?+(low*pick([1,1,2,2,0.5,3])).toFixed(3)        // octaves and a fifth of the root, no more
-      :pick(wild>0.6?[0.25,0.5,1,1.5,2,3,3.5,4,5.5,7,9]:[0.5,1,2,2,3,4]),
-    amt:+R(0.1,0.3+0.5*wild).toFixed(2),fine:RI(-8,8)*5,ph:0,phm:0};
-  const env={drum:[0.001,R(0.05,0.3),0,R(0.03,0.12)],
-    bass:[0.003,R(0.1,0.3),R(0.3,0.7),0.1], keys:[0.002,R(0.2,0.5),R(0.3,0.6),R(0.2,0.4)],
-    chord:[0.004,R(0.15,0.5),R(0.4,0.75),R(0.2,0.6)], lead:[0.002,R(0.1,0.35),R(0.5,0.85),R(0.08,0.3)],
-    pad:[R(0.2,0.8),0.5,R(0.6,0.9),R(0.5,1.5)], plk:[0.001,R(0.08,0.2),0,R(0.08,0.2)],
-    fx:[R(0.01,0.6),R(0.3,1),R(0.2,0.8),R(0.3,1.5)]}[cat]
-    ||[0.002,R(0.1,0.4),R(0,0.7),R(0.1,0.5)];
-  Object.assign(p.env[0],{a:env[0],d:env[1],s:env[2],r:env[3]});
-  /* A BASS IS THE BOTTOM OF THE MIX, so the one thing its filter must never do
-     is take the bottom off. Highpass and bandpass were in the pick list for
-     every category, and a bandpassed bass is a mid-range buzz with the part
-     it was written for missing. Lowpass only down here, and cut low enough to
-     actually shape something rather than sit above the note. */
-  p.flt[0]=cat==='bass'
-    ?{typ:1,frq:Math.round(180*Math.pow(2,R(0,3.6))),q:+R(0.7,2+3*wild).toFixed(1),gn:0}
-    :{typ:pick([1,1,1,2,3]),frq:Math.round(300*Math.pow(2,R(0,5.3))),q:+R(0.5,2+6*wild).toFixed(1),gn:0};
-  if(P(0.5))p.env[1]={dst:3,idx:1,amt:RI(6,18)*5,a:0.003,d:R(0.08,0.4),s:R(0,0.4),r:0.2};
-  /* LFO DESTINATIONS ARE ON THE LEGACY SCALE — 1 pitch · 2 filt · 3 amp ·
-     4 pan — which is NOT the mod rack's numbering (LFO2MD does the mapping).
-     Reading it as the mod rack's, as I did once, silently turns "mostly filter"
-     into "pitch one time in five".
-
-     A stack of three vibratoing voices is not a chord, it is seasickness, so
-     held categories never get pitch at all and everything else gets it rarely
-     and shallowly — a detune you can hear the intent of, not a siren. */
-  const held=cat==='chord'||cat==='pad';
-  if(P(0.3)){
-    const dst=held?pick([2,2,2,3,4]):pick(wild>0.6?[2,2,3,1,4]:[2,2,2,2,3,1]);
-    p.lfo[0]={dst,idx:1,wav:RI(0,3),rate:+R(0.2,2+8*wild).toFixed(1),
-      amt:dst===1?Math.round(R(1,2+2*wild))*5          // pitch: a few cents, not a semitone
-                 :Math.round(R(4,8+10*wild))*5};
-  }
-  if(wild>0.55&&P(0.35))p.lfo[1]={dst:pick([2,3,3,4]),idx:1,wav:RI(0,4),rate:+R(0.1,7).toFixed(1),amt:RI(3,10)*5};
-  if(P(0.35))p.amp[0]={typ:RI(1,9),drv:+R(0.1,0.2+0.55*wild).toFixed(2),mix:+R(0.2,0.3+0.5*wild).toFixed(2),par:0};
-  if(P(0.5))p.fx[0]=rnd()<0.5
-    ?{typ:pick(wild>0.6?[1,2,3,4,5,XDIST,12]:[1,2,4]),p1:+R(0.15,0.5).toFixed(2),p2:+R(0.2,0.5).toFixed(2),mix:+R(0.1,0.2+0.35*wild).toFixed(2)}
-    :{typ:8,p1:+R(0.38,0.49+0.28*wild).toFixed(2),p2:0,mix:+R(0.12,0.2+0.25*wild).toFixed(2)};
-  if(wild>0.5&&P(0.3))p.fx[1]={typ:pick([1,2,5,12]),p1:+R(0.1,0.5).toFixed(2),p2:+R(0.1,0.5).toFixed(2),mix:+R(0.1,0.35).toFixed(2)};
-  if(cat==='chord'&&P(0.6))p.ply[0]=ply1({typ:1,p1:RI(0,4),p2:+R(0,0.02).toFixed(3),p3:1});
-  if((cat==='plk'||cat==='lead')&&wild>0.6&&P(0.2))p.ply[0]=ply1({typ:2,p1:2,p2:0,p3:1});
-  if((cat==='lead'||cat==='bass')&&P(0.25))p.vox.glide=+R(0.02,0.1).toFixed(2);
-  if(cat==='pad'||cat==='lead'||cat==='chord')Object.assign(p.vox,{uni:pick(wild>0.5?[3,5,7]:[1,3,5]),sprd:RI(6,15)*2});
-  if(cat==='bass'){p.vox.mode=1;
-    p.fx[9]={typ:16,p1:1,p2:+R(0.4,0.65).toFixed(2),p3:0.3,mix:1};}  // duck: follow ch 1's kick
-  p.mix.lvl=+R(0.25,0.38).toFixed(2);   // supporting, not buried — see MIXT
-  foldMod(p);
-  genSpice(p,cat,wild,{R,RI,P,pick});
+  /* the tonal half is archetypes now — see genTonal, which also carries the
+     measurement that forced it. `_gen` is what the roll DID, for the probe and
+     for the flash line; it is not saved and nothing reads it back. */
+  p._gen=genTonal(p,cat,wild,{R,RI,P,pick,rnd},force);
   /* AND GIVE EVERY ROUTE AN ADDRESS. foldMod() stamps _addr on the way past,
      and everything above writes routes in the engine's legacy (dst,idx) form
      AFTER that — so addrMod's own guard turned it into a no-op for exactly the
