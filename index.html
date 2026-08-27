@@ -1245,7 +1245,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-27.1319';
+const BUILD='2026-08-27.1340';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1556,6 +1556,10 @@ let SMPWAIT=false;
    thousands of lines before the pool block. It survives today only because a
    default preset has no sample reference to look up, which is luck. */
 const POOLBYF=new Map();             // src.f -> entry, so a preset's sample ref is O(1)
+/* the sampled kits' cache lives up here for the same reason POOLBYF does:
+   libAll() appends them and libInit() calls libAll during module init, long
+   before the kit block itself is reached. See smpKitEntries. */
+let SMPKITCACHE=null;
 /* THE ENGINE ARRIVES AS AN ARGUMENT and is never read from the outer const.
    `rebuildRack` runs while `const engine = new Engine()` is still evaluating,
    and reading a const from inside its own initialiser is a ReferenceError, not
@@ -12211,10 +12215,12 @@ function loadShelf(url,ord0){
 }
 loadShelf('samples/manifest.json',0);
 loadShelf('samples/oneshots/manifest.json',1e4).then(()=>{
-  /* the manifest has resolved, but the BUFFERS are still landing — give them a
-     moment, then lay the factory sampled kits down. They only need the pool
-     ENTRIES, which arrive with each decode. */
-  setTimeout(()=>{try{const k=libSampleKits(); if(k)dirty=true;}catch(_){}} ,2500);
+  /* the manifest has resolved but the BUFFERS are still landing, so this only
+     INVALIDATES — the kits rebuild themselves on the next libAll, from
+     whatever the shelf holds by then. Nothing is lost if this fires early;
+     the old version laid them down here and a slow shelf meant no kits at all
+     for that whole session. */
+  setTimeout(()=>{SMPKITCACHE=null; libCache=null; libNoCache=null; dirty=true;},2500);
 });
 setTimeout(()=>seedCloud(true),4000);   // whatever landed, rather than silence
 /* WHERE THE CURSORS ARE. The worklet is the only one who knows — the tape
@@ -12663,14 +12669,32 @@ function libAll(){
   }
   /* the library holds presets too, so it is written in the same portable form
      — a saved sound must survive a list being reordered exactly as a set does */
-  return libCache=((x&&!Array.isArray(x)&&(x.v||0)>=21)
+  return libCache=withSmpKits((x&&!Array.isArray(x)&&(x.v||0)>=21)
     /* UNPACK FIRST, then port. The write is packRacks(portPreset(d,true)) —
        ported, then packed — so the read has to be its mirror. Running
        portPreset over packed racks hands it objects where it walks arrays; it
        threw, libAll caught it, and libAll's catch returns [] — so the whole
        library read as EMPTY while 787KB of it sat in storage untouched. */
     ? items.map(en=>en&&en.data?{...en,data:portPreset(unpackRacks(en.data),false)}:en)
-    : items);}catch(_){return libCache=[];}}
+    : items);}catch(_){return libCache=withSmpKits([]);}}
+/* the generator owns the sampled-kit names, so a stored copy from an older
+   build is dropped rather than shadowing it — no version bump needed, and a
+   library that already has them heals itself on the next read */
+function withSmpKits(items){
+  /* DEFENSIVE ON PURPOSE. libInit() calls libAll during module init, and at
+     that point POOL, KITMAP and MIXT are all still inside their own temporal
+     dead zones — reading any of them throws. There is nothing to do about
+     that except decline: the kits are appended by whichever libAll call comes
+     after the shelf exists, which is every one that matters. Silently
+     returning `items` here is right; throwing would land in libAll's catch
+     and empty the entire library, which is exactly how that bug went last
+     time. */
+  let gen=[];
+  try{gen=smpKitEntries();}catch(_){return items;}
+  if(!gen.length)return items;
+  const own=new Set(gen.map(k=>k.name));
+  return items.filter(en=>!(en&&en.factory&&own.has(en.name))).concat(gen);
+}
 /* preset -> its number within its category, which is what the Inst row shows.
    Built once per library change instead of scanned per channel per frame. */
 function libNos(){
@@ -12749,7 +12773,11 @@ function unpackRacks(d){
 }
 const LIBV=31;   // bump BOTH: libStore writes it, libAll checks it
 function libStore(a){libMigrated=true; libCache=null; libNoCache=null;
-  const out=(a||[]).map(en=>en&&en.data?{...en,data:packRacks(portPreset(en.data,true))}:en);
+  /* `gen` entries are built from this file and the manifest every boot — see
+     smpKitEntries. Writing them would cost 831KB for nothing and would let a
+     stale copy shadow the generator forever. */
+  const out=(a||[]).filter(en=>!(en&&en.gen))
+    .map(en=>en&&en.data?{...en,data:packRacks(portPreset(en.data,true))}:en);
   /* AND SAY SO WHEN IT FAILS. This catch was empty, which is how 831KB of
      kits went missing without a word — a write that cannot happen is a thing
      the person using it has to be told about. */
@@ -14617,26 +14645,39 @@ function sampleKit(style,rnd){
 const SMPKITS=[['tr808','KT808'],['tr8','KTTR8'],['linn','KTLIN'],['cr78','KTC78'],
                ['tr505','KT505'],['rx5','KTRX5'],['dr5','KTDR5'],['mrk2','KTMRK'],
                ['lofi','KTLOF'],[null,'KTMX1'],[null,'KTMX2']];
-let smpKitsLaid=false;
-function libSampleKits(){
-  if(smpKitsLaid||!POOL.some(e=>e&&e.inst))return false;
-  const have=new Set(libAll().map(en=>en&&en.name));
-  const add=[];
+/* GENERATED, NEVER STORED — and both halves of that matter.
+
+   The first version wrote these into the library with libStore(), on a single
+   2.5s timer after the manifest resolved, and Gad's answer was "we have to
+   have presets for kits which dont exist right now". Two ways to lose them
+   and the design had both:
+     · the TIMER is a race. If the shelf has not finished decoding when it
+       fires, libSampleKits returns without laying anything AND nothing ever
+       calls it again — the kits simply never exist for that session.
+     · the WRITE can fail. The library sits near what localStorage will hold,
+       and 831KB of kits going into a setItem that throws is 831KB of kits
+       silently not there.
+   Neither needs to happen, because a factory kit is not data — it is
+   DERIVABLE, from this file plus the manifest, deterministically from a fixed
+   seed. So it is built in memory, appended by libAll, and filtered back out
+   by libStore so it can never be written. It costs nothing to store, cannot
+   be lost, and reappears on its own the moment the shelf is loaded. */
+function smpKitEntries(){
+  if(SMPKITCACHE)return SMPKITCACHE;
+  if(!POOL.some(e=>e&&e.inst))return [];      // shelf not in yet: ask again next call
+  const out=[];
   SMPKITS.forEach(([style,nm],ki)=>{
-    if(have.has(nm))return;
-    if(style&&!POOL.some(e=>e&&e.style===style))return;      // that machine was pruned away
+    if(style&&!POOL.some(e=>e&&e.style===style))return;    // that machine was pruned away
     const pads=sampleKit(style,mulberry32(9000+ki*77));
     if(!pads)return;
     const p=basePreset(nm); p.cat='kit';
     Object.assign(p.osc[0],{wav:0,rat:0.5});
     Object.assign(p.env[0],{a:0.001,d:0.25,s:0,r:0.05});
     p.vox.mode=1; p.kit=pads;
-    add.push({name:nm,cat:'kit',factory:true,data:presetData(p)});
+    out.push({name:nm,cat:'kit',factory:true,gen:true,data:presetData(p)});
   });
-  if(!add.length){smpKitsLaid=true; return false;}
-  libStore(libAll().concat(add));
-  smpKitsLaid=true;
-  return add.length;
+  SMPKITCACHE=out;
+  return out;
 }
 function kitPads(rnd,wild){    // 12 complete pad chains, one per pitch class
   const lanes=['kik','snr','hh','hh','perc','tom','cymb','wood','zap','perc','snr','kik'];
