@@ -1,5 +1,52 @@
 # DRUMS — 2026-08-27 (late, branch `sound-library`)
 
+## QA CHECKLIST — pulse width and spread, 2026-08-27
+
+Reload **http://localhost:3033/** (a plain reload keeps your set). Build must
+read `2026-08-27.1519` or later. Ordered by what is most likely to be wrong.
+
+1. **A patch you already had, with a square at pw 0.5.** Play it. It must sound
+   EXACTLY as before — that case is mathematically identical and 25 of the 29
+   factory presets that use a square sit there. If anything moved, this is the
+   first thing to say. *Measured: square RMS against a saw's is 1.732 by
+   definition; 1.676 before, 1.741 after.*
+
+2. **S606, RD909, VEP9** — the only factory presets that dialled a width other
+   than 0.5. They WILL sound different, because the width now does something.
+   The question is whether they sound better or just changed. *Not measured as
+   a judgement — only that nothing went silent.*
+
+3. **The thing you asked for: an LFO on a square's width.** Should be a smooth
+   moving edge, no crackle at any rate or depth. *Measured: excess edges per
+   second under a 2Hz full-depth sweep, +80.2 before, -0.4 after, floor +0.4.*
+
+4. **Sweep the width by hand** inside the param scope (`⇧`/`⌥` + the width
+   pair). Should be smooth under a held note too, not just under an LFO.
+   *Not measured — the probe drives an LFO, not the keyboard.*
+
+5. **The phase engine** (vox `fmw`), same LFO on width. Smooth, but this one
+   still swaps a table rather than sliding a delay. *Measured 3.1 excess
+   edges/s against 120.3 before — small, at the edge of what the detector
+   resolves, but not the flat zero the native engine gets. If you can hear
+   anything here, say so and it gets the same treatment.*
+
+6. **Very low and very high squares** — a bass note near 32Hz, a lead near
+   2kHz, width at 0.25. *Measured duty 0.33 and 0.27 against 0.25 asked, but
+   both are the MEASUREMENT running out of cycles and out of harmonics under
+   Nyquist, not the width. Worth an ear.*
+
+7. **Spread on a rake / comb / vowel filter, turned by hand under a held
+   note.** The peaks must move while the note sounds. *Measured: peak 2 of a
+   rake bank, 1275 -> 1275 Hz before (dead), 803 -> 1748 after.*
+
+8. **Put an LFO on that spread** — it is offered in the destination picker at
+   all now, which it never was. *Measured: peak 2 swings 753 -> 1798 Hz under
+   a 3Hz LFO; before, the route would not even resolve.*
+
+9. **Cutoff and spread together** — move the cutoff after moving spread. The
+   shape must drag as a shape, not collapse. *Not measured; the `_r`
+   bookkeeping is shared with cutLive but no probe covers the pair.*
+
 ## PULSE WIDTH WAS NEVER A WIDTH  (0104f18)
 
 Gad: "can you make that pulsewidth modding will be smooth? right now its
