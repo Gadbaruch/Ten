@@ -1245,7 +1245,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-27.0833';
+const BUILD='2026-08-27.0838';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -13012,7 +13012,13 @@ function genTonal(p, cat, wild, H, force) {
      canonical instruments. Rung 3 may borrow from a NEIGHBOUR, which is what
      makes it feel like somewhere else rather than like noise; the neighbour
      map is by role, so a bass can turn into a pluck but never into a pad. */
-  const NEAR = { bass: ['plk', 'lead'], lead: ['keys', 'chord'], pad: ['chord', 'keys'],
+  /* MEASURED: a bass borrowing from plk gave BELBL — `blip`, an FM transient
+     whose modulator dominates — reading 393Hz and peak 0.397 against 64.6Hz
+     and ~0.15 for the rest of its round. Putting the octave back made it
+     worse, because the problem is not the octave: a percussive pluck does not
+     become a bass by being played low. A bass borrows from LEAD, where the
+     archetypes are sustained and pitched and do transpose down. */
+  const NEAR = { bass: ['lead'], lead: ['keys', 'chord'], pad: ['chord', 'keys'],
                  keys: ['plk', 'chord'], chord: ['pad', 'keys'], plk: ['keys', 'bass'],
                  fx: ['fx'], misc: ['keys', 'plk'] };
   let use = cat, names = Object.keys(kinds);
@@ -13025,6 +13031,15 @@ function genTonal(p, cat, wild, H, force) {
      tools/probe.sh archlvl. Nothing in the app passes it. */
   let an = pick(names);
   if (force) { for (const k in A) if (A[k][force]) { use = k; an = force; } }
+  /* A BORROWED ARCHETYPE STILL HAS TO SIT IN ITS OWN CATEGORY'S REGISTER, and
+     the octave has to be set BEFORE the archetype runs. Setting it after was
+     this generator's original bug wearing a new hat: the archetype had already
+     placed its filter against hz(), so moving the root two octaves down left a
+     bandpass sitting 4-16x above the note — BELRE measured 196.5Hz and peak
+     0.346 against 64.6Hz and ~0.15 for its round. A lead archetype never sets
+     `rat` itself, so pre-setting it survives and every LP/BP inside is
+     anchored to where the note actually ends up. */
+  if (cat === 'bass' && use !== 'bass') p.osc[0].rat = pick([0.25, 0.5, 0.5]);
   (A[use] || kinds)[an]();
   p.name = p.name.slice(0, 3) + an.slice(0, 2).toUpperCase();
 

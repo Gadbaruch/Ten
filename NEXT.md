@@ -1,3 +1,126 @@
+# WHERE THE INSTRUMENT STANDS — 2026-08-27  (branch `sound-library`)
+
+## THIS IS A BRANCH. Live is untouched; `main` has none of it.
+
+Three asks, all on `sound-library`: tell one-shots from loops, build a
+classic-drum-machine library, rebuild both randomisers.
+
+## 1 · THE POOL KNOWS A LOOP FROM A ONE-SHOT  (8237018)
+
+`poolKindOf` classifies every take ONCE, at `poolAdd`, and each browser gets a
+VIEW — an audio channel hunts loops, a synth op's smp slot hunts one-shots,
+the other kind still reachable at the far end. Nothing is filtered away; the
+pool never moves, because ops and channels store the BUFFER, never the index.
+
+**Amplitude alone cannot do it.** The first rules called `drone` a one-shot and
+`sweep` a loop: same envelope shape, different spectra. Zero-crossing DRIFT,
+first quarter to last, in octaves, is what separates them —
+
+    sweep +4.98   riser +1.86        gestures, fired once
+    pluck -1.72   kick  -1.14        hits, losing brightness as they decay
+    koto  +0.72   tabla +0.67        the loudest any LOOP shows
+
+so `|drift| >= 1.2` is a one-shot with 0.4 octaves of margin. 26 of 26 called
+right. `tools/probe.sh poolkind` re-runs it and drives the real dial specs.
+The manifest DECLARES kind; measurement is the fallback for drops/recordings.
+
+## 2 · 294 DRUM-MACHINE ONE-SHOTS, ALL FREE TO SHIP  (72fad43, 9a1cefe)
+
+Ten machines: TR-808, CR-78, LinnDrum LM-2, Maestro Rhythm King, TR-505,
+Yamaha RX5, Roland TR-8, Alesis DR5, and two derived kits. `LICENSES.md`
+names the licence of every sound. **REJECTED and recorded so nobody re-adds
+them:** oramics' two TR-909 sets read `"license": "None"` and trace to a blog
+post. The 909 here is the TR-8's — Roland's own model, recorded by the repo
+owner, CC0.
+
+**FLAC, decided by measurement** through Chrome's own `decodeAudioData`:
+
+    flac  len 11026  first audible 5  peak at 47   the WAV exactly
+    opus  len 11026  first audible 5  peak at 175  2.9ms late
+    aac   len 11026  first audible 0  peak at 46   pre-echo AHEAD of the hit
+
+**Layout is by TYPE**, machine as the name prefix (`tr808-kick-03`), so a kit
+can be reassembled by prefix later. **Pruned by measurement** — 24 log spectral
+bands + 16-point envelope + log duration, within one instrument folder only:
+
+    survivors of 666   0.20 -> 517   0.30 -> 416   0.45 -> 294   0.60 -> 196
+
+149 deleted (the Boochi44 kits measure 0.00 from the Fischer 808 — they are
+re-cuts), 312 parked in `_similar/` grouped `gNN-`. `PRUNED.md` lists every
+decision. Both thresholds are flags: `--tight 0.20 --loose 0.45`.
+
+**The whole shelf loads at boot** — 666 files fetched and decoded in **539ms**,
+35.9MB, 194MB of buffers, nothing failed. `POOL` cap 32 -> 1200 and it now
+evicts the oldest SESSION take, never a library sound. `ord` keeps the dial in
+manifest order rather than fetch-completion order.
+
+⚠ **`poolSP` must stay declared up with `SP`.** GRANF is built at load and
+calls it; a const read inside its own TDZ throws and `node --check` never sees
+it. This is the trap CLAUDE.md warns about, hit for real.
+
+## 3 · BOTH RANDOMISERS  (c5624de + this commit)
+
+**Gad's deal, and keep it:** a ROLL stays instant — no render-and-check at roll
+time. The render-and-check runs at DEVELOPMENT time and its answer is a number
+baked into a table. `tools/probe.sh genqual · archlvl · patqual`.
+
+**The patch generator: 29 archetypes, stepped wildness, one anchored filter.**
+Rung 0 the category's canonical two · 1 any of its archetypes · 2 plus a
+character layer laid OVER a patch that works · 3 off the leash, may borrow from
+a neighbour. Atonal lives in `fx` alone.
+
+THE BUG WAS ONE BUG, not five — four of five pad duds at wild 80%:
+
+    ZEP1 highpass 2175Hz on a 131Hz note  peak 0.023  centroid 10936
+    FUT3 highpass 2361Hz                  peak 0.016
+    CIK1 bandpass 6366Hz                  peak 0.021
+
+`frq` came from `300*2^R(0,5.3)` with NO reference to the note. Every filter is
+a multiple of the sounding fundamental now. **pad at wild 80%: 3/8 -> 6/8
+clean, no SILENT, no HARSH, centroid 1385..10936 -> 488..2104.**
+
+Level trims are MEASURED (`archlvl`), and every archetype under 0.10 was
+bandpassed: keys spread x4.34 -> x1.14, lead x2.51 -> x1.59, plk x2.15 -> x1.78.
+`fx/noise` was worst — bandpassed off a fundamental NOISE DOES NOT HAVE.
+
+⚠ **THE SAME BUG BIT ME TWICE MORE, both times through the BORROW.** A bass
+borrowing `blip` from plk read 393Hz/peak 0.397. Putting the octave back
+*afterwards* made it worse, because the archetype had already placed its filter
+against the OLD `hz()`. Two rules came out of it: the octave is set BEFORE the
+archetype runs, and a bass borrows only from `lead` (a percussive pluck does not
+become a bass by being played low). **Any new borrow gets asked both questions.**
+
+**The pattern generator: three things shared by every lane** — an accent grid
+(velocity was a constant with 6% jitter), one rhythmic cell the melodic lanes
+quote, a four-bar arc. A/B against live, `patqual n=8 --ab`:
+
+                            live 08-26   this build
+      accent agreement         0.804        0.828
+      bar 4 vs bar 1           0.243        0.314
+      offbeat concentration    0.726        0.750
+
+⚠ **THREE MEASUREMENT BUGS, each of which lied in a different direction:**
+`barvar` read 1.000 on EVERY build because clearing a lane's events sends
+genLane down its own "auto or empty" branch and resets the lane to one bar —
+leave a dummy event behind. Offbeat concentration was dominated by the HAT
+lane, a continuous stream nobody chose, so it tracked hat density and reversed
+sign once excluded. And quoting the cell *plus* perc's old offbeat list made
+concentration WORSE — adding positions is the opposite of agreeing on them.
+
+## WHAT IS OPEN
+
+- **`_bass-round1.json`** is the ten-bass audition set (import it; export yours
+  first). Ten basses, ONE part from one shared context, so soloing compares the
+  SOUND. Two per rung 0/3, three per rung 1/2. All ten sound: peaks
+  0.107..0.284, nine at 64.6Hz. **ch9 (`reed`, the borrowed lead) sits on its
+  3rd harmonic at 196.5Hz and runs ~1.9x hotter than the rest** — the one thing
+  to listen to first.
+- His verdict on those ten drives the next trim pass. Rounds of ten, his ear.
+- `_similar/` (312 files) is waiting on his ear too; nothing there loads.
+- The pool dial is ~320 entries end to end and ⇧ does not stride it. Raised,
+  not built — he chose "load it all" over an index and this is its cost.
+- Other categories have had no listening round yet, only numbers.
+
 # WHERE THE AUDIO CHANNEL STANDS — 2026-08-26 (sixth batch)
 
 ## THE VELOCITY WALL WAS MY OWN FILTER — and a correction worth keeping
