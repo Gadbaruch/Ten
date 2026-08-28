@@ -1471,7 +1471,7 @@ const recPlayed=(pi,tBeat,midi,vel,durBeats)=>recPlayNote(pi,tBeat,sndOut(pi,mid
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-28.2057';
+const BUILD='2026-08-28.2105';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -21257,31 +21257,35 @@ function retroCapture(){
      seven being the END of what he just played. If the buffer holds notes
      newer than the rounded end, the window extends to the cycle that
      contains them — the late-tap forgiveness now cuts both ways. */
-  let endB=anc+Math.round((nowB-anc)/snap)*snap;
+  /* THE WINDOW ENDS AT THE LAST NOTE YOU PLAYED. Not at the clock, and NOT at
+     a cycle line (Gad, 2026-08-29, fourth sighting of one report: "im testing
+     with single bar… i start playing mid bar and past the end of the bar then
+     hit retro mid bar again where i started - and i only see the beginning of
+     the bar not the end where i started").
+
+     ⚠ THE SNAP WAS THE BUG, and on a ONE-BAR loop it is total. endB snapped to
+     a bar line and the window is exactly L long, so at L=4 the window IS the
+     last bar — a phrase that crosses the line loses everything before it, with
+     no slack anywhere. Measured, 1-bar loop, eight notes played 2 -> 5.5 across
+     the line: FOUR came back, and they were the four after the line — "the
+     beginning of the bar", in his words. The identical phrase on a 4-bar loop
+     came back 8 of 8, which is why his channel 3 looked fine: a longer loop had
+     slack the one-bar loop does not. It was never a per-channel fix.
+
+     Ending at the take makes the tap time irrelevant, which subsumes BOTH
+     earlier patches: the forward extension for a jam that ran past the bar,
+     and the pull-back for a tap that came a cycle late. It cannot lose a note
+     the snap would have kept — the window is still exactly L long and still
+     half-open, so no two notes can share a phase, and PHASE comes from the
+     anchor (fmod(n.t-anc,L)) rather than from endB, so nothing moves.
+
+     ⚠ retroBars does NOT get this and must not: it maps from the WINDOW START
+     and resizes the lane, so its within-bar positions hold precisely BECAUSE
+     its end snaps to a bar line — its own comment says so. This function maps
+     from the anchor and never needed the snap at all. */
   let maxT9=-1e9;
   for(const n of retroBuf[pi])if(n.t<=nowB+1e-6&&n.t>maxT9)maxT9=n.t;
-  if(maxT9>endB+1e-9)endB=anc+Math.ceil((maxT9-anc-1e-9)/snap)*snap;
-  /* …AND IT COMES BACK WHEN THE PLAYING IS OLDER THAN THE CLOCK (Gad,
-     2026-08-29, third sighting of one report: "i start playing mid loop then
-     wrap around and do retro rec, only the beginning of the loop is captured
-     and not the end where i started playing from").
-     THE WINDOW ENDS WHERE THE TAKE ENDED, NOT WHERE THE CLOCK IS — the exact
-     rule retroBars has carried since 2026-08-22, and retroCapture never got.
-     The line above only ever pushed endB FORWARD, for a jam that ran past the
-     bar; nothing pulled it BACK, so `from = endB - L` slid along with the
-     clock while he waited for the loop to come round, and the front of his
-     performance fell out of the back of the window. Waiting is not optional
-     here — "let the loop wrap around" is the gesture.
-     Measured, 4-bar loop, played beats 12->20, notes kept by when retro was
-     pressed:  at 21/24/26/28 nine of nine · at 32 FIVE (only 0 1 2 3 4, which
-     is the wrap, i.e. "the beginning of the loop") · at 36 ONE.
-     Pulling endB back can only ever put MORE of the take inside the window:
-     the notes' PHASE comes from the anchor (fmod(n.t-anc,L)) and not from
-     endB, so nothing moves — the window only decides who is included. */
-  if(maxT9>-1e8){
-    const endTake=anc+Math.ceil((maxT9-anc-1e-9)/snap)*snap;
-    if(endTake<endB-1e-9)endB=endTake;
-  }
+  const endB=maxT9>-1e8?maxT9:anc+Math.round((nowB-anc)/snap)*snap;
   const from=endB-L;
   RETRO.end[pi]=endB;
   const seg=retroBuf[pi].filter(n=>n.t>from-1e-9&&n.t<=endB+1e-9);

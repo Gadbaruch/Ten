@@ -4296,14 +4296,17 @@ async function probeRetroGuess() {
     try { retroCapture(); } catch (e) { err = String(e).slice(0, 70); }
     const L = lane.len;
     const got = lane.events.slice().sort((a, b) => a.t - b.t).map(e => r3(e.t));
-    /* WHAT RETRO PROMISES, AS ARITHMETIC: the last cycle of the loop as set,
-       its window ending at the bar line that closes the TAKE (not at the
-       clock), every note in it placed against the anchor. Expecting "all the
-       notes" instead called a correct answer NO the moment a case played two
-       takes — retro is not supposed to reach back past a cycle. */
-    const snap9 = Math.min(4, L), newest = Math.max(...want);
-    const endT9 = Math.ceil((newest - 1e-9) / snap9) * snap9;      // anchor is 0 here
-    const wantAt = want.filter(t => t > endT9 - L - 1e-9 && t <= endT9 + 1e-9)
+    /* WHAT RETRO PROMISES, AS ARITHMETIC: the last L beats of PLAYING — the
+       window ends at the last note, not at the clock and NOT at a cycle line —
+       every note in it placed against the anchor.
+       ⚠ THIS EXPECTATION HAD THE BUG IN IT. Snapping endT9 up to a bar line
+       here is what the code did, so the probe agreed with it and called
+       4-of-8 on a one-bar loop `yes`. An oracle derived from the
+       implementation only ever checks that the code does what it does; it has
+       to state the PROMISE, which is his sentence: everything I just played,
+       where I played it. */
+    const newest = Math.max(...want);
+    const wantAt = want.filter(t => t > newest - L - 1e-9 && t <= newest + 1e-9)
                        .map(t => r3(fmod(t, L))).sort((a, b) => a - b);
     rows.push({ k, auto: setBars ? 'SET ' + setBars : 'unset',
                 guessBars: g ? g.bars : '—',
@@ -4352,6 +4355,17 @@ async function probeRetroGuess() {
        from = endB - L slides forward with it. */
     for (const at of [21, 24, 26, 28, 32, 36, 48, 64])
       midRun('4-bar SET · played 12\u219220 · retro at ' + at, mid, 4, at);
+    /* HIS SINGLE-BAR CASE (2026-08-29: "im testing with single bar… i start
+       playing mid bar and past the end of the bar then hit retro mid bar again
+       where i started"). L=4, so the bar-snapped window IS exactly one bar —
+       there is no slack, and anything played before the bar line falls out.
+       This is why a longer loop (his channel 3) looked fine. */
+    const cross = [[2,0],[2.5,2],[3,4],[3.5,5],[4,7],[4.5,5],[5,4],[5.5,2]];
+    for (const at of [5.75, 6, 6.5, 7, 9, 13])
+      midRun('1-BAR · played 2\u21925.5 across the line · retro at ' + at, cross, 1, at);
+    /* the same phrase on a 4-bar loop — the slack that hid it */
+    midRun('4-bar, same phrase · retro at 6', cross, 4, 6);
+
     /* AND THE GUARD AGAINST THE FIX OVER-REACHING: play again later and the
        window must follow the NEWER playing, not reach back for the old take. */
     midRun('...then played again 40\u219244 · retro at 46',
