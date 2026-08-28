@@ -4392,6 +4392,106 @@ async function probeRetroGuess() {
                   'clipped', 'collide', 'at', 'shouldBe', 'right', 'err'], rows };
 }
 
+/* WHAT A MOD SCOPE MAKES, AND WHETHER IT AIMS IT (Gad, 2026-08-29: "scope M
+ * now creates a macro immediately, it should always opt for env first" and
+ * "oh and it doesnt even set the mod destination anymore - big bug").
+ *
+ * One row per scope letter, opened with the channel strip down on a KNOWN
+ * parameter. `made` is the slot it created, `src` what kind, and `aimed` is
+ * the whole question: did the new route get pointed at the parameter the
+ * cursor was standing on, or at nothing.
+ */
+async function probeModScope() {
+  const ch = CH;
+  const keep = stash(ch);
+  const keepLayer = S.layer, keepSel = S.curPreset, keepEd = S.editSnd;
+  const keepMod = S.curMod, keepSlot = S.curSlot, keepP = S.slotParam;
+  const ev = (ty, code, mods) => document.dispatchEvent(new KeyboardEvent(ty,
+    Object.assign({ code, key: code, bubbles: true, cancelable: true }, mods || {})));
+  const rows = [];
+
+  /* the scope modifier is left control + numlock — SCOPEKEY, fixed */
+  const scope = code => {
+    KM.scp = true;
+    ev('keydown', code, { ctrlKey: true });
+    const H = HOLD.opt;
+    ev('keyup', code, { ctrlKey: true });
+    KM.scp = false;
+    return H;
+  };
+
+  const LETTERS = [['KeyE', 'env'], ['KeyL', 'lfo'], ['KeyK', 'keytrack'],
+                   ['KeyM', 'mod'], ['Slash', 'random']];
+  try {
+    for (const [code, nm] of LETTERS) {
+      /* a clean mod rack, and the cursor parked on a real parameter */
+      const p = S.presets[ch];
+      p.mod = (p.mod || []).map((_, i) => mkMod(i));
+      while (p.mod.length < 4) p.mod.push(mkMod(p.mod.length));
+      S.layer = 2; S.curPreset = ch; S.editSnd = ch; S.mSel = false;
+      S.curMod = MODULES.findIndex(M2 => M2 && M2.id === 'flt');
+      S.curSlot = 0; S.slotParam = 1;                 // the filter's cutoff
+      const before = p.mod.filter(m => m && m.src).length;
+      let err = null, H = null;
+      try { H = scope(code); } catch (e) { err = String(e).slice(0, 70); }
+      const made = p.mod.findIndex(m => m && m.src);
+      const sl = made >= 0 ? p.mod[made] : null;
+      const rt = sl && sl.routes && sl.routes[0];
+      rows.push({ k: nm + '  (⌃' + code.replace('Key', '') + ')',
+                  wasEmpty: before === 0 ? 'yes' : before,
+                  made: made < 0 ? 'none' : 'slot ' + made,
+                  src: sl ? MSRC[Math.round(sl.src || 0)] : '—',
+                  aimed: rt ? (rt.addr ? (rt.addr.rack + '.' + rt.addr.key)
+                                       : (rt.dst ? 'dst ' + rt.dst : 'NOTHING')) : '—',
+                  amt: rt ? rt.amt : '—',
+                  scopeOpen: H ? H.c.replace('Key', '') : 'no',
+                  err });
+      HOLD.opt = null; HOLD.optLatched = false;
+      for (const q of [...ALTSUS]) ALTSUS.delete(q);
+      await sleep(40);
+    }
+    /* AND THE SECOND PRESS MUST NOT MAKE A SECOND ONE. ⌃M asks "what moves
+       THIS knob" — so once something does, it has to arrive at it. Seeded with
+       an LFO on the cutoff so the row also shows whether it finds a mod that
+       is not an envelope, and whether the dials follow what it landed on. */
+    for (const [seed, nm] of [[1, 'env'], [2, 'lfo'], [MSRC_MACRO, 'macro']]) {
+      const p = S.presets[ch];
+      p.mod = (p.mod || []).map((_, i) => mkMod(i));
+      while (p.mod.length < 4) p.mod.push(mkMod(p.mod.length));
+      S.layer = 2; S.curPreset = ch; S.editSnd = ch; S.mSel = false;
+      S.curMod = MODULES.findIndex(M2 => M2 && M2.id === 'flt');
+      S.curSlot = 0; S.slotParam = 1;
+      /* slot 2 already modulates the cutoff, with the given source */
+      Object.assign(p.mod[2], mkMod(2), { src: seed, off: false });
+      p.mod[2].routes[0].addr = { rack: 'flt', slot: 0, key: 'frq', lbl: 'freq' };
+      const n0 = p.mod.filter(m => m && m.src).length;
+      let H = null, err = null;
+      try { H = scope('KeyM'); } catch (e) { err = String(e).slice(0, 70); }
+      const n1 = p.mod.filter(m => m && m.src).length;
+      rows.push({ k: '\u2303M onto an existing ' + nm,
+                  wasEmpty: n0 + ' slot(s)',
+                  made: n1 > n0 ? 'MADE ANOTHER' : 'found it',
+                  src: MSRC[Math.round(p.mod[2].src || 0)],
+                  aimed: H ? 'slot ' + H.si : '—',
+                  amt: p.mod[2].routes[0].amt,
+                  scopeOpen: H ? (H.c.replace('Key', '') + ' \u00b7 ' + (H.fld || '?')) : 'no',
+                  err });
+      HOLD.opt = null; HOLD.optLatched = false;
+      for (const q of [...ALTSUS]) ALTSUS.delete(q);
+      await sleep(40);
+    }
+  } finally {
+    HOLD.opt = null; HOLD.optLatched = false;
+    for (const q of [...ALTSUS]) ALTSUS.delete(q);
+    S.layer = keepLayer; S.curPreset = keepSel; S.editSnd = keepEd;
+    S.curMod = keepMod; S.curSlot = keepSlot; S.slotParam = keepP;
+    unstash(ch, keep);
+  }
+  notes.push('cursor parked on the FILTER CUTOFF before each scope opens. aimed=NOTHING means ' +
+             'the slot was made pointing at no destination, so nothing it does can be heard.');
+  return { cols: ['wasEmpty', 'made', 'src', 'aimed', 'amt', 'scopeOpen', 'err'], rows };
+}
+
 async function probePwmAll() {
   const ch = CH === 9 ? 8 : CH;
   const RATE = num(P.rate, 2), AMT = num(P.amt, 70);
@@ -4575,6 +4675,7 @@ const HELP = {
     { k: 'snapaud',  args: 'ch=9 \u2014 does a snapshot swap the audio channel\u2019s take, and survive a save round trip' },
     { k: 'envoff',   args: 'ch=5 rel=2 hold=400 \u2014 does a note stop DEAD at the end of its release? cutDb is the size of the step to silence' },
     { k: 'retroguess', args: 'ch=5 \u2014 retro on a lane with no length set: does it hear the punch-in and the span' },
+    { k: 'modscope', args: 'ch=5 \u2014 what each mod scope letter makes, and whether it aims the route at the cursor' },
     { k: 'poolkind', args: 'want=loop — every pool take: measured onsets/centroid, the kind it was called, and both dial views in order' },
     { k: '(any)',    args: '--ab <url> runs the same probe on a second build and diffs it' },
   ]
@@ -4617,6 +4718,7 @@ try {
                    fxmod: probeFxMod,
                    fxwire: probeFxWire,
                    poolkind: probePoolKind,
+                   modscope: probeModScope,
                    retroguess: probeRetroGuess,
                    envoff: probeEnvOff,
                    snapaud: probeSnapAud,

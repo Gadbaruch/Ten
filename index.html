@@ -1471,7 +1471,7 @@ const recPlayed=(pi,tBeat,midi,vel,durBeats)=>recPlayNote(pi,tBeat,sndOut(pi,mid
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-28.2105';
+const BUILD='2026-08-28.2121';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -3438,13 +3438,42 @@ const OPTRACK={
      stay hidden until something is routed, so there was nothing to find. Now
      it is the same grammar as env, lfo and keytrack: the letter takes you
      there and makes one if the rack has none. */
-  KeyM:{id:'mod',name:'macro',nav:1,
-        find:rk=>rk.map((x,i)=>x&&x.src===MSRC_MACRO&&!x.off?i:-1).filter(i=>i>=0),
-        make:(sl,i)=>Object.assign(sl,mkMod(i),{src:MSRC_MACRO,off:false}),
+  /* ⌃M IS THE MOD SCOPE, AND IT IS NOT THE MACRO'S FRONT DOOR (Gad, 2026-08-29:
+     "do not make any macros, this feature is on ice and no home yet, control+m
+     either takes to an existing mod that controls the param you are on, or
+     creates a new one that is destination to the param you are on, default is
+     env… we made the macro feature but i dont want it first citizen at all").
+
+     So the letter is about the PARAMETER, not about a source. It finds
+     whatever already modulates the knob you are standing on — env, lfo,
+     keytrack, anything — and makes an ENVELOPE aimed there when nothing does.
+     ⌃E, ⌃L and ⌃K still ask for a source by name; this one asks "what moves
+     THIS", which is the question you actually have with a knob under the
+     cursor.
+
+     ⚠ MACRO NO LONGER HAS A LETTER AT ALL. The source stays in the mod rack's
+     list and is reachable by hand, exactly where it was before the front door
+     was built — on ice, as asked. Nothing else about macros was removed: a
+     slot already set to macro still runs, still lives under a held note, and
+     ⌃M will still take you TO it, because it modulates the knob you are on.
+
+     Out on the desk there is no parameter cursor, so it degrades to what ⌃E
+     does: find or make an env. The dials follow the slot it lands on, so
+     arriving on somebody's lfo gives you the lfo's rate rather than an
+     envelope's stages. */
+  KeyM:{id:'mod',name:'mod',nav:1,
+        find:rk=>{const a=cursorAddr(S.presets[S.editSnd]);
+          return rk.map((x,i)=>x&&x.src&&!x.off&&(a
+              ?(x.routes||[]).some(rt=>rt&&rt.addr&&sameAddr(rt.addr,a))
+              :Math.round(x.src)===1)?i:-1).filter(i=>i>=0);},
+        make:(sl,i)=>Object.assign(sl,mkMod(i),{src:1,off:false}),
         unmake:(sl,i)=>Object.assign(sl,mkMod(i)),
         free:rk=>rk.findIndex(x=>!x||!x.src),
-        /* which dial it listens to, and how far it moves what it points at */
-        mag:{amt:'amt',pri:'mac',sec:'amt'}},
+        mag:{amt:'amt',
+             pri:sl=>{const s=Math.round((sl&&sl.src)||0);
+               return s===1?'tmul':s===2?(Math.round(sl.syn||0)===1?'rdiv':'rate'):'amt';},
+             sec:sl=>Math.round((sl&&sl.src)||0)===1?'a':'amt',
+             keys:{KeyA:'a',KeyD:'d',KeyS:'s',KeyR:'r'}}},
   Slash:{id:'mod',name:'random',nav:1,
         find:rk=>rk.map((x,i)=>x&&x.src===5&&!x.off?i:-1).filter(i=>i>=0),
         make:(sl,i)=>Object.assign(sl,mkMod(i),{src:5,off:false,rate:6}),
@@ -22183,9 +22212,35 @@ const onKeyDown=e=>{
         if(free<0){flash(T2.id.toUpperCase()+' rack is full');return;}
         pushUndo(T2.name);
         T2.make(rk[free],free);
+        /* AND IT POINTS AT WHAT YOU WERE STANDING ON (Gad, 2026-08-29: "oh and
+           it doesnt even set the mod destination anymore - big bug"). A mod
+           slot with no destination is silent by construction, so the scope's
+           whole promise — "the letter takes you to the thing, making one if
+           the rack has none" — handed back a thing that does nothing. Measured
+           with the cursor parked on the filter cutoff: env, lfo, keytrack and
+           macro ALL made a slot aimed at NOTHING. It was never only macro.
+           cursorAddr() is the address of the parameter under the cursor and it
+           has existed all along — the automation overlay picks its curve with
+           it. Read BEFORE the block below moves S.editSnd/S.curMod, so it is
+           the knob you were actually on.
+           Out on the desk (layer 1) there is no parameter cursor, so there is
+           nothing to aim at and the slot is made bare, as before. */
+        if(T2.id==='mod'){
+          const a9=cursorAddr(pre), rt9=rk[free].routes&&rk[free].routes[0];
+          /* a slot may not modulate ITSELF — the destination picker excludes
+             the same mod slot for the same reason */
+          if(a9&&rt9&&!(a9.rack==='mod'&&String(a9.slot)===String(free))){
+            rt9.addr={rack:a9.rack,slot:a9.slot,key:a9.key,lbl:a9.lbl};
+            if(a9.sid!=null)rt9.addr.sid=a9.sid;
+            rt9.dst=0; rt9.tgt=null;
+          }
+        }
         engine.rebuildRack(ch); engine.refresh(ch);
         list=[free];
-        flash(T2.name+' made on ch '+ch);
+        {const rtF=T2.id==='mod'&&rk[free].routes&&rk[free].routes[0];
+         flash(T2.name+' made on ch '+ch+
+           (rtF&&rtF.addr?' → '+destLabel(rtF.addr)
+            :T2.id==='mod'?' — no destination yet, open the channel to aim it':''));}
       }
       HOLD.opt={c,ch,key,nav:1,si:list[0],fld:magKey(T2.mag&&T2.mag.pri,rk[list[0]])};
       HOLD.optUsed=false; HOLD.optLatch=KM.sl;
