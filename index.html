@@ -1471,7 +1471,7 @@ const recPlayed=(pi,tBeat,midi,vel,durBeats)=>recPlayNote(pi,tBeat,sndOut(pi,mid
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-28.2320';
+const BUILD='2026-08-28.2334';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1772,10 +1772,32 @@ const smpPath=f=>{
 let SMPCAT='', LOOPCAT='';
 const SMPCATS=['all'].concat(DRUMCATS);          // the drum shelf tags itself by cat
 const LOOPCATS=['all','plk','keys','bass','pad','perc','fx'];
-const catSP=(name,list,get,set)=>SP(name,'_ptyp','enum',{opts:list,
+/* PUTTING A POOL ENTRY SOMEWHERE, once each. Both were inline in the `smpl`
+   dial's set, and the type dial now needs to do the identical thing — two
+   copies of "load this take" is how one of them quietly stops matching. */
+function smpPut(o,e2){
+  if(!e2)return false;
+  engine.opSamples.set(smpKeyUI(),e2.buf);
+  if(o&&o.lps===undefined)o.lps=1;          // a smp op fires once unless told
+  if(o){ if(e2.src&&e2.src.f)o.smp={f:e2.src.f}; else delete o.smp; }
+  engine.rebuildRack(S.editSnd);
+  dirty=true; dirtySave=true; return true;
+}
+function audPut(pi,e2){
+  if(!e2)return false;
+  engine.granNode(pi); engine.setChanBuf(pi,e2.buf,e2.name);
+  takeToLane(pi,e2.buf); engine.audLive(pi);
+  dirty=true; dirtySave=true; return true;
+}
+/* CHANGING THE TYPE LOADS ONE (Gad, 2026-08-29: "when changing audio ch or smp
+   type - load a sample from that type immediatly"). A filter you have to turn
+   a second dial to hear is a filter you have to think about; this makes the
+   type dial an audition. The FIRST of the new view, every time, so the gesture
+   is predictable — and the flash names what landed. */
+const catSP=(name,list,get,set,pick)=>SP(name,'_ptyp','enum',{opts:list,
   get:()=>Math.max(0,list.indexOf(get()||'all')),
   set:(o,v)=>{const k=list[clamp(Math.round(v),0,list.length-1)];
-    set(k==='all'?'':k); dirty=true;}});
+    set(k==='all'?'':k); if(pick)pick(o); dirty=true;}});
 const poolJump=(want,catf)=>(v,dir)=>{
   const V=poolView(want,catf?catf():'');
   if(!V.length)return 0;
@@ -1991,7 +2013,10 @@ const OSC_P=sl=>[
      hit it can pitch, not four bars of somebody else's tempo. The view puts
      those first; the loops are still down the far end of the same dial. */
   ...(Math.round((sl&&sl.wav)||0)===9?[
-   catSP('type',SMPCATS,()=>SMPCAT,v=>SMPCAT=v),
+   catSP('type',SMPCATS,()=>SMPCAT,v=>SMPCAT=v,o=>{
+     const V=poolView('one',SMPCAT), e2=POOL[V[0]];
+     flash(smpPut(o,e2)?(SMPCAT||'all')+' → '+e2.name
+                       :'no '+(SMPCAT||'all')+' samples on the shelf');}),
    poolSP(SP('smpl','_pool','lin',{min:0,max:31,step:1,w:2,
      jump:poolJump('one',()=>SMPCAT),   // shift walks the instrument groups
      fmt:v=>{const V=poolView('one',SMPCAT), e2=POOL[V[Math.round(v)]];
@@ -15974,7 +15999,10 @@ const GRANF=[
     get:m=>m.fb||0,set:(m,v)=>m.fb=v}),
  /* THE AUDIO CHANNEL LOOPS AND GRANULATES, so what it wants is a LOOP.
     Same dial, opposite view — see poolView. */
- catSP('type',LOOPCATS,()=>LOOPCAT,v=>LOOPCAT=v),
+ catSP('type',LOOPCATS,()=>LOOPCAT,v=>LOOPCAT=v,()=>{
+   const V=poolView('loop',LOOPCAT), e2=POOL[V[0]];
+   flash(audPut(S.editSnd,e2)?(LOOPCAT||'all')+' → '+e2.name
+                             :'no '+(LOOPCAT||'all')+' takes on the shelf');}),
  poolSP(SP('smpl','_pool','lin',{min:0,max:31,step:1,w:2,
    jump:poolJump('loop',()=>LOOPCAT),  // shift walks the instrument groups
    fmt:v=>{const V=poolView('loop',LOOPCAT), e2=POOL[V[Math.round(v)]];
@@ -16739,8 +16767,12 @@ function _prsAction(d){
   else if(f==='type'&&p.cat==='audio'){      // the phrase shelf's filter, not a sound type
     LOOPCAT=LOOPCATS[fmod(LOOPCATS.indexOf(LOOPCAT||'all')+d,LOOPCATS.length)];
     if(LOOPCAT==='all')LOOPCAT='';
-    const n=poolView('loop',LOOPCAT).length;
-    flash('sample type: '+(LOOPCAT||'all')+' — '+n+' take'+(n===1?'':'s'));
+    const V=poolView('loop',LOOPCAT), e2=POOL[V[0]];
+    /* and it LOADS one — the same audition the dial on the grain page does */
+    flash(audPut(pi,e2)
+      ?'sample type: '+(LOOPCAT||'all')+' — '+V.length+' take'+(V.length===1?'':'s')+
+       ' → '+e2.name
+      :'sample type: '+(LOOPCAT||'all')+' — nothing on the shelf');
     dirty=true;}
   else if(f==='type'){
     const i0=Math.max(0,SYNTHCATS.indexOf(p.cat||'misc'));

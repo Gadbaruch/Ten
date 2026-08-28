@@ -160,5 +160,13 @@
   "file": "vowel.mp3",
   "kind": "loop",
   "cat": "pad"
+ },
+ {
+  "name": "junglechop",
+  "file": "breaks/junglechop.mp3",
+  "bpm": 170.0,
+  "bars": 4,
+  "kind": "loop",
+  "cat": "perc"
  }
 ]
