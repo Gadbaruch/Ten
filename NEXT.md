@@ -1,3 +1,102 @@
+# A MASTER DOES NOT FOLLOW ITSELF, THE KEY IS LIVE, THE ARP LETS GO — 2026-08-29 (branch `sound-library`)
+
+Three from Gad, all measured. **The arp repro is his, and it is a CLOCK bug —
+read that section before touching anything that stores a beat.**
+
+## THE CHORD MASTER'S OWN KEYBOARD  (77a5d5f)
+
+"when chord channel is set to global it should not affect itself, rn after your
+fix a global chord changes every press toggles between 2 chords with the same
+key". Mine, from the day before.
+
+`isChordMaster` exists for exactly this and every other reader asks it —
+trigger, heardMidi, the note-fx repitcher, rpit. **The KEYBOARD had not been
+told, and the 08-28 fix is what gave the keyboard an opinion about the chord in
+the first place.** So the master's own run was laid out on the chord it is
+itself DEFINING: press a key, it defines a chord; the next press mapped through
+that chord defines a different one; one key, two chords, forever.
+
+    the MASTER's own keys, C-E-G held
+      before   C3 E3 G3 C4 E4 G4 C5 E5 G5    laid out on its own chord
+      after    C3 D3 E3 F3 G3 A3 B3 C4 D4    the plain scale run
+
+⚠ **`noteOf` is the only caller that knows the channel**, so the test is asked
+there and travels into `kbNote` as `noChord`. **`keyForOffset` takes it too** —
+it is the mirror that decides which key LIGHTS UP, and without it the master's
+highlights point at the chord's keys instead of its own.
+
+## THE GLOBAL KEY REACHES A RECORDED NOTE  (77a5d5f)
+
+"global key in settings should affect already recorded notes live, only global
+chord overrides it". **This REVERSES the 2026-08-18 ruling, on his ask.** One
+line: the replay snaps to `pcsNow()`, which already answers chord-over-scale,
+so "the chord overrides it" needs nothing said twice. `heardMidi` says the same
+thing, so grid and sound still agree.
+
+    key = F#, nothing held, stored E3   ->  grid D#3 / sound D#3   (was E3/E3)
+
+⚠ **WHAT IT COSTS, because it is exactly what August fixed:** an OFF-SCALE
+recorded note is re-snapped on the way out, so a chord played chromatically can
+come home a different quality. **The cost is far smaller than it was** — the
+keyboard hands out scale DEGREES now, so anything played with the scale on is
+already in key and this is a no-op for it. What it reaches is what you played
+with the scale OFF, what a channel transpose moved off-scale, and what
+random-pitch invented. Scale off snaps nothing at all. If the August complaint
+ever comes back, this is the line.
+
+## THE ARP THAT WOULD NOT LET GO — A CLOCK BUG  (77a5d5f)
+
+His repro: **"have playback paused > hold a few arp notes > let go > start
+playback = notice the arp is running even tho notes arent pressed"**. Five
+readings of his earlier description had all come back clean; this one is
+exact, and it is not about latching at all.
+
+⚠ **`gridNow()` IS TWO CLOCKS.** Stopped it is the free grid (`G.b0 +
+elapsed/spb`), climbing since the page loaded. Playing it is `posNow()`, which
+`play()` restarts at **ZERO**. A pool entry's `until` is a BEAT, written on
+whichever clock was running at the key-up — so a note released at free-grid
+beat 800 was compared, one line later, against transport beat 0, found to be
+800 beats in the future, and arpeggiated with nothing held. The `-8`
+housekeeping filter kept it for the same reason, so it ran until something else
+emptied the pool (which is why it read as "a few rounds then stops").
+
+    STOPPED . hold arp . let go . PLAY
+      before   until +3.125 beats still owed,  10 arp steps with nothing held
+      after    until -1.683 (in the past),      0 steps
+
+`play()` converts the pool through the TIMES the beats stood for, so a key
+still held across the press (`until` Infinity) keeps sounding and a released
+one lands in the past and is over. **Same family as the retro-buffer clear
+immediately above it in play(): a beat from a dead clock has no home on a new
+one.**
+
+⚠ **THE SIBLING NOBODY HAS HIT YET:** `rPend[c].ts` is also a free-grid beat
+and is also not rebased by `play()`. A note key held across the space bar
+therefore pushes a retro entry stamped on the dead clock. Not reported, not
+fixed, and the fix is the same three lines if it turns up.
+
+## QA CHECKLIST — 2026-08-29
+
+Reload **http://localhost:3033/**. Build `2026-08-28.1319` or later.
+
+1. **The arp lets go.** Stop the transport, hold a few notes on an arp
+   channel, let go, press play. Silence until you play something. *Measured:
+   10 arp steps with nothing held before, 0 after.*
+2. **A chord master plays its own keyboard.** On the channel holding the global
+   chord slot, run up the home row while a chord is held. Plain scale, one key
+   one degree — and the same key gives the same chord every time. *Measured:
+   C3 D3 E3 F3 G3 A3 B3 C4 D4; before it was the chord's own tones.*
+3. **The key moves a recorded part.** Record something, then change the key in
+   settings. The lane follows, live, in the grid AND in the sound. *Measured:
+   key F#, a stored E3 comes back D#3, grid and sound agreeing.*
+4. **A held chord still overrides the key.** With a chord held, the lane
+   follows the chord, not the scale. *Measured: Dm held over a stored E3 gives
+   F3 both.*
+5. **Watch for the August complaint.** An off-scale recorded note now gets
+   re-snapped — the thing 2026-08-18 removed, back by request. Anything you
+   played with the scale ON is unaffected. Say if a chromatic part comes home
+   the wrong quality.
+
 # THE DIALS, THE CHORD, RETRO AND THE SNAPSHOT'S TAKE — 2026-08-28 (branch `sound-library`)
 
 Second batch of the day. Six of eight shipped and measured; **two could not be
