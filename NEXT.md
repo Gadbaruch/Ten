@@ -151,9 +151,60 @@ Do not read commit 12b2595 as the fix for the mid-loop report; it is the fix
 for the regression the guesser caused on top of it.
 
 ⚠ **The probe's own expectation was wrong and called a correct answer NO:** it
-expected every note back, when retro promises the last CYCLE. It states the
-promise as arithmetic now — window ending at the bar line that closes the take,
-placed against the anchor.
+expected every note back, when retro promises the last CYCLE.
+
+### ⚠⚠⚠ AND THE ONE HE WAS ACTUALLY HITTING: THE SNAP  (3981508)
+
+Fourth sighting, and the detail that cracked it was in his message all along:
+*"im testing with **SINGLE BAR**… i start playing mid bar and past the end of
+the bar then hit retro mid bar again where i started - and i only see the
+beginning of the bar not the end where i started. **could it be that you fixed
+it only on channel 3? there is seems to work fine**"*.
+
+**It was never a channel. THE SNAP WAS THE BUG, and on a one-bar loop it is
+total.** endB snapped to a bar line and the window is exactly L long, so at
+**L=4 the window IS the last bar** — a phrase crossing the line loses
+everything before it, with no slack anywhere. A longer loop has slack, which is
+the entire explanation for "channel 3 seems to work fine".
+
+Eight notes played 2 → 5.5, across the line, on a **1-BAR** loop:
+
+      retro at        5.75   6    6.5   7    9    13
+      before          4/8   4/8   4/8  4/8  4/8  4/8    always `0 0.5 1 1.5`
+      after           8/8   8/8   8/8  8/8  8/8  8/8
+
+The four that came back were the four AFTER the line — "the beginning of the
+bar". The identical phrase on a 4-bar loop reads 8/8 on **both** builds.
+
+⚠ **It failed at every tap time including immediately, so waiting was never the
+variable here.** c0bf406 fixed a real and different defect (the window sliding
+with the clock, the 4-bar rows at 32/48/64) and I shipped it as the answer to
+this report. It was not. **Four defects in one sentence of his, and three of my
+fixes were each correct and each not it.**
+
+`endB = maxT9` — the last note at or before now — subsumes both earlier patches
+(the forward extension for a jam past the bar, the pull-back for a late tap)
+and deletes them. It cannot lose a note the snap kept: the window is still
+exactly L long and half-open, so no two notes share a phase, and PHASE comes
+from the anchor, never from endB.
+
+⚠ **`retroBars` does NOT get this and MUST NOT.** It maps from the WINDOW START
+and resizes the lane, so its within-bar positions hold precisely *because* its
+end snaps to a bar line — its own comment says so. `retroCapture` maps from the
+anchor and never needed the snap at all. That asymmetry is the thing to
+remember before "fixing" them the same way.
+
+### ⚠ THE PROBE LESSON, AND IT IS THE BIGGER ONE
+
+**An oracle derived from the implementation only checks that the code does what
+it does.** I wrote `shouldBe` as "the bar-snapped window, placed against the
+anchor" — the rule the CODE used — so the probe agreed with the bug and printed
+`yes` next to 4-of-8 on a one-bar loop. It states the PROMISE now, which is his
+sentence: *everything I just played, where I played it.*
+
+Together with the previous section: **when a report keeps reproducing against a
+passing probe, suspect the oracle before the code, and vary the step you
+paraphrased away.** Both failures happened here, in that order.
 
 ## QA CHECKLIST — 2026-08-29 (second batch)
 
@@ -169,6 +220,13 @@ Reload **http://localhost:3033/**. Build `2026-08-28.1341` or later.
 3. **A length you SET is still untouchable.** Set a lane to 1 bar, play two
    bars, hit retro. You get one bar — the guess does not overrule you.
    *Measured: guess said 2, lane stayed 1b.*
+3z. **⚠⚠⚠ MID-LOOP RETRO ON A **ONE-BAR** LOOP — the one he kept hitting.**
+   One bar, length SET, a loop already running. Start playing mid-bar, carry on
+   past the bar line, hit retro mid-bar. **Everything comes back**, both halves.
+   Before, only the part after the line did — at every tap time, immediately
+   included. *Measured: eight notes played 2→5.5, 4 of 8 before / 8 of 8 after;
+   the same phrase on a 4-bar loop was 8/8 on both, which is why a longer
+   channel looked fine.*
 3a. **⚠⚠ MID-LOOP RETRO, AND WAIT BEFORE YOU PRESS IT.** Transport running,
    4-bar loop with the length SET. Start playing partway through, let the loop
    wrap **all the way round** — a full cycle or two — and only THEN hit retro.
