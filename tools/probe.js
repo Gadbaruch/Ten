@@ -4641,6 +4641,7 @@ const HELP = {
     { k: 'cursor',   args: 'chs=9 — ping ten-grsyn: tv/g/tpos/cpos' },
     { k: 'preset',   args: 'names=SNR,S909 note=48 ch=8 — library name, played and measured' },
     { k: 'key',      args: 'code=KeyA hold=120 shift=0 alt=0 ctrl=0 meta=0' },
+    { k: 'syscopy',  args: 'ch=3 — cmd+C: patch JSON to the system clipboard for ONE channel, silent for a block or the desk' },
     { k: 'keypath',  args: 'code=KeyA ch=9 kmode=0 auto=1 arp=0 hold=400 — did the app CLAIM the key, and which engine door did it reach' },
     { k: 'roundtrip',args: 'ch=9 kmode=0 auto=1 arp=1 div=0.25 keys=KeyA,KeyS — record a phrase and replay it: did the head do the same thing twice' },
     { k: 'sweep',    args: 'ch=9 taps=6 — sine-sweep take: pitch IS position; record, replay, compare what SOUNDED' },
@@ -4701,7 +4702,43 @@ try {
         catch (e) { notes.push('setSinkId(none) failed: ' + e); }
       } else notes.push('output clock stalled and this browser has no setSinkId — every level will read 0');
     } }
-  const PROBES = { level: probeLevel, spectrum: probeSpectrum, cursor: probeCursor,
+  /* CMD+C PUTS THE PATCH ON THE SYSTEM CLIPBOARD TOO — and only for ONE channel
+   (Gad, 2026-08-28: "command+c is better for my muscle memory"). Stubs
+   navigator.clipboard.writeText, so what is measured is what clipboardOp
+   actually handed the system rather than what a paste buffer looked like
+   afterwards. Three scopes, because two of them MUST stay silent: a desk and a
+   block are tens of kB and have no business on somebody's clipboard. */
+async function probeSysCopy() {
+  const real = navigator.clipboard.writeText.bind(navigator.clipboard);
+  let cap = null;
+  navigator.clipboard.writeText = t => { cap = String(t); return Promise.resolve(); };
+  const rows = [];
+  const run = (label, setup) => {
+    cap = null;
+    let err = '';
+    try { setup(); clipboardOp('copy'); } catch (e) { err = String(e && e.message || e); }
+    let sys = 'none', bytes = 0, name = '', cat = '', keys = 0;
+    if (cap) {
+      bytes = cap.length; sys = 'BAD';
+      try { const j = JSON.parse(cap);
+            sys = 'json'; name = j.name || ''; cat = j.cat || '';
+            keys = ['ten', 'ch', 'name', 'cat', 'data'].filter(k => j[k] !== undefined).length;
+      } catch (e) {}
+    }
+    rows.push({ k: label, sys, bytes, name, cat, keys,
+                clip: (typeof CLIP !== 'undefined' && CLIP) ? CLIP.kind : '-', err });
+  };
+  const ch = num(P.ch, 3);
+  run('one channel', () => { S.mSel = false; CHSEL.clear(); S.layer = 1; S.curPreset = ch; });
+  run('block 2-4', () => { S.mSel = false; CHSEL.clear();
+                           CHSEL.add(2); CHSEL.add(3); CHSEL.add(4); S.layer = 1; });
+  run('master desk', () => { CHSEL.clear(); S.mSel = true; S.layer = 1; });
+  try { CHSEL.clear(); S.mSel = false; } catch (e) {}
+  navigator.clipboard.writeText = real;
+  return { cols: ['sys', 'bytes', 'keys', 'name', 'cat', 'clip', 'err'], rows };
+}
+
+const PROBES = { level: probeLevel, spectrum: probeSpectrum, cursor: probeCursor,
                    preset: probePreset, key: probeKey, keypath: probeKeyPath,
                    roundtrip: probeRoundTrip,
                    sweep: probeSweep,
@@ -4737,7 +4774,8 @@ try {
                    patqual: probePatQual,
                    pwm: probePwm,
                    pwmall: probePwmAll,
-                   spread: probeSpread };
+                   spread: probeSpread,
+                   syscopy: probeSysCopy };
   const fn = PROBES[NAME];
   out = fn ? await fn() : (NAME === 'help' ? HELP : { cols: [], rows: [], err: 'no probe named ' + NAME });
 } catch (e) {

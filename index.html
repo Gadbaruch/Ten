@@ -1471,7 +1471,7 @@ const recPlayed=(pi,tBeat,midi,vel,durBeats)=>recPlayNote(pi,tBeat,sndOut(pi,mid
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-28.2121';
+const BUILD='2026-08-28.2134';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -13754,7 +13754,11 @@ function genSpice(p,cat,wild,H){
    every rung, which is what makes "wild" mean adventurous rather than broken.
 
    ENV AND LFO DESTINATIONS ARE ON DIFFERENT SCALES and mixing them up is
-   silent — LFO2MD is the map. env dst: 1 amp · 2 pitch · 3 filter · 4 pan.
+   silent — LFO2MD is the map. env dst: 1 amp · 2 pitch · 3 filter · 4 OP
+   LEVEL — there is NO pan env, and this line said "4 pan" until 2026-08-28.
+   ENV2MD={1:1,2:2,3:3,4:5} and the engine's own opEnvs filter (dst===4) both
+   say op; nothing in the generator has ever written a dst-4 env, so the
+   wrong line never cost a note — it was simply waiting to.
    lfo dst: 1 pitch · 2 filter · 3 amp · 4 pan. */
 const TONEHZ = 440 * Math.pow(2, (48 - 69) / 12);   // 130.81Hz — KBBASE, the home key
 let ARCHNAMES = null;                              // diagnostic only: see genTonal
@@ -15093,9 +15097,10 @@ function clipboardOp(op){
     CLIP={kind:'chan',name:p.name,cat:p.cat,data:Object.assign(presetData(p),{__chan:1}),
       prep:p.prep?JSON.parse(JSON.stringify(p.prep)):null,
       lane:lane.toJSON(), aud:audClipGrab(pi)};
+    sysPatch(pi);
     if(op==='cut'){pushUndo('cut channel'); lane.clear(); delete lane._cap;
       flash('✂ ch '+pi+' cut — sound and lane on the clipboard');}
-    else flash('▣ copied ch '+pi+' — sound and lane');
+    else flash('▣ copied ch '+pi+' — sound and lane, patch on the system clipboard');
   }
   dirty=true; dirtySave=true;
 }
@@ -15126,6 +15131,25 @@ function patchJSON(pi){
          ?S.patterns[S.editPat].lanes[pi].events.length:0,
     data:presetData(p)
   },null,1);
+}
+/* AND cmd+C PUTS IT THERE TOO (Gad, 2026-08-28: "command+c is better for my
+   muscle memory"). One gesture, two destinations that cannot collide: TEN's own
+   CLIP is what cmd+V reads back, and the system clipboard is what travels out
+   to a chat window to become a preset. Silent — clipboardOp says its own piece,
+   and a second flash on every copy would be noise.
+
+   ONE CHANNEL ONLY. The master's cmd+C is the whole desk and a selection is a
+   block; either is ~30kB of JSON, and dropping that on somebody's system
+   clipboard unasked is worse than not offering it at all.
+
+   THE COST, SAID OUT LOUD: every internal cmd+C now clobbers whatever was on
+   the system clipboard. Copy ch3 to paste it onto ch7 and the link you had
+   copied is gone. That is the price of the muscle memory and it was his call.
+   ctrl+c stays as it was — it still works on a block, where this does not. */
+function sysPatch(pi){
+  try{const t=patchJSON(pi);
+    navigator.clipboard.writeText(t).catch(()=>{legacyCopy(t);});}
+  catch(_){ try{legacyCopy(patchJSON(pi));}catch(__){} }
 }
 function copyPatch(){
   const pi=S.layer>=2?S.editSnd:S.curPreset;
