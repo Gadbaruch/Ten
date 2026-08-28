@@ -3727,6 +3727,321 @@ async function probeChord() {
   return { cols: ['pcs', 'uniq', 'keys', 'grid', 'sound', 'agree'], rows };
 }
 
+/* RETRO'S ONE PROMISE (Gad, 2026-08-28: "when loop length already set, and
+ * then i preform mid loop, let the loop wrap around to the beginning, then hit
+ * retro rec, it only captures the beginning of the loop, instead it should
+ * also capture the start of my performance that started mid loop").
+ *
+ * The promise the code states is "a note played on beat 3 comes back on beat
+ * 3". So: seed the buffer with a performance whose loop positions are KNOWN,
+ * tap retro, and ask where each note landed.
+ *   want   fmod(playedAt - anchor, L) — where it was played in the loop
+ *   got    where retro put it
+ *   lost   played inside the last cycle but absent from the lane
+ * `tap` is where in the loop the retro key was pressed, which is the variable
+ * the bug lives in.
+ */
+async function probeRetro() {
+  const ch = CH, pat = S.patterns[S.editPat], lane = pat.lanes[ch];
+  const keepLane = JSON.parse(JSON.stringify(lane.toJSON()));
+  const keepBuf = (retroBuf[ch] || []).slice();
+  const keepPlaying = T.playing, keepState = pat.state;
+  const keepSel = S.curPreset, keepLayer = S.layer;
+  const BARS = Math.max(1, Math.round(num(P.bars, 4)));
+  const rows = [];
+
+  const wb = async x => { let g = 0; while (gridNow() < x && g++ < 1200) await sleep(4); };
+  const keepBpm = T.bpm;
+
+  try {
+    S.layer = 1; S.curPreset = ch; S.mSel = false; pat.state = 'on';
+    /* FAST, so five cases fit inside one eval. A 4-bar cycle at 120 is eight
+       seconds of waiting for a phase; at 300 it is three. Nothing here is a
+       timing measurement — the beats are the units. */
+    setBpm(300);
+    if (!T.playing) play();
+    await sleep(150);
+    if (!T.playing) { notes.push('transport would not start — nothing to measure'); return { cols: [], rows: [] }; }
+
+    /* one case: tap the retro key `tapAt` beats into the cycle, having played
+       a phrase that started `startBack` beats before that tap */
+    const one = async (k, tapAt, startBack) => {
+      lane.unit = 'B'; lane.count = BARS; lane.auto = false;
+      lane.events = []; delete lane._cap; delete lane._rec;
+      const L = lane.len, anc = editAnchor();
+      /* land on the wanted phase of the cycle so `tap` is the real variable */
+      const now0 = gridNow();
+      const cyc = Math.ceil((now0 - anc) / L) * L;
+      const target = anc + cyc + tapAt;
+      await wb(target);
+      const nowB = gridNow();
+      /* the performance: one note a beat, ending at the tap */
+      const played = [];
+      for (let b = startBack; b >= 1; b--) played.push(nowB - b);
+      retroBuf[ch] = played.map((t, i) => ({ t, midi: 60 + i, vel: 0.9, dur: 0.25 }));
+      for (const k2 in RETRO.end) delete RETRO.end[k2];
+      retroCapture();
+      /* every note inside the last cycle must come back where it was played */
+      const inCycle = played.filter(t => t > nowB - L - 1e-9);
+      let lost = 0, moved = 0, worst = 0;
+      const detail = [];
+      inCycle.forEach((t, n) => {
+        const i = played.indexOf(t), midi = 60 + i;
+        const want = r3(fmod(t - anc, L));
+        const ev = lane.events.find(e => e.midi === midi);
+        if (!ev) { lost++; detail.push(midi + ':lost@' + want); return; }
+        const got = r3(ev.t);
+        const d = Math.abs(fmod(got - want + L / 2, L) - L / 2);
+        if (d > 1e-6) { moved++; worst = Math.max(worst, r3(d)); detail.push(want + '->' + got); }
+      });
+      rows.push({ k, tap: r3(fmod(nowB - anc, L)), L, played: played.length,
+                  inCycle: inCycle.length, inLane: lane.events.length,
+                  lost, moved, worstShift: worst || 0,
+                  ok: (!lost && !moved) ? 'yes' : 'NO',
+                  sample: detail.slice(0, 4).join(' ') });
+    };
+
+    await one('tap on the cycle line', 0.05, Math.min(4 * BARS - 1, 8));
+    await one('tap MID-loop, phrase crosses the wrap', 4.05, 8);
+    await one('tap at beat 2 — off the bar line', 2.05, 6);
+  } finally {
+    try { stop(); } catch (_) {}
+    try { setBpm(keepBpm); } catch (_) {}
+    if (keepPlaying && !T.playing) { try { play(); } catch (_) {} }
+    pat.lanes[ch] = Looper.from(keepLane);
+    retroBuf[ch] = keepBuf;
+    for (const k2 in RETRO.end) delete RETRO.end[k2];
+    pat.state = keepState; S.curPreset = keepSel; S.layer = keepLayer;
+  }
+  notes.push('lost = played inside the last cycle and NOT in the lane. moved = in the lane ' +
+             'at the wrong loop position. Both must be 0: retro promises a note played on ' +
+             'beat 3 comes back on beat 3.');
+  notes.push('sample shows want->got for the first few that moved.');
+  return { cols: ['tap', 'L', 'played', 'inCycle', 'inLane', 'lost', 'moved', 'worstShift', 'ok', 'sample'], rows };
+}
+
+/* THE ARP THAT WOULD NOT LET GO (Gad, 2026-08-28: "holding rec>holding arp =
+ * freezes arp like it latches when letting go of rec, arp is stuck for a few
+ * rounds of loop then stops").
+ *
+ * A live arp note sits in engine.arpPool with an `until` beat; the note
+ * handle's release() pulls that back to the key-up. So the whole question is
+ * what `until` holds once the key is up.
+ *   until   beats past the key-up that the pool will keep emitting
+ *   pool    entries still in the pool 1s after the key-up
+ *   steps   notes the arp actually emitted after the key came up
+ * Anything but "until <= 0, pool 0, steps 0" is a stuck arp.
+ */
+async function probeArpLatch() {
+  const ch = CH, p = S.presets[ch], pat = S.patterns[S.editPat], lane = pat.lanes[ch];
+  const keep = stash(ch);
+  const keepLane = JSON.parse(JSON.stringify(lane.toJSON()));
+  const keepPlaying = T.playing, keepState = pat.state, keepBpm = T.bpm;
+  const keepSel = S.curPreset, keepLayer = S.layer;
+  const CODE = 'KeyD';
+  const rows = [];
+  const ev = (ty, code, mods) => document.dispatchEvent(new KeyboardEvent(ty,
+    Object.assign({ code, key: code, bubbles: true, cancelable: true }, mods || {})));
+
+  /* count what the arp emits, at the door the pool uses */
+  let fired = 0;
+  const realNoteOn = engine.noteOn;
+  engine.noteOn = function (at, pi, ...a) { if (pi === ch) fired++; return realNoteOn.call(this, at, pi, ...a); };
+
+  try {
+    S.layer = 1; S.curPreset = ch; S.mSel = false;
+    setBpm(300);
+    p.ply = (p.ply || []).map(x => Object.assign({}, x));
+    p.ply[0] = ply1({ typ: 2, p1: 2, p3: 0.25, p4: 60 });        // arp, 1/16, up
+    lane.unit = 'B'; lane.count = 1; lane.auto = false;
+
+    const one = async (k, rec, order) => {
+      engine.allOff(); engine.arpPool[ch].length = 0;
+      lane.events = []; delete lane._cap; delete lane._rec;
+      for (const c2 of [...kbHeld]) kbHeld.delete(c2);
+      noteLatch.clear(); SUS.clear();
+      KM.sl = false; LATCH.on = false; LATCH.used = false;
+      HOLD.tab = false; HOLD.tabUsed = false; HOLD.tabLatch = false;
+      pat.state = rec ? 'rec' : 'on';
+      if (!T.playing) play();
+      await sleep(200);
+      await order();
+      /* the key is up — from here nothing should sound */
+      const nowB0 = gridNow();
+      const pool0 = engine.arpPool[ch].length;
+      const untils = engine.arpPool[ch].map(e2 => (e2.until === Infinity ? 'inf' : r3(e2.until - nowB0)));
+      fired = 0;
+      /* WATCH THE LANE OVER SEVERAL ROUNDS. "stuck for a few rounds of loop
+         then stops" is not a stuck arp — it is a take that is being ERASED
+         while it plays, which is what a pend entry left behind does: the
+         sweep follows the playhead and wipes what it passes, round on round,
+         until there is nothing left. So count the lane, not the pool. */
+      const cyc = lane.len * spb() * 1000;
+      const trail = [lane.events.length];
+      for (let r = 0; r < 4; r++) { await sleep(cyc); trail.push(lane.events.length); }
+      const after = fired;
+      const stale = Object.keys(pend).length, susN = SUS.size, heldN = kbHeld.size;
+      const laneDur = lane.events.length ? r3(Math.max(...lane.events.map(e2 => e2.dur || 0))) : null;
+      rows.push({ k, rec: rec ? 'armed' : 'off',
+                  poolAtUp: pool0, until: untils.slice(0, 3).join(',') || '—',
+                  laneOverRounds: trail.join('→'), pend: stale, sus: susN, held: heldN,
+                  laneDur,
+                  ok: (pool0 === 0 && !stale && trail[0] > 0 &&
+                       trail[trail.length - 1] === trail[0]) ? 'yes' : 'NO' });
+      engine.allOff(); engine.arpPool[ch].length = 0;
+      await sleep(80);
+    };
+
+    const down = () => ev('keydown', CODE);
+    const up   = () => ev('keyup', CODE);
+    const tabD = () => { ev('keydown', 'Tab'); };
+    const tabU = () => { ev('keyup', 'Tab'); };
+
+    await one('note alone, rec off', false, async () => { down(); await sleep(500); up(); await sleep(120); });
+    await one('note alone, rec ARMED', true, async () => { down(); await sleep(500); up(); await sleep(120); });
+    await one('tab down · note · note up · tab up', true, async () => {
+      tabD(); await sleep(60); down(); await sleep(500); up(); await sleep(60); tabU(); await sleep(120); });
+    await one('tab down · note · TAB UP · note up', true, async () => {
+      tabD(); await sleep(60); down(); await sleep(500); tabU(); await sleep(60); up(); await sleep(120); });
+    await one('rec LATCHED (win+tab) · note', true, async () => {
+      tabD(); await sleep(40); KM.sl = true; latchArmHeld(); await sleep(20); tabU(); await sleep(60);
+      KM.sl = false; down(); await sleep(500); up(); await sleep(120); });
+  } finally {
+    engine.noteOn = realNoteOn;
+    try { engine.allOff(); } catch (_) {}
+    engine.arpPool[ch].length = 0;
+    for (const c2 of [...kbHeld]) kbHeld.delete(c2);
+    noteLatch.clear(); SUS.clear(); KM.sl = false; LATCH.on = false;
+    HOLD.tab = false; HOLD.tabLatch = false;
+    try { stop(); } catch (_) {}
+    try { setBpm(keepBpm); } catch (_) {}
+    if (keepPlaying && !T.playing) { try { play(); } catch (_) {} }
+    pat.state = keepState; pat.lanes[ch] = Looper.from(keepLane);
+    S.curPreset = keepSel; S.layer = keepLayer;
+    unstash(ch, keep);
+  }
+  notes.push('until = beats of arp still owed AFTER the key came up. "inf" is a pool entry ' +
+             'whose release never fired — it arps until something else clears it.');
+  notes.push('stepsAfter = notes the arp emitted in the 900ms after the key-up. Must be 0.');
+  notes.push('laneOverRounds = how many events are in the lane at the key-up and after each ' +
+             'of four loop cycles. A take that shrinks is being swept by a pend entry nobody ' +
+             'took out; `pend` names how many are left behind.');
+  return { cols: ['rec', 'poolAtUp', 'until', 'laneOverRounds', 'pend', 'sus', 'held', 'laneDur', 'ok'], rows };
+}
+
+/* A SNAPSHOT CARRIES ITS TAKE (Gad, 2026-08-28: "snapshots of channels that
+ * contain different audio samples in audio channels should swap the audio when
+ * changing snapshot").
+ *
+ * `take` is what the channel is actually holding after each move — the name
+ * engine.audName reports, which is what the strip shows. The round trip at the
+ * end is the one that used to fail silently: the OTHER snapshot's take is on
+ * no channel at save time, so it had nothing to come back from.
+ */
+async function probeSnapAud() {
+  const ch = CH, pat = S.patterns[S.editPat];
+  const keep = { p: stash(ch), buf: engine.audBuf[ch], name: engine.audName[ch],
+                 lane: JSON.parse(JSON.stringify(pat.lanes[ch].toJSON())) };
+  const keepClips = JSON.parse(JSON.stringify(S.clips || {}));
+  const keepAt = JSON.parse(JSON.stringify(S.clipAt || {}));
+  const keepSel = S.curPreset, keepLayer = S.layer, keepM = S.mSel;
+  const rows = [];
+  const take = () => engine.audName[ch] || '—';
+  const say = (k, extra) => rows.push(Object.assign(
+    { k, at: CLIPKEYS[(S.clipAt || {})[ch] ?? 0], take: take(),
+      buf: engine.audBuf[ch] ? r3(engine.audBuf[ch].duration) + 's' : 'none' }, extra || {}));
+
+  try {
+    S.layer = 1; S.curPreset = ch; S.mSel = false;
+    S.clips = {}; S.clipAt = { 1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0 };
+    /* two takes off the pool, told apart by name and length */
+    const pool = POOL.filter(e => e && e.buf && e.name);
+    if (pool.length < 2) { notes.push('pool has fewer than two takes — nothing to swap'); return { cols: [], rows: [] }; }
+    const A = pool[0], B = pool.find(e => e !== A && e.name !== A.name) || pool[1];
+
+    /* make the channel audio and give it take A on snapshot a */
+    setEngine ? setEngine(ch, 'audio') : (S.presets[ch].cat = 'audio');
+    S.presets[ch].cat = 'audio'; audDefaults(S.presets[ch]);
+    engine.granNode(ch); engine.setChanBuf(ch, A.buf, A.name);
+    engine.rebuildRack(ch); engine.refresh(ch);
+    clipMark(ch);
+    say('snapshot a, take A', { want: A.name });
+
+    /* to b, and give it take B */
+    goClip(ch, 1);
+    engine.setChanBuf(ch, B.buf, B.name);
+    say('moved to b, loaded take B', { want: B.name });
+
+    goClip(ch, 0);
+    say('back to a', { want: A.name, ok: take() === A.name ? 'yes' : 'NO' });
+    goClip(ch, 1);
+    say('back to b', { want: B.name, ok: take() === B.name ? 'yes' : 'NO' });
+
+    /* THE ROUND TRIP. Serialize with the channel on b, so A lives only in the
+       snapshot — exactly the case that had nothing to come back from. */
+    const json = serialize(false);
+    const o = JSON.parse(json);
+    const inAud = (o.aud || []).filter(r => r && r.emb).map(r => r.n);
+    const inCaud = (o.caud || []).map(r => r.n + (r.emb ? '(emb)' : '(ref)'));
+    rows.push({ k: 'serialize, channel on b', at: 'b', take: take(), buf: '',
+                want: 'A embedded somewhere',
+                note: 'aud:[' + inAud.join(',') + '] caud:[' + inCaud.join(',') + ']',
+                ok: (o.caud || []).some(r => r.n === A.name) ? 'yes' : 'NO' });
+
+    /* drop A from the pool entirely and put it back the way a load does */
+    const ai = POOL.indexOf(A); const savedA = POOL[ai];
+    POOL.splice(ai, 1);
+    restoreClipAudio(o.caud);
+    const backA = poolFind({ n: A.name, src: A.src });
+    rows.push({ k: 'A dropped from the pool, then restored', at: '', take: '',
+                buf: backA && backA.buf ? r3(backA.buf.duration) + 's' : 'none',
+                want: r3(savedA.buf.duration) + 's',
+                ok: backA && backA.buf ? 'yes' : 'NO' });
+    goClip(ch, 0);
+    say('...and snapshot a still finds it', { want: A.name, ok: take() === A.name ? 'yes' : 'NO' });
+    if (POOL.indexOf(savedA) < 0) POOL.splice(ai, 0, savedA);
+
+    /* THE CASE THAT ACTUALLY NEEDED caud: a RECORDED take. A factory take is
+       a path and comes back with the shelf; a recording exists nowhere but
+       this set, so it has to ride embedded. */
+    const R = AC.createBuffer(1, Math.round(AC.sampleRate * 0.4), AC.sampleRate);
+    { const d = R.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = Math.sin(i * 0.05) * 0.3; }
+    poolAdd(R, 'probe-rec', { k: 'r' });
+    goClip(ch, 2);                                   // snapshot c
+    engine.granNode(ch); engine.setChanBuf(ch, R, 'probe-rec');
+    goClip(ch, 0);                                   // leave it: c holds the only reference
+    const o2 = JSON.parse(serialize(false));
+    const rec = (o2.caud || []).find(r => r.n === 'probe-rec');
+    rows.push({ k: 'a RECORDED take, referenced only by snapshot c', at: 'a', take: take(),
+                buf: r3(R.duration) + 's',
+                want: 'embedded in caud',
+                note: rec ? (rec.emb ? 'emb ' + Math.round(rec.emb.d.length / 1024) + 'kB' : 'ref only') : 'ABSENT',
+                ok: (rec && rec.emb) ? 'yes' : 'NO' });
+    /* and it comes back from nothing but the file */
+    const ri = POOL.findIndex(e => e && e.name === 'probe-rec');
+    if (ri >= 0) POOL.splice(ri, 1);
+    restoreClipAudio(o2.caud);
+    goClip(ch, 2);
+    rows.push({ k: '...pool wiped of it, restored from the set', at: 'c', take: take(),
+                buf: engine.audBuf[ch] ? r3(engine.audBuf[ch].duration) + 's' : 'none',
+                want: r3(R.duration) + 's',
+                ok: take() === 'probe-rec' ? 'yes' : 'NO' });
+    { const ri2 = POOL.findIndex(e => e && e.name === 'probe-rec');
+      if (ri2 >= 0) POOL.splice(ri2, 1); }
+  } finally {
+    S.clips = keepClips; S.clipAt = keepAt;
+    S.curPreset = keepSel; S.layer = keepLayer; S.mSel = keepM;
+    pat.lanes[ch] = Looper.from(keep.lane);
+    engine.audBuf[ch] = keep.buf; engine.audName[ch] = keep.name;
+    unstash(ch, keep.p);
+    try { engine.audRelockAll(); } catch (_) {}
+  }
+  notes.push('`take` is engine.audName — what the strip shows. ok=NO anywhere means the ' +
+             'snapshot did not bring its sample back.');
+  return { cols: ['at', 'take', 'buf', 'want', 'ok', 'note'], rows };
+}
+
 async function probePwmAll() {
   const ch = CH === 9 ? 8 : CH;
   const RATE = num(P.rate, 2), AMT = num(P.amt, 70);
@@ -3905,6 +4220,9 @@ const HELP = {
     { k: 'master',   args: '\u2014 with the master selected: which lane do the loop-length and clear gestures actually move' },
     { k: 'steps',    args: 'ch=8 all=0 \u2014 how far one press moves every dial: 0..1 params must be 0.01/0.1, reso 0.1/1' },
     { k: 'chord',    args: 'ch=6 \u2014 the scale and the global chord: do adjacent keys stay distinct, and does the grid agree with the sound' },
+    { k: 'retro',    args: 'ch=5 bars=4 \u2014 does a retro tap keep a phrase that started mid-loop, and at the beat it was played' },
+    { k: 'arplatch', args: 'ch=5 \u2014 does an arp let go of the key? pool/until/steps after the key-up, with rec off, armed and latched' },
+    { k: 'snapaud',  args: 'ch=9 \u2014 does a snapshot swap the audio channel\u2019s take, and survive a save round trip' },
     { k: 'poolkind', args: 'want=loop — every pool take: measured onsets/centroid, the kind it was called, and both dial views in order' },
     { k: '(any)',    args: '--ab <url> runs the same probe on a second build and diffs it' },
   ]
@@ -3947,6 +4265,9 @@ try {
                    fxmod: probeFxMod,
                    fxwire: probeFxWire,
                    poolkind: probePoolKind,
+                   snapaud: probeSnapAud,
+                   arplatch: probeArpLatch,
+                   retro: probeRetro,
                    chord: probeChord,
                    steps: probeSteps,
                    master: probeMaster,

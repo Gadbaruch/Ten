@@ -1147,9 +1147,45 @@ const clipMark=pi=>{clipEntry[pi]=JSON.stringify(presetData(S.presets[pi]));};
 function grabClip(pi){
   const cur=presetData(S.presets[pi]); cur.__chan=1;   // a clip carries the whole channel
   const touched=clipEntry[pi]===undefined||JSON.stringify(cur)!==clipEntry[pi];
+  /* AND THE TAKE (Gad, 2026-08-28: "snapshots of channels that contain
+     different audio samples in audio channels should swap the audio when
+     changing snapshot"). A REFERENCE, never the AudioBuffer: S.clips goes
+     through JSON.stringify on every autosave, and a buffer serialises to {}
+     — which would not merely lose the take, it would hand setChanBuf an empty
+     object on the next load. audRef is the same {name, src} pair the set
+     already stores per channel, so the pool is the one place audio lives.
+     `sm` and not `aud`, because the desk clipboard puts a LIVE buffer on
+     `aud` (audClipGrab) and the two must not collide. */
   return {p:touched?cur:null,
           lane:S.patterns[S.editPat].lanes[pi].toJSON(),
+          sm:audRef(pi),
           oct:S.presets[pi].tr||0};
+}
+/* a take, from the reference a snapshot carries. A factory take IS its path;
+   anything else is matched by the name the pool shows you. */
+function poolFind(ref){
+  if(!ref)return null;
+  if(ref.src&&ref.src.k==='f'&&ref.src.f){
+    const e=POOLBYF.get(smpPath(ref.src.f)); if(e)return e;
+  }
+  return POOL.find(p2=>p2.name===ref.n)||null;
+}
+const refKey=r=>r?((r.src&&r.src.f)||r.n||''):'';
+/* putting a snapshot's take back. A snapshot with no take EMPTIES an audio
+   channel — that is what "this snapshot is a different sample" means when the
+   other snapshot had none — but it leaves a synth channel alone, since a
+   channel that is not reading a buffer has no opinion about which one it
+   holds. A take the pool no longer has leaves the channel as it is: better
+   the wrong take than silence with no explanation, and restoreAudio already
+   reports what did not come back. */
+function audSnapPut(pi,ref){
+  if(!isAudioCh(pi))return;
+  const e=ref?poolFind(ref):null;
+  if(e&&e.buf){engine.granNode(pi); engine.setChanBuf(pi,e.buf,e.name||ref.n||'take');}
+  else if(!ref){engine.audBuf[pi]=null; if(engine.granBuf)engine.granBuf[pi]=null;
+                engine.audName[pi]=null;}
+  else return;
+  try{engine.audRelockAll();}catch(_){}
 }
 function putClip(pi,c){
   if(!c)return false;
@@ -1166,6 +1202,9 @@ function putClip(pi,c){
   S.presets[pi].mix={...keepMix};
   clipMark(pi);
   engine.rebuildRack(pi); engine.refresh(pi);
+  /* AFTER the preset, because whether this channel reads a buffer at all is
+     one of the things the snapshot just decided */
+  audSnapPut(pi,c.sm);
   return true;
 }
 function clipSlot(pi,k){ (S.clips[pi]=S.clips[pi]||{}); return S.clips[pi][k]; }
@@ -1432,7 +1471,7 @@ const recPlayed=(pi,tBeat,midi,vel,durBeats)=>recPlayNote(pi,tBeat,sndOut(pi,mid
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-28.1244';
+const BUILD='2026-08-28.1255';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -21140,7 +21179,22 @@ function retroCapture(){
   if(!seg.length){flash('nothing played in the last '+fmtLen(lane)+
     ' — tab+digits reaches further back');return;}
   for(const n of seg){
-    const t=fmod(n.t-from,L);
+    /* AGAINST THE ANCHOR, NOT THE WINDOW START (Gad, 2026-08-28: "i preform
+       mid loop, let the loop wrap around to the beginning, then hit retro rec,
+       it only captures the beginning of the loop"). Nothing was lost — the
+       whole phrase was ROTATED. endB snaps to a BAR line and `from` is
+       endB−L, so on any loop longer than a bar a tap taken anywhere but on a
+       cycle line put the window start at a phase the loop does not have, and
+       every note moved by that offset. Measured on a 4-bar loop, tap at beat
+       4: 8 of 8 notes present, 8 of 8 in the wrong place, all shifted by
+       exactly 4 — a note played at 12.07 came back at 8.07.
+       This function does not resize the lane, so the anchor's phase is the
+       one true thing about it, and its own comment has promised "a note
+       played on beat 3 comes back on beat 3" all along. The window stays
+       exactly L long, so no two notes can land on one position.
+       (retroBars maps from the window start on purpose — it RESIZES the lane
+       to the bars you asked for, and then the anchor's phase means nothing.) */
+    const t=fmod(n.t-anc,L);
     lane.clear(ev=>ev.midi===n.midi&&ev.cue===n.cue&&Math.abs(ev.t-t)<1e-6);   // same note same spot: newest wins
     lane.events.push({t,midi:n.midi,vel:n.vel??0.9,dur:n.dur||0.25,born:performance.now(),
       ...(n.cue!==undefined?{cue:n.cue}:{}),
@@ -25403,7 +25457,46 @@ function portPreset(p,out){
   if(Array.isArray(q.kit))q.kit=q.kit.map(k=>k?portPreset(k,out):null);
   return q;
 }
-function serialize(noAudio){const _os=opSmpSave(noAudio); const _as=audSave(noAudio,_os._bytes); return JSON.stringify({v:SAVEV,bpm:T.bpm,metro:S.metro,hum:S.hum,grv:S.grv,oct:S.oct,master:S.master,mLvl:S.mLvl??0.8,dj:S.dj,gmT:S.gmT||[],arrOn:S.arrOn!==false,
+/* THE TAKES A SNAPSHOT REFERENCES BUT NO CHANNEL IS HOLDING. A channel's own
+   take rides embedded in `aud`; the OTHER snapshot's take is on no channel at
+   save time, so without this a set came back with every snapshot pointing at
+   whatever its channel happened to be holding — the swap worked all session
+   and died on reload. Same encoder, same shared budget, and over budget it
+   degrades to a named reference exactly as a channel's take does.
+   `caud` is a NEW KEY, so it is not a format change in either direction: an
+   older build ignores it, and this one treats its absence as an empty list. */
+function clipAudSave(noAudio,spent0){
+  if(noAudio)return [];
+  let spent=spent0||0;
+  const have=new Set();
+  for(let i=0;i<10;i++){const r=audRef(i); if(r)have.add(refKey(r));}
+  const out=[], seen=new Set();
+  const walk=c=>{
+    if(!c||!c.sm)return;
+    const k=refKey(c.sm); if(!k||have.has(k)||seen.has(k))return;
+    seen.add(k);
+    if(c.sm.src&&c.sm.src.k==='f'&&c.sm.src.f){out.push(c.sm); return;}  // factory: re-fetched
+    const e=poolFind(c.sm); if(!e||!e.buf)return;
+    const enc=smpEnc(e.buf);
+    if(enc&&spent+enc.d.length<=SMPCAP){spent+=enc.d.length; out.push({...c.sm,emb:enc});}
+    else out.push(c.sm);
+  };
+  for(const pi in (S.clips||{}))for(const k in (S.clips[pi]||{}))walk(S.clips[pi][k]);
+  for(const k in (S.scenes||{}))(S.scenes[k]||[]).forEach(walk);
+  return out;
+}
+function restoreClipAudio(list){
+  if(!Array.isArray(list))return;
+  for(const r of list){
+    if(!r||!r.emb)continue;                       // factory refs come back with the shelf
+    const b=smpDec(r.emb);
+    if(b)poolAdd(b,r.n||'take',r.src||{k:'r'});
+  }
+}
+function serialize(noAudio){const _os=opSmpSave(noAudio); const _as=audSave(noAudio,_os._bytes);
+  const _spent=(_os._bytes||0)+_as.reduce((n,r)=>n+((r&&r.emb&&r.emb.d)?r.emb.d.length:0),0);
+  const _cs=clipAudSave(noAudio,_spent);
+  return JSON.stringify({v:SAVEV,bpm:T.bpm,metro:S.metro,hum:S.hum,grv:S.grv,oct:S.oct,master:S.master,mLvl:S.mLvl??0.8,dj:S.dj,gmT:S.gmT||[],arrOn:S.arrOn!==false,
   clips:S.clips,scenes:S.scenes,clipAt:S.clipAt,sceneAt:S.sceneAt,
   arr:S.arr,
   patterns:S.patterns.map(p=>({state:p.state==='edit'?'on':p.state,sw:p.sw||0,lanes:p.lanes})),
@@ -25413,7 +25506,7 @@ function serialize(noAudio){const _os=opSmpSave(noAudio); const _as=audSave(noAu
      the mic being an instrument means the set loses its performances on every
      export and every reload. A recorded take rides as 16-bit base64 inside
      the op-sample budget; factory files stay references. */
-  aud:_as,
+  aud:_as, caud:_cs,
   /* …and the SYNTH ops' samples, which unlike a channel's take cannot be
      re-fetched, so the audio itself travels. Two keys: the deduped blobs and
      the map of which op points at which. */
@@ -25641,6 +25734,7 @@ function load(json){
     /* …and the takes. Last, after every channel exists and its dials are set,
        so a re-fetched factory phrase lands on a channel that is ready for it. */
     restoreAudio(o.aud);
+    restoreClipAudio(o.caud);      // …and the takes only a snapshot points at
     /* op samples before the racks are heard again: a voice built without them
        falls through to noiseBuf, which is the whole bug this fixes */
     opSmpLoad(o.smp,o.osmp);
