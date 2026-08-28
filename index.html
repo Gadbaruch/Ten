@@ -1471,7 +1471,7 @@ const recPlayed=(pi,tBeat,midi,vel,durBeats)=>recPlayNote(pi,tBeat,sndOut(pi,mid
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-28.1301';
+const BUILD='2026-08-28.1331';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -6151,7 +6151,31 @@ function play(){
      the stop-then-tab flow (take the jam of the run that just ended) still
      works — that reads the buffer before the next play. */
   for(let i9=0;i9<retroBuf.length;i9++)retroBuf[i9].length=0;
+  /* THE ARP POOL'S CLOCK DIES WITH THE OLD ONE TOO (Gad, 2026-08-29: "have
+     playback paused > hold a few arp notes > let go > start playback = notice
+     the arp is running even tho notes arent pressed").
+     gridNow() is TWO CLOCKS. Stopped it is the free grid, which has been
+     climbing since the page loaded; playing it is posNow(), which play()
+     restarts at ZERO. A pool entry's `until` is a BEAT, written on whichever
+     clock was running when the key came up — so a note released at free-grid
+     beat 800 was compared, one line later, against transport beat 0, found to
+     be 800 beats in the future, and arpeggiated with nothing held. The `-8`
+     housekeeping filter kept it for the same reason, so it ran until something
+     else emptied the pool. Same family as the retro-buffer clear right above:
+     a beat from a dead clock has no home on a new one.
+     Converted rather than dropped, through the times they actually happened
+     at, so a key STILL HELD across the press (until Infinity) keeps sounding
+     and a released one lands in the past and is over. */
+  const _pt=(()=>{const t0=G.t0,b0=G.b0,sp=spb();
+    const toT=b=>t0+(b-b0)*sp;
+    return engine.arpPool.map(pool=>pool.map(en=>({en,
+      u:en.until===Infinity?Infinity:toT(en.until),
+      b:en.born===undefined?undefined:toT(en.born)})));})();
   T.startTime=AC.currentTime+0.06; T.startBeat=0; T.schedBeat=0; T.playing=true;
+  for(const grp of _pt)for(const r of grp){
+    r.en.until=r.u===Infinity?Infinity:beatsAt(r.u);
+    if(r.b!==undefined)r.en.born=beatsAt(r.b);
+  }
   acts=[{pat:S.curPat,start:-1e9,anchor:0}];
   dirty=true;
 }
@@ -11241,22 +11265,22 @@ class Engine{
        different chop. cueNote already refuses transpose and the octave arrows
        for the same reason. */
     const posCh=p.cat==='audio'&&kmodeOf(p)===0;
-    /* …BUT A HELD CHORD IS NOT THE KEY, AND IT DOES REACH A RECORDED NOTE
-       (Gad, 2026-08-28: "global chord changes looks like it works, i can see
-       notes moving but i dont hear the change"). He could see it because the
-       grid draws through heardMidi(), which snapped; he could not hear it
-       because this line let only LIVE notes through. Measured on ch5 with a
-       Dm held over a stored E3: grid F3, sound E3.
-       The 2026-08-18 ruling is untouched — it is about the SCALE, a fixed
-       setting that must not re-decide a chord you already played. A chord
-       master is the opposite: a gesture you are making right now, whose whole
-       purpose is that the rest of the desk follows it. With nothing held
-       chordPCs() is null and a replayed note is left exactly alone, which is
-       what that ruling asked for. */
-    if(CFG.scaleOn&&!isDrumCat(p.cat)&&!isMaster&&!posCh){
-      if(durSec==null)midi=snapToPCs(midi,pcsNow());
-      else{const ch9=chordPCs(); if(ch9)midi=snapToPCs(midi,ch9);}
-    }
+    /* THE KEY IS LIVE TOO, AND THIS REVERSES 2026-08-18 ON GAD'S OWN ASK
+       (2026-08-29: "global key in settings should affect already recorded
+       notes live, only global chord overrides it"). One line, and pcsNow()
+       already answers chord-over-scale, so "the chord overrides it" needs
+       nothing said twice.
+       WHAT IT COSTS, plainly, because it is the thing that was fixed in
+       August: an OFF-SCALE recorded note is re-snapped on the way out, so a
+       chord you played chromatically can come home a different quality. That
+       cost is far smaller than it was — the keyboard now hands out scale
+       DEGREES, so anything you played with the scale on is already in key and
+       this is a no-op for it. What it reaches is what you played with the
+       scale OFF, what a channel transpose moved off-scale, and what
+       random-pitch invented. Turn the scale off and nothing snaps at all.
+       (2026-08-28 kept only the CHORD here; the key is back by request.) */
+    if(CFG.scaleOn&&!isDrumCat(p.cat)&&!isMaster&&!posCh)
+      midi=snapToPCs(midi,pcsNow());
     this.lastMidi[pi]=midi;
     /* LIVE playing gets the note-level PLAY effects too (the sequencer applies its
        own copies to recorded notes; durSec!=null means it came from the scheduler) */
@@ -15573,15 +15597,12 @@ function heardMidi(pi,midi){
   /* the grid has to show the pad you will HEAR — see trigger(), which skips
      transpose on a kit for the same reason */
   let m=midi+(isKit(p)?0:trSemis(p));
-  /* AND IT DRAWS WHAT PLAYS, WHICH IS NOT THE SAME AS WHAT A FINGER WOULD DO
-     HERE. These are STORED notes, and playback does not re-snap a stored note
-     to the key — so drawing the scale snap showed a change you could not
-     hear, on every off-scale note in the lane and on every chord change. The
-     guard list is trigger's, exactly, so the two cannot drift. */
+  /* AND IT DRAWS WHAT PLAYS — the guard list is trigger's, exactly, so the
+     two cannot drift. It was this pair disagreeing that made a chord change
+     visible and inaudible; they say the same thing now, in both directions. */
   const posCh=p.cat==='audio'&&kmodeOf(p)===0;
-  if(CFG.scaleOn&&!isDrumCat(p.cat)&&!isChordMaster(p)&&!posCh){
-    const ch=chordPCs(); if(ch)m=snapToPCs(m,ch);
-  }
+  if(CFG.scaleOn&&!isDrumCat(p.cat)&&!isChordMaster(p)&&!posCh)
+    m=snapToPCs(m,pcsNow());
   return m;
 }
 const trLabel=p=>{const st=trSemis(p);return st?(st>0?'+':'')+st+'st':'0st';};
@@ -16888,7 +16909,7 @@ const KBHOME=KBSEQ.indexOf('KeyA');
    Only the KIT lifts. A synth channel with a sampler op is PLAYING notes, and
    an octave down there is a musical choice rather than a mistake. */
 const KITLIFT=12;
-function kbNote(code,chrom){
+function kbNote(code,chrom,noChord){
   const raw=KBSEQ.indexOf(code); if(raw<0)return null;
   const i=raw-KBHOME;
   if(chrom||!CFG.scaleOn)return i;                  // chromatic, one semitone a key
@@ -16909,7 +16930,16 @@ function kbNote(code,chrom){
      tone a key, so the snap is a no-op again and every key still plays
      something. Chord pitch classes are ABSOLUTE (0 = C), so no key offset is
      added to them — the scale's are relative and keep theirs. */
-  const ch=chordPCs();
+  /* …AND A CHORD MASTER DOES NOT FOLLOW ITSELF (Gad, 2026-08-29: "when chord
+     channel is set to global it should not affect itself, rn after your fix a
+     global chord changes every press toggles between 2 chords with the same
+     key"). isChordMaster exists for exactly this and every other reader asks
+     it; the keyboard was the one place that had not been told, so the master's
+     own run was being laid out on the chord it is itself DEFINING. Press a
+     key, it defines a chord; the next press is mapped through that chord and
+     defines a different one — two chords, one key, forever. `noChord` is that
+     test, asked by noteOf, which is the only caller that knows the channel. */
+  const ch=noChord?null:chordPCs();
   if(ch)return Math.floor(i/ch.length)*12+ch[fmod(i,ch.length)];
   const sc=SCALES[CFG.scale][1];
   /* fmod, not %, now that the z row is NEGATIVE degrees: -1 has to mean the
@@ -16922,8 +16952,10 @@ const kbFull=()=>(CFG.kbd??'full')!=='piano';
    the twelve pitch classes vanish with the scale on. Kit channels read the
    keyboard chromatically no matter what the scale says. */
 function noteOf(code,pi){
-  const kit=pi!=null&&isKit(S.presets[pi]);
-  const v=kbFull()?kbNote(code,kit):NOTEKEYS_PIANO[code];
+  const p9=pi!=null?S.presets[pi]:null;
+  const kit=!!(p9&&isKit(p9));
+  const self9=!!(p9&&isChordMaster(p9));      // …and it does not follow itself
+  const v=kbFull()?kbNote(code,kit,self9):NOTEKEYS_PIANO[code];
   if(v===undefined||v===null)return null;
   /* THE KIT'S LIFT LIVES HERE, not at the one call site that used to carry it.
      There are three places that turn a key into a note and I had lifted one;
@@ -16941,10 +16973,11 @@ const NOTEKEYS=NOTEKEYS_PIANO;
 function keyForOffset(off,pi){
   /* the mirror of noteOf, and it has to take the same lift off again or a kit
      channel highlights a key an octave from the one you pressed */
-  const kit=pi!=null&&isKit(S.presets[pi]);
+  const p9=pi!=null?S.presets[pi]:null;
+  const kit=!!(p9&&isKit(p9)), self9=!!(p9&&isChordMaster(p9));
   const o=kit?off-KITLIFT:off;
   if(!kbFull()){for(const k in NOTEKEYS_PIANO)if(NOTEKEYS_PIANO[k]===o)return k;return null;}
-  for(const code of KBSEQ)if(kbNote(code,kit)===o)return code;
+  for(const code of KBSEQ)if(kbNote(code,kit,self9)===o)return code;
   return null;
 }
 const KEYFOR=new Proxy({},{get:(_,k)=>keyForOffset(+k)});

@@ -3664,14 +3664,14 @@ async function probeChord() {
   const rows = [];
 
   /* what the key SOUNDS as: noteOf through trigger's own arithmetic, live */
-  const sounds = () => ROW.map(c => {
-    const raw = KBBASE + S.oct * 12 + (noteOf(c, ch) ?? 0);
-    let m = raw + (isKit(p) ? 0 : trSemis(p));
-    if (CFG.scaleOn && !isDrumCat(p.cat) && !isChordMaster(p)) m = snapToPCs(m, pcsNow());
+  const sounds = (pi) => { const q = S.presets[pi]; return ROW.map(c => {
+    const raw = KBBASE + S.oct * 12 + (noteOf(c, pi) ?? 0);
+    let m = raw + (isKit(q) ? 0 : trSemis(q));
+    if (CFG.scaleOn && !isDrumCat(q.cat) && !isChordMaster(q)) m = snapToPCs(m, pcsNow());
     return m;
-  });
+  }); };
 
-  const one = async (k, setup) => {
+  const one = async (k, setup, viaCh) => {
     /* A CHORD MASTER'S OWN NOTE ADDS A PITCH CLASS AND TAKES IT BACK ON A
        TIMER (trigger: subPC after durSec). Without the wait the NEXT row runs
        with the previous row's note still in heldPCs — which is how this probe
@@ -3686,7 +3686,7 @@ async function probeChord() {
     p.ply = keepPly.map(x => Object.assign({}, x)).filter(x => !isGlobalChordSlot(x));
     while (p.ply.length < keepPly.length) p.ply.push(mkPly());
     if (setup) setup();
-    const S2 = sounds();
+    const S2 = sounds(viaCh == null ? ch : viaCh);
     /* one stored note, drawn and played */
     const stored = 52;                                    // E3 as it sits in a lane
     const drawn = heardMidi(ch, stored);
@@ -3714,6 +3714,20 @@ async function probeChord() {
     await one('released — chordHold sticks', () => { master(); chordHold.push(0, 4, 7); });
     await one('...now a Dm: D-F-A held', () => { master(); [2, 5, 9].forEach(addPC); });
     await one('scale OFF, chord held', () => { master(); [0, 4, 7].forEach(addPC); CFG.scaleOn = 0; });
+    /* THE MASTER'S OWN ROW. It defines the chord, so it must not be laid out
+       on it — press a key, it defines a chord; the next press mapped through
+       that chord defines a different one, and one key toggles two chords
+       forever. Asked of the MASTER channel itself. */
+    await one('the MASTER\u2019s own keys, chord held', () => {
+      const sl = ply1({ typ: 1, p1: 0, p3: 1 });
+      S.presets[other].ply = [sl].concat((keepOther.data.ply || []).slice(1));
+      S.presets[ch].ply = [Object.assign({}, sl)].concat(keepPly.slice(1));
+      [0, 4, 7].forEach(addPC);
+    }, ch);
+    /* THE GLOBAL KEY REACHES A RECORDED NOTE (2026-08-29). No chord anywhere,
+       key moved to F# — a stored C3 must come back in the new key, and the
+       grid must say the same thing. */
+    await one('key = F#, nothing held', () => { CFG.key = 6; });
   } finally {
     for (const q of [...heldPCs.keys()]) heldPCs.delete(q);
     chordHold.length = 0; keepHold.forEach(x => chordHold.push(x));
@@ -3882,12 +3896,21 @@ async function probeArpLatch() {
       const after = fired;
       const stale = Object.keys(pend).length, susN = SUS.size, heldN = kbHeld.size;
       const laneDur = lane.events.length ? r3(Math.max(...lane.events.map(e2 => e2.dur || 0))) : null;
+      /* live = pool entries still owed time. A SPENT entry (until already
+         past) is harmless housekeeping and must not read as a failure — the
+         first version of this probe called every clean case NO for it. */
+      const live = engine.arpPool[ch].filter(e2 => e2.until > gridNow()).length;
       rows.push({ k, rec: rec ? 'armed' : 'off',
-                  poolAtUp: pool0, until: untils.slice(0, 3).join(',') || '—',
+                  poolAtUp: pool0, liveNow: live,
+                  until: untils.slice(0, 3).join(',') || '—',
                   laneOverRounds: trail.join('→'), pend: stale, sus: susN, held: heldN,
-                  laneDur,
-                  ok: (pool0 === 0 && !stale && trail[0] > 0 &&
-                       trail[trail.length - 1] === trail[0]) ? 'yes' : 'NO' });
+                  stepsAfter: rec ? '(lane)' : after,
+                  /* WITH REC ARMED THE LANE FEEDS THE POOL, legitimately —
+                     the take that was just recorded is playing back through
+                     the same arp. So liveNow and stepsAfter only mean
+                     something with rec OFF, and a probe that says otherwise
+                     flickers between yes and NO on a sampling race. */
+                  ok: (!stale && (rec ? true : (live === 0 && after === 0))) ? 'yes' : 'NO' });
       engine.allOff(); engine.arpPool[ch].length = 0;
       await sleep(80);
     };
@@ -3897,6 +3920,16 @@ async function probeArpLatch() {
     const tabD = () => { ev('keydown', 'Tab'); };
     const tabU = () => { ev('keyup', 'Tab'); };
 
+    /* HIS REPRO (2026-08-29): "have playback paused > hold a few arp notes >
+       let go > start playback = notice the arp is running even tho notes
+       arent pressed". The pool's `until` is a beat on whichever clock was
+       running; play() restarts the transport clock at 0. */
+    await one('STOPPED · hold arp · let go · PLAY', false, async () => {
+      try { stop(); } catch (_) {}
+      await sleep(150);
+      down(); await sleep(500); up(); await sleep(150);
+      play(); await sleep(200);
+    });
     await one('note alone, rec off', false, async () => { down(); await sleep(500); up(); await sleep(120); });
     await one('note alone, rec ARMED', true, async () => { down(); await sleep(500); up(); await sleep(120); });
     await one('tab down · note · note up · tab up', true, async () => {
@@ -3926,7 +3959,10 @@ async function probeArpLatch() {
   notes.push('laneOverRounds = how many events are in the lane at the key-up and after each ' +
              'of four loop cycles. A take that shrinks is being swept by a pend entry nobody ' +
              'took out; `pend` names how many are left behind.');
-  return { cols: ['rec', 'poolAtUp', 'until', 'laneOverRounds', 'pend', 'sus', 'held', 'laneDur', 'ok'], rows };
+  notes.push('liveNow = pool entries still owed arp time with nothing held. Must be 0. ' +
+             'stepsAfter is only meaningful with rec off — armed, the lane is legitimately ' +
+             'playing back what was just recorded.');
+  return { cols: ['rec', 'poolAtUp', 'liveNow', 'until', 'laneOverRounds', 'pend', 'sus', 'held', 'stepsAfter', 'ok'], rows };
 }
 
 /* A SNAPSHOT CARRIES ITS TAKE (Gad, 2026-08-28: "snapshots of channels that
