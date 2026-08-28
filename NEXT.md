@@ -1,3 +1,87 @@
+# THE KEY COMES BACK, AND RETRO LISTENS AGAIN — 2026-08-29 (branch `sound-library`)
+
+## CLEARING THE MASTER HANDS THE KEY BACK  (7cf5b19)
+
+Gad: *"when a master chord ch is cleared, i guess you can return to track the
+global key."*
+
+`chordHold` is deliberately sticky — the harmony has to hold after your hand
+lifts or every other channel lurches at the end of each chord. But it is still
+**the last thing THAT CHANNEL said**, and clearing the channel is you saying it
+has nothing to say. `anyGlobalChord()` already covered the slot being switched
+back to local; this covers the notes going away. Measured, `pcsNow()`:
+
+    Dm stuck, released not cleared   2,5,9            (unchanged)
+    ...then the master is CLEARED    0,2,4,5,7,9,11   the global key, back
+    ...cleared while STILL HOLDING   2,5,9            untouched
+
+⚠ **The third row is the guard that matters.** `heldPCs` outranks `chordHold`
+in `chordPCs()`, so clearing under your own fingers changes nothing until you
+let go — which is why the fix sits in `clearLane` and not at read time. A
+read-time test ("does the master still have notes?") would have broken the
+live case, where a master legitimately defines a chord with an empty lane.
+
+## RETRO LISTENS AGAIN — BUT ONLY WHERE NOTHING WAS DECIDED  (7cf5b19)
+
+Gad: *"retro rec on empty ch with no set length — in that state retro needs to
+listen to the performance and guess the length based on when started playing,
+with some gap window like if silent for a bar then assume that the next playing
+is the the rec punch in position… i thought we had it like this."*
+
+⚠ **THE GUESSER CAME OUT ON PURPOSE — read `retroCapture`'s own comment before
+touching this.** It was wrong because it overrode a length you had **SET**. On
+a lane whose `auto` is still true nothing has been decided, and the alternative
+there was `DEFLENS[CFG.defLen]` — a number out of settings that knows nothing
+about what you just played. **A guess beats an arbitrary constant; a guess does
+not beat a decision.** That sentence is the whole scope of `retroGuess`.
+
+- **The punch-in** is the first note after the last silence of `RETROGAP` (one
+  bar) or more, so "play a bit, breathe, then play the take" hands back the
+  take and not both.
+- **The length** is that span at the nearest bar — **but never shorter than
+  what you played**, or a phrase whose last note sits just past the line wraps
+  onto its own beginning.
+
+Measured with `CFG.defLen` pinned to 1 bar, so every length other than 1b came
+from listening (`tools/probe.sh retroguess ch=5`):
+
+                                          guess   lane   notes kept
+      2-bar phrase, clean                    2      2b      8/8
+      1-bar phrase                           1      1b      4/4
+      warm-up · 1 bar silence · 2-bar take   2      2b      8/11   <- punch-in
+      last note past the line (span 5.0)     2      2b      3/3    <- no clip
+      4-bar phrase                           4      4b      5/5
+      length already SET to 1                2      1b      4/8    <- not touched
+
+**The last row is the reason the guesser was removed, and it still holds:** the
+guess said 2 and the lane stayed at the 1 that was decided. Nothing clipped and
+nothing collided in any row.
+
+The flash says `(heard)` when the length came from listening, so a wrong guess
+is legible rather than mysterious — and `tab+digits` re-cuts it any width, which
+is the escape hatch that makes guessing safe at all.
+
+## QA CHECKLIST — 2026-08-29 (second batch)
+
+Reload **http://localhost:3033/**. Build `2026-08-28.1341` or later.
+
+1. **Retro on a fresh channel hears the phrase.** Empty channel, length never
+   set. Play a two-bar phrase, hit retro. You get a TWO bar loop, not whatever
+   `defLen` says. The flash reads `(heard)`. *Measured: 2b from a 2-bar phrase
+   with defLen pinned at 1.*
+2. **The silence finds your punch-in.** Noodle, leave a bar of silence, then
+   play the take, then hit retro. Only the take comes back. *Measured: 8 of 11
+   notes — the three warm-up notes on the far side of the gap were dropped.*
+3. **A length you SET is still untouchable.** Set a lane to 1 bar, play two
+   bars, hit retro. You get one bar — the guess does not overrule you.
+   *Measured: guess said 2, lane stayed 1b.*
+4. **Clearing the chord master returns the key.** Play a chord on the master,
+   let go (the desk stays on that chord — correct), then clear that channel.
+   The desk goes back to the global key and the flash says so. *Measured:
+   2,5,9 → 0,2,4,5,7,9,11.*
+5. **Clearing while still holding changes nothing.** *Measured: pcs stayed
+   2,5,9 until the fingers came up.*
+
 # A MASTER DOES NOT FOLLOW ITSELF, THE KEY IS LIVE, THE ARP LETS GO — 2026-08-29 (branch `sound-library`)
 
 Three from Gad, all measured. **The arp repro is his, and it is a CLOCK bug —
