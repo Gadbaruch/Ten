@@ -4299,6 +4299,28 @@ function mkJ(name,cat,d){
   if(d.trs!==undefined)p.xtrs=d.trs;      // …and it travels with the sound
   return p;
 }
+/* ---- PRESETS GAD GAVE ME, AND A REGEN CANNOT REACH THEM ----------------
+   Gad, 2026-08-29: "please make sure that presets i give you to load do not
+   get erased when we do a new preset run."
+
+   They live in their OWN function, and that separation IS the guarantee — not
+   a flag somebody has to remember to check. Redoing the generated batch means
+   rewriting PRESETS0 and re-rolling the dice; neither can reach in here. A
+   flag in one shared list would survive exactly as long as the next person
+   who rewrites that list.
+
+   EMPTY TODAY. BES1, pasted 2026-08-28, was a copy-paste test he disowned
+   ("not a good sound ... dont use this one to learn anything from"), so
+   nothing of his has been shelved yet.
+
+   THE RULE, and it is the whole point of this block:
+     · a preset that arrives from Gad goes HERE, never in PRESETS0
+     · adding one needs LIBV bumped, or the stored library shadows it forever
+     · a batch regen rewrites PRESETS0 and this function is not touched
+   Each entry keeps his own line of intent as a comment — category does not
+   carry intent, and it is the expensive thing to reconstruct later. */
+const GIVEN=()=>[
+];
 const PRESETS0=()=>[
  mkP('KCK','kik',p=>{Object.assign(p.osc[0],{wav:0,rat:0.25,ph:90});
    Object.assign(p.env[0],{a:0.001,d:0.24,s:0,r:0.05});
@@ -13543,7 +13565,12 @@ function libInit(){
   const users=cur.filter(en=>!en.factory);
   const need=CATS.filter(c2=>c2!=='audio').length*10;
   if(cur.length-users.length>=need)return;                // factory set already complete
-  const arr=PRESETS0().map(p=>({name:p.name,cat:p.cat,factory:true,data:presetData(p)}));
+  const arr=PRESETS0().map(p=>({name:p.name,cat:p.cat,factory:true,data:presetData(p)}))
+    /* GAD'S OWN, laid every time from GIVEN() so they cannot go missing, and
+       marked so anything downstream can tell them from a generated one. They
+       count toward the per-category ten below, so three of his in a category
+       means seven rolled rather than eleven entries. */
+    .concat(GIVEN().map(p=>({name:p.name,cat:p.cat,factory:true,given:true,data:presetData(p)})));
   for(const cat of CATS){
     if(cat==='audio'||cat==='kit')continue;
     const rnd=mulberry32(cat.split('').reduce((a2,ch)=>a2*31+ch.charCodeAt(0),7));
