@@ -1471,7 +1471,7 @@ const recPlayed=(pi,tBeat,midi,vel,durBeats)=>recPlayNote(pi,tBeat,sndOut(pi,mid
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-28.2047';
+const BUILD='2026-08-28.2056';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -21261,6 +21261,27 @@ function retroCapture(){
   let maxT9=-1e9;
   for(const n of retroBuf[pi])if(n.t<=nowB+1e-6&&n.t>maxT9)maxT9=n.t;
   if(maxT9>endB+1e-9)endB=anc+Math.ceil((maxT9-anc-1e-9)/snap)*snap;
+  /* …AND IT COMES BACK WHEN THE PLAYING IS OLDER THAN THE CLOCK (Gad,
+     2026-08-29, third sighting of one report: "i start playing mid loop then
+     wrap around and do retro rec, only the beginning of the loop is captured
+     and not the end where i started playing from").
+     THE WINDOW ENDS WHERE THE TAKE ENDED, NOT WHERE THE CLOCK IS — the exact
+     rule retroBars has carried since 2026-08-22, and retroCapture never got.
+     The line above only ever pushed endB FORWARD, for a jam that ran past the
+     bar; nothing pulled it BACK, so `from = endB - L` slid along with the
+     clock while he waited for the loop to come round, and the front of his
+     performance fell out of the back of the window. Waiting is not optional
+     here — "let the loop wrap around" is the gesture.
+     Measured, 4-bar loop, played beats 12->20, notes kept by when retro was
+     pressed:  at 21/24/26/28 nine of nine · at 32 FIVE (only 0 1 2 3 4, which
+     is the wrap, i.e. "the beginning of the loop") · at 36 ONE.
+     Pulling endB back can only ever put MORE of the take inside the window:
+     the notes' PHASE comes from the anchor (fmod(n.t-anc,L)) and not from
+     endB, so nothing moves — the window only decides who is included. */
+  if(maxT9>-1e8){
+    const endTake=anc+Math.ceil((maxT9-anc-1e-9)/snap)*snap;
+    if(endTake<endB-1e-9)endB=endTake;
+  }
   const from=endB-L;
   RETRO.end[pi]=endB;
   const seg=retroBuf[pi].filter(n=>n.t>from-1e-9&&n.t<=endB+1e-9);

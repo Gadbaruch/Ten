@@ -4296,15 +4296,22 @@ async function probeRetroGuess() {
     try { retroCapture(); } catch (e) { err = String(e).slice(0, 70); }
     const L = lane.len;
     const got = lane.events.slice().sort((a, b) => a.t - b.t).map(e => r3(e.t));
-    /* where each PLAYED beat should land in a loop of this length, anchor 0 */
-    const wantAt = want.map(t => r3(fmod(t, L))).sort((a, b) => a - b);
+    /* WHAT RETRO PROMISES, AS ARITHMETIC: the last cycle of the loop as set,
+       its window ending at the bar line that closes the TAKE (not at the
+       clock), every note in it placed against the anchor. Expecting "all the
+       notes" instead called a correct answer NO the moment a case played two
+       takes — retro is not supposed to reach back past a cycle. */
+    const snap9 = Math.min(4, L), newest = Math.max(...want);
+    const endT9 = Math.ceil((newest - 1e-9) / snap9) * snap9;      // anchor is 0 here
+    const wantAt = want.filter(t => t > endT9 - L - 1e-9 && t <= endT9 + 1e-9)
+                       .map(t => r3(fmod(t, L))).sort((a, b) => a - b);
     rows.push({ k, auto: setBars ? 'SET ' + setBars : 'unset',
                 guessBars: g ? g.bars : '—',
                 bars: lane.count + UNIT_NAMES[lane.unit].slice(0, 1),
-                took: got.length + '/' + want.length,
+                took: got.length + '/' + wantAt.length + ' of ' + want.length,
                 at: got.join(' ') || '—',
                 shouldBe: wantAt.join(' '),
-                right: (got.length === want.length &&
+                right: (got.length === wantAt.length &&
                         got.every((v, i2) => Math.abs(v - wantAt[i2]) < 1e-6)) ? 'yes' : 'NO',
                 err });
     try { stop(); } catch (_) {}
@@ -4338,6 +4345,17 @@ async function probeRetroGuess() {
     midRun('AUTO · play 12→20 · retro at 21', mid, 0, 21);
     midRun('AUTO · a bar of rest inside',
            [[12,0],[13,2],[14,4],[15,5],/* rest */[20,7]], 0, 21);
+
+    /* THE VARIABLE I ASSUMED AWAY: WHEN he hits retro. "let the loop wrap
+       around to the beginning, THEN hit retro rec" — the wrap takes a whole
+       cycle, so the clock has moved on. endB follows the clock and
+       from = endB - L slides forward with it. */
+    for (const at of [21, 24, 26, 28, 32, 36, 48, 64])
+      midRun('4-bar SET · played 12\u219220 · retro at ' + at, mid, 4, at);
+    /* AND THE GUARD AGAINST THE FIX OVER-REACHING: play again later and the
+       window must follow the NEWER playing, not reach back for the old take. */
+    midRun('...then played again 40\u219244 · retro at 46',
+           mid.concat([[40,0],[41,2],[42,4],[43,5],[44,7]]), 4, 46);
 
     /* AND THE ONE THE GUESSER MUST NOT TOUCH: a length you set */
     one('length already SET to 2', [[0,0],[1,2],[2,4],[3,5],[4,7],[5,5],[6,4],[7,2]], 2);
