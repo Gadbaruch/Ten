@@ -3728,6 +3728,23 @@ async function probeChord() {
        key moved to F# — a stored C3 must come back in the new key, and the
        grid must say the same thing. */
     await one('key = F#, nothing held', () => { CFG.key = 6; });
+    /* CLEARING THE MASTER HANDS THE KEY BACK (2026-08-29). The sticky chord
+       survives your hand lifting — that is the point — but not the channel
+       being emptied. */
+    await one('Dm stuck (released, not cleared)', () => {
+      master(); [2, 5, 9].forEach(addPC); [2, 5, 9].forEach(subPC);
+      chordHold = [2, 5, 9];
+    });
+    await one('...then the master is CLEARED', () => {
+      master(); [2, 5, 9].forEach(addPC); [2, 5, 9].forEach(subPC);
+      chordHold = [2, 5, 9];
+      clearLane(other);
+    });
+    await one('...cleared while STILL HOLDING it', () => {
+      master(); chordHold = [2, 5, 9];
+      [2, 5, 9].forEach(addPC);
+      clearLane(other);
+    });
   } finally {
     for (const q of [...heldPCs.keys()]) heldPCs.delete(q);
     chordHold.length = 0; keepHold.forEach(x => chordHold.push(x));
@@ -4204,6 +4221,93 @@ async function probeEnvOff() {
   return { cols: ['rel', 'relSeen', 'held', 't12', 'cutAt', 'cutDb', 'ok', 'err'], rows };
 }
 
+/* RETRO ON A LANE WITH NOTHING DECIDED (Gad, 2026-08-29: "retro rec on empty
+ * ch with no set length — in that state retro needs to listen to the
+ * performance and guess the length based on when started playing, with some
+ * gap window like if silent for a bar then assume that the next playing is
+ * the rec punch in position").
+ *
+ * The buffer IS the input retro reads, so each case writes a performance into
+ * it directly and then presses the key. `bars` is what the lane came out as,
+ * `took` how many of the notes it kept, `first` where the earliest kept note
+ * landed. A guess that clips the take, or that swallows the warm-up on the
+ * other side of the silence, is the failure.
+ */
+async function probeRetroGuess() {
+  const ch = CH;
+  const pat = S.patterns[S.editPat], lane0 = pat.lanes[ch];
+  const keepLane = JSON.parse(JSON.stringify(lane0.toJSON()));
+  const keepLanes = pat.lanes.map(l => (l ? JSON.parse(JSON.stringify(l.toJSON())) : null));
+  const keepBuf = retroBuf.map(b => b.slice());
+  const keepPlaying = T.playing, keepSel = S.curPreset, keepEd = S.editSnd, keepLayer = S.layer;
+  const keepDef = CFG.defLen;
+
+  const rows = [];
+  /* one case: a synthetic performance in the buffer, then the retro key */
+  const one = (k, notes, setLen) => {
+    try { stop(); } catch (_) {}
+    S.layer = 1; S.curPreset = ch; S.editSnd = ch; S.mSel = false;
+    for (let i = 0; i < 10; i++) { pat.lanes[i].events = []; delete pat.lanes[i]._cap; }
+    const lane = pat.lanes[ch];
+    if (setLen) { lane.unit = 'B'; lane.count = setLen; lane.auto = false; }
+    else { lane.unit = 'B'; lane.count = 1; lane.auto = true; }
+    const base = gridNow() - 40;                     // well inside retro's 64-beat reach
+    retroBuf[ch] = notes.map(n => ({ t: base + n[0], midi: 60 + (n[1] || 0),
+                                     vel: 0.9, dur: n[2] || 0.25 }));
+    const want = notes.length;
+    const g = retroGuess(ch);
+    let err = null;
+    try { retroCapture(); } catch (e) { err = String(e).slice(0, 70); }
+    const evs = lane.events.slice().sort((a, b) => a.t - b.t);
+    const wrapped = evs.length > 1 && evs.some((e, i2) =>
+      i2 > 0 && Math.abs(e.t - evs[i2 - 1].t) < 1e-6);
+    rows.push({ k, auto: setLen ? 'SET ' + setLen : 'unset',
+                guessBars: g ? g.bars : '—', guessSpan: g ? r3(g.span) : '—',
+                bars: lane.count + UNIT_NAMES[lane.unit].slice(0, 1),
+                took: evs.length + '/' + want,
+                first: evs.length ? r3(evs[0].t) : null,
+                last: evs.length ? r3(evs[evs.length - 1].t) : null,
+                clipped: (evs.length && lane.len > 0 &&
+                          evs[evs.length - 1].t >= lane.len - 1e-9) ? 'YES' : 'no',
+                collide: wrapped ? 'YES' : 'no', err });
+    try { stop(); } catch (_) {}
+  };
+
+  try {
+    CFG.defLen = 1;                                  // 1 bar — so a guess is visible against it
+    /* eight 8ths over two bars, nothing before it */
+    one('2-bar phrase, clean',
+        [[0,0],[1,2],[2,4],[3,5],[4,7],[5,5],[6,4],[7,2]]);
+    /* one bar */
+    one('1-bar phrase', [[0,0],[1,2],[2,4],[3,5]]);
+    /* a warm-up, ONE BAR of silence, then the take — the punch-in rule */
+    one('warm-up · 1 bar silence · 2-bar take',
+        [[0,0],[1,3],[2,7], /* gap */ [7,0],[8,2],[9,4],[10,5],[11,7],[12,5],[13,4],[14,2]]);
+    /* a phrase whose last note sits just PAST the bar line: rounding down clips it */
+    one('last note past the line (4.5)', [[0,0],[2,4],[4.5,7,0.5]]);
+    /* a long one */
+    one('4-bar phrase', [[0,0],[4,4],[8,7],[12,4],[15,2]]);
+    /* AND THE ONE THE GUESSER MUST NOT TOUCH: a length you set */
+    one('length already SET to 2', [[0,0],[1,2],[2,4],[3,5],[4,7],[5,5],[6,4],[7,2]], 2);
+    one('length already SET to 1', [[0,0],[1,2],[2,4],[3,5],[4,7],[5,5],[6,4],[7,2]], 1);
+  } finally {
+    try { stop(); } catch (_) {}
+    for (let i = 0; i < keepLanes.length; i++)
+      if (keepLanes[i]) pat.lanes[i] = Looper.from(keepLanes[i]);
+    pat.lanes[ch] = Looper.from(keepLane);
+    for (let i = 0; i < keepBuf.length; i++) retroBuf[i] = keepBuf[i];
+    CFG.defLen = keepDef;
+    S.curPreset = keepSel; S.editSnd = keepEd; S.layer = keepLayer;
+    if (keepPlaying && !T.playing) { try { play(); } catch (_) {} }
+    if (!keepPlaying && T.playing) { try { stop(); } catch (_) {} }
+  }
+  notes.push('CFG.defLen forced to 1 bar, so any length other than 1b on an unset lane came ' +
+             'from listening. clipped = a note landed on or past the loop line; collide = two ' +
+             'notes on one instant, which is what a too-short loop does to a phrase.');
+  return { cols: ['auto', 'guessBars', 'guessSpan', 'bars', 'took', 'first', 'last',
+                  'clipped', 'collide', 'err'], rows };
+}
+
 async function probePwmAll() {
   const ch = CH === 9 ? 8 : CH;
   const RATE = num(P.rate, 2), AMT = num(P.amt, 70);
@@ -4386,6 +4490,7 @@ const HELP = {
     { k: 'arplatch', args: 'ch=5 \u2014 does an arp let go of the key? pool/until/steps after the key-up, with rec off, armed and latched' },
     { k: 'snapaud',  args: 'ch=9 \u2014 does a snapshot swap the audio channel\u2019s take, and survive a save round trip' },
     { k: 'envoff',   args: 'ch=5 rel=2 hold=400 \u2014 does a note stop DEAD at the end of its release? cutDb is the size of the step to silence' },
+    { k: 'retroguess', args: 'ch=5 \u2014 retro on a lane with no length set: does it hear the punch-in and the span' },
     { k: 'poolkind', args: 'want=loop — every pool take: measured onsets/centroid, the kind it was called, and both dial views in order' },
     { k: '(any)',    args: '--ab <url> runs the same probe on a second build and diffs it' },
   ]
@@ -4428,6 +4533,7 @@ try {
                    fxmod: probeFxMod,
                    fxwire: probeFxWire,
                    poolkind: probePoolKind,
+                   retroguess: probeRetroGuess,
                    envoff: probeEnvOff,
                    snapaud: probeSnapAud,
                    arplatch: probeArpLatch,

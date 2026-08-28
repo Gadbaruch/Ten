@@ -1471,7 +1471,7 @@ const recPlayed=(pi,tBeat,midi,vel,durBeats)=>recPlayNote(pi,tBeat,sndOut(pi,mid
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-28.1331';
+const BUILD='2026-08-28.2027';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -21140,6 +21140,38 @@ function audRecEnd(){
     flash('keys take — the sound was dropped (play nothing under tab for a sound take)');}
   else engine.audRecStop();
 }
+/* WHERE A PERFORMANCE STARTED, AND HOW LONG IT WAS (Gad, 2026-08-29: "retro
+   rec on empty ch with no set length — in that state retro needs to listen to
+   the performance and guess the length based on when started playing, with
+   some gap window like if silent for a bar then assume that the next playing
+   is the rec punch in position").
+
+   THE GUESSER CAME OUT ON PURPOSE and this is not putting it back everywhere.
+   It was wrong because it overrode a length you had SET — see the note in
+   retroCapture. On a lane whose `auto` is still true NOTHING has been decided,
+   and the alternative there is DEFLENS[CFG.defLen], a number out of settings
+   that knows nothing about what you just played. A guess beats an arbitrary
+   constant; a guess does not beat a decision.
+
+   THE PUNCH-IN is the first note after the last silence of RETROGAP or more,
+   so "play a bit, breathe, then play the take" hands back the take and not
+   both. THE LENGTH is that span at the nearest bar — but NEVER shorter than
+   what you played, or a phrase whose last note sits just past the line would
+   wrap onto its own beginning. */
+const RETROGAP=4;                      // one bar of silence separates two attempts
+function retroGuess(pi){
+  const buf=retroBuf[pi]; if(!buf||!buf.length)return null;
+  const ns=buf.slice().sort((a,b)=>a.t-b.t);
+  let i=ns.length-1;
+  while(i>0&&ns[i].t-(ns[i-1].t+(ns[i-1].dur||0))<RETROGAP)i--;
+  const start=ns[i].t;
+  let end=start;
+  for(let j=i;j<ns.length;j++)end=Math.max(end,ns[j].t+(ns[j].dur||0.25));
+  const span=Math.max(end-start,0.25);
+  let bars=Math.max(1,Math.round(span/4));
+  if(bars*4<span-1e-9)bars=Math.ceil(span/4);        // never clip the take
+  return {start,end,span,bars:clamp(bars,1,256),n:ns.length-i};
+}
 function retroCapture(){
   /* THE GUESSER IS GONE. The tap used to walk the buffer back to the last
      long silence and estimate a loop length from what it found — clever, and
@@ -21155,7 +21187,8 @@ function retroCapture(){
      the loop as set" — but on a fresh lane there is no length you set, and it
      was using the Looper's own construction default instead of the one bar
      count in settings that exists precisely to answer this. */
-  if(lane.auto){lane.unit='B'; lane.count=DEFLENS[CFG.defLen];}
+  const G9=lane.auto?retroGuess(pi):null;             // …and now it LISTENS instead
+  if(lane.auto){lane.unit='B'; lane.count=G9?G9.bars:DEFLENS[CFG.defLen];}
   const L=lane.len||4, nowB=gridNow(), anc=editAnchor();
   const patEmpty=S.patterns[S.editPat].lanes.every(l=>l===lane||!l.events.length);
   pushUndo('retro');
@@ -21167,8 +21200,12 @@ function retroCapture(){
     const recent=retroBuf[pi].filter(n=>n.t>nowB-64).sort((a,b)=>a.t-b.t);
     if(!recent.length){flash('retro: play something first, then tab');return;}
     const endT=recent[recent.length-1].t+Math.min(recent[recent.length-1].dur||0.25,0.5);
-    const seg=recent.filter(n=>n.t>endT-L-1e-9);
-    const t0=seg[0].t;
+    /* GUESSED: the punch-in IS the one, so the window starts there rather than
+       L behind the last note — which is the same thing when the guess is right
+       and keeps the phrase whole when it had to round the length up. */
+    const seg=G9?recent.filter(n=>n.t>=G9.start-1e-9):recent.filter(n=>n.t>endT-L-1e-9);
+    if(!seg.length){flash('retro: play something first, then tab');return;}
+    const t0=G9?G9.start:seg[0].t;
     lane.events=seg.map(n=>({t:fmod(n.t-t0,L),midi:n.midi,vel:n.vel??0.9,
       dur:n.dur||0.25,born:performance.now(),
       ...(n.cue!==undefined?{cue:n.cue}:{}),
@@ -21185,8 +21222,8 @@ function retroCapture(){
     RETRO.end[pi]=L;
     T.startTime=AC.currentTime+0.06; T.startBeat=0; T.schedBeat=0; T.playing=true;
     acts=[{pat:S.editPat,start:-1e9,anchor:0}];
-    flash('◉ retro: last '+fmtLen(lane)+' · '+seg.length+' notes · first note = the 1'+
-      ' — tab+digits widens the window');
+    flash('◉ retro: '+fmtLen(lane)+(G9?' (heard)':'')+' · '+seg.length+
+      ' notes · first note = the 1 — tab+digits widens the window');
     dirty=true; dirtySave=true; return;
   }
   /* running: the last cycle of the loop as set, cut against the anchor so a
@@ -21237,7 +21274,8 @@ function retroCapture(){
       audOverwrite(lane,t,n.dur||0.25,lane.events[lane.events.length-1]);
   }
   markRecorded(lane);
-  flash('◉ retro: last '+fmtLen(lane)+' · '+seg.length+' notes — tab+digits widens the window');
+  flash('◉ retro: last '+fmtLen(lane)+(G9?' (heard)':'')+' · '+seg.length+
+    ' notes — tab+digits widens the window');
   dirty=true; dirtySave=true;
 }
 const fmtLen=l=>(l.count%1?l.count.toFixed(2):l.count)+' '+UNIT_NAMES[l.unit];
@@ -26410,6 +26448,20 @@ function genOn(pi,midi){
 function clearLane(pi){
   const l=S.patterns[S.editPat].lanes[pi];
   if(!l)return;
+  /* CLEARING THE MASTER HANDS THE KEY BACK (Gad, 2026-08-29: "when a master
+     chord ch is cleared, i guess you can return to track the global key").
+     chordHold is deliberately sticky — the harmony has to hold after your hand
+     lifts or every other channel lurches at the end of each chord — but it is
+     STILL the last thing this channel said, and clearing the channel is you
+     saying it has nothing to say. anyGlobalChord() already covers the slot
+     being switched back to local; this covers the notes going away.
+     A chord you are HOLDING right now is untouched: heldPCs outranks
+     chordHold in chordPCs(), so clearing under your own fingers changes
+     nothing until you let go. */
+  if(isChordMaster(S.presets[pi])&&chordHold.length){
+    chordHold=[];
+    if(!heldPCs.size)flash('chord cleared — back to '+NN[CFG.key||0]+' '+SCALES[CFG.scale||0][0]);
+  }
   /* a jam of cue jumps is what an audio lane holds, and it was cleared by the
      same key without ever saying so */
   const jumps9=l.events.filter(ev=>ev.cue!==undefined||ev.pk!==undefined||ev.fz!==undefined).length;
