@@ -1,3 +1,195 @@
+# THE MASTER, AND THE NOTE THAT CAME BACK WRONG — 2026-08-28 (branch `sound-library`)
+
+## THE NOTE YOU PLAYED IS THE NOTE THAT COMES BACK  (98d19f1)
+
+Gad: **"i have a bug that played notes and the recorded notes are not the same
+like they are shifted after recording maybe its the scaler doing some rogue
+adjusting"**. It is the scaler — and the transpose, in the other direction.
+
+**THE CONTRACT: a lane event is the channel's INPUT.** `trigger()` adds the
+transpose on the way out and, for a LIVE note only, snaps it into the key
+first — the snap is a playing aid, and a recorded note is already decided (the
+comment in trigger has said so since 2026-08-18). Two recorders disagreed with
+that contract, in opposite directions:
+
+- **THE FINGER wrote the key you PRESSED.** The snap that moved the note you
+  heard never reached the lane, so the replay played the unsnapped one.
+- **THE GENERATORS wrote the pool's OUTPUT**, which has already been through
+  transpose — so the replay transposed it a second time. chord, arp, euclid,
+  ratchet, cycle, spray, all seven pool call sites.
+
+Measured on ch5 in C major, `tools/probe.sh recpitch ch=5`, sounded → replayed:
+
+                                        before      after
+      black key on the piano map      C3 -> C#3   C3 -> C3
+      a held chord narrowing the key  C3 -> D3    C3 -> C3
+      off-scale semitone transpose    F3 -> F#3   F3 -> F3
+      CHORD SLOT, channel up an oct   E4 -> E5    E4 -> E4
+      ARP, channel up an oct          E4 -> E5    E4 -> E4
+
+The octave pair is almost certainly what he was hearing: **any generator on a
+transposed channel recorded an octave high.** Nine other cases (plain, scale
+off, in-scale transposes, the octave transpose itself, an in-scale piano key,
+key=F, an untransposed chord slot) read shift 0 before AND after — nothing
+moved that was already right.
+
+**ONE RULE, BOTH DIRECTIONS: a lane event is THE NOTE THAT SOUNDED, MINUS THE
+TRANSPOSE.** `sndIn` converts a finger's note into it, `sndOut` a generator's;
+`recPlayed` marks the seven pool sites that emit a sounding note. **MIDI IN
+calls the same `recPlayNote` with a PRESSED note** — that asymmetry is why the
+conversion could not live inside recPlayNote, and it is the thing to remember
+if another caller appears.
+
+⚠ **AUDIO LANES ARE DELIBERATELY UNTOUCHED.** They hold cues and bends, not
+notes, and `recAudEvent` does its own arithmetic with `trSemis`. One hole is
+KNOWN AND UNFIXED: an audio channel in PITCH mode gets snapped live by trigger
+(posCh only excludes position mode) and `recAudEvent` writes `pk=midi-KBBASE`
+raw — the same bug, on a lane whose whole regression net is built on exact
+values. Not measured, not touched. Say if a pitched sample drifts.
+
+The `matrix` net reads the same before and after — seven take rows sounding,
+and the four cue rows 0/tv0 on BOTH builds, which is a pre-existing hole and
+not this. (A/B'd by stashing the change and reloading, not from memory.)
+
+## THE MASTER IS A CHANNEL AT EVERY DEPTH  (310d964)
+
+**chTargets() tested the LAYER before it tested the master.** Standing inside
+the master's rack — the only place its fx and dj pads can be edited, therefore
+where you are — every channel-scoped gesture answered `[S.editSnd]` and went to
+whichever channel the cursor had been on before you pressed 0. Gad: *"right now
+it only changes the last visited channel"*. Measured, master selected, cursor
+last on 7 (`tools/probe.sh master`):
+
+                    layer 1            layer 2 BEFORE      layer 2 AFTER
+      tab+↑         lane 0: 2 -> 4     lane 7 grew, m0=2   lane 0: 2 -> 4
+      tab+→         lane 0: 2 -> 3     lane 7 grew, m0=2   lane 0: 2 -> 3
+      ⇧⌫            lane 0 cleared     NOTHING             lane 0 cleared
+
+⇧⌫ at layer≥2 also carried a `!S.mSel` that sent it down a chain nothing else
+claimed — no lane, no flash, silence. `focusCh()` has always answered 0 for the
+master, so dropping the guard was the whole fix. **The two automation branches
+above it keep theirs: the master has no modLoop.**
+
+**Every gesture that must NOT reach the master already says `!S.mSel` for
+itself**, which is what made reordering safe — and layer 1 has answered `[0]`
+here all along, so this only makes the two depths agree.
+
+## 0+LETTER WALKS THE DESK · ⇧ WIDENS IT TO A SCENE
+
+Gad: *"my original intent was that it will just change all other channels to
+their respective clips, for example 0s will change all channels to be s
+clips"* — and asked for BOTH, so plain is the row and ⇧ is the scene that key
+used to be. Measured from a desk all on d:
+
+      0s      -> sssssssss   sceneAt a     every channel to ITS OWN s
+      3f      -> ddfdddddd                 one channel, unchanged
+      ⇧0S     -> ddfdddddd   sceneAt s     the scene shelf, letters untouched
+
+`goSnaps` is nine `goClip` calls with ONE undo point, one flash and ONE lane
+event — `goClip(pi,k,quiet)` gained the flag and now returns whether it moved.
+
+⚠ **A ch-0 EVENT IS TWO THINGS NOW AND HAS TO SAY WHICH.** The walk carries
+`row:1`; a BARE ch-0 event is still a scene, which is what every ch-0 event
+written before today meant, so old arrangements replay unchanged. Both doors
+verified: `row-e` → eeeeeeeee, bare `h` → sceneAt h.
+
+## RECORD OR ENTER A CHANGE — `1a>1b`  (`placeClip`)
+
+Recording worked; ENTERING did not exist, so a change you wanted at bar 5 had
+to be performed at bar 5, in time, every time. **In EDIT on the master,
+digit+letter places the change at the cursor cell instead of firing it**, and
+the same chord there takes it back off — the step editor's own grammar, on the
+arrangement. One change per channel per cell: a different letter at a step you
+already wrote is a correction, not a second event. Measured — `clipAt` never
+moves, so nothing fired:
+
+      edit 1a @cell0   -> ch1a@0        edit 1b @cell0 -> ch1b@0 (replaced)
+      edit 1b again    -> none          edit 0s @cell0 -> rows@0
+      edit 1b @cell4   -> rows@0 ch1b@1
+
+Only on the master, because that is when the lane the edit cursor belongs to IS
+lane 0. **The cell cursor walks with ←→ at layer ≥2** (`inEdit()&&S.layer!==1`);
+at layer 1 the arrows walk the desk instead, and stepping off the master
+deselects it.
+
+⚠ **AND A GESTURE NAMING WHERE YOU ALREADY ARE WAS DROPPED WHOLE.** goClip and
+goScene return early with nothing to move, and the lane write sat behind that
+return — so *"and here it comes back to a"* was the one change that could not
+be recorded. Measured: `1a` on a channel already at a wrote no event at all;
+now `ch1a@0.5`.
+
+## THE WORD ON SCREEN IS SNAPSHOT
+
+Gad: *"maybe we should call these not clips but snapshots, cause they change
+the whole channel strip not just the midi notes"*. He is right — it carries the
+sound, the racks, the mix and the loop. **UI TEXT ONLY.** `S.clips`, `goClip`,
+`clipOf` and `CLIPKEYS` are in the save format and renaming them buys nothing
+you can see. The desk-wide one stays a **scene**.
+
+⚠ **"clip" is four different things in this file** — the clipper fx, the
+clipboard, an audio channel's take, and this. Only the fourth was renamed.
+
+## NOT BUILT, AND WHY
+
+- **The master column still draws a clip event as a 3px DOT**, positioned by
+  channel, with no letter. With step entry now real, reading back an
+  arrangement means stepping to each cell — the flash names what landed
+  (`bar 1.1 → ch 1 snapshot b`) but nothing shows it afterwards. Nine channels
+  share an 8-character column, so a per-channel label collides; a ROW or SCENE
+  event owns the whole column and could carry its letter. Not asked for, so
+  not built.
+- **The audio pitch-mode snap hole above.**
+
+## QA CHECKLIST — master + recorded pitch, 2026-08-28
+
+Reload **http://localhost:3033/**. Build must read `2026-08-28.1204` or later.
+Ordered by what is most likely to be wrong.
+
+1. **An ARP or a CHORD on a channel you have transposed records at the pitch
+   you hear.** Put an arp on a melodic channel, pull the channel up an octave
+   (or down), record a bar, then listen to the playback against your fingers.
+   It used to come back an OCTAVE HIGH. *Measured: E4 → E5 before, E4 → E4
+   after.* This is the one most likely to be what you were hearing.
+2. **A note you play out of key records where you HEARD it.** Scale on, play a
+   note the scale bends (a black key in piano-keyboard mode, or anything while
+   a chord-master channel is holding a chord), record it, play it back. It used
+   to come back at the pitch you PRESSED, not the one that sounded. *Measured:
+   C3 sounded, C#3 replayed → now C3 both.*
+3. **⚠ CHECK YOUR EXISTING PARTS.** Anything already recorded under the old
+   rule is stored the old way — a generator take on a transposed channel is
+   sitting in the lane an octave high and will now REPLAY an octave high plus
+   nothing, i.e. exactly as it has been. This fix changes what gets WRITTEN,
+   not what is already written. Re-record anything that sounds wrong. *No
+   migration was attempted — say if you want one.*
+4. **Master loop length.** Press 0, go into its rack (layer 2), hold tab and
+   press ↑ / ↓ / ← / →. The MASTER's loop must change. It used to change
+   whichever channel you were on before you pressed 0. *Measured: lane 0
+   2 → 4 bars; before, lane 7 grew and the master stayed at 2.*
+5. **Master clear.** Master selected, in its rack, ⇧⌫. The master lane clears.
+   It used to do nothing at all — no flash, no change. *Measured: lane 0
+   emptied; before, nothing.*
+6. **`0s` walks the desk.** Hold 0, press s. Every channel goes to ITS OWN
+   snapshot s — channels with no s get a fresh empty bar on the same
+   instrument. One flash says how many moved. *Measured: a desk all on d →
+   sssssssss.*
+7. **`⇧0S` is still the desk-wide scene.** Hold 0, shift, press S. Stores or
+   recalls one whole-desk snapshot, and does NOT move any channel's own
+   letter. *Measured: letters stayed ddfdddddd, sceneAt went to s.*
+8. **Old arrangements still replay as scenes.** If you have a master lane with
+   recorded 0+letter changes from before today, they still recall SCENES, not
+   rows. *Measured: a bare ch-0 event → sceneAt h; only new events carry row.*
+9. **Enter a change without performing it.** Master selected, layer 2, press
+   the edit key (⏎ / pattern edit), walk the cursor with ←→, hold 1 and press
+   b. The flash says `bar N → ch 1 snapshot b` and NOTHING changes on the
+   desk. Press 1b again at that cell and it comes off. *Measured: ch1b@0
+   placed, clipAt never moved, second press removed it.*
+10. **Recording a change to where you already are now lands.** Arm the master
+    lane, play, and press 1a while channel 1 is already on a. An event goes
+    down. *Measured: was no event at all, now ch1a@0.5.*
+11. **The word says snapshot.** Flashes read `ch 3 · snapshot f`, `row s`,
+    `scene q — one desk-wide snapshot`. Internals still say clip; your saved
+    sets are untouched. *Not a format change — no export needed.*
+
 # MACROS, AND THE MODE THAT CAME OUT — 2026-08-27/28 (branch `sound-library`)
 
 ## THE KIT GLOBAL MODE IS GONE  (225bb22)
