@@ -107,6 +107,54 @@ arguments.** The moment `retroGuess` took one, the probe's `guessBars` column
 was reporting a variant `retroCapture` never asked for — and disagreeing with
 the length the lane actually came out as, which is worse than having no column.
 
+### ⚠⚠ AND UNDERNEATH BOTH: THE WINDOW WAS SLIDING  (c0bf406)
+
+Gad, third time on one report: *"mmm still reproducing"*. Right twice before
+and right again — **one report, THREE separate defects, each fix uncovering
+the next:**
+
+1. the phrase came back **ROTATED** — anchor placement (6b1f0a3)
+2. the guesser **SHORTENED L** on an unset lane (12b2595)
+3. and under both, **the window slid with the clock** (c0bf406)
+
+**WHY MY PROBES KEPT PASSING, and it is the lesson:** I only ever pressed retro
+IMMEDIATELY after the performance. His words said otherwise the whole time —
+*"let the loop wrap around to the beginning, **THEN** hit retro rec"* — and the
+wrap takes a whole cycle. Sweeping the one variable I had assumed away found it
+in a single run. **When a report keeps reproducing against a passing probe, the
+thing to vary is the step you paraphrased away.**
+
+4-bar loop, played beats 12→20, notes kept by WHEN retro was pressed:
+
+      retro at   21   24   26   28   32   36   48   64
+      before    9/9  9/9  9/9  9/9  5/9  1/9  0/9  0/9
+      after     9/9  9/9  9/9  9/9  9/9  9/9  9/9  9/9
+
+At 32 what came back was `0 1 2 3 4` — the notes played AFTER the wrap, which
+is "only the beginning of the loop is captured and not the end where i started
+playing from", in his words and in his order.
+
+`endB` followed the CLOCK. The line above it only ever pushed endB **forward**,
+for a jam that ran past the bar; **nothing pulled it back**, so `from = endB-L`
+slid along while he waited for the loop to come round.
+
+**THE WINDOW ENDS WHERE THE TAKE ENDED, NOT WHERE THE CLOCK IS** — the exact
+rule `retroBars` has carried in its own comment since 2026-08-22, and
+`retroCapture` never got. Pulling endB back can only ever put MORE of the take
+inside the window: the notes' PHASE comes from the anchor (`fmod(n.t-anc,L)`),
+never from endB, so nothing moves — the window only decides who is included.
+Guarded: play a second take later and the window follows the NEWER playing
+(5 of 5 in the last cycle out of 14 in the buffer, on both builds).
+
+⚠ **This is on lanes with the length SET, so it predates the guesser entirely.**
+Do not read commit 12b2595 as the fix for the mid-loop report; it is the fix
+for the regression the guesser caused on top of it.
+
+⚠ **The probe's own expectation was wrong and called a correct answer NO:** it
+expected every note back, when retro promises the last CYCLE. It states the
+promise as arithmetic now — window ending at the bar line that closes the take,
+placed against the anchor.
+
 ## QA CHECKLIST — 2026-08-29 (second batch)
 
 Reload **http://localhost:3033/**. Build `2026-08-28.1341` or later.
@@ -121,7 +169,15 @@ Reload **http://localhost:3033/**. Build `2026-08-28.1341` or later.
 3. **A length you SET is still untouchable.** Set a lane to 1 bar, play two
    bars, hit retro. You get one bar — the guess does not overrule you.
    *Measured: guess said 2, lane stayed 1b.*
-3b. **⚠ Mid-loop retro, the one that regressed.** Transport running, start
+3a. **⚠⚠ MID-LOOP RETRO, AND WAIT BEFORE YOU PRESS IT.** Transport running,
+   4-bar loop with the length SET. Start playing partway through, let the loop
+   wrap **all the way round** — a full cycle or two — and only THEN hit retro.
+   Everything you played comes back, including the part before the wrap.
+   *Measured by when retro was pressed, notes kept: at 21/24/26/28 nine of nine
+   both builds; at 32 five before / nine after; at 36 one / nine; at 48 and 64
+   NOTHING before / nine after. Waiting is the whole bug — press it
+   immediately and it always looked fine.*
+3b. **⚠ Mid-loop retro on a lane with NO length.** Transport running, start
    playing partway through the loop, let it wrap, hit retro. Everything you
    played comes back, including the part before the wrap — and a REST inside
    your phrase must not eat it. *Measured on a 4-bar cycle, five notes at
