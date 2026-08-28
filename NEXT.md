@@ -1,3 +1,133 @@
+# THE SOUND MODEL — 2026-08-28 (branch `sound-model`, off `sound-library`)
+
+Branch made because another thread was committing to `sound-library` live (four
+commits landed mid-conversation). Merge target is `sound-library` or main,
+Gad's call. Nothing here is on main yet.
+
+## CMD+C HANDS THE PATCH TO THE SYSTEM CLIPBOARD TOO  (7eaff98)
+
+Gad: **"command+c is better for my muscel memory"** — one gesture to both
+duplicate a channel inside TEN and carry its patch out to a chat window, where
+it becomes a factory preset. The two destinations cannot collide: `CLIP` is
+what cmd+V reads back, the system clipboard is what leaves the instrument.
+`ctrl+c` is untouched and still works on a BLOCK, where this deliberately does
+not.
+
+**ONE CHANNEL ONLY.** `tools/probe.sh syscopy ch=3` stubs
+`navigator.clipboard.writeText`, so what is measured is what `clipboardOp`
+handed the system rather than what a paste buffer looked like afterwards:
+
+      scope          system clipboard        TEN's CLIP
+      one channel    json  13243 B  5/5        chan
+      block 2-4      none      0 B            chans
+      master desk    none      0 B             desk
+
+**The cost, and it is real:** every internal cmd+C now clobbers whatever was on
+the system clipboard. Copy ch3 to paste onto ch7 and the link you had copied is
+gone. Gad's call, made knowingly.
+
+**OPEN:** a patch is 13.1kB pretty-printed. Flat is 7.2kB, `packRacks` is
+6.0kB. Kept pretty because that is `ctrl+c`'s existing contract ("a form anyone
+can read"), but if pasting many presets gets expensive, flat is a one-word
+change.
+
+## THERE IS NO PAN ENV — dst 4 IS OP LEVEL
+
+genTonal's header said `env dst: 1 amp · 2 pitch · 3 filter · 4 pan`. Wrong,
+and sitting directly under its own warning that env and lfo destinations are on
+different scales and mixing them up is SILENT. `ENV2MD={1:1,2:2,3:3,4:5}` maps
+engine dst 4 to MDST `op`, and the engine's `opEnvs` filter reads `dst===4` as
+an op-level env. **No generator code has ever written a dst-4 env**, so the
+wrong line never cost a note — it was waiting to.
+
+**This is the capability Gad asked for by name:** an envelope on the FM level of
+a second operator is `dst:4, idx:<op>`, and it already works. The generator has
+only three env helpers — `env` (amp), `fenv` (dst 3), `penv` (dst 2). An `oenv`
+is missing and is the cheapest new expressive axis available.
+
+## THE ARCHETYPE MODEL — Gad's, 2026-08-28, and it supersedes mine
+
+I proposed five layers (timbre / filter-EQ / curve / movement / effects) with
+the archetype as "one correlated point across all five". Gad's is better and
+this is the one to build:
+
+> An instrument archetype is a **dominant frequency spread + register** (its
+> position in the frequency-range orchestration), **plus its time/shape
+> response** (the pluck-vs-pad difference, amp+filter envelopes). Those two are
+> RESTRICTED per archetype, each with a safe range. **Timbre, movement and
+> effects are the free variation space.**
+
+Mine kept coherence but had no principled account of what may VARY. His names
+the two axes that must be constrained and frees the other three.
+
+**The evidence it is right: both measured failures were on his restricted
+axes.** The 3/8 mud on lead/pad/plk was a highpass at 2175Hz on a 131Hz note —
+frequency position. The 4.3x level spread that forced the TRIM table — register
+and level. Neither failure was ever in timbre, movement or effects. His model
+predicts the two bugs that were actually measured; that is a test it passes,
+not agreement.
+
+**Envelopes split across the line BY DESTINATION**, which the rack already
+carries: dst 1 (amp) and dst 3 (filter) are the archetype's time/shape response
+and are restricted; dst 2 (pitch) and dst 4 (op level) are movement and are
+free. Gad: *"some basses can be more flat, some wobble and others can be more
+plucky or have some twang in them"* — twang is a fast dst-2, wobble is an lfo,
+both free. **CAVEAT: on DRUMS the pitch env is archetype, not movement** — the
+pitch drop IS the kick. So restricted is dst 1+3 tonal, dst 1+2+3 drums.
+
+**PLUCK AND PAD ARE CURVE VALUES, NOT CATEGORIES — unresolved.** TEN has `plk`
+as a category AND `pluck` as an archetype inside `bass`. Same word, two levels.
+Gad's model says the curve is an axis every tonal category can move along (a
+plucky pad, a sustained bass). That is a bigger change than anything above and
+is NOT decided.
+
+`pad` already has four archetypes — warm, glass, choir, drift. What is thin is
+the SHELF: one hand-written pad against five snares.
+
+## THE SHELF IS CONTEXT-FREE, THE ROLL IS NOT  (Gad's call)
+
+**"factory presets from the shelf should not have the context dependant thing
+of the rolls, they should all just be great sounds within their archetypes."**
+
+This resolves a trap I had raised as a workaround. Context-aware rolls make
+generation ORDER-DEPENDENT, which would have broken `libInit`'s seeded factory
+fill — I proposed libInit "opt out". Gad's rule makes it a PRINCIPLE instead:
+the shelf is categorically context-free, so libInit is never in context to
+begin with. Cleaner, and it is the reason, not the patch.
+
+`libInit()` is the function that lays the factory library down — on first boot
+or after a LIBV bump. It keeps anything saved, then tops each category up to 10
+with the seeded generator. **The 10 is a FLOOR FOR DICE, not a cap**: `i` starts
+at however many that category already has, so hand-written presets past ten
+simply mean fewer rolled ones. `scrollPreset` walks the pool with `fmod`, no cap.
+Today: 21 hand-written (snr 5, kik 4, hh 3, perc 2, lead 2, plk/pad/keys/chord/
+bass 1 each) against ~170 rolled.
+
+**And the roll does not read the library at all.** It reads the archetype table.
+Adding presets to the shelf changes what you can scroll to and NOTHING about
+what the dice can make — the two are only connected by a human reading one and
+writing the other.
+
+## THE AGREED BUILD ORDER
+
+    1  cmd+C dual-write                                   DONE (7eaff98)
+    2  Gad shelves presets, one line of intent each       his move
+    3  log _gen at first recorded event                   NOT BUILT, optional
+    4  solo learn run -> archetype table on Gad's model   needs 2
+    5  context-aware roll                                 needs 4's axes
+    6  preference learning                                needs 3's data
+
+Context-awareness (5) is the strongest idea in the batch and still lands fifth,
+because it needs somewhere to intervene. The restricted/free split IS that
+somewhere: "a bass already exists" touches the frequency axis only; "the set is
+full" touches effects and width only.
+
+**HOW A PRESET ARRIVES:** cmd+C on the channel, paste the JSON, and one line of
+intent in Gad's own words ("the 808 that cuts through a busy mix"). Category
+does not carry intent, and reconstructing it at learn time is the expensive
+part. Learning happens in a BATCH, not per-paste: an archetype is a shape plus
+RANGES, and ranges need n>1. One patch gives a copy, six give the invariant.
+
 # THE MOD SCOPE AIMS, AND MACRO GOES ON ICE — 2026-08-29 (branch `sound-library`)
 
 ## EVERY MOD SCOPE MADE A SLOT AIMED AT NOTHING  (dbbc263)
