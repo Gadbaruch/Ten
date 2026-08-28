@@ -1,3 +1,219 @@
+# THE DIALS, THE CHORD, RETRO AND THE SNAPSHOT'S TAKE — 2026-08-28 (branch `sound-library`)
+
+Second batch of the day. Six of eight shipped and measured; **two could not be
+reproduced and are waiting on Gad** — see the last section, which is the first
+thing to read if you are picking this up.
+
+## THE DIALS MOVE BY THE NUMBERS YOU REACH FOR  (4c2c213)
+
+"reso params should jump by 0.1 normally, and 1 shifted" · "all params that are
+0-1 should jump 0.01 normally and by 0.1 shifted for example reverb width and
+damp".
+
+86 specs — 72 at step 0.05 and 14 at 0.02 — became `step:0.01, big:0.1`, which
+is the idiom `level` has used all along. **`big` SNAPS the coarse step to its
+own multiples**, so ⇧ walks 0.1 / 0.2 / 0.3 rather than wherever the fine steps
+left you. The filter's Q ran 0.5 and 5 — four values between "no resonance" and
+"singing", one shifted press a fifth of the dial — and is 0.1 / 1 now.
+
+Measured, `tools/probe.sh steps` (every fx and channel-rack param, driven
+through `adjust()` at all three modifiers): **0..1 params seen 78, of which 0
+disagree with 0.01 / 0.1**; flt reso 0.1 / 1 / 0.01 fine.
+
+⚠ **TWO EXCEPTIONS, and the probe called both of them failures first:**
+
+- **`mix` is 0..1 but carries `curve:'vol'`**, so adjust() steps it in FADER
+  units (10 / 2 / 0.5) and a wet/dry feels like the channel strip. Its `step`
+  is read only by the random roller, so it KEPT 0.05 rather than claiming a
+  number it does not use.
+- **grain's `pitch` is 0..1 over ±24 semitones with `step:1/48`** — one press,
+  one semitone, which is what a pitch dial is for.
+
+And the loop cell under the grid gets a space: `416th` is a number you parse
+before you read it. The cell is 8 wide and the longest pair, `256 16th`, is
+exactly 8 — measured `4 bar` / `16 16th` / `3 beat`.
+
+## THE CHORD IS LIVE, THE SCALE IS AN INPUT AID  (b2cf50d)
+
+"the live auto scaling is messed up… im getting now several bugs we already
+fixed weeks ago. like i have 2 adjacent keys playing the same note with scale
+on, and global chord changes looks like it works, i can see notes moving but i
+dont hear the change". Both real, both measured (`tools/probe.sh chord ch=5`),
+and both the same split.
+
+**TWO KEYS, ONE NOTE — the SECOND time this line has been fixed.** `kbNote`
+maps a key to a scale DEGREE, so the snap in trigger() is a no-op and the row
+stays playable. That holds while `pcsNow()` is the seven-note scale. **A HELD
+GLOBAL CHORD makes it three, and seven degrees rounded onto three tones
+collapses the row:**
+
+    C-E-G held, keys a s d f g h j k l
+      before   C3 C3 E3 E3 G3 G3 C4 C4 C4    4 distinct of 9, four dead keys
+      after    C3 E3 G3 C4 E4 G4 C5 E5 G5    9 of 9
+
+Same fix, generalised, and **this is the rule to keep: THE KEY RUN IS WHATEVER
+THE SNAP DOWNSTREAM WILL ACCEPT.** When a chord is sounding the chord IS the
+run, one tone a key. Chord pitch classes are ABSOLUTE so they take no key
+offset; the scale's are relative and keep theirs.
+
+⚠ **The row now spans three octaves on a triad** (C3..G5 across a s d f g h j k
+l). That is the honest consequence of one-chord-tone-a-key and every key is
+live, but it is a feel change — say if you would rather it stayed tighter.
+
+**SEEN BUT NOT HEARD.** The grid draws through `heardMidi()`, which snapped;
+the replay let only LIVE notes through the snap.
+
+    Dm held, stored E3     before  grid F3 / sound E3
+                           after   grid F3 / sound F3
+
+**A held chord now reaches a recorded note, and the 2026-08-18 ruling is
+untouched.** That ruling is about the SCALE — a fixed setting that must not
+re-decide a chord you already played. A chord master is the opposite: a gesture
+you are making right now whose entire purpose is that the desk follows it, and
+worth nothing if only live notes hear it. **With nothing held `chordPCs()` is
+null and a replayed note is left exactly alone** — measured, scale-only rows
+read C3 D3 E3 F3 G3 A3 B3 C4 D4 and a stored E3 replays E3, before and after.
+`heardMidi`'s guard list is now trigger's, exactly, so the two cannot drift.
+
+## RETRO STOPS ROTATING THE TAKE  (6b1f0a3)
+
+"i preform mid loop, let the loop wrap around to the beginning, then hit retro
+rec, it only captures the beginning of the loop". **Nothing was lost — the
+whole phrase was ROTATED.** `endB` snaps to a BAR line and the window start is
+`endB−L`, so on any loop longer than one bar a tap taken anywhere but on a
+cycle line put the window start at a phase the loop does not have, and every
+note moved by that offset. Measured on a 4-bar loop (`tools/probe.sh retro
+ch=5 bars=4`), lost / moved of the notes inside the last cycle:
+
+    tap on the cycle line       0 / 0   ->  0 / 0
+    tap MID-loop (beat 4)       0 / 8   ->  0 / 0    was 12.07 -> 8.07, all by 4
+    tap at beat 2, off the bar  0 / 6   ->  0 / 0    was 12.05 -> 8.05, all by 4
+
+Cut against the **ANCHOR**, which this function's own comment has promised all
+along. It does not resize the lane, so the anchor's phase is the one true thing
+about it, and the window is still exactly L long so no two notes can collide.
+
+⚠ **`retroBars` (tab+N) still maps from the window START, on purpose** — it
+RESIZES the lane to the bars you asked for, and then the anchor's phase means
+nothing. Do not "fix" it to match.
+
+## A SNAPSHOT BRINGS ITS SAMPLE  (6b1f0a3)
+
+"snapshots of channels that contain different audio samples in audio channels
+should swap the audio when changing snapshot".
+
+⚠ **A REFERENCE, NEVER THE AudioBuffer.** `S.clips` goes through
+`JSON.stringify` on every autosave and a buffer serialises to `{}` — which
+would not merely lose the take, it would hand `setChanBuf` an empty object on
+the next load. `sm` holds the same `{name, src}` pair the set already stores
+per channel, so **the pool stays the one place audio lives**. It is `sm` and
+not `aud` because the desk clipboard puts a LIVE buffer on `aud`
+(`audClipGrab`) and the two must not collide.
+
+**And the half that would have died on reload:** the OTHER snapshot's take is
+on no channel at save time, so `aud` never embedded it. New key **`caud`**
+carries those — factory takes as references (the shelf re-fetches them),
+recordings embedded, same encoder and the same shared SMPCAP budget. **A new
+key is not a format change in either direction**, so no SAVEV bump and nothing
+to export first.
+
+Measured (`tools/probe.sh snapaud ch=9`): a↔b swaps nylonlick/koto both ways; a
+recorded take referenced only by snapshot c rides as `emb 46kB`; wipe it from
+the pool, restore from the set, and c finds it again. `setio` unchanged —
+embed yes, name kept, rms 0.283 both sides, stamp local, export bytes match.
+
+## ⚠ TWO THAT COULD NOT BE REPRODUCED — READ THIS FIRST
+
+Both are Gad's, both are still open, and **neither was guessed at**. The
+measurements say the plain paths are clean, so the next round needs HIS state,
+not more theorising.
+
+**THE CLICK ON NOTE OFF** — "there is a click on note off even when ther is
+long release and sustain is at 1… env note off is not always very clean".
+`tools/probe.sh envoff ch=5 rel=1` taps the bus across the whole release and
+asks how far below the held level the sound was when it stopped DEAD — that
+step IS the click:
+
+    native osc, sus 1, rel 1s     cut at 3.25s, -84.6 dB
+    FM worklet (phase engine)     cut at 3.25s, -84.6 dB
+    with a filter env             cut at 3.25s, -126.6 dB
+
+All inaudible. Voice STEALING is clean by construction too — a normal steal
+fades with τ 8ms and ends 15τ later (-130dB), a mono steal τ 1.5ms and 20τ
+(-173dB). **His word was "not always", so it is patch-dependent.** Next step is
+the protocol in CLAUDE.md: he exports the set, we `importSet` it on 3032 and
+measure the actual patch.
+
+⚠ **THE FIRST RUN OF envoff LIED and it is worth knowing why:** it set
+`p.env[0]` and reported a clean 0.058s release while claiming to test 1s. **The
+amp envelope is a MOD SLOT** (`src:1`, a route to `dst 1 idx 0`); `p.env` is
+the legacy shape and `foldMod` only reads it on an UNFOLDED preset. The probe
+reports `relSeen` — the voice's own `this.rel` — precisely so that can never
+pass unnoticed again.
+
+**THE ARP LATCH** — "holding rec>holding arp = freezes arp like it latches when
+letting go of rec, arp is stuck for a few rounds of loop then stops".
+`tools/probe.sh arplatch ch=5` drove five readings of that gesture — note
+alone with rec off and armed, tab-down·note·note-up·tab-up, tab-down·note·
+TAB-UP·note-up, and rec latched with win+tab — and **none of them sticks**:
+
+    pool `until` after the key-up   negative in every case (the release fired)
+    lane over four loop rounds      9 -> 9 -> 9 -> 9 -> 9   stable
+    pend / SUS / kbHeld left over   0 / 0 / 0
+
+Two readings of "holding arp" are still untested: **holding the arp SCOPE
+(⌃a)**, and holding a note through a scope. `latchArmHeld()` is called from
+exactly one place — the win key (line ~21888) — so releasing tab arms no latch,
+which is why the tab orderings all came back clean. **Ask which keys he means
+before writing any more code for this.**
+
+## QA CHECKLIST — dials, chord, retro, snapshots · 2026-08-28
+
+Reload **http://localhost:3033/**. Build `2026-08-28.1255` or later. Nothing
+here changed the save format, so no export needed. Ordered by what is most
+likely to be wrong.
+
+1. **The keyboard row under a held global chord.** Hold a chord on your
+   chord-master channel and run up a s d f g h j k l on another channel. Every
+   key a different note, ascending through the chord. It used to double —
+   a and s the same pitch, d and f the same. *Measured: 9 distinct of 9, was 4
+   of 9.* **Also say whether the three-octave span feels right** — one chord
+   tone a key is what makes them distinct, and it is a wider run than a scale.
+2. **A chord change you can HEAR.** Play a part into a lane, then change the
+   chord on the master channel. The lane's notes move in the grid AND in the
+   sound. Before, only the grid moved. *Measured: Dm held over a stored E3 —
+   grid F3, sound was E3, now F3.*
+3. **With NO chord held, a recorded lane is untouched by the key.** This is the
+   2026-08-18 rule and it must still hold: change the key/scale setting and a
+   recorded part does NOT re-snap. *Measured: stored E3 replays E3 before and
+   after; scale-only key runs identical.*
+4. **Retro mid-loop.** Set a loop of 4 bars, start playing at bar 3, let it
+   wrap, keep playing into bar 1, then tap retro. Everything you played comes
+   back AT THE BEAT YOU PLAYED IT. It used to rotate the whole phrase by
+   however far into the bar you tapped. *Measured: tap at beat 4 moved 8 of 8
+   notes by exactly 4 beats; now 0 of 8.*
+5. **Snapshots swap the sample.** On an audio channel, load take A, hold 1 and
+   press b, load take B, then walk 1a / 1b. The take follows. Then export and
+   re-import and walk them again — the take that was NOT on the channel at
+   save time still comes back. *Measured: nylonlick↔koto both ways; a recorded
+   take referenced only by a snapshot rides embedded at 46kB and restores from
+   the file alone.*
+6. **The dials.** Reverb width and damp: one press 0.01, ⇧ 0.1 landing on
+   round numbers. Filter reso: 0.1 and 1. *Measured: 78 of 78 unit params at
+   0.01 / 0.1, reso 0.1 / 1.* **`mix` deliberately still moves in fader units**
+   (10 / 2 / 0.5) so a wet/dry feels like the channel strip — say if you want
+   it on the 0.01 rule too.
+7. **The loop cell reads as two things.** `4 bar`, `16 16th`, `3 beat`.
+   *Measured.*
+8. **STILL OPEN — the click on note off.** Not reproduced: the release measures
+   clean at -84.6dB on native, worklet and with a filter env. **Export the set
+   with the patch that clicks** and say which channel, and it gets measured on
+   the real thing.
+9. **STILL OPEN — the arp latch.** Five readings of "holding rec > holding arp"
+   all came back clean (lane stable at 9 events over four loop rounds, nothing
+   left in pend). **Say exactly which keys** — is "arp" the ⌃a scope, or a note
+   held into a running arp?
+
 # THE MASTER, AND THE NOTE THAT CAME BACK WRONG — 2026-08-28 (branch `sound-library`)
 
 ## THE NOTE YOU PLAYED IS THE NOTE THAT COMES BACK  (98d19f1)

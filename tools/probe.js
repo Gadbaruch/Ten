@@ -4042,6 +4042,132 @@ async function probeSnapAud() {
   return { cols: ['at', 'take', 'buf', 'want', 'ok', 'note'], rows };
 }
 
+/* THE CLICK AT THE END OF A NOTE (Gad, 2026-08-28: "there is a click on note
+ * off even when ther is long release and sustain is at 1 not sure whats going
+ * on but env note off is not always very clean").
+ *
+ * A click is a DISCONTINUITY, so measure discontinuities. The bus is tapped
+ * across the whole release; every sample-to-sample step is compared with the
+ * median step of that same window.
+ *   jumps    steps over 8x the median, in the release tail
+ *   worst    the biggest step, as a multiple of the median
+ *   cutAt    where the tail stops dead, in seconds after the note-off
+ *   cutDb    the level at the sample BEFORE it stops — that is the size of
+ *            the step to silence, and the click you hear
+ * A clean release ends below about -90dB. -30dB is a click.
+ */
+async function probeEnvOff() {
+  const ch = CH, p = S.presets[ch];
+  const keep = stash(ch);
+  /* ONE EVAL'S WORTH. Each case waits out rel*4 plus the tail, so the whole
+     table is ~4x rel x cases seconds — at rel 2 and five cases that is 45s
+     and the eval times out. rel 1 is still long enough that a step to
+     silence is unmistakable. */
+  const REL = num(P.rel, 1);
+  const HOLD9 = num(P.hold, 400);
+  const rows = [];
+  const sr = AC.sampleRate;
+
+  const db = v => (v > 0 ? +(20 * Math.log10(v)).toFixed(1) : -999);
+
+  const one = async (k, setup) => {
+    engine.allOff(); await sleep(120);
+    /* one operator, flat sustain, a long release — his exact case */
+    unstash(ch, keep);
+    const q = S.presets[ch];
+    q.cat = 'keys';
+    q.osc.forEach((o, i) => { o.wav = i ? 0 : 2; o.amt = i ? 0 : 0.8; o.rat = 1; });
+    /* THE AMP ENVELOPE IS A MOD SLOT, not p.env. p.env is the legacy shape
+       and foldMod only reads it on an UNFOLDED preset, so writing it here
+       reached nothing: the first run of this probe measured this.rel 0.058 —
+       the no-envelope default of 0.05 — while claiming to test a 1s release. */
+    q.mod[0] = Object.assign(mkMod(), { src: 1, rsel: 0,
+      routes: [{ dst: 1, idx: 0, amt: 100, tgt: null }],
+      a: 0.005, d: 0.05, s: 1, r: REL, crv: 0 });
+    q.mod[0].off = false;
+    for (let i = 1; i < q.mod.length; i++) q.mod[i].src = 0;
+    q.flt.forEach(f => { f.typ = 0; });
+    q.fx.forEach(f => { f.typ = 0; });
+    q.mix = { lvl: 0.8, pan: 0 };
+    if (setup) setup(q);
+    engine.rebuildRack(ch); engine.refresh(ch);
+    await sleep(120);
+    /* what the VOICE ended up with, so a probe that failed to reach the
+       envelope says so instead of reporting a clean release it never set */
+    let relSeen = null;
+    const bus = busOf(ch); if (!bus) { rows.push({ k, err: 'no bus' }); return; }
+    const h = engine.trigger(AC.currentTime + 0.02, ch, NOTE, 0.9);
+    await sleep(HOLD9);
+    { const v = (engine.act[ch] || []).find(x => x && !x.killed); relSeen = v ? r3(v.rel) : null; }
+    const t = tap(bus);
+    await sleep(40);
+    const relT = AC.currentTime;
+    if (h && h.release) h.release(relT); else engine.allOff();
+    /* the whole release, plus a second past where _end should have fired */
+    await sleep((REL * 4 + 0.4) * 1000 + 400);
+    const [L] = t.stop();
+    engine.allOff();
+    const n = L.length;
+    /* where the tail stops dead: the last sample with any level in it */
+    let last = -1;
+    for (let i = n - 1; i >= 0; i--) if (Math.abs(L[i]) > 1e-7) { last = i; break; }
+    /* envelope of the tail, so cutDb is a level and not one sample's phase */
+    const W = Math.round(sr * 0.005);
+    let pkAtCut = 0;
+    for (let i = Math.max(0, last - W); i <= last; i++) { const v = Math.abs(L[i]); if (v > pkAtCut) pkAtCut = v; }
+    let pk0 = 0;
+    for (let i = 0; i < Math.min(n, W * 4); i++) { const v = Math.abs(L[i]); if (v > pk0) pk0 = v; }
+    /* discontinuities across the tail */
+    const seg = L.subarray(0, last + 1);
+    const d = new Float64Array(Math.max(1, seg.length - 1));
+    for (let i = 1; i < seg.length; i++) d[i - 1] = Math.abs(seg[i] - seg[i - 1]);
+    const srt = Array.from(d).sort((a, b) => a - b);
+    const med = srt[srt.length >> 1] || 1e-12;
+    let big = 0, mx = 0;
+    for (let i = 0; i < d.length; i++) { if (d[i] > 8 * med) big++; if (d[i] > mx) mx = d[i]; }
+    /* how long the tail took to fall 12dB — says whether the release the
+       slot asks for is the release you actually hear */
+    let t12 = null;
+    { const want = pk0 * 0.251;
+      for (let i = 0; i <= last; i += 64) {
+        let v = 0; for (let j = i; j < Math.min(i + 64, last + 1); j++) { const a2 = Math.abs(L[j]); if (a2 > v) v = a2; }
+        if (v < want) { t12 = r3(i / sr - 0.04); break; } } }
+    rows.push({ k,
+      rel: REL, relSeen, held: db(pk0), t12,
+      cutAt: last < 0 ? '—' : r3((last / sr) - 0.04),
+      cutDb: last < 0 ? '—' : +(db(pkAtCut) - db(pk0)).toFixed(1),
+      /* A CASE THAT MADE NO SOUND HAS NOTHING TO SAY ABOUT A CLICK, and
+         reporting one as a failure is worse than dropping it — the filter-env
+         case drove its cutoff shut and read cutDb +905. */
+      ok: db(pk0) < -60 ? 'n/a — silent' :
+          (last < 0 || db(pkAtCut) - db(pk0) < -80) ? 'yes' : 'NO' });
+    await sleep(80);
+  };
+
+  try {
+    const WHICH = str(P.only, '');
+    const pick = k => !WHICH || k.indexOf(WHICH) >= 0;
+    if (pick('native')) await one('native osc · sus 1 · long rel');
+    if (pick('worklet')) await one('FM worklet (phase engine)', q => { q.eng = 1; });
+    if (pick('filter')) await one('with a filter env', q => { q.flt[0].typ = 2; q.flt[0].frq = 3000; q.flt[0].q = 1;
+      q.mod[1] = Object.assign(mkMod(), { src: 1, rsel: 0,
+        routes: [{ dst: 3, idx: 1, amt: 25, tgt: null }],
+        a: 0.005, d: 0.2, s: 1, r: REL, crv: 0 }); q.mod[1].off = false; });
+    if (WHICH === 'more') { await one('native osc · sus 0.5', q => { q.env[0].s = 0.5; });
+      await one('two ops, both sounding', q => { q.osc[1].wav = 2; q.osc[1].amt = 0.5; q.osc[1].rat = 2; }); }
+  } finally {
+    engine.allOff();
+    unstash(ch, keep);
+  }
+  notes.push('cutDb = how far below the held level the sound was when it stopped DEAD. ' +
+             'That step is the click. Under -80dB is inaudible; anything near -30 you hear.');
+  notes.push('rel=' + REL + 's, sustain 1 — the release is the only thing shaping the tail.');
+  notes.push('relSeen is the voice\u2019s own this.rel — if it does not match rel, the probe ' +
+             'never reached the envelope and every other number is about the default 0.05.');
+  notes.push('t12 = seconds for the tail to fall 12dB. With rel R the target is R/3 x 1.38.');
+  return { cols: ['rel', 'relSeen', 'held', 't12', 'cutAt', 'cutDb', 'ok', 'err'], rows };
+}
+
 async function probePwmAll() {
   const ch = CH === 9 ? 8 : CH;
   const RATE = num(P.rate, 2), AMT = num(P.amt, 70);
@@ -4223,6 +4349,7 @@ const HELP = {
     { k: 'retro',    args: 'ch=5 bars=4 \u2014 does a retro tap keep a phrase that started mid-loop, and at the beat it was played' },
     { k: 'arplatch', args: 'ch=5 \u2014 does an arp let go of the key? pool/until/steps after the key-up, with rec off, armed and latched' },
     { k: 'snapaud',  args: 'ch=9 \u2014 does a snapshot swap the audio channel\u2019s take, and survive a save round trip' },
+    { k: 'envoff',   args: 'ch=5 rel=2 hold=400 \u2014 does a note stop DEAD at the end of its release? cutDb is the size of the step to silence' },
     { k: 'poolkind', args: 'want=loop — every pool take: measured onsets/centroid, the kind it was called, and both dial views in order' },
     { k: '(any)',    args: '--ab <url> runs the same probe on a second build and diffs it' },
   ]
@@ -4265,6 +4392,7 @@ try {
                    fxmod: probeFxMod,
                    fxwire: probeFxWire,
                    poolkind: probePoolKind,
+                   envoff: probeEnvOff,
                    snapaud: probeSnapAud,
                    arplatch: probeArpLatch,
                    retro: probeRetro,
