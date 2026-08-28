@@ -1301,6 +1301,47 @@ const pcsNow=()=>heldPCs.size?[...heldPCs.keys()]
   :(chordHold.length&&anyGlobalChord()?chordHold:scalePCs());
 function addPC(pc){heldPCs.set(pc,(heldPCs.get(pc)||0)+1);}
 function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);else heldPCs.set(pc,n);}
+/* WHAT A LANE HOLDS, AND WHY THE REPLAY PLAYED SOMETHING ELSE (Gad,
+   2026-08-28: "played notes and the recorded notes are not the same like they
+   are shifted after recording maybe its the scaler doing some rogue
+   adjusting"). It is the scaler — and the transpose, in the opposite
+   direction.
+
+   A lane event is the channel's INPUT. trigger() adds the transpose to it on
+   the way out and, for a LIVE note ONLY, snaps it into the key first — the
+   snap is a playing aid and a recorded note is already decided (see the note
+   in trigger). Two recorders disagreed with that contract:
+
+     THE FINGER wrote the key you PRESSED, so a snap that moved the note you
+       heard never reached the lane and the replay played the unsnapped one.
+     THE GENERATORS — chord, arp, euclid, ratchet, cycle, spray — write what
+       the pool EMITTED, which has already been through transpose, so the
+       replay transposed it a second time.
+
+   Measured on ch5 in C major (tools/probe.sh recpitch), sounded vs replayed:
+     a black key on the piano map      C3  -> C#3   +1
+     a held chord narrowing the key    C3  -> D3    +2
+     an off-scale semitone transpose   F3  -> F#3   +1
+     a CHORD SLOT, channel up an oct   E4  -> E5   +12
+     an ARP, channel up an oct         E4  -> E5   +12
+
+   One rule fixes both directions: A LANE EVENT IS THE NOTE THAT SOUNDED,
+   MINUS THE TRANSPOSE. sndIn converts a finger's note into it; sndOut
+   converts a generator's output back to it.
+
+   Audio channels are excluded on purpose: a lane there holds cues and bends,
+   not notes, and recAudEvent does its own arithmetic with trSemis. */
+const trFor=pi=>{const p=S.presets[pi];return(!p||isKit(p))?0:trSemis(p);};
+function sndIn(pi,midi){
+  const p=S.presets[pi]; if(!p)return midi;
+  if(!CFG.scaleOn||isDrumCat(p.cat)||isChordMaster(p)||isAudioCh(pi))return midi;
+  const t=trFor(pi);
+  return snapToPCs(midi+t,pcsNow())-t;
+}
+const sndOut=(pi,midi)=>isAudioCh(pi)?midi:midi-trFor(pi);
+/* the pool's own recorder: everything inside trigger() emits a SOUNDING note,
+   the keyboard and midi-in emit what was pressed. One wrapper says which. */
+const recPlayed=(pi,tBeat,midi,vel,durBeats)=>recPlayNote(pi,tBeat,sndOut(pi,midi),vel,durBeats);
 /* SETTINGS IN SECTIONS, drawn with the chain row the racks use. Fifty-two
    entries in one flat line was a row you scanned rather than read; grouped,
    you go to the group and then to the thing. Sections are named in SETSECT
@@ -1314,7 +1355,7 @@ function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);els
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-28.1121';
+const BUILD='2026-08-28.1151';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -11160,14 +11201,14 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
       const off=(strum>=0?i*strum:(nM-1-i)*(-strum));
       /* the same instant the voice is given, in beats — strum included, so a
          roll comes back as a roll rather than a block */
-      if(recCh){recPlayNote(pi,beatsAt(at+off),Math.round(n2.m),vel,
+      if(recCh){recPlayed(pi,beatsAt(at+off),Math.round(n2.m),vel,
                            Math.max(0.05,lnR?gridOf(lnR):0.25));
         /* remember WHERE each note went so the release can give it the length
            it was actually held — written immediately with a provisional step so
            a latched chord is already in the lane, then corrected on the key-up,
            which is the same two-stage the single-note recorder uses */
         recSpots.push({t:fmod(beatsAt(at+off)-editAnchor(),lnR?lnR.len:4),
-                       b0:beatsAt(at+off),m:Math.round(n2.m)});}
+                       b0:beatsAt(at+off),m:sndOut(pi,Math.round(n2.m))});}
       const v=this.noteOn(at+off,pi,n2.m,vel,n2.pad);
       v.live=durSec==null; return v;
     });
@@ -11252,7 +11293,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
             const vv2=clamp(en.vel*(1-fade*(k%divs)/divs),0.05,1);
             const v=this.noteOn(gridTime(bg),pi,en.midi,vv2,en.pad??en.midi);
             v.release(gridTime(bg+step*0.85));
-            recPlayNote(pi,b,en.midi,vv2,step*0.85);   // the generator's output IS the take
+            recPlayed(pi,b,en.midi,vv2,step*0.85);   // the generator's output IS the take
           }
         }
         const nw2=gridNow();
@@ -11273,7 +11314,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
             en.heard=true;
             const v=this.noteOn(gridTime(en.born),pi,en.midi,en.vel,en.pad??en.midi);
             v&&v.release&&v.release(gridTime(Math.min(en.until,en.born+8)));
-            recPlayNote(pi,en.born,en.midi,en.vel,
+            recPlayed(pi,en.born,en.midi,en.vel,
               Math.max(0.05,Math.min(en.until,en.born+8)-en.born));
           }
         }else if(ent.length>1){
@@ -11296,7 +11337,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
               const bg=t+grooveOff(pi,t);
               const v=this.noteOn(gridTime(bg),pi,en.midi,en.vel,en.pad??en.midi);
               v&&v.release&&v.release(gridTime(bg+gp*gate));
-              recPlayNote(pi,t,en.midi,en.vel,Math.max(0.05,gp*gate));
+              recPlayed(pi,t,en.midi,en.vel,Math.max(0.05,gp*gate));
             }
           }
         }
@@ -11331,7 +11372,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
             const vv=clamp(en.vel*(1-Math.abs(ric)*0.4*Math.min(1,k/24)),0.05,1);
             const v=this.noteOn(gridTime(bg),pi,m2,vv,en.pad??en.midi);
             v&&v.release&&v.release(gridTime(bg+Math.max(0.05,base*0.8)));
-            recPlayNote(pi,t,m2,vv,Math.max(0.05,base*0.8));
+            recPlayed(pi,t,m2,vv,Math.max(0.05,base*0.8));
           }
         }
         const nwS=gridNow();
@@ -11356,7 +11397,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
                its way out. Storing bg here meant every arp step was recorded
                with groove baked in and then grooved a second time, which is a
                steady offset between what you played and what came back. */
-            recPlayNote(pi,b,en.midi,en.vel,div*0.85);
+            recPlayed(pi,b,en.midi,en.vel,div*0.85);
           }
         }
         const nw=gridNow();
@@ -11411,7 +11452,7 @@ const b2=gridBeatsAt(t);for(const en of entries)en.until=Math.min(en.until,b2);}
           const v=this.noteOn(gridTime(bg),pi,rpA?rpitApply(m,rpA,S.presets[pi]):m,pick.vel,pick.pad??m);
           this._arpStep=0;
           v.release(gridTime(bg+div*0.85));
-          recPlayNote(pi,b,m,pick.vel,div*0.85);   // …the RAW beat: groove is a playback layer
+          recPlayed(pi,b,m,pick.vel,div*0.85);   // …the RAW beat: groove is a playback layer
         }
         }
       }
@@ -16813,7 +16854,7 @@ const EXP={
     /* written now with a provisional length and rewritten at the note-off with
        the real one, the way the key path already does it — so a note held
        across a stop is in the lane rather than only in a pending entry */
-    if(T.playing)recPlayNote(pi,tr,note,vel,Math.max(0.05,lane?gridOf(lane):0.25));
+    if(T.playing)recPlayNote(pi,tr,sndIn(pi,note),vel,Math.max(0.05,lane?gridOf(lane):0.25));
     this.held[ch+':'+note]={h,pi,tr,at,vel,press:AC.currentTime};
   },
   noteOff(ch,note){
@@ -16825,7 +16866,7 @@ const EXP={
        release() clamps to the start — which turns it into a stub. */
     const dur=Math.max(0.05,(AC.currentTime-(v.press??AC.currentTime))/spb());
     if(v.h.release)v.h.release(Math.max((v.at??0)+0.02,AC.currentTime+0.005));
-    if(v.tr!=null)recPlayNote(v.pi,v.tr,note,v.vel??0.9,dur);
+    if(v.tr!=null)recPlayNote(v.pi,v.tr,sndIn(v.pi,note),v.vel??0.9,dur);
   },
   voicesOf(ch,note){
     const v=this.held[ch+':'+note]; if(!v)return null;
@@ -23994,6 +24035,11 @@ const onKeyDown=e=>{
     }
     let at=AC.currentTime+0.005;
     const lane=(S.layer===1?pat:S.patterns[S.editPat]).lanes[pi];
+    /* THE NOTE THE LANE GETS IS THE NOTE THAT SOUNDS, not the key you pressed
+       — see sndIn. Everything below that writes a lane, a pend or the retro
+       buffer uses this; `midi` stays the raw press because that is what the
+       engine's own door wants (trigger snaps it again, to the same value). */
+    const recMidi=sndIn(pi,midi);
     const recording=S.layer>=1&&pat.state==='rec'&&T.playing;   // record into the channel's lane from sound layer too
     /* PLAYING IS NOT ERASING. Overwrite used to silence the recorded lane the
        moment you played over it even with rec OFF — jamming on top of your own
@@ -24023,7 +24069,7 @@ const onKeyDown=e=>{
            The ONE still gets set, and the listen window still opens above —
            only the note stands down, the same test the branch below uses. */
         if(!genOn(pi,midi))
-          pend[c]={t0:0,sweep:0,ts:0,bornAt:performance.now(),lane:pi,qt:0,midi,vel:hitVel};
+          pend[c]={t0:0,sweep:0,ts:0,bornAt:performance.now(),lane:pi,qt:0,midi:recMidi,vel:hitVel};
       }else{
         /* live quantize applies whenever it's on — stopped or playing, rec or not */
         /* live quantize applies whenever it's on — stopped or playing, rec or not */
@@ -24049,7 +24095,7 @@ const onKeyDown=e=>{
            key-up can carry the length you held across the quantize: a 40ms tap
            is a 40ms note wherever on the grid it lands. */
         livePress[c]={start:at,press:AC.currentTime};
-        if(S.layer>=1)rPend[c]={pi,ts:tr,midi,vel:hitVel,press:AC.currentTime};   // retro memory hears everything
+        if(S.layer>=1)rPend[c]={pi,ts:tr,midi:recMidi,vel:hitVel,press:AC.currentTime};   // retro memory hears everything
         /* an active arp generates the notes — record ITS output (recPlayNote), not the held note */
         const plyOf=isKit(S.presets[pi])?(kitSlot(S.presets[pi],midi)||{ply:[]}).ply:S.presets[pi].ply;
         const arpOn=genOn(pi,midi);
@@ -24064,7 +24110,7 @@ const onKeyDown=e=>{
           }
           const qt=lane._cap?Math.max(0,tr-lane._cap.t0):fmod(tr-editAnchor(),lane.len);
           // qt stored straight (groove is a playback layer); ts = where it actually sounds
-          pend[c]={t0,sweep:t0,ts:heard,bornAt:performance.now(),lane:pi,qt,midi,vel:hitVel};
+          pend[c]={t0,sweep:t0,ts:heard,bornAt:performance.now(),lane:pi,qt,midi:recMidi,vel:hitVel};
           /* WRITTEN NOW, NOT AT THE KEYUP. The event lands the moment it is
              played, with a provisional one-step length that endNote replaces
              with the real one — so a LATCHED note, whose keyup may be a bar or
@@ -24080,8 +24126,8 @@ const onKeyDown=e=>{
                so it speaks the channel's vocabulary before that happens. */
             if(isAudioCh(pi))recAudEvent(pi,tr,midi,hitVel,Math.max(0.05,gridOf()));
             else{
-              lane.clear(ev=>ev.midi===midi&&Math.abs(ev.t-qt)<1e-6);
-              lane.events.push({t:qt,midi,vel:hitVel,dur:Math.max(0.05,gridOf()),born:performance.now()});
+              lane.clear(ev=>ev.midi===recMidi&&Math.abs(ev.t-qt)<1e-6);
+              lane.events.push({t:qt,midi:recMidi,vel:hitVel,dur:Math.max(0.05,gridOf()),born:performance.now()});
             }
             dirtySave=true;
           }

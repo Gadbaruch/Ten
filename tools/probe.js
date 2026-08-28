@@ -3340,6 +3340,115 @@ async function probeKitDcy() {
  * bright wave than a dull one, and that residue is not an artifact.
  *
  *     tools/probe.sh pwmall ch=8 rate=2 amt=70                                */
+/* WHAT YOU PLAYED vs WHAT CAME BACK (Gad, 2026-08-28: "played notes and the
+ * recorded notes are not the same like they are shifted after recording maybe
+ * its the scaler doing some rogue adjusting").
+ *
+ * Three numbers per case, and the whole question is whether the last two agree:
+ *   heard   engine.lastMidi after the keydown — the note trigger() DECIDED to
+ *           play, i.e. post-transpose and post-scale-snap
+ *   rec     the midi that landed in the lane
+ *   replay  what trigger() decides when the SCHEDULER hands that stored note
+ *           back (durSec!=null — the replay signature)
+ * shift = replay - heard. Anything but 0 is the bug, in semitones.
+ */
+async function probeRecPitch() {
+  const ch = CH;
+  const p  = S.presets[ch];
+  const pat = S.patterns[S.editPat];
+  const lane = pat.lanes[ch];
+  const keep = stash(ch);
+  const keepCfg = { scaleOn: CFG.scaleOn, key: CFG.key, scale: CFG.scale,
+                    kbd: CFG.kbd, qOn: CFG.qOn };
+  const keepLane = JSON.parse(JSON.stringify(lane.toJSON()));
+  const keepState = pat.state, keepPlaying = T.playing, keepOct = S.oct;
+  const keepHeld = [...heldPCs.keys()];
+  const keepSel = S.curPreset, keepLayer = S.layer;
+
+  const ev = (ty, code) => document.dispatchEvent(
+    new KeyboardEvent(ty, { code, key: code, bubbles: true, cancelable: true }));
+  const wb = async x => { let g = 0; while (gridNow() < x && g++ < 4000) await sleep(5); };
+  const nm = m => (m == null ? '—' : NN[((Math.round(m) % 12) + 12) % 12] + Math.floor(Math.round(m) / 12 - 1));
+
+  const rows = [];
+  /* one case: set the world up, play ONE key with rec armed, then ask the
+     three questions. */
+  const one = async (k, code, setup) => {
+    for (const q of [...heldPCs.keys()]) heldPCs.delete(q);
+    CFG.scaleOn = 1; CFG.key = 0; CFG.scale = 0; CFG.kbd = 'full'; CFG.qOn = 0;
+    p.tr = 0; p.trs = 0; S.oct = 0;
+    const note = setup ? setup() : null;
+    lane.events = []; delete lane._cap; delete lane._rec;
+    lane.unit = 'B'; lane.count = 1; lane.auto = false;
+    pat.state = 'rec';
+    if (!T.playing) play();
+    await wb(Math.ceil(gridNow()) + 1);
+    engine.lastMidi[ch] = null;
+    ev('keydown', code);
+    await sleep(90);
+    const heard = engine.lastMidi[ch];
+    ev('keyup', code);
+    await sleep(140);
+    const e0 = lane.events.find(e => e.midi !== undefined);
+    const rec = e0 ? e0.midi : null;
+    /* the replay, through the real door: durSec set is the scheduler's own
+       signature and it is what makes trigger() skip the snap */
+    let replay = null;
+    if (rec != null) {
+      engine.lastMidi[ch] = null;
+      engine.trigger(AC.currentTime + 0.02, ch, rec, 0.9, 0.2);
+      await sleep(60);
+      replay = engine.lastMidi[ch];
+      engine.allOff();
+    }
+    rows.push({ k, key: code,
+                heard: heard == null ? null : Math.round(heard),
+                rec: rec == null ? null : Math.round(rec),
+                replay: replay == null ? null : Math.round(replay),
+                shift: (heard != null && replay != null) ? Math.round(replay - heard) : null,
+                sounded: nm(heard), back: nm(replay),
+                t: e0 ? r3(e0.t) : null, dur: e0 ? r3(e0.dur) : null, n: lane.events.length });
+    pat.state = 'on';
+    await sleep(40);
+  };
+
+  try {
+    S.layer = 1; S.curPreset = ch; S.mSel = false;
+    if (isAudioCh(ch) || isKit(p) || isDrumCat(p.cat))
+      notes.push('ch ' + ch + ' is ' + (isAudioCh(ch) ? 'audio' : isKit(p) ? 'a kit' : 'a drum cat') +
+                 ' — the scale skips it by design; pass ch=<a melodic channel>');
+    await one('plain',        'KeyD');
+    await one('scale off',    'KeyD', () => { CFG.scaleOn = 0; });
+    await one('trs +1',       'KeyD', () => { p.trs = 1; });
+    await one('trs +2 (off-scale)', 'KeyD', () => { p.trs = 2; });
+    await one('trs +3',       'KeyD', () => { p.trs = 3; });
+    await one('tr +1 oct',    'KeyD', () => { p.tr = 1; });
+    await one('piano kb, C#', 'KeyW', () => { CFG.kbd = 'piano'; });
+    await one('piano kb, D',  'KeyS', () => { CFG.kbd = 'piano'; });
+    await one('held chord',   'KeyS', () => { [0, 4, 7].forEach(addPC); });
+    await one('key=F',        'KeyD', () => { CFG.key = 5; });
+    /* THE GENERATORS. Their output is recorded by recPlayNote, which is handed
+       a note that has ALREADY been through transpose and the snap — so the
+       question here is whether the lane gets transposed twice. */
+    await one('chord slot',   'KeyD', () => { p.ply[0] = ply1({ typ: 1, p1: 0 }); });
+    await one('chord, tr +1 oct', 'KeyD', () => { p.ply[0] = ply1({ typ: 1, p1: 0 }); p.tr = 1; });
+    await one('arp, tr +1 oct',   'KeyD', () => { p.ply[0] = ply1({ typ: 2, p1: 2, p3: 0.25 }); p.tr = 1; });
+  } finally {
+    try { stop(); } catch (_) {}
+    if (keepPlaying) { try { play(); } catch (_) {} }
+    Object.assign(CFG, keepCfg);
+    for (const q of [...heldPCs.keys()]) heldPCs.delete(q);
+    keepHeld.forEach(addPC);
+    pat.state = keepState; S.oct = keepOct;
+    S.curPreset = keepSel; S.layer = keepLayer;
+    pat.lanes[ch] = Looper.from(keepLane);
+    unstash(ch, keep);
+  }
+  notes.push('shift = replay - heard, in semitones. 0 is correct: the note the ' +
+             'scheduler hands back must be the note your finger played.');
+  return { cols: ['key', 'heard', 'rec', 'replay', 'shift', 'sounded', 'back', 't', 'dur', 'n'], rows };
+}
+
 async function probePwmAll() {
   const ch = CH === 9 ? 8 : CH;
   const RATE = num(P.rate, 2), AMT = num(P.amt, 70);
@@ -3514,6 +3623,7 @@ const HELP = {
     { k: 'spread',   args: "ch=8 ty=rake \u2014 can a bank filter's spread be modulated, and does a tweak reach a held note" },
     { k: 'pwmall',   args: 'ch=8 rate=2 amt=70 wavs=0,1,2,3 \u2014 which waves still STEP their width, for waves a pulse metric cannot see' },
     { k: 'pwm',      args: 'ch=8 wav=3 rate=2 amt=70 \u2014 is a width sweep smooth? excess edges per second = clicks' },
+    { k: 'recpitch', args: 'ch=8 \u2014 played vs recorded vs replayed pitch: does the scale snap the finger and not the lane' },
     { k: 'poolkind', args: 'want=loop — every pool take: measured onsets/centroid, the kind it was called, and both dial views in order' },
     { k: '(any)',    args: '--ab <url> runs the same probe on a second build and diffs it' },
   ]
@@ -3556,6 +3666,7 @@ try {
                    fxmod: probeFxMod,
                    fxwire: probeFxWire,
                    poolkind: probePoolKind,
+                   recpitch: probeRecPitch,
                    smplib: probeSmpLib,
                    smpkit: probeSmpKit,
                    kitoct: probeKitOct,
