@@ -1,3 +1,94 @@
+# THE MOD SCOPE AIMS, AND MACRO GOES ON ICE — 2026-08-29 (branch `sound-library`)
+
+## EVERY MOD SCOPE MADE A SLOT AIMED AT NOTHING  (dbbc263)
+
+Gad: *"oh and it doesnt even set the mod destination anymore - big bug"*. It
+was never only macro — measured with the cursor parked on the filter cutoff,
+what each scope MADE:
+
+                    before      after
+      env   ⌃E      NOTHING     flt.frq
+      lfo   ⌃L      NOTHING     flt.frq
+      key   ⌃K      NOTHING     flt.frq
+      macro ⌃M      NOTHING     flt.frq
+
+**A mod slot with no destination is silent by construction**, so the scope's
+whole promise — *"the letter takes you to the thing, making one if the rack has
+none"* — handed back a thing that does nothing.
+
+⚠ **`cursorAddr()` had existed all along** — the automation overlay picks its
+lit curve with it. It is read BEFORE the block that moves `S.editSnd`/
+`S.curMod`, so it is the knob you were actually standing on, and it refuses
+when it would point a slot at itself (the destination picker excludes the same
+slot for the same reason). Out on the desk there is no parameter cursor: the
+slot is made bare, as before, and the flash says so instead of pretending.
+
+## ⌃M IS THE MOD SCOPE · MACRO LOSES ITS LETTER  (dbbc263)
+
+Gad: *"do not make any macros, this feature is on ice and no home yet, control+m
+either takes to an existing mod that controls the param you are on, or creates
+a new one that is destination to the param you are on, default is env… we made
+the macro feature but i dont want it first citizen at all."*
+
+**The letter is about the PARAMETER, not a source.** ⌃E/⌃L/⌃K ask for a source
+by name; ⌃M asks *"what moves THIS"*, which is the question you actually have
+with a knob under the cursor.
+
+      ⌃M on a bare channel        makes an ENV aimed at flt.frq
+      ⌃M onto an existing env     found it, slot 2, dial tmul
+      ⌃M onto an existing lfo     found it, slot 2, dial rate
+      ⌃M onto an existing macro   found it, slot 2, dial amt
+
+The `mag` row's `pri`/`sec` are functions of the slot's SOURCE, so the dials
+follow what it landed on — arriving on somebody's lfo gives you the lfo's rate
+rather than an envelope's stages. `keys` stays the env's a/d/s/r; on a non-env
+slot `magSpec` returns null and `magCur` falls back to the primary, which is
+the safe degradation the mag machinery already had.
+
+⚠ **MACRO HAS NO LETTER AT ALL NOW.** `src:MSRC_MACRO` appears nowhere in
+OPTRACK, so no gesture can conjure one. **Nothing else about macros was
+removed** — a slot already set to macro still runs, still moves live under a
+held note, the source is still in the mod rack's list by hand, and ⌃M still
+takes you TO one because it modulates the knob you are on. The feature is on
+ice, not deleted; see the macro section further down for how it works when it
+comes back.
+
+## ⚠ ⌃/ IS UNREACHABLE AT LAYER 2, AND LIVE IS THE SAME
+
+The `Slash` random-source scope never opens inside a channel: an earlier
+handler makes ⌃/ `rollSlot()` — the dice for the slot under the cursor — and it
+returns first. The scope is only reachable at layer 1.
+
+Gad asked to *"make it like it is in live, or explain to me whats different"*.
+**Checked, and nothing is different**: the live build (2026-08-27.2121) carries
+the identical `KeyM` macro entry, the identical `Slash` scope and the identical
+`rollSlot` handler. The conflict is not a regression from this branch and was
+not touched. His call next time — it needs either a new key for the dice or a
+new letter for the random source.
+
+## QA CHECKLIST — 2026-08-29 (third batch)
+
+Reload **http://localhost:3033/**. Build `2026-08-28.2115` or later.
+
+1. **A mod scope aims at the knob you are on.** Open a channel, walk to the
+   filter cutoff, press ⌃E. You get an envelope **already routed to the
+   cutoff** and the flash names it. Before, every one of these made a slot
+   pointing at nothing, so nothing happened however you dialled it.
+   *Measured: NOTHING → flt.frq, on all four letters.*
+2. **⌃M finds what already moves this knob.** Stand on a knob something already
+   modulates and press ⌃M — it takes you to that slot rather than making a
+   second one, whatever its source is. *Measured: found an env, an lfo and a
+   macro, each on the second press, no extra slot made.*
+3. **⌃M on a knob with nothing on it makes an ENV**, not a macro. *Measured:
+   src env, aimed flt.frq.*
+4. **No gesture makes a macro any more.** *Verified: `src:MSRC_MACRO` appears
+   nowhere in the scope table. Macros you already have still run and ⌃M still
+   reaches them.*
+5. **Out on the desk (no channel open), ⌃E still works** and makes a bare env —
+   there is no parameter cursor to aim at, and the flash says so rather than
+   claiming a destination. *Not measured — reasoned from cursorAddr returning
+   null at layer 1.*
+
 # THE KEY COMES BACK, AND RETRO LISTENS AGAIN — 2026-08-29 (branch `sound-library`)
 
 ## CLEARING THE MASTER HANDS THE KEY BACK  (7cf5b19)
