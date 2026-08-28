@@ -3641,6 +3641,92 @@ async function probeSteps() {
   return { cols: ['lo', 'hi', 'step', 'big', 'plain', 'shift', 'fine', 'rule', 'ok'], rows };
 }
 
+/* THE SCALE AND THE GLOBAL CHORD (Gad, 2026-08-28: "i have 2 adjacent keys
+ * playing the same note with scale on, and global chord changes looks like it
+ * works, i can see notes moving but i dont hear the change").
+ *
+ * `keys`   what the home row maps to, as the key -> the note that SOUNDS
+ * `uniq`   how many distinct notes those keys make. 10 keys, 10 notes is a
+ *          playable row; anything less is two keys on one pitch.
+ * `grid`   what heardMidi() DRAWS for a stored note
+ * `sound`  what the scheduler actually plays for that same stored note
+ *          (trigger with durSec set — the replay signature)
+ * The last two disagreeing IS "i can see notes moving but i dont hear it".
+ */
+async function probeChord() {
+  const ch = CH, p = S.presets[ch];
+  const keep = stash(ch), keepCfg = { scaleOn: CFG.scaleOn, key: CFG.key, scale: CFG.scale, kbd: CFG.kbd };
+  const keepHeld = [...heldPCs.keys()], keepHold = chordHold.slice();
+  const keepPly = JSON.parse(JSON.stringify(p.ply || []));
+  const other = ch === 6 ? 5 : 6, keepOther = stash(other);
+  const ROW = ['KeyA','KeyS','KeyD','KeyF','KeyG','KeyH','KeyJ','KeyK','KeyL'];
+  const nm = m => (m == null ? '—' : NN[((Math.round(m) % 12) + 12) % 12] + Math.floor(Math.round(m) / 12 - 1));
+  const rows = [];
+
+  /* what the key SOUNDS as: noteOf through trigger's own arithmetic, live */
+  const sounds = () => ROW.map(c => {
+    const raw = KBBASE + S.oct * 12 + (noteOf(c, ch) ?? 0);
+    let m = raw + (isKit(p) ? 0 : trSemis(p));
+    if (CFG.scaleOn && !isDrumCat(p.cat) && !isChordMaster(p)) m = snapToPCs(m, pcsNow());
+    return m;
+  });
+
+  const one = async (k, setup) => {
+    /* A CHORD MASTER'S OWN NOTE ADDS A PITCH CLASS AND TAKES IT BACK ON A
+       TIMER (trigger: subPC after durSec). Without the wait the NEXT row runs
+       with the previous row's note still in heldPCs — which is how this probe
+       first reported "pcs 4" for a case with no chord anywhere. */
+    await sleep(250);
+    for (const q of [...heldPCs.keys()]) heldPCs.delete(q);
+    chordHold.length = 0;
+    CFG.scaleOn = 1; CFG.key = 0; CFG.scale = 0; CFG.kbd = 'full';
+    S.presets[other].ply = (keepOther.data.ply || []).map(x => Object.assign({}, x));
+    /* and the channel under test must not BE one — a master does not follow
+       itself, so it would measure the snap never running */
+    p.ply = keepPly.map(x => Object.assign({}, x)).filter(x => !isGlobalChordSlot(x));
+    while (p.ply.length < keepPly.length) p.ply.push(mkPly());
+    if (setup) setup();
+    const S2 = sounds();
+    /* one stored note, drawn and played */
+    const stored = 52;                                    // E3 as it sits in a lane
+    const drawn = heardMidi(ch, stored);
+    engine.lastMidi[ch] = null;
+    engine.trigger(AC.currentTime + 0.02, ch, stored, 0.9, 0.15);
+    await sleep(60);
+    const played = engine.lastMidi[ch];
+    engine.allOff();
+    rows.push({ k,
+      pcs: pcsNow().slice().sort((a, b) => a - b).join(','),
+      keys: S2.map(nm).join(' '),
+      uniq: new Set(S2).size + '/' + ROW.length,
+      grid: nm(drawn), sound: nm(played),
+      agree: (drawn === played) ? 'yes' : 'NO' });
+  };
+
+  try {
+    /* a channel that DEFINES the chord: a global chord slot on `other` */
+    const master = () => { const sl = ply1({ typ: 1, p1: 0, p3: 1 });   // isGlobalChordSlot: typ 1, p3 == 1
+      S.presets[other].ply = [sl].concat((keepOther.data.ply || []).slice(1));
+      return sl; };
+    await one('scale only, no chord master');
+    await one('chord master exists, nothing held', () => { master(); });
+    await one('chord master exists, C-E-G HELD', () => { master(); [0, 4, 7].forEach(addPC); });
+    await one('released — chordHold sticks', () => { master(); chordHold.push(0, 4, 7); });
+    await one('...now a Dm: D-F-A held', () => { master(); [2, 5, 9].forEach(addPC); });
+    await one('scale OFF, chord held', () => { master(); [0, 4, 7].forEach(addPC); CFG.scaleOn = 0; });
+  } finally {
+    for (const q of [...heldPCs.keys()]) heldPCs.delete(q);
+    chordHold.length = 0; keepHold.forEach(x => chordHold.push(x));
+    keepHeld.forEach(addPC);
+    Object.assign(CFG, keepCfg);
+    unstash(ch, keep); unstash(other, keepOther);
+  }
+  notes.push('grid vs sound on the SAME stored note (52 = E3). They must agree or the ' +
+             'display is telling you about a change you cannot hear.');
+  notes.push('a global chord slot is ply typ 1 with p4=1 (isGlobalChordSlot).');
+  return { cols: ['pcs', 'uniq', 'keys', 'grid', 'sound', 'agree'], rows };
+}
+
 async function probePwmAll() {
   const ch = CH === 9 ? 8 : CH;
   const RATE = num(P.rate, 2), AMT = num(P.amt, 70);
@@ -3818,6 +3904,7 @@ const HELP = {
     { k: 'recpitch', args: 'ch=8 \u2014 played vs recorded vs replayed pitch: does the scale snap the finger and not the lane' },
     { k: 'master',   args: '\u2014 with the master selected: which lane do the loop-length and clear gestures actually move' },
     { k: 'steps',    args: 'ch=8 all=0 \u2014 how far one press moves every dial: 0..1 params must be 0.01/0.1, reso 0.1/1' },
+    { k: 'chord',    args: 'ch=6 \u2014 the scale and the global chord: do adjacent keys stay distinct, and does the grid agree with the sound' },
     { k: 'poolkind', args: 'want=loop — every pool take: measured onsets/centroid, the kind it was called, and both dial views in order' },
     { k: '(any)',    args: '--ab <url> runs the same probe on a second build and diffs it' },
   ]
@@ -3860,6 +3947,7 @@ try {
                    fxmod: probeFxMod,
                    fxwire: probeFxWire,
                    poolkind: probePoolKind,
+                   chord: probeChord,
                    steps: probeSteps,
                    master: probeMaster,
                    recpitch: probeRecPitch,

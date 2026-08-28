@@ -1360,8 +1360,22 @@ const anyGlobalChord=()=>S.presets.some(p=>p&&p.ply&&p.ply.some(isGlobalChordSlo
    snapped through it, and rpit's stay-in-key snapped through it. One test,
    asked everywhere. */
 const isChordMaster=p=>!!(p&&p.ply&&p.ply.some(isGlobalChordSlot));
-const pcsNow=()=>heldPCs.size?[...heldPCs.keys()]
-  :(chordHold.length&&anyGlobalChord()?chordHold:scalePCs());
+/* THE CHORD, TOLD APART FROM THE SCALE — and the difference is the whole of
+   two bugs (Gad, 2026-08-28). A SCALE is a fixed setting and an INPUT AID: it
+   bends what you press and then leaves the lane alone, because a recorded
+   note is a decision already made (the 2026-08-18 ruling, and it stands). A
+   HELD CHORD is a live performance gesture: the desk conforms while you hold
+   it, which is the entire point of a chord-master channel and is worth
+   nothing if only live notes hear it.
+   Returns the chord's pitch classes, ASCENDING, or null when there is no
+   chord sounding — so "is a chord live right now" is one question with one
+   answer, asked by the keyboard, the grid and the replay alike. */
+const chordPCs=()=>{
+  const a=heldPCs.size?[...heldPCs.keys()]
+    :(chordHold.length&&anyGlobalChord()?chordHold.slice():null);
+  return a&&a.length?[...new Set(a)].sort((x,y)=>x-y):null;
+};
+const pcsNow=()=>chordPCs()||scalePCs();
 function addPC(pc){heldPCs.set(pc,(heldPCs.get(pc)||0)+1);}
 function subPC(pc){const n=(heldPCs.get(pc)||0)-1;if(n<=0)heldPCs.delete(pc);else heldPCs.set(pc,n);}
 /* WHAT A LANE HOLDS, AND WHY THE REPLAY PLAYED SOMETHING ELSE (Gad,
@@ -1418,7 +1432,7 @@ const recPlayed=(pi,tBeat,midi,vel,durBeats)=>recPlayNote(pi,tBeat,sndOut(pi,mid
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-28.1238';
+const BUILD='2026-08-28.1244';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -11188,8 +11202,22 @@ class Engine{
        different chop. cueNote already refuses transpose and the octave arrows
        for the same reason. */
     const posCh=p.cat==='audio'&&kmodeOf(p)===0;
-    if(CFG.scaleOn&&durSec==null&&!isDrumCat(p.cat)&&!isMaster&&!posCh)
-      midi=snapToPCs(midi,pcsNow());
+    /* …BUT A HELD CHORD IS NOT THE KEY, AND IT DOES REACH A RECORDED NOTE
+       (Gad, 2026-08-28: "global chord changes looks like it works, i can see
+       notes moving but i dont hear the change"). He could see it because the
+       grid draws through heardMidi(), which snapped; he could not hear it
+       because this line let only LIVE notes through. Measured on ch5 with a
+       Dm held over a stored E3: grid F3, sound E3.
+       The 2026-08-18 ruling is untouched — it is about the SCALE, a fixed
+       setting that must not re-decide a chord you already played. A chord
+       master is the opposite: a gesture you are making right now, whose whole
+       purpose is that the rest of the desk follows it. With nothing held
+       chordPCs() is null and a replayed note is left exactly alone, which is
+       what that ruling asked for. */
+    if(CFG.scaleOn&&!isDrumCat(p.cat)&&!isMaster&&!posCh){
+      if(durSec==null)midi=snapToPCs(midi,pcsNow());
+      else{const ch9=chordPCs(); if(ch9)midi=snapToPCs(midi,ch9);}
+    }
     this.lastMidi[pi]=midi;
     /* LIVE playing gets the note-level PLAY effects too (the sequencer applies its
        own copies to recorded notes; durSec!=null means it came from the scheduler) */
@@ -15506,7 +15534,15 @@ function heardMidi(pi,midi){
   /* the grid has to show the pad you will HEAR — see trigger(), which skips
      transpose on a kit for the same reason */
   let m=midi+(isKit(p)?0:trSemis(p));
-  if(CFG.scaleOn&&!isDrumCat(p.cat)&&!isChordMaster(p))m=snapToPCs(m,pcsNow());
+  /* AND IT DRAWS WHAT PLAYS, WHICH IS NOT THE SAME AS WHAT A FINGER WOULD DO
+     HERE. These are STORED notes, and playback does not re-snap a stored note
+     to the key — so drawing the scale snap showed a change you could not
+     hear, on every off-scale note in the lane and on every chord change. The
+     guard list is trigger's, exactly, so the two cannot drift. */
+  const posCh=p.cat==='audio'&&kmodeOf(p)===0;
+  if(CFG.scaleOn&&!isDrumCat(p.cat)&&!isChordMaster(p)&&!posCh){
+    const ch=chordPCs(); if(ch)m=snapToPCs(m,ch);
+  }
   return m;
 }
 const trLabel=p=>{const st=trSemis(p);return st?(st>0?'+':'')+st+'st':'0st';};
@@ -16816,11 +16852,27 @@ const KITLIFT=12;
 function kbNote(code,chrom){
   const raw=KBSEQ.indexOf(code); if(raw<0)return null;
   const i=raw-KBHOME;
-  const sc=(!chrom&&CFG.scaleOn)?SCALES[CFG.scale][1]:null;
-  if(!sc)return i;                                  // chromatic, one semitone a key
-  /* a scale DEGREE a key — WITH the key offset. Without it the run was always
-     C-shaped, and the snap downstream rounded two neighbouring degrees onto
-     the same note of the actual key: s and d, one pitch. */
+  if(chrom||!CFG.scaleOn)return i;                  // chromatic, one semitone a key
+  /* THE KEY RUN IS WHATEVER THE SNAP DOWNSTREAM WILL ACCEPT. That is the
+     rule, and this is the SECOND time the same bug has been fixed on this
+     line — worth saying plainly so it is not fixed a third time by patching
+     the symptom.
+     FIRST TIME: the run was C-shaped and the snap rounded two neighbouring
+     degrees onto one note of the actual key — s and d, one pitch. Fixed by
+     folding the key offset in, so the snap became a no-op.
+     SECOND TIME (Gad, 2026-08-28: "i have 2 adjacent keys playing the same
+     note with scale on"): a HELD GLOBAL CHORD makes pcsNow() three notes
+     instead of seven, and seven degrees rounded onto three tones collapses
+     the row. Measured with C-E-G held: a s d f g h j k l gave
+     C3 C3 E3 E3 G3 G3 C4 C4 C4 — FOUR distinct notes out of nine, and four
+     dead keys under your fingers.
+     Same fix, generalised: when a chord is sounding the chord IS the run, one
+     tone a key, so the snap is a no-op again and every key still plays
+     something. Chord pitch classes are ABSOLUTE (0 = C), so no key offset is
+     added to them — the scale's are relative and keep theirs. */
+  const ch=chordPCs();
+  if(ch)return Math.floor(i/ch.length)*12+ch[fmod(i,ch.length)];
+  const sc=SCALES[CFG.scale][1];
   /* fmod, not %, now that the z row is NEGATIVE degrees: -1 has to mean the
      last degree an octave down, and % would hand back a negative index */
   return Math.floor(i/sc.length)*12+sc[fmod(i,sc.length)]+(CFG.key||0);
