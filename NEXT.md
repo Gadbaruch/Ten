@@ -1,3 +1,98 @@
+# TWO SHELVES, AND THE ROLL'S REACH — 2026-08-29 (branch `sound-model`)
+
+## THE SHELVES SPLIT BY `shelf`, NOT BY `kind`  (f50a982)
+
+Gad: **"please seperate audio samples from one shots and loops, dont put one
+shots in audio channel ... similarly dont put loops in the smp op ... in the smp
+op we should have type selector"**.
+
+`poolView` SORTED rather than filtered — your kind first, the other kind at the
+far end, on the stated reasoning that nothing should be hidden. Wrong call for a
+browser you hunt in: 250 one-shots behind 19 loops is not reachable, it is 250
+turns of a dial. It filters now.
+
+**AND IT SPLITS ON `shelf`.** Three phrase-shelf entries are one-shots — bell,
+riser, sweep — and an audio channel is exactly what a riser is for. Splitting by
+`kind` would have thrown all three out of the only rack that wants them. `shelf`
+is a THIRD axis, stamped at load, not a restatement of kind.
+
+`tools/probe.sh shelf`, clean reload:
+
+      shelf tags                  one 250   loop  22    of 272 factory
+      view, all                       251         23    smp op | audio ch
+      one-shots on phrase shelf         0          3    bell/riser/sweep kept
+      type filter kik | pad            22          4
+      your take visible                 1          1
+      take beats a filter               1          1
+
+**WHAT YOU MADE IS NEVER FILTERED.** `poolKindOf` is a heuristic and `shelf` is
+a fact about the FACTORY; a recorded or dropped take has neither, so a hard
+filter would turn "down the dial" into "gone". A session take shows in both
+browsers and beats a type filter — the last two rows, and the reason they exist.
+
+⚠ **THE STAMP WAS DROPPED ONCE, and this is the trap to remember: `poolAdd`
+copies a FIXED FIELD LIST onto the POOL entry.** Adding `shelf` to the hint was
+not enough; the first measurement read `shelf_one 0 of 272` and the whole split
+was silently falling back to kind. Any new per-sample field must be added in
+BOTH the push and the dedupe path.
+
+**Type dials, immediately before `smpl`:** smp op gets `all` + the eight
+DRUMCATS; audio ch gets `all/plk/keys/bass/pad/perc/fx`. **SESSION STATE, never
+a preset field** — a browsing filter is not a property of the sound, and storing
+it would be a save-format change. No SAVEV bump. Exercised: smp op `kik` takes
+the dial 250 -> 21; audio ch `pad` 22 -> 3 (choirpad/drone/vowel).
+
+Recording and drag-drop into the smp op **already worked** — drop is global,
+record is esc+tab — so that half of the ask needed nothing.
+
+`samples/manifest.json` gains `cat` on all 22 loops; `tools/gen_samples.py`
+gains the TAGS table that writes `kind` and `cat`, neither of which it ever
+wrote — so every regen had been silently dropping the hand-added `kind`.
+
+**THE LOOP TAGS ARE GUESSES FROM NAMES and want Gad's eye.** plk: nylonlick,
+steelriff, flamenco, banjoroll, harp, koto, marimba, kalimba, bell, cellostac ·
+keys: pianoriff, rhodesvamp, prepiano · bass: upright · perc: tabla, brushkit ·
+pad: choirpad, drone, vowel · fx: rain, riser, sweep. **cellostac is the shaky
+one** — a bowed staccato cello filed under plucked because TEN has no strings
+category.
+
+## THE GENERATOR'S REACH IS THE RACK'S REACH  (Gad, 2026-08-29)
+
+**"your generator should be able to do ANYTHING that a user can do in the ch
+racks bro."** Said after I wrote "four things my generator cannot produce" about
+a patch of his. Wrong framing: the RACKS can do all four. The archetype TABLE
+never reaches there. That is a much narrower claim and it is the one to fix.
+
+**So the target is coverage, not capability**: every expressive move the racks
+allow should be reachable by some roll. Today's table reaches none of these,
+all four seen in one patch of Gad's — a sub-octave FM modulator (mine only go
+up and inharmonic), a bandpass past the 6th harmonic, an LFO on the filter in
+`keys` at all, and two modulators stacked on one cutoff.
+
+## AND NOT EVERY COMBINATION IS LEGAL  (Gad, 2026-08-29)
+
+**"a plucky pad - shouldnt exist for example, these are rules we can build as we
+go."** I had used "a plucky pad" as an example of what the restricted/free split
+unlocks. It is not — it is an example of a combination that must be RULED OUT.
+
+So the model has a third part beyond restricted-vs-free: **cross-axis rules,
+accumulated one at a time as Gad names them.** The free axes are not a
+free-for-all; they are free *subject to rules we write down as they come up*.
+First rule on the books: **a pad may not take a pluck curve.**
+
+## DISCARDED: BES1
+
+The `keys` patch pasted 2026-08-28 was a copy-paste TEST, not a submission.
+Gad: **"not a good sound ... dont use this one to learn anything from!"**
+Nothing from it enters the archetype table. The two range observations it
+suggested (BP at 6.43x, mix.lvl 0.3955) are **withdrawn** — they came from a
+patch he has disowned.
+
+Its one still-open question is a possible BUG, not a preset matter: `env[0]`
+(a.005/d.15/s.70/r.20) and `mod[0]` (a.002/d.230/s.485/r.276) were TWO AMP
+ENVELOPES DISAGREEING on one channel, with `_folded:true`. Unanswered, and
+worth a look on its own if a hand-edited envelope ever fails to take.
+
 # THE SOUND MODEL — 2026-08-28 (branch `sound-model`, off `sound-library`)
 
 Branch made because another thread was committing to `sound-library` live (four
