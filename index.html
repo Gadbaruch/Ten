@@ -1418,7 +1418,7 @@ const recPlayed=(pi,tBeat,midi,vel,durBeats)=>recPlayNote(pi,tBeat,sndOut(pi,mid
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-28.1204';
+const BUILD='2026-08-28.1238';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1861,16 +1861,16 @@ const poolSP=(spec,want)=>Object.defineProperty(spec,'max',
    engine's dedicated page */
 const WTF=[
   SP('tbl a','wta','enum',{opts:WTNAMES,get:o=>Math.round(o.wta??0),set:(o,v)=>o.wta=Math.round(v)}),
-  SP('pos a','posa','lin',{min:0,max:1,step:0.02,get:o=>o.posa??0,set:(o,v)=>o.posa=v,
+  SP('pos a','posa','lin',{min:0,max:1,step:0.01,big:0.1,get:o=>o.posa??0,set:(o,v)=>o.posa=v,
      fmt:v=>Math.round(v*100)+'%'}),
   SP('tbl b','wtb','enum',{opts:WTNAMES,get:o=>Math.round(o.wtb??3),set:(o,v)=>o.wtb=Math.round(v)}),
-  SP('pos b','posb','lin',{min:0,max:1,step:0.02,get:o=>o.posb??0,set:(o,v)=>o.posb=v,
+  SP('pos b','posb','lin',{min:0,max:1,step:0.01,big:0.1,get:o=>o.posb??0,set:(o,v)=>o.posb=v,
      fmt:v=>Math.round(v*100)+'%'}),
   /* no pitch dial here any more: in the rack the op's own ratio/fine sit two
      fields down, and two spellings of one 'rat' is a fight over the knob */
-  SP('morph','mrph','lin',{min:0,max:1,step:0.02,get:o=>o.mrph??0,set:(o,v)=>o.mrph=v,
+  SP('morph','mrph','lin',{min:0,max:1,step:0.01,big:0.1,get:o=>o.mrph??0,set:(o,v)=>o.mrph=v,
      fmt:v=>Math.round(v*100)+'%'}),
-  SP('fold','fold','lin',{min:0,max:1,step:0.02,get:o=>o.fold??0,set:(o,v)=>o.fold=v,
+  SP('fold','fold','lin',{min:0,max:1,step:0.01,big:0.1,get:o=>o.fold??0,set:(o,v)=>o.fold=v,
      fmt:v=>Math.round(v*100)+'%'}),
 ];
 /* THE CROP, RESOLVED IN ONE PLACE. Four callers used to spell it out
@@ -1961,7 +1961,7 @@ const OSC_P=sl=>[
      because a crackle's only real parameter is how often. Hidden on sin (one
      harmonic — nothing to weight) and on the buffer waves that have neither. */
   ...((w=>{
-    if(w===13)return [SP('dens','pw','lin',{min:0,max:1,step:0.05,
+    if(w===13)return [SP('dens','pw','lin',{min:0,max:1,step:0.01,big:0.1,
       fmt:v=>Math.round(4+v*v*1600)+'/s'})];
     if(w===0||w===4||w===9||(w>=10&&w<=12)||w===14)return [];
     return [SP('width','pw','lin',{min:0.05,max:0.95,step:0.025,
@@ -1980,7 +1980,13 @@ const fTy=sl=>FTYPES[Math.round((sl&&sl.typ)||0)];
 const FLT_P=sl=>[
   SP('type','typ','enum',{opts:FTYPES}),
   SP('freq','frq','freq'),
-  SP('reso','q','lin',{min:0.1,max:24,step:0.5}),
+  /* THE TWO STEP SIZES ARE THE ONES YOU REACH FOR (Gad, 2026-08-28: "reso
+     params should jump by 0.1 normally, and 1 shifted"). Q ran 0.5 and 5,
+     which put four values between "no resonance" and "singing" and made the
+     coarse step a fifth of the whole dial. `big` snaps the shifted step to
+     whole numbers so ⇧ walks 1, 2, 3 rather than wherever the fine steps
+     happened to leave you. */
+  SP('reso','q','lin',{min:0.1,max:24,step:0.1,big:1}),
   /* SLOPE. A BiquadFilterNode is two poles — 12dB per octave — which is a
      gentle filter: open a lowpass on a saw and you still hear most of the top.
      Cascading a second biquad gives the 24dB/oct slope that everything with a
@@ -1989,7 +1995,7 @@ const FLT_P=sl=>[
      character filter are both things you want, sometimes in the same patch. */
   SP('slope','pol','enum',{opts:['12dB','24dB']})]
   .concat(FBANK.has(fTy(sl))
-    ?[SP('spread','spr','lin',{min:0,max:1,step:0.05,
+    ?[SP('spread','spr','lin',{min:0,max:1,step:0.01,big:0.1,
         fmt:v=>Math.round(v*100)+'%'})]:[])
   .concat(FLT_GAINY.has(fTy(sl))
     ?[SP('gain','gn','lin',{min:-18,max:18,step:1,fmt:v=>v+'dB'})]:[])
@@ -2054,7 +2060,7 @@ const MOD_P=sl=>{                    // unified: source picks which extra fields
        fmt:v=>'×'+(v/100).toFixed(2),
        get:m=>Math.round((m.tmul??1)*100),set:(m,v)=>m.tmul=clamp(v,10,400)/100}),
     SP('atk','a','time'),SP('dec','d','time'),
-    SP('sus','s','lin',{min:0,max:1,step:0.05}),SP('rel','r','time'),
+    SP('sus','s','lin',{min:0,max:1,step:0.01,big:0.1}),SP('rel','r','time'),
     SP('curve','crv','lin',{min:-200,max:200,step:10,big:50,
        fmt:v=>v?(v>0?'+':'')+Math.round(v):'lin'})]);
   if(s===2)return base.concat([SP('wave','wav','enum',{opts:LFOW}),
@@ -2124,7 +2130,7 @@ const FX_P=sl=>{
     set:(o,v)=>{o.typ=FAM.typs[clamp(Math.round(v),0,FAM.typs.length-1)];
                 engine.rebuildRack(S.editSnd); engine.refresh(S.editSnd);}}));
   const tail={
-    dly:[SP('time','p1','lin',{min:0,max:1,step:0.05,fmt:v=>Math.round(20+v*1300)+'ms'}),
+    dly:[SP('time','p1','lin',{min:0,max:1,step:0.01,big:0.1,fmt:v=>Math.round(20+v*1300)+'ms'}),
          SP('fdbk','p2','lin',{min:0,max:0.9,step:0.05}),
          SP('mode','p3','enum',{opts:['free','sync','pong','s+pong']}),
          /* COLOUR SITS IN THE LOOP, so it compounds: each repeat is one more
@@ -2134,21 +2140,21 @@ const FX_P=sl=>{
          SP('color','p5','lin',{min:-1,max:1,step:0.1,
             fmt:v=>Math.abs(v)<0.05?'flat':(v<0?'dark ':'bright ')+Math.round(Math.abs(v)*100)}),
          SPMIX()],
-    phase:[SP('rate','p1','lin',{min:0,max:1,step:0.05,fmt:v=>(0.1+v*4).toFixed(1)+'Hz'}),
-         SP('depth','p2','lin',{min:0,max:1,step:0.05}),
-         SP('width','p3','lin',{min:0,max:1,step:0.05}),SPMIX()],
-    fla:[SP('rate','p1','lin',{min:0,max:1,step:0.05,fmt:v=>(0.05+v*2).toFixed(2)+'Hz'}),
+    phase:[SP('rate','p1','lin',{min:0,max:1,step:0.01,big:0.1,fmt:v=>(0.1+v*4).toFixed(1)+'Hz'}),
+         SP('depth','p2','lin',{min:0,max:1,step:0.01,big:0.1}),
+         SP('width','p3','lin',{min:0,max:1,step:0.01,big:0.1}),SPMIX()],
+    fla:[SP('rate','p1','lin',{min:0,max:1,step:0.01,big:0.1,fmt:v=>(0.05+v*2).toFixed(2)+'Hz'}),
          SP('fdbk','p2','lin',{min:0,max:0.9,step:0.05}),
-         SP('width','p3','lin',{min:0,max:1,step:0.05}),SPMIX()],
-    pha:[SP('rate','p1','lin',{min:0,max:1,step:0.05,fmt:v=>(0.05+v*3).toFixed(2)+'Hz'}),
-         SP('depth','p2','lin',{min:0,max:1,step:0.05}),
-         SP('width','p3','lin',{min:0,max:1,step:0.05}),SPMIX()],
-    trm:[SP('rate','p1','lin',{min:0,max:1,step:0.05,fmt:v=>(0.5+v*15).toFixed(1)+'Hz'}),
-         SP('depth','p2','lin',{min:0,max:1,step:0.05}),SPMIX()],
-    drv:[SP('drive','p1','lin',{min:0,max:1,step:0.05}),
-         SP('tone','p2','lin',{min:0,max:1,step:0.05}),SPMIX()],
-    crush:[SP('crush','p1','lin',{min:0,max:1,step:0.05}),
-         SP('-','p2','lin',{min:0,max:1,step:0.05}),SPMIX()],
+         SP('width','p3','lin',{min:0,max:1,step:0.01,big:0.1}),SPMIX()],
+    pha:[SP('rate','p1','lin',{min:0,max:1,step:0.01,big:0.1,fmt:v=>(0.05+v*3).toFixed(2)+'Hz'}),
+         SP('depth','p2','lin',{min:0,max:1,step:0.01,big:0.1}),
+         SP('width','p3','lin',{min:0,max:1,step:0.01,big:0.1}),SPMIX()],
+    trm:[SP('rate','p1','lin',{min:0,max:1,step:0.01,big:0.1,fmt:v=>(0.5+v*15).toFixed(1)+'Hz'}),
+         SP('depth','p2','lin',{min:0,max:1,step:0.01,big:0.1}),SPMIX()],
+    drv:[SP('drive','p1','lin',{min:0,max:1,step:0.01,big:0.1}),
+         SP('tone','p2','lin',{min:0,max:1,step:0.01,big:0.1}),SPMIX()],
+    crush:[SP('crush','p1','lin',{min:0,max:1,step:0.01,big:0.1}),
+         SP('-','p2','lin',{min:0,max:1,step:0.01,big:0.1}),SPMIX()],
     /* ONE REVERB, FOUR WAYS TO BUILD IT — the same shape `dist` uses for its
        curves. They are not variations on a sound, they are different machines,
        and they cost wildly different amounts:
@@ -2163,10 +2169,10 @@ const FX_P=sl=>{
        preset already saved keeps the convolver it was built with. */
     verb:[SP('mode','rv','enum',{opts:['convolve','plate','spring','room'],
             get:o=>Math.round(o.rv||0), set:(o,v)=>{o.rv=Math.round(v);}}),
-         SP('size','p1','lin',{min:0,max:1,step:0.05,
+         SP('size','p1','lin',{min:0,max:1,step:0.01,big:0.1,
             fmt:(v,m)=>Math.round((m&&m.rv)||0)===0?fT(vrbSec(v)):Math.round(0.2+v*4.3)+'s'}),
-         SP('damp','p2','lin',{min:0,max:1,step:0.05}),
-         SP('width','p3','lin',{min:0,max:1,step:0.05}),
+         SP('damp','p2','lin',{min:0,max:1,step:0.01,big:0.1}),
+         SP('width','p3','lin',{min:0,max:1,step:0.01,big:0.1}),
          /* PRE RESTS AT OFF, and what is worth writing down is why that
             matters rather than how it happens: a slot saved before pre-delay
             existed has no p5, and a NaN here is not a cosmetic dash — it
@@ -2174,28 +2180,28 @@ const FX_P=sl=>{
             which is the whole channel. The engine reads a missing p5 as 0 and
             builds no delay node at all. specVal hands the dial that same 0,
             off mkFx, the way it does for every param a slot predates. */
-         SP('pre','p5','lin',{min:0,max:1,step:0.05,
+         SP('pre','p5','lin',{min:0,max:1,step:0.01,big:0.1,
             fmt:v=>v<0.005?'off':Math.round(v*200)+'ms'}),
          SPMIX()],
-    limit:[SP('ceil','p1','lin',{min:0,max:1,step:0.05,fmt:v=>Math.round(-30+v*30)+'dB'}),
-         SP('rel','p2','lin',{min:0,max:1,step:0.05}),
-         SP('gain','mix','lin',{min:0,max:1,step:0.05})],
-    clip:[SP('amount','p1','lin',{min:0,max:1,step:0.05,
+    limit:[SP('ceil','p1','lin',{min:0,max:1,step:0.01,big:0.1,fmt:v=>Math.round(-30+v*30)+'dB'}),
+         SP('rel','p2','lin',{min:0,max:1,step:0.01,big:0.1}),
+         SP('gain','mix','lin',{min:0,max:1,step:0.01,big:0.1})],
+    clip:[SP('amount','p1','lin',{min:0,max:1,step:0.01,big:0.1,
             fmt:v=>'-'+(1+v*23).toFixed(0)+'dB'}),
-         SP('knee','p2','lin',{min:0,max:1,step:0.05}),
-         SP('recover','p3','lin',{min:0,max:1,step:0.05,
+         SP('knee','p2','lin',{min:0,max:1,step:0.01,big:0.1}),
+         SP('recover','p3','lin',{min:0,max:1,step:0.01,big:0.1,
             fmt:v=>Math.round((0.03+v*0.25)*1000)+'ms'})],
-    comp:[SP('thresh','p1','lin',{min:0,max:1,step:0.05,fmt:v=>Math.round(-60+v*60)+'dB'}),
-         SP('ratio','p2','lin',{min:0,max:1,step:0.05,fmt:v=>(1+v*19).toFixed(1)+':1'}),
-         SP('attack','p3','lin',{min:0,max:1,step:0.05,
+    comp:[SP('thresh','p1','lin',{min:0,max:1,step:0.01,big:0.1,fmt:v=>Math.round(-60+v*60)+'dB'}),
+         SP('ratio','p2','lin',{min:0,max:1,step:0.01,big:0.1,fmt:v=>(1+v*19).toFixed(1)+':1'}),
+         SP('attack','p3','lin',{min:0,max:1,step:0.01,big:0.1,
             fmt:v=>Math.round((0.0005+v*v*0.2)*1000)+'ms'}),
-         SP('release','p4','lin',{min:0,max:1,step:0.05,
+         SP('release','p4','lin',{min:0,max:1,step:0.01,big:0.1,
             fmt:v=>Math.round((0.02+v*v*0.9)*1000)+'ms'}),
-         SP('makeup','mix','lin',{min:0,max:1,step:0.05})],
-    gate:[SP('thresh','p1','lin',{min:0,max:1,step:0.05}),
-         SP('depth','p2','lin',{min:0,max:1,step:0.05}),SPMIX()],
+         SP('makeup','mix','lin',{min:0,max:1,step:0.01,big:0.1})],
+    gate:[SP('thresh','p1','lin',{min:0,max:1,step:0.01,big:0.1}),
+         SP('depth','p2','lin',{min:0,max:1,step:0.01,big:0.1}),SPMIX()],
     roll:[SP('div','p1','lin',{min:0,max:3,step:1,fmt:v=>['1/4','1/8','1/16','1/32'][clamp(Math.round(v),0,3)]}),
-         SP('fdbk','p2','lin',{min:0,max:1,step:0.05}),SPMIX()],
+         SP('fdbk','p2','lin',{min:0,max:1,step:0.01,big:0.1}),SPMIX()],
     /* SAT HAD NO ROW AT ALL, and it is the one type that most needed one.
        drv and crush were folded INTO it — both are hidden from the fx menu and
        rewrite themselves as sat with a curve index — so its `curve` dial IS the
@@ -2207,91 +2213,91 @@ const FX_P=sl=>{
        picker, and it was the only thing left to look at.
        p3 indexes DTYPES FROM 1: DTYPES[0] is 'off', and an fx that is off has
        the fx menu for that. */
-    sat:[SP('drive','p1','lin',{min:0,max:1,step:0.05}),
+    sat:[SP('drive','p1','lin',{min:0,max:1,step:0.01,big:0.1}),
          SP('curve','p3','enum',{opts:DTYPES.slice(1)}),
          /* ONE DIAL, TWO MEANINGS, because the engine has two: on the crush
             curve p2 is the sample-rate divider, on every other curve it is the
             lowpass after the shaper. Showing it as 'tone' while it decimates
             was how the bitcrusher read as a broken tone control. */
          DTYPES[clamp(Math.round(sl.p3||0),0,8)+1]==='crush'
-           ?SP('rate','p2','lin',{min:0,max:1,step:0.05,
+           ?SP('rate','p2','lin',{min:0,max:1,step:0.01,big:0.1,
               fmt:v=>'÷'+(1+Math.round(v*v*40))})
-           :SP('tone','p2','lin',{min:0,max:1,step:0.05,
+           :SP('tone','p2','lin',{min:0,max:1,step:0.01,big:0.1,
               fmt:v=>{const f=clamp(700*Math.pow(28.6,v),700,20000);
                 return f>=1000?(f/1000).toFixed(1)+'k':Math.round(f)+'Hz';}}),
          /* IN AND OUT DEFAULT TO THE CENTRE, and they have to say so here: a
             slot saved before these existed has no p5 or p7, and reading one as
             0 puts the dial at −12dB — so simply LOOKING at the gain would have
             turned the effect down the first time you nudged it. */
-         SP('in','p5','lin',{min:0,max:1,step:0.05,get:o=>o.p5??0.5,
+         SP('in','p5','lin',{min:0,max:1,step:0.01,big:0.1,get:o=>o.p5??0.5,
             fmt:v=>{const db=(v-0.5)*24.1; return (db>0?'+':'')+db.toFixed(1)+'dB';}}),
-         SP('out','p7','lin',{min:0,max:1,step:0.05,get:o=>o.p7??0.5,
+         SP('out','p7','lin',{min:0,max:1,step:0.01,big:0.1,get:o=>o.p7??0.5,
             fmt:v=>{const db=(v-0.5)*24.1; return (db>0?'+':'')+db.toFixed(1)+'dB';}}),
          SPMIX()],
-    tape:[SP('wow','p1','lin',{min:0,max:1,step:0.05}),
-         SP('sat','p2','lin',{min:0,max:1,step:0.05}),SPMIX()],
+    tape:[SP('wow','p1','lin',{min:0,max:1,step:0.01,big:0.1}),
+         SP('sat','p2','lin',{min:0,max:1,step:0.01,big:0.1}),SPMIX()],
     grs8:[SP('pat','p1','lin',{min:0,max:4,step:1,fmt:v=>['half','off8','gate8','fade','trip'][clamp(Math.round(v),0,4)]}),
-         SP('depth','p2','lin',{min:0,max:1,step:0.05}),SPMIX()],
+         SP('depth','p2','lin',{min:0,max:1,step:0.01,big:0.1}),SPMIX()],
     send:[SP('bus','p1','lin',{min:1,max:10,step:1,fmt:v=>'slot'+Math.round(v)}),
-         SP('amt','p2','lin',{min:0,max:1,step:0.05})],
+         SP('amt','p2','lin',{min:0,max:1,step:0.01,big:0.1})],
     /* CHANNEL 0 IS THE MASTER — CHANS() is 1..9 — so a channel's number IS its
        index, unlike a rack slot where 0 is the tenth. This borrowed the slot
        formula and so labelled index 1 as "ch2": set it to follow ch2 and it
        followed ch1, every time. The range starts at 1 because ducking off the
        master is ducking off yourself. */
     duck:[SP('follow','p1','lin',{min:1,max:9,step:1,fmt:v=>'ch'+Math.round(v)}),
-         SP('amt','p2','lin',{min:0,max:1,step:0.05}),
-         SP('rel','p3','lin',{min:0,max:1,step:0.05})],
-    amix:[SP('amt','p1','lin',{min:0,max:1,step:0.05}),
-         SP('react','p2','lin',{min:0,max:1,step:0.05})],
-    hp:[SP('freq','p1','lin',{min:0,max:1,step:0.02,fmt:v=>xHz(v)}),
-         SP('reso','p2','lin',{min:0,max:1,step:0.05}),SPMIX()],
-    lp:[SP('freq','p1','lin',{min:0,max:1,step:0.02,fmt:v=>xHz(v)}),
-         SP('reso','p2','lin',{min:0,max:1,step:0.05}),SPMIX()],
-    bld:[SP('hp','p1','lin',{min:0,max:1,step:0.02,fmt:v=>xHz(v)}),
-         SP('wet','p2','lin',{min:0,max:1,step:0.05}),
+         SP('amt','p2','lin',{min:0,max:1,step:0.01,big:0.1}),
+         SP('rel','p3','lin',{min:0,max:1,step:0.01,big:0.1})],
+    amix:[SP('amt','p1','lin',{min:0,max:1,step:0.01,big:0.1}),
+         SP('react','p2','lin',{min:0,max:1,step:0.01,big:0.1})],
+    hp:[SP('freq','p1','lin',{min:0,max:1,step:0.01,big:0.1,fmt:v=>xHz(v)}),
+         SP('reso','p2','lin',{min:0,max:1,step:0.01,big:0.1}),SPMIX()],
+    lp:[SP('freq','p1','lin',{min:0,max:1,step:0.01,big:0.1,fmt:v=>xHz(v)}),
+         SP('reso','p2','lin',{min:0,max:1,step:0.01,big:0.1}),SPMIX()],
+    bld:[SP('hp','p1','lin',{min:0,max:1,step:0.01,big:0.1,fmt:v=>xHz(v)}),
+         SP('wet','p2','lin',{min:0,max:1,step:0.01,big:0.1}),
          SP('time','p3','enum',{opts:['1/16','1/8','1/8.','1/4']})],
     filt:(()=>{
       const ty=XFT[clamp(Math.round(sl.p3||0),0,XFT.length-1)];
       const a=[SP('type','p3','enum',{opts:XFT})];   // the selector is 'fx' now
-      if(ty==='vowel')a.push(SP('vowel','p1','lin',{min:0,max:1,step:0.02,
+      if(ty==='vowel')a.push(SP('vowel','p1','lin',{min:0,max:1,step:0.01,big:0.1,
         fmt:v=>{const t=clamp(v,0,1)*4,i=Math.min(3,Math.floor(t));
           return VOWELS[i].toUpperCase()+'-'+VOWELS[i+1].toUpperCase()+' '+Math.round((t-i)*100)+'%';}}));
-      else a.push(SP('freq','p1','lin',{min:0,max:1,step:0.02,
+      else a.push(SP('freq','p1','lin',{min:0,max:1,step:0.01,big:0.1,
         fmt:v=>xHz(v)}));
-      a.push(SP(ty==='fmnt'||ty==='vowel'?'sharp':'reso','p2','lin',{min:0,max:1,step:0.05}));
+      a.push(SP(ty==='fmnt'||ty==='vowel'?'sharp':'reso','p2','lin',{min:0,max:1,step:0.01,big:0.1}));
       /* centred like sat's in/out, and for the same reason: the shelf a preset
          predates has no p4, the engine plays it flat (`fx.p4??0.5`), and the
          factory's 0.3 would have shown −7dB on a filter that is doing nothing. */
       if(ty==='peq'||ty==='lsh'||ty==='hsh')
-        a.push(SP('gain','p4','lin',{min:0,max:1,step:0.05,def:0.5,
+        a.push(SP('gain','p4','lin',{min:0,max:1,step:0.01,big:0.1,def:0.5,
           fmt:v=>((v-0.5)*36>0?'+':'')+Math.round((v-0.5)*36)+'dB'}));
       a.push(SPMIX());
       return a;})(),
-    grain:[SP('size','p1','lin',{min:0,max:1,step:0.02,
+    grain:[SP('size','p1','lin',{min:0,max:1,step:0.01,big:0.1,
               fmt:v=>Math.round((0.004+v*v*0.6)*1000)+'ms'}),
-         SP('dens','p2','lin',{min:0,max:1,step:0.02,
+         SP('dens','p2','lin',{min:0,max:1,step:0.01,big:0.1,
               fmt:v=>(1+v*55).toFixed(0)+'/s'}),
          SP('pitch','p3','lin',{min:0,max:1,step:1/48,
               fmt:v=>{const st=Math.round((v-0.5)*48);return (st>0?'+':'')+st+'st';}}),
          /* spray was linear and the whole useful range lived under 0.1, so the
             knob was unusable past a tenth of its travel. v^3.3 puts today's
             0.1 at the midpoint and shows the actual lookback. */
-         SP('spray','p4','lin',{min:0,max:1,step:0.02,
+         SP('spray','p4','lin',{min:0,max:1,step:0.01,big:0.1,
             fmt:v=>Math.round(12+xSpray(v)*1600)+'ms'}),
-         SP('rand','p6','lin',{min:0,max:1,step:0.05}),
-         SP('width','p7','lin',{min:0,max:1,step:0.05}),
+         SP('rand','p6','lin',{min:0,max:1,step:0.01,big:0.1}),
+         SP('width','p7','lin',{min:0,max:1,step:0.01,big:0.1}),
          SP('fdbk','p5','lin',{min:0,max:0.92,step:0.04}),
-         SP('ftime','p8','lin',{min:0,max:1,step:0.02,
+         SP('ftime','p8','lin',{min:0,max:1,step:0.01,big:0.1,
             fmt:v=>{const t=xFbT(v);return t>=1?t.toFixed(2)+'s':Math.round(t*1000)+'ms';}}),
          SPMIX()],
   };
   tail.dub=tail.tec=tail.wob=tail.res=tail.dly;   // the delay kinds share the dial
   tail.qual=[SP('type','p3','enum',{opts:['phone','lowbit','amp','lofi']}),
-    SP('amt','p1','lin',{min:0,max:1,step:0.05}),
-    SP('tone','p2','lin',{min:0,max:1,step:0.05}),SPMIX()];
+    SP('amt','p1','lin',{min:0,max:1,step:0.01,big:0.1}),
+    SP('tone','p2','lin',{min:0,max:1,step:0.01,big:0.1}),SPMIX()];
   tail.buf=[SP('type','p3','enum',{opts:['repeat','reverse','chop','shuffle','stop']}),
-    SP('size','p1','lin',{min:0,max:1,step:0.05,fmt:v=>Math.round(50+v*750)+'ms'}),SPMIX()];
+    SP('size','p1','lin',{min:0,max:1,step:0.01,big:0.1,fmt:v=>Math.round(50+v*750)+'ms'}),SPMIX()];
   return base.concat(tail[t]||[]);
 };
 /* STAGE IS GONE (Gad, 2026-08-18: "we should kill the idea of pre and post and
@@ -2381,7 +2387,7 @@ const PLY_P=sl=>{
   if(sl.typ===12)return T(
     SP('gap','p1','lin',{min:5,max:120,step:1,fmt:v=>v+'ms'}),
     SP('hits','p2','lin',{min:1,max:3,step:1,fmt:v=>'+'+Math.round(v)}),
-    SP('level','p3','lin',{min:0,max:1,step:0.05,fmt:v=>Math.round(v*100)+'%'}));
+    SP('level','p3','lin',{min:0,max:1,step:0.01,big:0.1,fmt:v=>Math.round(v*100)+'%'}));
   if(sl.typ===16)return T(                       // cyc: your own timing, looped
     SP('gate','p1','lin',{min:10,max:100,step:5,get:o=>o.p1??85,set:(o,v)=>o.p1=v,
        fmt:v=>Math.round(v)+'%'}));
@@ -2420,7 +2426,7 @@ const MODULES=[
       get:o=>Math.round(o.fmw||0), set:(o,v)=>{o.fmw=Math.round(v);}}),
     SP('uni','uni','lin',{min:1,max:7,step:1,fmt:v=>v+'v'}),
     SP('sprd','sprd','lin',{min:0,max:50,step:2,fmt:v=>v+'c'}),
-    SP('wide','wide','lin',{min:0,max:1,step:0.05}),
+    SP('wide','wide','lin',{min:0,max:1,step:0.01,big:0.1}),
     SP('slop','slop','time',{min:0,max:0.03})]},
  {k:'7',id:null,name:'—'},      // MIX → the Vol / Pan rows in the channel strip (c)
  {k:'8',id:null,name:'—'},
@@ -2579,9 +2585,13 @@ function autoLanes(pre){
    its travel above the point where wet already drowns dry — the same reason
    channel volume is not linear either. Stored value is unchanged; only the
    way the knob walks through it moves. */
+/* MIX IS A FADER, NOT A UNIT DIAL, and that is why it keeps its own numbers
+   through the 0..1 sweep of 2026-08-28: curve:'vol' makes adjust() step in
+   FADER units (⇧ 10 · plain 2 · ⌥ 0.5) so a wet/dry and a channel fader feel
+   like one control. `step` here is only read by the random roller. */
 const SPMIX=()=>SP('mix','mix','lin',{min:0,max:1,step:0.05,curve:'vol',
                    fmt:v=>volToF(v).toFixed(0)});
-const MIX_P=[SP('level','lvl','lin',{min:0,max:1,step:0.05})];
+const MIX_P=[SP('level','lvl','lin',{min:0,max:1,step:0.01,big:0.1})];
 /* AMP, PAN AND PITCH BELONG TO THE VOICE, not to a rack. The amp envelope is
    the VCA every operator runs through, `pitch` is all of them at once, and pan
    is where the whole channel sits — none of them has a slot to live in, and
@@ -2589,7 +2599,7 @@ const MIX_P=[SP('level','lvl','lin',{min:0,max:1,step:0.05})];
    own with one slot.
    PAN USED TO SIT IN A `mix` RACK OF ITS OWN, which put the three global
    destinations in two places and left `mix` holding exactly one entry. */
-const VOICE_P=[SP('amp','amp','lin',{min:0,max:1,step:0.05}),
+const VOICE_P=[SP('amp','amp','lin',{min:0,max:1,step:0.01,big:0.1}),
                SP('pan','pan','lin',{min:-1,max:1,step:0.05}),
                SP('pitch','pitch','lin',{min:-1,max:1,step:0.05})];
 /* the ones that reach a live AudioParam and can therefore be driven at audio
@@ -15714,7 +15724,7 @@ const GRANF=[
     be as an OFFSET from the carrier, which would mean something in both cases.
     Note what goes with them: they are no longer mod/automation destinations,
     so a stored route aimed at cloud pos or scan now points at nothing. */
- SP('spray','spray','lin',{min:0,max:1,step:0.02,fmt:v=>Math.round(v*100)+'%'}),
+ SP('spray','spray','lin',{min:0,max:1,step:0.01,big:0.1,fmt:v=>Math.round(v*100)+'%'}),
  /* the character dial: a sliver, a cloud, or — at the top — one unbroken
     playhead, which is the clean tape read */
  /* 5ms to a whole second in 5ms steps was two hundred presses end to end —
@@ -15735,7 +15745,7 @@ const GRANF=[
    get:o=>Math.round(o.dsync||0),set:(o,v)=>o.dsync=Math.round(v)}),
  SP('dens','dens','lin',{min:0.5,max:120,step:0.5,
    fmt:(v,o)=>Math.round((o&&o.dsync)||0)===1?(+v.toFixed(2))+'/beat':v+'/s'}),
- SP('flow','flow','lin',{min:0,max:1,step:0.05,fmt:v=>v<0.02?'lock':Math.round(v*100)+'%'}),
+ SP('flow','flow','lin',{min:0,max:1,step:0.01,big:0.1,fmt:v=>v<0.02?'lock':Math.round(v*100)+'%'}),
 /* gpitch IS GONE (Gad, 2026-08-18: "rn we have 2 pitch params in grain mode,
    the regular one, and gpitch, they do the same, maybe we can remove gpitch").
    They did: the cloud's own semis and the channel's both ended up transposing
@@ -15744,11 +15754,11 @@ const GRANF=[
    family applyCmode already converts to and from, so one dial means "the pitch
    of this channel" in all three modes and the mode switch keeps it. */
  SP('jit','jit','lin',{min:0,max:12,step:0.5,fmt:v=>'\u00b1'+v+'st'}),
- SP('shape','shape','lin',{min:0,max:1,step:0.05}),
- SP('rev','rev','lin',{min:0,max:1,step:0.05,fmt:v=>Math.round(v*100)+'%'}),
- SP('width','width','lin',{min:0,max:1,step:0.05}),
+ SP('shape','shape','lin',{min:0,max:1,step:0.01,big:0.1}),
+ SP('rev','rev','lin',{min:0,max:1,step:0.01,big:0.1,fmt:v=>Math.round(v*100)+'%'}),
+ SP('width','width','lin',{min:0,max:1,step:0.01,big:0.1}),
  SP('fade','fade','lin',{min:0.005,max:0.5,step:0.005,fmt:v=>Math.round(v*1000)+'ms'}),
- SP('dif','dif','lin',{min:0,max:1,step:0.05,fmt:v=>v<0.03?'dry':Math.round(v*100)+'%'}),
+ SP('dif','dif','lin',{min:0,max:1,step:0.01,big:0.1,fmt:v=>v<0.03?'dry':Math.round(v*100)+'%'}),
  SP('fb','fb','lin',{min:0,max:0.95,step:0.05,fmt:v=>Math.round(v*100)+'%',
     get:m=>m.fb||0,set:(m,v)=>m.fb=v}),
  /* THE AUDIO CHANNEL LOOPS AND GRANULATES, so what it wants is a LOOP.
@@ -15981,14 +15991,14 @@ const AUDTAKE=[
    the dials that shape what a key spawns. Both rest at the top and only cut,
    so nothing is quietly attenuating a channel you have not touched. */
 const AUDLVL=[
- SP('key vol','kvol','lin',{min:0,max:1,step:0.05,fmt:v=>Math.round(v*100)+'%'}),
+ SP('key vol','kvol','lin',{min:0,max:1,step:0.01,big:0.1,fmt:v=>Math.round(v*100)+'%'}),
 ];
 /* on the INSTRUMENT row rather than the page — but where a dial lives and
    whether something can drive it are different questions, so they are listed
    here for the mod matrix and the automation to find */
 const AUDINST=[
- SP('gain','gain','lin',{min:0,max:1,step:0.05,fmt:v=>Math.round(v*100)+'%'}),
- SP('loop vol','lvol','lin',{min:0,max:1,step:0.05,fmt:v=>Math.round(v*100)+'%'}),
+ SP('gain','gain','lin',{min:0,max:1,step:0.01,big:0.1,fmt:v=>Math.round(v*100)+'%'}),
+ SP('loop vol','lvol','lin',{min:0,max:1,step:0.01,big:0.1,fmt:v=>Math.round(v*100)+'%'}),
 ];
 
 const CODEF=()=>Array.from({length:8},(_,i)=>{
@@ -27341,7 +27351,11 @@ function loopRow(pat){
     const l=pat.lanes[i]; if(!l)return '';
     if(l.auto&&!l.events.length)return sp('d','·');
     const n=l.count%1?String(l.count).replace(/^0/,''):String(l.count);
-    return sp(i===S.curPreset?'a':'v',(n+UNIT_NAMES[l.unit]).slice(0,CELLW));
+    /* A SPACE BETWEEN THE COUNT AND THE UNIT (Gad, 2026-08-28: "rn they are
+       together and its hard to read") — `416th` is a number you have to parse
+       before you can read it. The cell is CELLW wide and the longest pair,
+       256 16th, is exactly 8. */
+    return sp(i===S.curPreset?'a':'v',(n+' '+UNIT_NAMES[l.unit]).slice(0,CELLW));
   }, sp('d',pad('Loop',GUTW)));
 }
 function meterRow(LN,PR,peeking){

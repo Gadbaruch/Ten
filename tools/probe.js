@@ -3568,6 +3568,79 @@ async function probeMaster() {
                   'at', 'sceneAt', 'master', 'err'], rows };
 }
 
+/* HOW FAR ONE PRESS MOVES A DIAL (Gad, 2026-08-28: "reso params should jump by
+ * 0.1 normally, and 1 shifted" · "all params that are 0-1 should jump 0.01
+ * normally and by 0.1 shifted for example reverb width and damp").
+ *
+ * Every param the fx racks and the filter offer, driven through adjust() —
+ * the real door — at the three modifiers. `plain` and `shift` are what he
+ * named; only rows that DISAGREE with the rule are printed unless all=1.
+ */
+async function probeSteps() {
+  const ALL = num(P.all, 0) !== 0;
+  const rows = [], seen = new Set();
+  const look = (where, spec) => {
+    if (!spec || spec.type === 'enum' || spec.type === 'freq' || spec.type === 'time') return;
+    const lo = spec.min, hi = spec.max;
+    if (!(Number.isFinite(lo) && Number.isFinite(hi))) return;
+    const key = where + '|' + spec.lbl + '|' + lo + '|' + hi + '|' + spec.step + '|' + (spec.big ?? '');
+    if (seen.has(key)) return; seen.add(key);
+    /* FROM A VALUE ON THE GRID. `big` SNAPS the coarse step to its own
+       multiples, so measuring from an arbitrary midpoint reports the distance
+       to the next multiple and calls a correct dial broken — flt reso read
+       0.95 from 12.05 and 1 from 12. */
+    const grid = spec.big || spec.step || 1;
+    const mid = Math.round((lo + (hi - lo) * 0.5) / grid) * grid;
+    const d = m => r3(Math.abs(adjust(spec, mid, 1, m) - mid));
+    const plain = d(1), shift = d(10), fine = d(0.1);
+    /* the two rules he named, and the two things they deliberately do not
+       cover: a curve:'vol' dial is a FADER (⇧10 · 2 · ⌥0.5 in fader units, so
+       a wet/dry feels like the channel strip), and grain's pitch steps in
+       SEMITONES (1/48 of ±24) because that is what a pitch dial is for. */
+    const isUnit = lo === 0 && hi === 1 && !spec.curve && spec.lbl !== 'pitch';
+    const isReso = /reso/.test(spec.lbl) && !(lo === 0 && hi === 1);
+    const want = isUnit ? [0.01, 0.1] : isReso ? [0.1, 1] : null;
+    const ok = !want || (Math.abs(plain - want[0]) < 1e-9 && Math.abs(shift - want[1]) < 1e-9);
+    if (ALL || !ok || isReso)
+      rows.push({ k: where + ' · ' + spec.lbl, lo, hi, step: spec.step, big: spec.big ?? '—',
+                  plain, shift, fine, rule: want ? want.join(' / ') : 'n/a', ok: ok ? 'yes' : 'NO' });
+    return ok;
+  };
+
+  let unit = 0, unitBad = 0, other = 0;
+  const tally = spec => {
+    if (!spec || spec.type === 'enum' || spec.type === 'freq' || spec.type === 'time') return;
+    if (!(spec.min === 0 && spec.max === 1) || spec.curve || spec.lbl === 'pitch') { other++; return; }
+    unit++;
+    const d = m => Math.abs(adjust(spec, 0.5, 1, m) - 0.5);
+    if (Math.abs(d(1) - 0.01) > 1e-9 || Math.abs(d(10) - 0.1) > 1e-9) unitBad++;
+  };
+
+  /* every fx type, through the real spec builder */
+  for (let t = 0; t < XTYPES.length; t++) {
+    const sl = Object.assign(mkFx ? mkFx() : {}, { typ: t, p1: 0.5, p2: 0.5, p3: 0.5, p4: 0.5,
+                                                   p5: 0.5, p6: 0.5, p7: 0.5, mix: 0.5 });
+    let sp2 = []; try { sp2 = FX_P(sl) || []; } catch (_) {}
+    for (const s2 of sp2) { look('fx ' + XTYPES[t], s2); tally(s2); }
+  }
+  /* the channel racks: filter, env, amp, lfo, mod, ply — whatever paramsFor offers */
+  const pre = S.presets[CH];
+  for (let mi = 0; mi < MODULES.length; mi++) {
+    const M = MODULES[mi]; if (!M || !M.id || M.prs) continue;
+    const hold = modHolder(pre, M.id); const list = hold && hold[M.id];
+    const slots = Array.isArray(list) ? list : [list];
+    for (const sl of slots) {
+      let sp2 = []; try { sp2 = paramsFor(mi, sl) || []; } catch (_) {}
+      for (const s2 of sp2) { look(M.id, s2); tally(s2); }
+    }
+  }
+  notes.push('0..1 params seen: ' + unit + ', of which ' + unitBad + ' still disagree with 0.01 / 0.1');
+  notes.push('non-unit params seen: ' + other + ' (untouched)');
+  notes.push('rows shown: every reso, plus anything that BREAKS a rule. pass all=1 for the lot.');
+  if (!rows.length) rows.push({ k: 'every rule holds', lo: '', hi: '', ok: 'yes' });
+  return { cols: ['lo', 'hi', 'step', 'big', 'plain', 'shift', 'fine', 'rule', 'ok'], rows };
+}
+
 async function probePwmAll() {
   const ch = CH === 9 ? 8 : CH;
   const RATE = num(P.rate, 2), AMT = num(P.amt, 70);
@@ -3744,6 +3817,7 @@ const HELP = {
     { k: 'pwm',      args: 'ch=8 wav=3 rate=2 amt=70 \u2014 is a width sweep smooth? excess edges per second = clicks' },
     { k: 'recpitch', args: 'ch=8 \u2014 played vs recorded vs replayed pitch: does the scale snap the finger and not the lane' },
     { k: 'master',   args: '\u2014 with the master selected: which lane do the loop-length and clear gestures actually move' },
+    { k: 'steps',    args: 'ch=8 all=0 \u2014 how far one press moves every dial: 0..1 params must be 0.01/0.1, reso 0.1/1' },
     { k: 'poolkind', args: 'want=loop — every pool take: measured onsets/centroid, the kind it was called, and both dial views in order' },
     { k: '(any)',    args: '--ab <url> runs the same probe on a second build and diffs it' },
   ]
@@ -3786,6 +3860,7 @@ try {
                    fxmod: probeFxMod,
                    fxwire: probeFxWire,
                    poolkind: probePoolKind,
+                   steps: probeSteps,
                    master: probeMaster,
                    recpitch: probeRecPitch,
                    smplib: probeSmpLib,
