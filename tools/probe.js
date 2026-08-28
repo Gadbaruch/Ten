@@ -4255,7 +4255,10 @@ async function probeRetroGuess() {
     retroBuf[ch] = notes.map(n => ({ t: base + n[0], midi: 60 + (n[1] || 0),
                                      vel: 0.9, dur: n[2] || 0.25 }));
     const want = notes.length;
-    const g = retroGuess(ch);
+    /* THE SAME CALL THE CODE MAKES: stopped, retroCapture passes punchIn=true.
+       Reporting the other variant here made this column disagree with the
+       length the lane actually came out as, which is worse than no column. */
+    const g = lane.auto ? retroGuess(ch, true) : null;
     let err = null;
     try { retroCapture(); } catch (e) { err = String(e).slice(0, 70); }
     const evs = lane.events.slice().sort((a, b) => a.t - b.t);
@@ -4273,6 +4276,40 @@ async function probeRetroGuess() {
     try { stop(); } catch (_) {}
   };
 
+  /* THE RUNNING CASE. The transport clock is wound back rather than waited
+     out — posNow() is pure arithmetic off T.startTime, so a 21-beat-old
+     transport is exactly a 21-beat-old transport. */
+  const midRun = (k, notes, setBars, atBeat) => {
+    try { stop(); } catch (_) {}
+    S.layer = 1; S.curPreset = ch; S.editSnd = ch; S.mSel = false;
+    for (let i = 0; i < 10; i++) { pat.lanes[i].events = []; delete pat.lanes[i]._cap; }
+    const lane = pat.lanes[ch];
+    if (setBars) { lane.unit = 'B'; lane.count = setBars; lane.auto = false; }
+    else { lane.unit = 'B'; lane.count = 1; lane.auto = true; }
+    play();
+    T.startTime = AC.currentTime - atBeat * spb();   // the transport is `atBeat` old
+    acts = [{ pat: S.editPat, start: -1e9, anchor: 0 }];
+    retroBuf[ch] = notes.map(n => ({ t: n[0], midi: 60 + (n[1] || 0), vel: 0.9, dur: n[2] || 0.25 }));
+    const want = notes.map(n => n[0]);
+    const g = lane.auto ? retroGuess(ch, false) : null;   // running: no gap walk
+    let err = null;
+    try { retroCapture(); } catch (e) { err = String(e).slice(0, 70); }
+    const L = lane.len;
+    const got = lane.events.slice().sort((a, b) => a.t - b.t).map(e => r3(e.t));
+    /* where each PLAYED beat should land in a loop of this length, anchor 0 */
+    const wantAt = want.map(t => r3(fmod(t, L))).sort((a, b) => a - b);
+    rows.push({ k, auto: setBars ? 'SET ' + setBars : 'unset',
+                guessBars: g ? g.bars : '—',
+                bars: lane.count + UNIT_NAMES[lane.unit].slice(0, 1),
+                took: got.length + '/' + want.length,
+                at: got.join(' ') || '—',
+                shouldBe: wantAt.join(' '),
+                right: (got.length === want.length &&
+                        got.every((v, i2) => Math.abs(v - wantAt[i2]) < 1e-6)) ? 'yes' : 'NO',
+                err });
+    try { stop(); } catch (_) {}
+  };
+
   try {
     CFG.defLen = 1;                                  // 1 bar — so a guess is visible against it
     /* eight 8ths over two bars, nothing before it */
@@ -4287,6 +4324,21 @@ async function probeRetroGuess() {
     one('last note past the line (4.5)', [[0,0],[2,4],[4.5,7,0.5]]);
     /* a long one */
     one('4-bar phrase', [[0,0],[4,4],[8,7],[12,4],[15,2]]);
+    /* HIS SCENARIO, RUNNING (2026-08-29: "if i start playing mid loop then
+       wrap around and do retro rec, only the beginning of the loop is
+       captured and not the end where i started playing from"). A 4-bar loop,
+       the performance starts at beat 12 — bar 4, mid-loop — and runs past the
+       wrap to beat 20. Every note must survive, and a note played at 12 must
+       come back at 12. */
+    const mid = [];
+    for (let b = 12; b <= 20; b += 1) mid.push([b - 40 + 40, (b - 12) % 8]);
+    midRun('4-bar SET · play 12→20 · retro at 21', mid, 4, 21);
+    midRun('4-bar SET · a bar of rest inside', 
+           [[12,0],[13,2],[14,4],[15,5],/* rest */[20,7]], 4, 21);
+    midRun('AUTO · play 12→20 · retro at 21', mid, 0, 21);
+    midRun('AUTO · a bar of rest inside',
+           [[12,0],[13,2],[14,4],[15,5],/* rest */[20,7]], 0, 21);
+
     /* AND THE ONE THE GUESSER MUST NOT TOUCH: a length you set */
     one('length already SET to 2', [[0,0],[1,2],[2,4],[3,5],[4,7],[5,5],[6,4],[7,2]], 2);
     one('length already SET to 1', [[0,0],[1,2],[2,4],[3,5],[4,7],[5,5],[6,4],[7,2]], 1);
@@ -4305,7 +4357,7 @@ async function probeRetroGuess() {
              'from listening. clipped = a note landed on or past the loop line; collide = two ' +
              'notes on one instant, which is what a too-short loop does to a phrase.');
   return { cols: ['auto', 'guessBars', 'guessSpan', 'bars', 'took', 'first', 'last',
-                  'clipped', 'collide', 'err'], rows };
+                  'clipped', 'collide', 'at', 'shouldBe', 'right', 'err'], rows };
 }
 
 async function probePwmAll() {

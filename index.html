@@ -1471,7 +1471,7 @@ const recPlayed=(pi,tBeat,midi,vel,durBeats)=>recPlayNote(pi,tBeat,sndOut(pi,mid
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-28.2028';
+const BUILD='2026-08-28.2047';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -21157,13 +21157,30 @@ function audRecEnd(){
    so "play a bit, breathe, then play the take" hands back the take and not
    both. THE LENGTH is that span at the nearest bar — but NEVER shorter than
    what you played, or a phrase whose last note sits just past the line would
-   wrap onto its own beginning. */
+   wrap onto its own beginning.
+
+   ⚠ AND THE GAP WALK IS FOR THE STOPPED CASE ONLY (Gad, 2026-08-29: "your
+   last fix reverted a fix from last turn… if i start playing mid loop then
+   wrap around and do retro rec, only the beginning of the loop is captured
+   and not the end where i started playing from"). It did, and this is why:
+   A REST IS NOT A PUNCH-IN. A bar of silence inside a phrase looks exactly
+   like the silence between two attempts, so a phrase with a bar's rest in it
+   had its punch-in walked forward past everything before the rest — measured,
+   a take of 5 notes at beats 12,13,14,15 and 20 came back as ONE note, the
+   four before the rest gone. Those four are literally "the end of the loop
+   where I started playing from".
+   Stopped there is nothing else to go on: no clock, no anchor, and the phrase
+   is the only reference there is. RUNNING there is — play() empties the retro
+   buffer, so everything in it IS this run, and the anchor already places it
+   correctly. So while the transport runs the guess chooses a bar COUNT and
+   nothing else, and it covers every note you have played. */
 const RETROGAP=4;                      // one bar of silence separates two attempts
-function retroGuess(pi){
+function retroGuess(pi,punchIn){
   const buf=retroBuf[pi]; if(!buf||!buf.length)return null;
   const ns=buf.slice().sort((a,b)=>a.t-b.t);
-  let i=ns.length-1;
-  while(i>0&&ns[i].t-(ns[i-1].t+(ns[i-1].dur||0))<RETROGAP)i--;
+  let i=0;
+  if(punchIn){ i=ns.length-1;
+    while(i>0&&ns[i].t-(ns[i-1].t+(ns[i-1].dur||0))<RETROGAP)i--; }
   const start=ns[i].t;
   let end=start;
   for(let j=i;j<ns.length;j++)end=Math.max(end,ns[j].t+(ns[j].dur||0.25));
@@ -21187,7 +21204,8 @@ function retroCapture(){
      the loop as set" — but on a fresh lane there is no length you set, and it
      was using the Looper's own construction default instead of the one bar
      count in settings that exists precisely to answer this. */
-  const G9=lane.auto?retroGuess(pi):null;             // …and now it LISTENS instead
+  /* the gap walk only where there is no clock to be true to — see retroGuess */
+  const G9=lane.auto?retroGuess(pi,!T.playing):null;   // …and now it LISTENS instead
   if(lane.auto){lane.unit='B'; lane.count=G9?G9.bars:DEFLENS[CFG.defLen];}
   const L=lane.len||4, nowB=gridNow(), anc=editAnchor();
   const patEmpty=S.patterns[S.editPat].lanes.every(l=>l===lane||!l.events.length);
