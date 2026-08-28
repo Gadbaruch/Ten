@@ -3449,6 +3449,125 @@ async function probeRecPitch() {
   return { cols: ['key', 'heard', 'rec', 'replay', 'shift', 'sounded', 'back', 't', 'dur', 'n'], rows };
 }
 
+/* THE MASTER IS A CHANNEL — IS IT? (Gad, 2026-08-28: "when on master channel
+ * i need to be able to edit the loop length same as in normal channels, right
+ * now it only changes the last visited channel, also i need to be able to
+ * clear recordings on master same as normal channel".)
+ *
+ * Every row is one gesture made with the master selected, and the answer is
+ * WHICH LANE MOVED: 0 is the master's own, anything else is the channel the
+ * cursor was last on. `tgt` is chTargets() — the one function every
+ * channel-scoped action asks — so it says whether the gesture was ever going
+ * to land on the master at all.
+ */
+async function probeMaster() {
+  const pat = S.patterns[S.editPat];
+  const keepLanes = pat.lanes.map(l => (l ? JSON.parse(JSON.stringify(l.toJSON())) : null));
+  const keepSel = S.curPreset, keepEd = S.editSnd, keepLayer = S.layer, keepM = S.mSel;
+  const keepState = pat.state, keepPlaying = T.playing;
+  const keepClips = JSON.parse(JSON.stringify(S.clips || {}));
+  const keepScenes = JSON.parse(JSON.stringify(S.scenes || {}));
+  const keepAt = JSON.parse(JSON.stringify(S.clipAt || {})), keepSc = S.sceneAt;
+
+  const ev = (ty, code, mods) => document.dispatchEvent(new KeyboardEvent(ty,
+    Object.assign({ code, key: code, bubbles: true, cancelable: true }, mods || {})));
+  const lens = () => pat.lanes.map(l => (l ? +(l.count) : null));
+  const cnts = () => pat.lanes.map(l => (l ? l.events.length : 0));
+  const moved = (a, b) => { const o = []; for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) o.push(i); return o.join(',') || 'none'; };
+
+  const rows = [];
+  /* one gesture, with the master selected at the given layer */
+  const g = (k, layer, run) => {
+    S.mSel = true; S.layer = layer; S.editSnd = 7; S.curPreset = 7;
+    for (let i = 0; i < 10; i++) { const l = pat.lanes[i]; if (!l) continue;
+      l.unit = 'B'; l.count = 2; l.auto = false;
+      l.events = [{ t: 0, midi: 60, vel: 0.9, dur: 0.5 }]; delete l._cap; }
+    const L0 = lens(), C0 = cnts();
+    let err = null;
+    try { run(); } catch (e) { err = String(e).slice(0, 60); }
+    rows.push({ k, layer, tgt: '[' + chTargets().join(',') + ']', focus: focusCh(),
+                lenMoved: moved(L0, lens()), notesCleared: moved(C0, cnts()),
+                m0len: pat.lanes[0].count, err });
+  };
+
+  try {
+    if (T.playing) stop();
+    /* TAB+UP is the loop length. HOLD.tab is what the real chord sets. */
+    const tabUp = () => { HOLD.tab = true; HOLD.tabAt = performance.now(); HOLD.tabUsed = false;
+                          ev('keydown', 'ArrowUp'); HOLD.tab = false; };
+    const tabDn = () => { HOLD.tab = true; HOLD.tabAt = performance.now(); HOLD.tabUsed = false;
+                          ev('keydown', 'ArrowDown'); HOLD.tab = false; };
+    const tabRight = () => { HOLD.tab = true; HOLD.tabAt = performance.now(); HOLD.tabUsed = false;
+                             ev('keydown', 'ArrowRight'); HOLD.tab = false; };
+    const shDel = () => { ev('keydown', 'Backspace', { shiftKey: true }); ev('keyup', 'Backspace', { shiftKey: true }); };
+    g('tab+↑  (len ×2)',  1, tabUp);
+    g('tab+↓  (len ÷2)',  1, tabDn);
+    g('tab+→  (len +1)',  1, tabRight);
+    g('⇧⌫  (clear lane)', 1, shDel);
+    g('tab+↑  (len ×2)',  2, tabUp);
+    g('tab+→  (len +1)',  2, tabRight);
+    g('⇧⌫  (clear lane)', 2, shDel);
+
+    /* ---- the 0+letter gestures, and the two ways to get one into the lane ---- */
+    const dig = (n, code, mods) => { HOLD.dig = n; HOLD.digUsed = false;
+      ev('keydown', code, mods); HOLD.dig = -1; };
+    const at = () => CHANS().map(i => CLIPKEYS[(S.clipAt || {})[i] ?? 0]).join('');
+    const m0 = () => pat.lanes[0].events.filter(e => e.clip !== undefined)
+      .map(e => (e.ch === 0 ? (e.row ? 'row' : 'sc') : 'ch' + e.ch) + CLIPKEYS[e.clip] + '@' + r3(e.t)).join(' ') || 'none';
+    const setup = () => { S.mSel = true; S.layer = 2; S.editSnd = 7; S.curPreset = 7;
+      S.clips = {}; S.scenes = {}; S.clipAt = {1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0,9:0}; S.sceneAt = 0;
+      pat.state = 'on'; pat.lanes[0].events = []; };
+    const g2 = (k, run) => { let err = null; try { run(); } catch (e) { err = String(e).slice(0, 70); }
+      rows.push({ k, at: at(), sceneAt: CLIPKEYS[S.sceneAt ?? 0], master: m0(), err }); };
+
+    setup();
+    g2('0s   plain', () => dig(0, 'KeyS'));
+    g2('0d   plain', () => dig(0, 'KeyD'));
+    g2('3f   one channel', () => dig(3, 'KeyF'));
+    g2('⇧0S  scene', () => dig(0, 'KeyS', { shiftKey: true }));
+    g2('⇧0Q  scene', () => dig(0, 'KeyQ', { shiftKey: true }));
+
+    /* RECORD: armed master lane, transport running — the gesture goes down */
+    setup(); pat.lanes[0].unit = 'B'; pat.lanes[0].count = 4; pat.lanes[0].auto = false;
+    pat.state = 'rec'; if (!T.playing) play();
+    await sleep(200);
+    g2('rec 1a  (already on a)', () => dig(1, 'KeyA'));
+    g2('rec 1b  (a real move)', () => dig(1, 'KeyB'));
+    g2('rec 0s  (playing)', () => dig(0, 'KeyS'));
+    g2('rec ⇧0Q (playing)', () => dig(0, 'KeyQ', { shiftKey: true }));
+    stop();
+
+    /* ENTER: edit on the master, no transport — placed at the cursor cell */
+    setup(); pat.lanes[0].unit = 'B'; pat.lanes[0].count = 4; pat.lanes[0].auto = false;
+    pat.state = 'edit'; stepCur = 0;
+    g2('edit 1a @cell0', () => dig(1, 'KeyA'));
+    g2('edit 1b @cell0 (replaces)', () => dig(1, 'KeyB'));
+    g2('edit 1b again (toggles off)', () => dig(1, 'KeyB'));
+    g2('edit 0s @cell0', () => dig(0, 'KeyS'));
+    stepCur = 4;
+    g2('edit 1b @cell4', () => dig(1, 'KeyB'));
+    g2('...did any of that FIRE?', () => {});
+
+    /* REPLAY: a row event walks the desk, a bare ch0 event restores a scene */
+    setup();
+    S.clips = { 1: {}, 2: {} };
+    g2('replay row-e', () => { const e = { clip: 4, ch: 0, row: 1 }; if (e.row) goSnaps(e.clip); });
+    g2('replay scene-h (bare ch0)', () => { const e = { clip: 7, ch: 0 }; if (e.row) goSnaps(e.clip); else goScene(e.clip); });
+  } finally {
+    for (let i = 0; i < keepLanes.length; i++)
+      if (keepLanes[i]) pat.lanes[i] = Looper.from(keepLanes[i]);
+    S.curPreset = keepSel; S.editSnd = keepEd; S.layer = keepLayer; S.mSel = keepM;
+    pat.state = keepState;
+    S.clips = keepClips; S.scenes = keepScenes; S.clipAt = keepAt; S.sceneAt = keepSc;
+    if (keepPlaying && !T.playing) { try { play(); } catch (_) {} }
+    if (!keepPlaying && T.playing) { try { stop(); } catch (_) {} }
+  }
+  notes.push('every lane starts 2 bars with one note. lenMoved / notesCleared name the LANE INDEX ' +
+             'that changed — 0 is the master, 7 is the channel the cursor was last on.');
+  return { cols: ['layer', 'tgt', 'focus', 'lenMoved', 'notesCleared', 'm0len',
+                  'at', 'sceneAt', 'master', 'err'], rows };
+}
+
 async function probePwmAll() {
   const ch = CH === 9 ? 8 : CH;
   const RATE = num(P.rate, 2), AMT = num(P.amt, 70);
@@ -3624,6 +3743,7 @@ const HELP = {
     { k: 'pwmall',   args: 'ch=8 rate=2 amt=70 wavs=0,1,2,3 \u2014 which waves still STEP their width, for waves a pulse metric cannot see' },
     { k: 'pwm',      args: 'ch=8 wav=3 rate=2 amt=70 \u2014 is a width sweep smooth? excess edges per second = clicks' },
     { k: 'recpitch', args: 'ch=8 \u2014 played vs recorded vs replayed pitch: does the scale snap the finger and not the lane' },
+    { k: 'master',   args: '\u2014 with the master selected: which lane do the loop-length and clear gestures actually move' },
     { k: 'poolkind', args: 'want=loop — every pool take: measured onsets/centroid, the kind it was called, and both dial views in order' },
     { k: '(any)',    args: '--ab <url> runs the same probe on a second build and diffs it' },
   ]
@@ -3666,6 +3786,7 @@ try {
                    fxmod: probeFxMod,
                    fxwire: probeFxWire,
                    poolkind: probePoolKind,
+                   master: probeMaster,
                    recpitch: probeRecPitch,
                    smplib: probeSmpLib,
                    smpkit: probeSmpKit,

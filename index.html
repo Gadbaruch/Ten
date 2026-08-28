@@ -1189,50 +1189,113 @@ function freshClip(pi){
    That is the difference between a clip and a preset slot, and it is the whole
    reason there is no save key: a save key means there is a version of this you
    could lose, and there isn't one. */
-function goClip(pi,k){
+/* THE WORD ON SCREEN IS SNAPSHOT (Gad, 2026-08-28: "maybe we should call
+   these not clips but snapshots, cause they change the whole channel strip not
+   just the midi notes"). He is right — this carries the sound, the racks, the
+   mix and the loop, and "clip" promises only the notes. The CODE still says
+   clip everywhere (S.clips, goClip, clipOf, CLIPKEYS) because those names are
+   in the save format and renaming them buys nothing you can see. UI text only.
+   `quiet` is for goSnaps, which moves nine channels as ONE gesture: one undo
+   point, one flash and one lane event, not nine of each. Returns whether the
+   channel actually moved, so the row can say how many did. */
+function goClip(pi,k,quiet){
   S.clipAt=S.clipAt||{};
   const at=S.clipAt[pi]??0;
-  if(at===k)return;
+  if(at===k)return false;
   S.clips[pi]=S.clips[pi]||{};
   S.clips[pi][at]=grabClip(pi);          // where you were keeps what you did
-  pushUndo('clip');
+  if(!quiet)pushUndo('snapshot');
   if(S.clips[pi][k])putClip(pi,S.clips[pi][k]);
   else{
-    /* A NEW CLIP IS AN EMPTY BAR ON THE SAME INSTRUMENT. It used to roll a
+    /* A NEW SNAPSHOT IS AN EMPTY BAR ON THE SAME INSTRUMENT. It used to roll a
        fresh preset, which meant every empty letter was a different sound and
-       reaching for clip d to try a variation of the part handed you a
-       different patch to play it on. */
+       reaching for d to try a variation of the part handed you a different
+       patch to play it on. */
     initLane(S.patterns[S.editPat].lanes[pi]);
     clipMark(pi);
   }
   S.clipAt[pi]=k;
-  flash('ch '+pi+' · clip '+CLIPKEYS[k]+(S.clips[pi][k]?'':' — new'));
-  recClip(pi,k);
+  if(!quiet){
+    flash('ch '+pi+' · snapshot '+CLIPKEYS[k]+(S.clips[pi][k]?'':' — new'));
+    recClip(pi,k);
+  }
+  dirty=true; dirtySave=true;
+  return true;
+}
+/* 0+LETTER WALKS THE WHOLE DESK TO THAT LETTER (Gad, 2026-08-28: "my original
+   intent was that it will just change all other channels to their respective
+   clips, for example 0s will change all channels to be s clips"). Nine goClip
+   calls and nothing else: the letter means on the master exactly what it means
+   on every channel, and there is no second shelf to hold in your head.
+   ⇧ WIDENS IT to the desk-wide scene — the thing this key used to be, kept
+   because it is a different and useful gesture (goScene), not because both
+   were needed to reach a row. Same shape as ⇧ everywhere else in a held scope:
+   the bigger bite. */
+function goSnaps(k){
+  pushUndo('snapshot row');
+  let n=0;
+  for(const i of CHANS())if(goClip(i,k,true))n++;
+  flash('row '+CLIPKEYS[k]+' — '+n+' channel'+(n===1?'':'s')+' moved');
+  recClip(0,k,true);                    // the ROW is the event, not nine changes
   dirty=true; dirtySave=true;
 }
 /* the same move on 0, every channel at once */
 function goScene(k){
   S.sceneAt=S.sceneAt??0;
-  if(S.sceneAt===k)return;
+  if(S.sceneAt===k)return false;
   S.scenes=S.scenes||{};
   S.scenes[S.sceneAt]=CHANS().map(i=>grabClip(i));
   pushUndo('scene');
   if(S.scenes[k])S.scenes[k].forEach((c,n)=>putClip(CHANS()[n],c));
   else CHANS().forEach(i=>{initLane(S.patterns[S.editPat].lanes[i]); clipMark(i);});
   S.sceneAt=k;
-  flash('scene '+CLIPKEYS[k]+(S.scenes[k]?'':' — new'));
+  flash('scene '+CLIPKEYS[k]+(S.scenes[k]?'':' — new')+' — one desk-wide snapshot');
   recClip(0,k);
   dirty=true; dirtySave=true;
+  return true;
 }
 /* a recall while the master lane is recording becomes part of the arrangement:
    the master's loop is the song now, and this is what goes in it */
-function recClip(pi,k){
+function recClip(pi,k,row){
   const ml=S.patterns[S.editPat].lanes[0];
   if(!ml||S.patterns[S.editPat].state!=='rec'||!T.playing)return;
   const t=fmod(qnext(gridNow(),0.25)-editAnchor(),ml.len);
   ml.clear(ev=>ev.clip!==undefined&&ev.ch===pi&&Math.abs(ev.t-t)<1e-6);
-  ml.events.push({t,clip:k,ch:pi,dur:0.25});
+  /* ch 0 IS TWO THINGS NOW, so it has to say which. `row` marks the new
+     per-channel walk; a bare ch-0 event is a scene, which is what every ch-0
+     event written before today meant — so old arrangements replay unchanged. */
+  const ev={t,clip:k,ch:pi,dur:0.25}; if(row)ev.row=1;
+  ml.events.push(ev);
   dirtySave=true;
+}
+/* WRITTEN DOWN RATHER THAN PERFORMED (Gad, 2026-08-28: "i need a way to record
+   or enter clip changes like 1a>1b etc"). Recording one has always worked —
+   arm the master lane and play the gesture — but that means a change you want
+   at bar 5 has to be performed at bar 5, in time, every time. In EDIT on the
+   master, digit+letter puts the change at the cursor cell instead of firing
+   it, and the same chord at the same cell takes it back off: the step editor's
+   own grammar, on the arrangement.
+   ONE CHANGE PER CHANNEL PER CELL — reaching for a different letter at a step
+   you already wrote is a correction, not a second event. */
+function placeClip(pi,k,scene){
+  const ml=S.patterns[S.editPat].lanes[0]; if(!ml||!(ml.len>0))return false;
+  const cell=cellOf(ml), t0=curCell(ml)*cell;
+  const isRow=pi===0&&!scene;                  // the three kinds a master event can be
+  const here=ev=>ev.clip!==undefined&&ev.ch===pi&&ev.t>=t0-1e-9&&ev.t<t0+cell-1e-9;
+  const hit=ml.events.findIndex(ev=>here(ev)&&ev.clip===k&&!!ev.row===isRow);
+  const where='bar '+(Math.floor(t0/4)+1)+'.'+(Math.round(t0%4*100)/100+1);
+  const what=pi?'ch '+pi+' snapshot '+CLIPKEYS[k]
+               :(isRow?'row ':'scene ')+CLIPKEYS[k];
+  pushUndo('arrangement step');
+  if(hit>=0){ml.events.splice(hit,1); flash('· '+where+' — '+what+' removed');}
+  else{
+    ml.clear(here);
+    const ev={t:t0,clip:k,ch:pi,dur:cell};
+    if(isRow)ev.row=1;
+    ml.events.push(ev);
+    flash('· '+where+' → '+what);
+  }
+  dirty=true; dirtySave=true; return true;
 }
 const CH_LOW=1;
 var CHW=7.8, CHWdone=false;
@@ -1355,7 +1418,7 @@ const recPlayed=(pi,tBeat,midi,vel,durBeats)=>recPlayNote(pi,tBeat,sndOut(pi,mid
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-28.1151';
+const BUILD='2026-08-28.1204';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -3648,8 +3711,19 @@ const CHSEL=new Set();
    clear, roll, copy, the volume arrows, the loop keys — they are the gestures
    you already know, pointed at more than one thing. */
 function chTargets(){
-  if(S.layer>=2)return [S.editSnd];
+  /* THE MASTER IS A CHANNEL AT EVERY DEPTH (Gad, 2026-08-28: "when on master
+     channel i need to be able to edit the loop length same as in normal
+     channels, right now it only changes the last visited channel"). The layer
+     test came first, so standing INSIDE the master's rack — which is the only
+     place its fx and dj pads can be edited, so it is where you are — every
+     channel-scoped gesture answered [S.editSnd] and quietly went to whichever
+     channel the cursor had been on before you pressed 0. Measured with the
+     master selected and the cursor last on 7: tab+↑ grew lane 7 from 2 bars to
+     4 and left the master at 2; at layer 1 the same key grew lane 0, correctly.
+     Asking about the master FIRST makes the two depths agree, and every gesture
+     that must not reach the master already says !S.mSel for itself. */
   if(S.mSel)return [0];
+  if(S.layer>=2)return [S.editSnd];
   if(CHSEL.size)return [...CHSEL].filter(i=>i>=CH_LOW).sort((a,b)=>a-b);
   return [S.curPreset];
 }
@@ -6094,7 +6168,8 @@ function scheduleRange(from,to){
      const at=t+a0.anchor;
      if(e.clip!==undefined){
        const ms=Math.max(0,(timeAt(at)-AC.currentTime)*1000);
-       setTimeout(()=>{ if(e.ch===0)goScene(e.clip); else goClip(e.ch,e.clip);
+       setTimeout(()=>{ if(e.ch!==0)goClip(e.ch,e.clip);
+         else if(e.row)goSnaps(e.clip); else goScene(e.clip);
          dirty=true; },ms);
      }else if(e.dj!==undefined&&S.dj[e.dj]&&S.dj[e.dj].typ){
        const ms=Math.max(0,(timeAt(at)-AC.currentTime)*1000), key=e.dj;
@@ -12886,7 +12961,7 @@ function copyFromPeek(){
   let lane=o.patterns&&o.patterns[0]&&o.patterns[0].lanes[ch];
   if(k!=null){                      // a particular clip of that channel, not its live state
     const cl=o.clips&&o.clips[ch]&&o.clips[ch][k];
-    if(!cl){flash('ch '+ch+' has no clip '+CLIPKEYS[k]+' there');return;}
+    if(!cl){flash('ch '+ch+' has no snapshot '+CLIPKEYS[k]+' there');return;}
     src=cl.p; lane=cl.lane;
   }
   if(!src){flash('nothing on channel '+ch+' there');return;}
@@ -22077,7 +22152,21 @@ const onKeyDown=e=>{
   if(/^Key[A-Z]$/.test(e.code)&&!e.repeat&&S.layer>=1&&HOLD.dig>=0&&!e.metaKey&&!e.ctrlKey){
     e.preventDefault();
     const k=clipOf(e.code);
-    if(k>=0){HOLD.digUsed=true; if(HOLD.dig===0)goScene(k); else goClip(HOLD.dig,k);}
+    if(k>=0){HOLD.digUsed=true;
+      /* IN EDIT ON THE MASTER the chord is written into the arrangement at the
+         cursor instead of being performed — see placeClip. Only on the master,
+         because that is when the lane the cursor belongs to IS lane 0. */
+      if(S.mSel&&inEdit()&&placeClip(HOLD.dig,k,!!e.shiftKey))return;
+      /* NAMING WHERE YOU ALREADY ARE IS STILL AN ARRANGEMENT DECISION. Both
+         of these do nothing when you name the letter you are already on —
+         correctly, there is nothing to move — and the lane write sat behind
+         that early return, so with the master armed "and here it comes back
+         to a" was the one change you could not record. Measured: 1a while
+         ch1 was on a wrote no event at all. */
+      if(HOLD.dig!==0){ if(!goClip(HOLD.dig,k))recClip(HOLD.dig,k); }
+      else if(e.shiftKey){ if(!goScene(k))recClip(0,k); }   // ⇧ widens: one desk-wide snapshot
+      else goSnaps(k);                   // plain: every channel to ITS OWN letter
+    }
     return;
   }
 
@@ -22925,7 +23014,13 @@ const onKeyDown=e=>{
       }
       dirty=true; dirtySave=true; return;
     }
-    if(rs(e)&&S.layer>=2&&!S.mSel){clearLane(focusCh());return;}   // same key, either depth
+    /* …AND THE MASTER'S LANE CLEARS WITH THE SAME KEY (Gad, 2026-08-28: "i
+       need to be able to clear recordings on master same as normal channel").
+       The !S.mSel here sent ⇧⌫ on the master rack down a chain where nothing
+       else claimed it — measured: no lane cleared, no flash, nothing. focusCh()
+       already answers 0 for the master, so dropping the guard is the whole fix.
+       The two automation branches above keep theirs: the master has no modLoop. */
+    if(rs(e)&&S.layer>=2){clearLane(focusCh());return;}   // same key, either depth
     if(rs(e)&&S.layer===1&&CHSEL.size>1){
       const tg=chTargets(); tg.forEach(clearLane); chSay('cleared',tg.length); return;}
     if(S.layer>=2&&!rs(e)&&!MODULES[S.curMod].prs&&!S.mSel&&resetParam())return;
