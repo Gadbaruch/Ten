@@ -1,3 +1,98 @@
+# MACROS, AND THE MODE THAT CAME OUT — 2026-08-27/28 (branch `sound-library`)
+
+## THE KIT GLOBAL MODE IS GONE  (225bb22)
+
+Gad: "i kinda regret this global mode for at least mods and filters… maybe only
+audio fx should just always be global and we dont need modes and
+complications?" He was right, and the evidence was the week's:
+
+- **THE TELL WAS FX.** It was already channel-level by construction —
+  `rebuildRack` reads `S.presets[pi]`, not the pad — and nobody ever asked for
+  a switch for it. **A default that needs no mode is the one already right.**
+- **SHARING FORCED A MERGE POLICY, TWICE, both invisible.** "Keep the pad's
+  envelopes, take the channel's other slots" silently ate every global env he
+  added (a player's env is `src 1` too). "Except where the channel speaks the
+  pad steps aside" silently REPLACED every pad's decay: C 0.297 · D 0.038 ·
+  G 2.776 all became 0.05.
+- **AND IT COULD NOT DO THE ASK.** "Global hit length" is not one envelope for
+  twelve pads — that makes them identical. It is one dial moving twelve values
+  each from where it was. That is a MACRO.
+
+Out: `KITSHARE`, `kitGlob`, `kitVoicePre`, the `mods` field and its action.
+⚠ ONE THING STAYED and it is a bug fix, not a mode: **fx edits on a kit go to
+the CHANNEL.** The engine always read fx from `S.presets[pi]`, so an fx edit
+sent to a focused pad landed in a rack nothing reads — dialling a reverb on a
+kit pad did nothing, silently, since kits became twelve chains.
+
+## MACROS  (0893e2f, 9293d3d)
+
+Four per channel. **It needed almost no new machinery, which is the argument
+for it:** a mod slot already carries up to EIGHT routes with their own
+destination, amount and polarity, and routes already carry learned target
+addresses. "One dial, many things" is a slot that already existed — it lacked
+only a source whose value comes from a dial. `macro` is `MSRC[8]`; the slot
+names its dial in `mac` (`rsel` was taken — it picks which ROUTE you edit).
+
+**Additive and unconditional, which is why it needs no mode.** `voiceMods`
+hands every voice the CHANNEL's macro slots alongside its own rack, so on a
+kit one dial reaches all twelve pads with no merge policy and nothing
+replaced:
+
+    M1=0     C 0.500   D 0.138   G 0.143
+    M1=0.5   C 0.250   D 0.069   G 0.072
+    M1=1     C 0       D 0       G 0        each pad scaled FROM WHERE IT WAS
+
+**LIVE under a held note** (Gad: "i need macros to run on live played note").
+It was read once at voice build — fine for a drum, useless for a held note,
+and the whole point of a macro. `press`/`flw` already had the machinery: a
+ConstantSource per destination whose offset moves afterwards. Macro is that,
+from a dial — `macN` bag, `setMacro()`, `engine.macroLive()`.
+
+    ONE HELD NOTE, dial moved underneath: 264Hz -> 431 -> 705 -> back to 264
+
+⚠ A voice STARTS where the dials already are — the live path zeroes every
+handle and waits, so without that a note played at M1=60% came in at 0%.
+
+**THE FRONT DOOR:** `macro` is a scope letter, same grammar as the rest —
+`E=env L=lfo K=keytrack M=macro /=random`. ⌃M finds or makes one; holding it,
+the arrows pick which dial and -/= the amount. M1..M4 appear at the end of the
+instrument row once a macro claims one. Before this the feature was reachable
+only by hand-building a mod slot AND knowing `macro` had appeared in the source
+list — while the dials stay hidden until routed. That is not a feature, it is a
+secret.
+
+⚠ **EVERY BUG IN THIS FEATURE HAD THE SAME SHAPE**: the voice could SEE the
+slot and still hear nothing. The static-source loop opens
+`if(m.src<3||m.src>7)continue` — macro is 8.
+
+## ⚠ THE BOUNDARY, MEASURED AND NOT MINE
+
+On a kit with SAMPLED pads the static-source path does not reach pitch or
+filter — a sample's playback rate is not among the params it resolves.
+**VELOCITY fails there identically**, so this predates macros; the ENV path
+does reach it. So today a macro on a kit shapes LEVEL, and a macro on a synth
+channel shapes anything. Teaching the static path about sample playback rate
+(and about envelope decay, which is not an AudioParam at all) is its own job.
+
+## THE MERGE — verified, not assumed  (2026-08-28)
+
+Gad merged the pulse-width thread in. Both threads edited `index.html`; the
+history is linear and the tree clean. On the merged build:
+
+    initialises fully, no dead-zone symbols, no console errors
+    pool 272 · library 190 · 20 kits · MSRC_MACRO 8 · KeyM scope present
+    KT808  12/12 distinct takes and centroids
+    dial views correct — loops on the audio channel, one-shots on the smp op
+    kik 8/8 · snr 8/8 · hh 6/8 clean at wild 60%
+    macros still live under a held note: 264 -> 431 -> 705 -> 264
+    and the other thread's width dial is there: pw, 0.05..0.95
+
+⚠ **THE BROWSE DAEMON'S CONFIG CHANGED UNDER ME** — it had been restarted
+without `--headed`, so every `$B --headed` call failed with "headed mismatch".
+probe.sh already detects this; a hand-rolled call has to as well. And :3032
+was DOWN after the merge. Both are the first things to check when a round
+"stops working".
+
 # DRUMS — 2026-08-27 (late, branch `sound-library`)
 
 ## THE WIDTH STOPS SNAPPING BETWEEN RUNGS  (73a3f3f)
