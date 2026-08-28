@@ -92,7 +92,8 @@ already adds vel->filt and key->filt, but behind `P(0.4)`/`P(0.5)` — so a larg
 share of rolls get no dynamics at all. Expressivity cannot be a coin flip.
 
 **Sources.** `MSRC=['off','env','lfo','vel','key','rnd','press','flw','macro']`
-— vel is 3, key is 4, **press is 6**.
+— vel is 3, key is 4, **press is 6**. All three work. None of the three is
+used to anything like its reach, and press is not used at all.
 
 ### What Gad specified
 
@@ -104,45 +105,62 @@ share of rolls get no dynamics at all. Expressivity cannot be a coin flip.
     keys      volume and colour spread across the keyboard so high notes
               do not bite
 
-### Reachable today
+### Reachable today — and BOTH earlier "BLOCKED" calls were WRONG
+
+**MEASURED.** Two things this file called blocked on 2026-08-29 were already
+built. Gad pushed back on one of them (*"sure it is... easy peasy"*) and he was
+right; the other I got wrong by grepping for the MIDI opcodes and stopping.
 
     less bassy at low vel     vel -> op level (dst 5) on the sub/body op
-    less bright at low vel    vel -> filt cutoff (dst 3)          already in genSpice
-    pitched down at low vel   vel -> pitch (dst 2), small amount
-    colour spread             key -> filt (dst 3)                 already in genSpice
-    high notes do not bite    key -> amp (dst 1), NEGATIVE amount  never used
-    press dimension           press -> filt / op level / fx mix    never used
+    less bright at low vel    vel -> filt cutoff (dst 3)     already in genSpice
+    pitched down at low vel   vel -> pitch (dst 2), small
+    colour spread             key -> filt (dst 3)            already in genSpice
+    high notes do not bite    key -> amp (dst 1), NEGATIVE   never used
+    press dimension           press -> anything              WIRED, never used
+    shorter at low vel        vel -> mod[n].d or .tmul       addressable, see below
 
-⚠ **`press` (src 6) appears NOWHERE in the generator.** The engine supports it
-fully — `Voice.setPressure`, and `src===6` is treated as a LIVE source that
-keeps moving — so it is an entire expressive axis that has never been rolled.
+**THE PRESS WIRE ALREADY EXISTS.** `EXP.keyPress(code,x)` calls
+`v.setPressure(x)` on the live voice, and the hall-effect sample handler
+already calls it with per-key travel — so per-key analog depth reaches the
+`press` mod source with no MIDI controller at all. **MEASURED**, without the
+board, `tools/probe.sh press ch=4 amt=90` — a press route onto flt[0].frq:
 
-### BLOCKED, and these are the prerequisites
+      press 0.00   param 0
+      press 0.50   param 1928.6
+      press 1.00   param 3875.2      pressN 1 — the route claimed a real param
 
-**B1 — "shorter at low vel" is not reachable.** No mod route can target an
-envelope TIME. `learnTarget` reaches flt (freq/q/gn), osc (amt/pitch) and mix;
-nothing addresses env `a/d/s/r`. Until env times are mod targets, the nearest
-honest approximation is vel -> filter with a fast filter envelope, which
-shortens the BRIGHT part and not the note.
+⚠ What is actually missing is that **`src:6` appears NOWHERE in the
+generator.** The axis is built, tested and unused. Untested on hardware — Gad
+QAs on the FUN60.
 
-**B2 — press does nothing on Gad's own keyboard.** It is fed only by MIDI
-aftertouch: `0xA0` poly and `0xD0` channel. Speccing a heavy press layer today
-produces presets whose expressive half is silent unless a MIDI controller with
-aftertouch is plugged in.
+**ENV TIMES ARE ADDRESSABLE.** `destList` offers `mod[n].tmul`, `.a`, `.d`,
+`.s`, `.r`, `.crv` — **MEASURED**: 39 destinations on a plain preset, and a
+route aimed at `mod[0].tmul` returns `resolveDest ... 1`.
 
-**But the fix is close and it is worth doing before this layer ships.** TEN
-already reads live analog key depth off the FUN60 — `HE.pressure()`, `HE.keys`
-is `keyId -> stroke state`, used today for the arrow-as-dial. **`HE.keys` is
-PER-KEY, so wiring it into `Voice.setPressure` gives POLY pressure from the
-computer keyboard itself.** That single wire is what makes the whole press half
-of this layer real, and it fits the north star: playable without a screen.
+⚠ **But they are a `'next'` kind destination**, and the engine says so in its
+own words at the classifier: *"These have no node to write and no value to ramp
+— they are read once, when a note starts... the change lands on the next note
+you play."* For an LFO or a macro that is right. **For VELOCITY it is off by
+one**: a vel -> decay route shapes the note AFTER the one whose velocity set it.
+
+    THE FIX, and it is small: a note-scoped source (vel, key) is KNOWN AT
+    NOTE-ON. For 'next' destinations those two should be evaluated for THIS
+    note rather than parked for the following one. Everything else about the
+    mechanism already works.
+
+**NOT MEASURED, and the probe is not yet trustworthy.** `tools/probe.sh
+veldecay` reads ~2000ms at every velocity on an envelope whose decay is 486ms
+with sustain 0 — the note is not decaying inside the window even with fx and
+amp zeroed, so the harness is wrong before the question is. Do not read its
+numbers as evidence either way until that is found.
 
 ### Build order for this layer
 
-    1  wire HE.keys -> setPressure          unblocks B2, makes press real
-    2  env times as mod targets             unblocks B1, "shorter at low vel"
+    1  fix vel/key on 'next' destinations   evaluate at note-on, not parked
+    2  fix the veldecay probe               it cannot currently prove step 1
     3  dynamics as a REQUIRED layer         per-family tables above, always on
-    4  re-run archlvl and genqual           a new always-on layer moves both
+    4  roll press into the layer            src=6 is built and unused
+    5  re-run archlvl and genqual           a new always-on layer moves both
 
 ## 6. THE SHELF IS CONTEXT-FREE, THE ROLL IS NOT  (Gad, 2026-08-28)
 

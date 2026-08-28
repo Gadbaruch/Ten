@@ -1,3 +1,61 @@
+# THE PRESS WIRE WAS ALREADY THERE — 2026-08-29
+
+## TWO "BLOCKED" CALLS, BOTH WRONG  (SOUND.md corrected)
+
+Gad: **"snares shorter at low vel reachable at all - sure it is... just have a
+vel mod with decay destenation to the smp or synth ops, easy peasy. or map it
+to the time multiplier even."** He was right, and the second blocker was wrong
+for a dumber reason.
+
+**PRESS: already wired end to end.** `EXP.keyPress(code,x)` calls
+`v.setPressure(x)`, and the hall-effect sample handler already calls it with
+per-key travel — so the FUN60's analog depth reaches the `press` mod source
+with no MIDI at all. I claimed MIDI-only after grepping the MIDI opcodes and
+stopping there. **MEASURED**, `tools/probe.sh press ch=4 amt=90`, press route
+onto flt[0].frq: 0.00 -> 0 · 0.50 -> 1928.6 · 1.00 -> 3875.2, `pressN 1`.
+Nothing to build. **Untested on hardware — Gad QAs on the FUN60.**
+
+**ENV TIMES: addressable.** `destList` offers `mod[n].tmul/.a/.d/.s/.r/.crv`
+— 39 destinations on a plain preset, and a route at `mod[0].tmul` resolves.
+
+⚠ **But they are `'next'` kind**, and the engine's own classifier comment says
+it: *"read once, when a note starts... the change lands on the next note you
+play."* Right for an LFO, **off by one for VELOCITY** — a vel->decay route
+shapes the note AFTER the one that set it. The fix is small: vel and key are
+KNOWN AT NOTE-ON, so for 'next' destinations they should be evaluated for THIS
+note instead of parked.
+
+⚠ **`tools/probe.sh veldecay` IS NOT TRUSTWORTHY YET** — it reads ~2000ms at
+every velocity on an envelope whose decay is 486ms with sustain 0, with fx and
+amp zeroed. The note is not decaying inside the window and I have not found
+why. Its numbers prove nothing in either direction; fix the harness before
+using it to judge the off-by-one.
+
+## NEAR-FUTURE ASSIGNMENT: CLASSIFY WHAT COMES IN  (Gad, 2026-08-29)
+
+> **"you should listen to them and learn to recognize oneshots from loops by
+> length and dynamic variation, you should also be able to recognize from drag
+> and drop so you can categorize the samples coming in or recorded and lable
+> them or put them in the right folder."**
+
+Today a dropped take gets `src.k='d'`, a recorded one `{k:'r'}`, and **neither
+gets a `shelf` or a `cat`** — they show in both browsers by the safety
+carve-out, which is correct but uncategorised.
+
+Wanted: on drop AND on mic/bounce record, classify by **length and dynamic
+variation**, assign `shelf` + `cat`, label it, and file it. `poolKindOf` is the
+existing heuristic and already reads onsets, duration, spectral drift and
+centroid; the axes Gad named are length and dynamics, so it wants revisiting on
+those rather than extending sideways.
+
+Reference numbers already taken — all 22 phrase-shelf entries measured
+(dur/onsets/peak/drift/centroid): the 15 real loops are 9.6s with 6-32 onsets,
+the 7 short ones 3-5s. Every one is correctly KINDED, so the classifier is not
+misfiring on the factory shelf; this is about what arrives.
+
+**Still Gad's call, not the classifier's:** which phrase-shelf sounds do not
+belong in an audio channel. He has the folder.
+
 # THE TYPE ROW, AND SOUND.md — 2026-08-29
 
 ## THE FILTER SITS BESIDE THE THING IT FILTERS  (build 2026-08-28.2239, LIVE)

@@ -4641,6 +4641,8 @@ const HELP = {
     { k: 'cursor',   args: 'chs=9 — ping ten-grsyn: tv/g/tpos/cpos' },
     { k: 'preset',   args: 'names=SNR,S909 note=48 ch=8 — library name, played and measured' },
     { k: 'key',      args: 'code=KeyA hold=120 shift=0 alt=0 ctrl=0 meta=0' },
+    { k: 'press',    args: 'ch=4 amt=90 note=48 — does src=press actually move a param (the hall-effect wire, without the board)' },
+    { k: 'veldecay', args: 'ch=4 key=tmul|d amt=90 note=48 — does a velocity mod actually shorten a note' },
     { k: 'shelf',    args: 'one=kik loop=pad — the shelf split, the type filters, and that a session take beats both' },
     { k: 'syscopy',  args: 'ch=3 — cmd+C: patch JSON to the system clipboard for ONE channel, silent for a block or the desk' },
     { k: 'keypath',  args: 'code=KeyA ch=9 kmode=0 auto=1 arp=0 hold=400 — did the app CLAIM the key, and which engine door did it reach' },
@@ -4772,6 +4774,133 @@ async function probeShelf() {
   return { cols: ['one', 'loop', 'note'], rows };
 }
 
+/* CAN VELOCITY SHORTEN A NOTE? (Gad, 2026-08-29: "sure it is... just have a
+   vel mod with decay destenation to the smp or synth ops, easy peasy. or map
+   it to the time multiplier even.") He was right and SOUND.md said BLOCKED.
+
+   BUILT ON A REAL ROLL, not a hand-assembled preset: the first attempt wired
+   mod[0] by hand and read 1486ms at every velocity — the whole capture window,
+   because an unfolded preset has no amp envelope at all and the note simply
+   never ended. foldMod/addrMod are what make a mod rack live, so the honest
+   test starts from a patch that already works and adds ONE route to it. */
+async function probeVelDecay() {
+  const ch = num(P.ch, CH), note = num(P.note, NOTE);
+  const key = str(P.key, 'tmul'), lbl = key === 'tmul' ? 'time' : key === 'd' ? 'dec' : key;
+  const keep = stash(ch);
+  const rows = [];
+  let ampSlot = -1, resolves = -1, wired = false;
+  try {
+    const p = S.presets[ch];
+    /* a pluck: something with an audible tail to shorten */
+    const g = genPreset('plk', mulberry32(num(P.seed, 7)), 0.2);
+    for (const k of Object.keys(p)) if (k !== 'modLoop') delete p[k];
+    Object.assign(p, JSON.parse(JSON.stringify(presetData(g))));
+    /* FX OFF, or this measures a REVERB TAIL. First run read ~2000ms at every
+       velocity on an envelope whose decay is 486ms with sustain 0 — the tail
+       stayed above 5% of peak for the whole window, and since a tail scales
+       with the peak the ratio was a flat 1.00 no matter what the route did. */
+    for (const x of (p.fx || [])) if (x) x.typ = 0;
+    for (const x of (p.amp || [])) if (x) x.typ = 0;
+    foldMod(p); addrMod(p);
+    /* the slot carrying the AMP envelope is the one to stretch */
+    ampSlot = (p.mod || []).findIndex(m => m && m.src === 1 &&
+      (m.routes || []).some(r => r && ((r.addr && r.addr.key === 'amp') || (!r.addr && r.dst === 1))));
+    if (ampSlot >= 0) {
+      const free = (p.mod || []).findIndex(m => m && !m.src);
+      if (free >= 0) {
+        p.mod[free] = { src: 3, rsel: 0, mac: 0, a: 0.002, d: 0.2, s: 0, r: 0.2, crv: 0, tmul: 1,
+          routes: [{ dst: 0, idx: 0, amt: num(P.amt, 95), ctr: 0, tgt: null,
+                     addr: { rack: 'mod', slot: ampSlot, key, lbl } }] };
+        wired = true;
+        resolves = resolveDest(p, p.mod[free].routes[0].addr).length;
+      }
+    }
+    engine.rebuildRack(ch); engine.refresh(ch);
+    const len = async vel => {
+      engine.allOff(); await sleep(90);
+      const bus = busOf(ch); if (!bus) return null;
+      const t = tap(bus); await sleep(30);
+      engine.noteOn(AC.currentTime + 0.02, ch, note, vel);
+      await sleep(2200);
+      engine.allOff();
+      const w = t.stop()[0];
+      let pk = 0; for (let i = 0; i < w.length; i++) { const x = Math.abs(w[i]); if (x > pk) pk = x; }
+      if (!(pk > 1e-4)) return { pk: 0, ms: 0 };
+      let last = 0;
+      for (let i = 0; i < w.length; i++) if (Math.abs(w[i]) > pk * 0.05) last = i;
+      return { pk: +pk.toFixed(4), ms: Math.round(last / AC.sampleRate * 1000) };
+    };
+    /* A SEQUENCE, not three isolated notes. An env time is a 'next' kind
+       destination — read once when a note starts — so if a velocity route
+       reaches it at all, it reaches the note AFTER the one that set it. Play
+       loud, soft, soft, loud: an off-by-one shows as row N tracking row N-1. */
+    const seq = [1, 0.25, 0.25, 1];
+    for (let i = 0; i < seq.length; i++) {
+      const r = await len(seq[i]);
+      rows.push({ k: (i + 1) + '. vel ' + seq[i].toFixed(2), peak: r ? r.pk : 0, ms: r ? r.ms : 0 });
+    }
+    const ms = rows.map(r => r.ms);
+    rows.push({ k: 'same-note effect', peak: '', ms: ms[0] ? +(ms[1] / ms[0]).toFixed(2) : 0 });
+    rows.push({ k: 'one-note-late', peak: '', ms: ms[1] ? +(ms[2] / ms[1]).toFixed(2) : 0 });
+  } finally { unstash(ch, keep); }
+  return { cols: ['peak', 'ms'], rows,
+           notes: 'vel -> mod[' + ampSlot + '].' + key + ' amt ' + num(P.amt, 95) +
+                  ' | wired ' + wired + ' | resolves ' + resolves };
+}
+
+/* IS THE PRESS WIRE REAL? (Gad, 2026-08-29: "yes do the press wire".) It turned
+   out already built and SOUND.md was wrong to call it BLOCKED: EXP.keyPress
+   does v.setPressure(x), and the hall-effect sample handler already calls it
+   with per-key travel. So there is nothing to wire — only something to PROVE,
+   without the board, before Gad QAs it on the FUN60.
+
+   Routes press -> filter cutoff on a live voice and reads the AudioParam back
+   at three depths. pressN is the list of params a press route actually
+   claimed: 0 there means the route never landed and every reading below is
+   meaningless. */
+async function probePress() {
+  const ch = num(P.ch, CH), note = num(P.note, NOTE), amt = num(P.amt, 90);
+  const keep = stash(ch);
+  const rows = [];
+  try {
+    const p = S.presets[ch];
+    p.osc[0] = { wav: 2, mode: 0, dst: 0, rat: 1, amt: 1, fine: 0, ph: 0, phm: 0 };
+    for (let i = 1; i < p.osc.length; i++) if (p.osc[i]) p.osc[i].amt = 0;
+    for (const x of (p.fx || [])) if (x) x.typ = 0;
+    p.flt[0] = { typ: 1, frq: 800, q: 1, gn: 0, par: 0, pol: 0, spr: 0.4, lvl: 1 };
+    for (const m of p.mod) if (m) { m.src = 0; m.routes = [{ dst: 0, idx: 0, amt: 100, ctr: 0, tgt: null }]; }
+    for (const e of p.env) if (e) e.dst = 0;
+    p.mod[0] = { src: 1, rsel: 0, mac: 0, a: 0.002, d: 0.5, s: 0.9, r: 0.2, crv: 0, tmul: 1,
+      routes: [{ dst: 1, idx: 0, amt: 100, ctr: 0, tgt: null,
+                 addr: { rack: 'voice', slot: 0, key: 'amp', lbl: 'amp' } }] };
+    p.mod[1] = { src: 6, rsel: 0, mac: 0, a: 0.002, d: 0.2, s: 0, r: 0.2, crv: 0, tmul: 1,
+      routes: [{ dst: 3, idx: 1, amt: amt, ctr: 0, tgt: null,
+                 addr: { rack: 'flt', slot: 0, key: 'frq', lbl: 'freq' } }] };
+    p._folded = true; p._addr = true;
+    engine.rebuildRack(ch); engine.refresh(ch);
+    engine.allOff(); await sleep(80);
+    const h = engine.trigger(AC.currentTime + 0.02, ch, note, 0.9);
+    await sleep(120);
+    const vs = (h && h.voices) || [];
+    const v0 = vs[0];
+    const claimed = v0 && v0.pressN ? v0.pressN.length : 0;
+    const read = () => {
+      if (!v0 || !v0.pressN || !v0.pressN.length) return null;
+      return +(v0.pressN[0].p.value).toFixed(1);
+    };
+    for (const x of [0, 0.5, 1]) {
+      if (v0 && v0.setPressure) v0.setPressure(x);
+      await sleep(140);
+      rows.push({ k: 'press ' + x.toFixed(2), press: v0 ? +(v0.press || 0).toFixed(2) : '-', param: read() });
+    }
+    engine.allOff();
+    const a = rows[0].param, b = rows[2].param;
+    rows.push({ k: 'moved', press: 'pressN ' + claimed,
+                param: (a != null && b != null) ? +(b - a).toFixed(1) : 'n/a' });
+  } finally { unstash(ch, keep); }
+  return { cols: ['press', 'param'], rows, notes: 'src=press -> flt[0].frq amt ' + amt };
+}
+
 const PROBES = { level: probeLevel, spectrum: probeSpectrum, cursor: probeCursor,
                    preset: probePreset, key: probeKey, keypath: probeKeyPath,
                    roundtrip: probeRoundTrip,
@@ -4810,7 +4939,9 @@ const PROBES = { level: probeLevel, spectrum: probeSpectrum, cursor: probeCursor
                    pwmall: probePwmAll,
                    spread: probeSpread,
                    syscopy: probeSysCopy,
-                   shelf: probeShelf };
+                   shelf: probeShelf,
+                   veldecay: probeVelDecay,
+                   press: probePress };
   const fn = PROBES[NAME];
   out = fn ? await fn() : (NAME === 'help' ? HELP : { cols: [], rows: [], err: 'no probe named ' + NAME });
 } catch (e) {
