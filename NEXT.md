@@ -1,3 +1,67 @@
+# THE TYPE ROW, AND SOUND.md — 2026-08-29
+
+## THE FILTER SITS BESIDE THE THING IT FILTERS  (build 2026-08-28.2239, LIVE)
+
+Gad: **"i actually dont see the type, it should be between engine and sample in
+instrument rack"** — and he looked in the right place. The audio channel's type
+filter WAS shipped, in `GRANF`, which is the grain/sound page. `sample` is a row
+in the INSTRUMENT RACK, so its filter is now a row there too. Both read and
+write the same `LOOPCAT`, so turning either turns the other.
+
+Exercised through `prsAction` on an audio channel, which is the real path:
+
+      rows      engine · type · sample · keys mode · slices
+      start     all  22
+      +1        plk  10      GRANF agrees: plk
+      +1        keys  3      GRANF smpl dial max 2
+
+**A SMP OP FIRES ONCE NOW.** Set on ASSIGNMENT rather than by changing how the
+field reads, so nothing already saved moves: `lps` is absent from the op
+template, which makes `undefined` a real "never carried one". Measured — a fresh
+slot given a sample reads `once`; a slot holding an explicit `lps:0` still reads
+`loop` after a new assignment.
+
+## SOUND.md EXISTS NOW
+
+Gad asked for a generative sound doc and there was none. `SOUND.md` carries the
+model — archetypes, restricted vs free, the rule list, the coverage principle,
+the dynamics layer, and what is BLOCKED. Every claim in it is marked MEASURED /
+DESIGNED / BLOCKED. **NEXT.md is the state; SOUND.md is the model.**
+
+## THE DYNAMICS LAYER — TWO BLOCKERS FOUND BEFORE BUILDING IT
+
+Gad wants velocity/press/keyboard mods on every roll. Two things were checked
+first and both change the plan:
+
+⚠ **`press` (src 6) is fed ONLY by MIDI aftertouch** — `0xA0` poly, `0xD0`
+channel. On Gad's own keyboard it does nothing, so a press-heavy preset would
+ship with its expressive half silent. **But `HE.keys` is `keyId -> stroke
+state`, PER-KEY, already read for the arrow-as-dial — wiring it into
+`Voice.setPressure` gives POLY pressure from the computer keyboard.** That one
+wire should land before the layer does.
+
+⚠ **"snares shorter at low vel" is NOT reachable.** No mod route can target an
+envelope TIME — `learnTarget` reaches flt, osc and mix only. Needs env `a/d/s/r`
+as mod targets first.
+
+And the structural point: `genSpice` already does vel->filt and key->filt, but
+behind `P(0.4)`/`P(0.5)`. **Expressivity cannot be a coin flip** — this becomes
+a REQUIRED layer, not spice.
+
+## STILL OPEN FROM THIS ROUND
+
+- **Which phrase-shelf sounds do not belong in an audio channel.** All 22 were
+  measured (dur/onsets/pk/drift/centroid) and every one is correctly KINDED;
+  the complaint is about which are SHELVED there, which is a tagging call and
+  Gad's to make from the folder. `samples/` is 24MB, 22 loops at the top level
+  and the drum shelf under `samples/oneshots/`.
+- **Classifying takes on drop and record.** A dropped take gets `src.k='d'` and
+  no shelf and no cat, so it shows everywhere by the carve-out. Gad wants it
+  recognised by length and dynamic variation, labelled, and filed. NOT BUILT.
+- **The folder reorg to mirror smp/audio.** Not attempted: presets store
+  `smp:{f:'oneshots/kick/tr808-kick-06.flac'}`, so moving files breaks saved
+  references and needs a path migration.
+
 # TWO SHELVES, AND THE ROLL'S REACH — 2026-08-29 (branch `sound-model`)
 
 ## THE SHELVES SPLIT BY `shelf`, NOT BY `kind`  (f50a982)
