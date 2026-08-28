@@ -61,6 +61,52 @@ The flash says `(heard)` when the length came from listening, so a wrong guess
 is legible rather than mysterious — and `tab+digits` re-cuts it any width, which
 is the escape hatch that makes guessing safe at all.
 
+### ⚠ A REST IS NOT A PUNCH-IN — the guesser's own regression  (12b2595)
+
+Gad, same day: *"your last fix reverted a fix from last turn… if i start
+playing mid loop then wrap around and do retro rec, only the beginning of the
+loop is captured and not the end where i started playing from."* It did.
+
+**The anchor fix was NOT touched** — `fmod(n.t-anc,L)` is still there and the
+two SET rows below prove it. What the guesser broke is **L**. It only runs when
+`lane.auto`, but on a lane with no length set it now chose the length, and
+`from = endB - L` IS the window: a short L cuts the front off it, which is
+exactly "the end of the loop where I started playing from".
+
+**And L came out short because a bar of silence inside a phrase looks identical
+to the silence between two attempts.** A take with a rest in it had its
+punch-in walked forward past everything before the rest.
+
+So the gap walk is now **stopped-only**, and that split is the rule:
+
+- **STOPPED** there is no clock and no anchor. The phrase is the only reference
+  there is, and "play a bit, breathe, play the take" is the gesture. Gap walk on.
+- **RUNNING** there IS one — `play()` empties the retro buffer, so everything in
+  it is this run, and the anchor already places it. The guess chooses a bar
+  COUNT and nothing else, covering every note played. Gap walk off.
+
+One argument, `punchIn`, and `retroCapture` passes `!T.playing`.
+
+                                          guess  lane  kept   placed
+      STOPPED
+        2-bar phrase, clean                 2     2b    8/8     —
+        1-bar phrase                        1     1b    4/4     —
+        warm-up · 1 bar silence · take      2     2b    8/11    —     punch-in
+        last note past the line (span 5)    2     2b    3/3     —     no clip
+        4-bar phrase                        4     4b    5/5     —
+      RUNNING, 4-bar loop, played 12->20 across the wrap
+        length SET to 4                     —     4b    9/9    right
+        length SET to 4, rest inside        —     4b    5/5    right
+        AUTO                                3     3b    9/9    right
+        AUTO, rest inside                   3     3b    5/5    right  <- was 1/5
+      AND THE DECISION STILL WINS
+        length already SET to 1             —     1b    4/8     —
+
+⚠ **A probe that calls a helper the code also calls must pass the same
+arguments.** The moment `retroGuess` took one, the probe's `guessBars` column
+was reporting a variant `retroCapture` never asked for — and disagreeing with
+the length the lane actually came out as, which is worse than having no column.
+
 ## QA CHECKLIST — 2026-08-29 (second batch)
 
 Reload **http://localhost:3033/**. Build `2026-08-28.1341` or later.
@@ -75,6 +121,13 @@ Reload **http://localhost:3033/**. Build `2026-08-28.1341` or later.
 3. **A length you SET is still untouchable.** Set a lane to 1 bar, play two
    bars, hit retro. You get one bar — the guess does not overrule you.
    *Measured: guess said 2, lane stayed 1b.*
+3b. **⚠ Mid-loop retro, the one that regressed.** Transport running, start
+   playing partway through the loop, let it wrap, hit retro. Everything you
+   played comes back, including the part before the wrap — and a REST inside
+   your phrase must not eat it. *Measured on a 4-bar cycle, five notes at
+   beats 12,13,14,15,20: 1 of 5 before, 5 of 5 after, all in the right places.
+   With the length SET it was right throughout — this only ever bit a lane with
+   no length.*
 4. **Clearing the chord master returns the key.** Play a chord on the master,
    let go (the desk stays on that chord — correct), then clear that channel.
    The desk goes back to the global key and the flash says so. *Measured:
