@@ -1471,7 +1471,7 @@ const recPlayed=(pi,tBeat,midi,vel,durBeats)=>recPlayNote(pi,tBeat,sndOut(pi,mid
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-28.2216';
+const BUILD='2026-08-28.2239';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -2003,6 +2003,12 @@ const OSC_P=sl=>[
        const e2=POOL[V[clamp(Math.round(v),0,Math.max(0,V.length-1))]];
        if(!e2){flash('pool is empty — record (esc+tab) or drop audio first');return;}
        engine.opSamples.set(smpKeyUI(),e2.buf);
+       /* A SAMPLE OP FIRES ONCE UNLESS TOLD OTHERWISE (Gad, 2026-08-29: "make
+          smp op default non looped"). Set on ASSIGNMENT and only when the slot
+          has never carried an lps, so every patch already saved keeps whatever
+          it was doing — `lps` is absent from the op template, so undefined is
+          a real "never touched" and not a disguised zero. */
+       if(o.lps===undefined)o.lps=1;
        /* record WHICH take on the slot, so this patch can be saved, loaded on
           another channel, and still be this sound */
        if(e2.src&&e2.src.f)o.smp={f:e2.src.f}; else delete o.smp;
@@ -15833,7 +15839,16 @@ function prsFieldDefs(){
        take are sound design — they went back to the page. What is left is the
        set of answers you give a channel ONCE: what it plays, what the letters
        do, whether the loop runs by itself and how loud it runs. */
-    chEng, chSmp,
+    chEng,
+    /* THE FILTER SITS BESIDE THE THING IT FILTERS (Gad, 2026-08-29: "i
+       actually dont see the type, it should be between engine and sample in
+       instrument rack"). It WAS shipped — on the grain page, in GRANF, which
+       is where the sound lives and not where you go looking for what a channel
+       is playing. `sample` is here, so its filter is here. GRANF keeps its
+       copy: same LOOPCAT behind both, so turning either turns the other. */
+    {k:'type',v:()=>{const n=poolView('loop',LOOPCAT).length;
+       return (LOOPCAT||'all')+'  '+n;}},
+    chSmp,
     {k:'keys mode',v:()=>kmodeOf(p)?'pitch':'position'},
     /* how position keys carve the take (Gad, 2026-08-24): the grid by
        default, the transient detector on the toggle */
@@ -16694,6 +16709,12 @@ function _prsAction(d){
   }
   if(f==='prst')scrollPreset(pi,d);
   if(f==='kit')scrollPreset(pi,d);       // the whole kit — cat 'kit' in the library
+  else if(f==='type'&&p.cat==='audio'){      // the phrase shelf's filter, not a sound type
+    LOOPCAT=LOOPCATS[fmod(LOOPCATS.indexOf(LOOPCAT||'all')+d,LOOPCATS.length)];
+    if(LOOPCAT==='all')LOOPCAT='';
+    const n=poolView('loop',LOOPCAT).length;
+    flash('sample type: '+(LOOPCAT||'all')+' — '+n+' take'+(n===1?'':'s'));
+    dirty=true;}
   else if(f==='type'){
     const i0=Math.max(0,SYNTHCATS.indexOf(p.cat||'misc'));
     const cat=SYNTHCATS[fmod(i0+d,SYNTHCATS.length)];
