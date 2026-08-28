@@ -4,139 +4,161 @@
   "file": "nylonlick.mp3",
   "bpm": 100.0,
   "bars": 4,
-  "kind": "loop"
+  "kind": "loop",
+  "cat": "plk"
  },
  {
   "name": "steelriff",
   "file": "steelriff.mp3",
   "bpm": 100.0,
   "bars": 4,
-  "kind": "loop"
+  "kind": "loop",
+  "cat": "plk"
  },
  {
   "name": "flamenco",
   "file": "flamenco.mp3",
   "bpm": 100.0,
   "bars": 4,
-  "kind": "loop"
+  "kind": "loop",
+  "cat": "plk"
  },
  {
   "name": "banjoroll",
   "file": "banjoroll.mp3",
   "bpm": 100.0,
   "bars": 4,
-  "kind": "loop"
+  "kind": "loop",
+  "cat": "plk"
  },
  {
   "name": "harp",
   "file": "harp.mp3",
   "bpm": 100.0,
   "bars": 4,
-  "kind": "loop"
+  "kind": "loop",
+  "cat": "plk"
  },
  {
   "name": "koto",
   "file": "koto.mp3",
   "bpm": 100.0,
   "bars": 4,
-  "kind": "loop"
+  "kind": "loop",
+  "cat": "plk"
  },
  {
   "name": "pianoriff",
   "file": "pianoriff.mp3",
   "bpm": 100.0,
   "bars": 4,
-  "kind": "loop"
+  "kind": "loop",
+  "cat": "keys"
  },
  {
   "name": "rhodesvamp",
   "file": "rhodesvamp.mp3",
   "bpm": 100.0,
   "bars": 4,
-  "kind": "loop"
+  "kind": "loop",
+  "cat": "keys"
  },
  {
   "name": "prepiano",
   "file": "prepiano.mp3",
   "bpm": 100.0,
   "bars": 4,
-  "kind": "loop"
+  "kind": "loop",
+  "cat": "keys"
  },
  {
   "name": "cellostac",
   "file": "cellostac.mp3",
   "bpm": 100.0,
   "bars": 4,
-  "kind": "loop"
+  "kind": "loop",
+  "cat": "plk"
  },
  {
   "name": "upright",
   "file": "upright.mp3",
   "bpm": 100.0,
   "bars": 4,
-  "kind": "loop"
+  "kind": "loop",
+  "cat": "bass"
  },
  {
   "name": "marimba",
   "file": "marimba.mp3",
   "bpm": 100.0,
   "bars": 4,
-  "kind": "loop"
+  "kind": "loop",
+  "cat": "plk"
  },
  {
   "name": "kalimba",
   "file": "kalimba.mp3",
   "bpm": 100.0,
   "bars": 4,
-  "kind": "loop"
+  "kind": "loop",
+  "cat": "plk"
  },
  {
   "name": "tabla",
   "file": "tabla.mp3",
   "bpm": 100.0,
   "bars": 4,
-  "kind": "loop"
+  "kind": "loop",
+  "cat": "perc"
  },
  {
   "name": "brushkit",
   "file": "brushkit.mp3",
   "bpm": 100.0,
   "bars": 4,
-  "kind": "loop"
+  "kind": "loop",
+  "cat": "perc"
  },
  {
   "name": "bell",
   "file": "bell.mp3",
-  "kind": "one"
+  "kind": "one",
+  "cat": "plk"
  },
  {
   "name": "choirpad",
   "file": "choirpad.mp3",
-  "kind": "loop"
+  "kind": "loop",
+  "cat": "pad"
  },
  {
   "name": "drone",
   "file": "drone.mp3",
-  "kind": "loop"
+  "kind": "loop",
+  "cat": "pad"
  },
  {
   "name": "rain",
   "file": "rain.mp3",
-  "kind": "loop"
+  "kind": "loop",
+  "cat": "fx"
  },
  {
   "name": "riser",
   "file": "riser.mp3",
-  "kind": "one"
+  "kind": "one",
+  "cat": "fx"
  },
  {
   "name": "sweep",
   "file": "sweep.mp3",
-  "kind": "one"
+  "kind": "one",
+  "cat": "fx"
  },
  {
   "name": "vowel",
   "file": "vowel.mp3",
-  "kind": "loop"
+  "kind": "loop",
+  "cat": "pad"
  }
 ]

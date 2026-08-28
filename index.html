@@ -1471,7 +1471,7 @@ const recPlayed=(pi,tBeat,midi,vel,durBeats)=>recPlayNote(pi,tBeat,sndOut(pi,mid
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-28.2134';
+const BUILD='2026-08-28.2216';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1763,8 +1763,21 @@ const smpPath=f=>{
    cross the shelf, or nineteen. Backwards lands on the HEAD of the previous
    group rather than its tail, because walking back should put you at the
    beginning of the kicks and not at the last one. */
-const poolJump=want=>(v,dir)=>{
-  const V=poolView(want);
+/* THE TYPE FILTERS, and they are SESSION state on purpose (Gad, 2026-08-29:
+   "in the smp op we should have type selector so easier to find what i want").
+   A browsing filter is not a property of the sound: putting it in the preset
+   would mean a save-format change, and a patch that remembers which corner of
+   the shelf you were rummaging in when you made it. 'all' is the empty
+   string. */
+let SMPCAT='', LOOPCAT='';
+const SMPCATS=['all'].concat(DRUMCATS);          // the drum shelf tags itself by cat
+const LOOPCATS=['all','plk','keys','bass','pad','perc','fx'];
+const catSP=(name,list,get,set)=>SP(name,'_ptyp','enum',{opts:list,
+  get:()=>Math.max(0,list.indexOf(get()||'all')),
+  set:(o,v)=>{const k=list[clamp(Math.round(v),0,list.length-1)];
+    set(k==='all'?'':k); dirty=true;}});
+const poolJump=(want,catf)=>(v,dir)=>{
+  const V=poolView(want,catf?catf():'');
   if(!V.length)return 0;
   const gk=i=>{const e=POOL[V[i]]; return e?(e.inst||('·'+(e.kind||'?'))):'?';};
   let i=clamp(Math.round(v),0,V.length-1);
@@ -1903,8 +1916,8 @@ const SP=(lbl,key,type,o={})=>({lbl,key,type,...o});
    and it has to be declared HERE: GRANF is built at load and calls it, so
    leaving it down with the pool put it in its own temporal dead zone.
    `want` is which kind that dial hunts for — see poolView. */
-const poolSP=(spec,want)=>Object.defineProperty(spec,'max',
-  {get:()=>Math.max(0,poolView(want).length-1),configurable:true});
+const poolSP=(spec,want,catf)=>Object.defineProperty(spec,'max',
+  {get:()=>Math.max(0,poolView(want,catf?catf():'').length-1),configurable:true});
 
 /* 'none' is first, so the wave list reads the way every other rack's type list
    does — the empty state at the top, reachable with ⌫ or by walking down past
@@ -1977,21 +1990,23 @@ const OSC_P=sl=>[
   /* A SYNTH OP IS PLAYED FROM THE KEYS, so what it wants is a ONE-SHOT — a
      hit it can pitch, not four bars of somebody else's tempo. The view puts
      those first; the loops are still down the far end of the same dial. */
-  ...(Math.round((sl&&sl.wav)||0)===9?[poolSP(SP('smpl','_pool','lin',{min:0,max:31,step:1,w:2,
-     jump:poolJump('one'),          // shift walks the instrument groups
-     fmt:v=>{const V=poolView('one'), e2=POOL[V[Math.round(v)]];
+  ...(Math.round((sl&&sl.wav)||0)===9?[
+   catSP('type',SMPCATS,()=>SMPCAT,v=>SMPCAT=v),
+   poolSP(SP('smpl','_pool','lin',{min:0,max:31,step:1,w:2,
+     jump:poolJump('one',()=>SMPCAT),   // shift walks the instrument groups
+     fmt:v=>{const V=poolView('one',SMPCAT), e2=POOL[V[Math.round(v)]];
        return e2?KINDMK(e2.kind)+e2.name:'—';},
-     get:()=>{const k=smpKeyUI(), V=poolView('one');
+     get:()=>{const k=smpKeyUI(), V=poolView('one',SMPCAT);
        const j=V.indexOf(POOL.findIndex(p2=>p2.buf===engine.opSamples.get(k)));
        return j<0?0:j;},
-     set:(o,v)=>{const V=poolView('one');
+     set:(o,v)=>{const V=poolView('one',SMPCAT);
        const e2=POOL[V[clamp(Math.round(v),0,Math.max(0,V.length-1))]];
        if(!e2){flash('pool is empty — record (esc+tab) or drop audio first');return;}
        engine.opSamples.set(smpKeyUI(),e2.buf);
        /* record WHICH take on the slot, so this patch can be saved, loaded on
           another channel, and still be this sound */
        if(e2.src&&e2.src.f)o.smp={f:e2.src.f}; else delete o.smp;
-       engine.rebuildRack(S.editSnd);}}),'one'),
+       engine.rebuildRack(S.editSnd);}}),'one',()=>SMPCAT),
    /* the CLIP half: crop the take per slot, loop it or fire it once */
    SP('start','sst','lin',{min:0,max:0.98,step:0.01,get:o=>o.sst??0,set:(o,v)=>o.sst=v,
       fmt:v=>Math.round(v*100)+'%'}),
@@ -12902,10 +12917,15 @@ const engine=new Engine();
    old code capped itself at 32 because the POOL did; the cap is 1200 now.
    `ord` is passed so the dial's order is the manifest's rather than whichever
    fetch happened to finish first — see poolView. */
-function loadShelf(url,ord0){
+function loadShelf(url,ord0,shelf){
   return fetch(url).then(r=>r.ok?r.json():null).then(man=>{
     if(!Array.isArray(man))return 0;
     man.forEach((en,i)=>{
+      /* WHICH SHELF, stamped at load (Gad, 2026-08-29). The browsers split on
+         this and NOT on `kind`, because three entries on the phrase shelf —
+         bell, riser, sweep — are one-shots, and a riser is exactly what an
+         audio channel is for. Splitting by kind would have thrown them out. */
+      en=Object.assign({shelf:shelf},en);
       fetch('samples/'+en.file).then(r=>r.ok?r.arrayBuffer():null)
         .then(ab=>ab&&AC.decodeAudioData(ab))
         .then(buf=>{if(!buf)return;
@@ -12919,8 +12939,8 @@ function loadShelf(url,ord0){
     return man.length;
   }).catch(()=>0);
 }
-loadShelf('samples/manifest.json',0);
-loadShelf('samples/oneshots/manifest.json',1e4).then(nSh=>{
+loadShelf('samples/manifest.json',0,'loop');
+loadShelf('samples/oneshots/manifest.json',1e4,'one').then(nSh=>{
   SHELFN=nSh|0;
   /* the manifest has resolved but the BUFFERS are still landing, so this only
      INVALIDATES — the kits rebuild themselves on the next libAll, from
@@ -15912,18 +15932,19 @@ const GRANF=[
     get:m=>m.fb||0,set:(m,v)=>m.fb=v}),
  /* THE AUDIO CHANNEL LOOPS AND GRANULATES, so what it wants is a LOOP.
     Same dial, opposite view — see poolView. */
+ catSP('type',LOOPCATS,()=>LOOPCAT,v=>LOOPCAT=v),
  poolSP(SP('smpl','_pool','lin',{min:0,max:31,step:1,w:2,
-   jump:poolJump('loop'),           // shift walks the instrument groups
-   fmt:v=>{const V=poolView('loop'), e2=POOL[V[Math.round(v)]];
+   jump:poolJump('loop',()=>LOOPCAT),  // shift walks the instrument groups
+   fmt:v=>{const V=poolView('loop',LOOPCAT), e2=POOL[V[Math.round(v)]];
      return e2?KINDMK(e2.kind)+e2.name:'\u2014';},
-   get:()=>{const V=poolView('loop');
+   get:()=>{const V=poolView('loop',LOOPCAT);
      const j=V.indexOf(POOL.findIndex(p2=>p2.buf===(engine.granBuf||[])[S.editSnd]));
      return j<0?0:j;},
-   set:(o,v)=>{const pi=S.editSnd, V=poolView('loop');
+   set:(o,v)=>{const pi=S.editSnd, V=poolView('loop',LOOPCAT);
      const e2=POOL[V[clamp(Math.round(v),0,Math.max(0,V.length-1))]];
      if(!e2){flash('pool is empty — record (esc+tab) or drop audio first');return;}
      engine.granNode(pi); engine.setChanBuf(pi,e2.buf,e2.name);
-     takeToLane(pi,e2.buf); engine.audLive(pi);}}),'loop'),
+     takeToLane(pi,e2.buf); engine.audLive(pi);}}),'loop',()=>LOOPCAT),
 ];
 /* (granAction lived here: the cloud's own knob handler, writing pre.gr and
    nothing else. audAction covers both halves of the page now, so a dial
@@ -16532,7 +16553,7 @@ function _prsAction(d){
      the tape and the cloud are handed the same take by the same call */
   if(f==='sample'&&(p.cat==='audio'||engineGranP(p))){
     if(!POOL.length){flash('pool is empty — record (esc+tab) or drop audio in');dirty=true;return;}
-    const V=poolView('loop');            // loops first here too, so the walk agrees with the dial
+    const V=poolView('loop',LOOPCAT);    // same view as the dial, filter and all
     const cur=V.indexOf(POOL.findIndex(e2=>e2.buf===(engine.audBuf[pi]||(engine.granBuf||[])[pi])));
     const nx=POOL[V[fmod((cur<0?0:cur)+(d>0?1:-1),V.length)]];
     pushUndo('sample');
@@ -18735,11 +18756,24 @@ function poolKindOf(buf,hint){
    away. Nothing is hidden; the thing you want is just under your hand. */
 let POOLVER=0;                       // bumped on every change; the views cache against it
 const POOLVIEW={};
-function poolView(want){
-  const c=POOLVIEW[want];
+function poolView(want,cat){
+  const key=want+'|'+(cat||'');
+  const c=POOLVIEW[key];
   if(c&&c.v===POOLVER)return c.a;
   const a=[],b=[];
-  for(let i=0;i<POOL.length;i++)((POOL[i].kind||'one')===want?a:b).push(i);
+  for(let i=0;i<POOL.length;i++){
+    const e=POOL[i]; if(!e)continue;
+    /* WHAT YOU MADE IS NEVER FILTERED. poolKindOf and the shelf tag are both
+       facts about the FACTORY; a take you recorded or dropped has neither, and
+       a hard filter would turn "somewhere down the dial" into "gone". Only the
+       shelf obeys the split, and a session take shows in both browsers. */
+    const mine=!(e.src&&e.src.k==='f');
+    if(!mine){
+      if((e.shelf||(e.kind||'one'))!==want)continue;
+      if(cat&&(e.cat||'')!==cat)continue;
+    }
+    (mine?b:a).push(i);                      // the shelf first, your own after
+  }
   /* THE ORDER IS THE MANIFEST'S, NOT THE NETWORK'S. Six hundred fetches finish
      in whatever order they finish, so without `ord` the dial held a different
      arrangement on every boot and "the 808 kick is twelve along" was never
@@ -18747,7 +18781,7 @@ function poolView(want){
      here sorts after all of them, newest last. */
   const byOrd=(x,y)=>(POOL[x].ord||0)-(POOL[y].ord||0);
   const arr=a.sort(byOrd).concat(b.sort(byOrd));
-  POOLVIEW[want]={v:POOLVER,a:arr};
+  POOLVIEW[key]={v:POOLVER,a:arr};
   return arr;
 }
 const KINDMK=k=>k==='loop'?'\u221e ':'\u25aa ';     // \u221e a loop · \u25aa one hit
@@ -18782,6 +18816,7 @@ function poolAdd(buf,name,src,hint){
       if(hint&&Number.isFinite(hint.ord)){
         e0.ord=hint.ord; e0.inst=hint.inst||e0.inst;
         e0.style=hint.style||e0.style; e0.cat=hint.cat||e0.cat;
+        e0.shelf=hint.shelf||e0.shelf;
         if(hint.kind)e0.kind=hint.kind;
         POOLVER++;
       }
@@ -18798,7 +18833,13 @@ function poolAdd(buf,name,src,hint){
     /* the two axes travel with the sound: which INSTRUMENT it is and which
        MACHINE it came out of — see tools/build_oneshots.py */
     inst:(hint&&hint.inst)||null, style:(hint&&hint.style)||null,
-    cat:(hint&&hint.cat)||null});
+    cat:(hint&&hint.cat)||null,
+    /* WHICH SHELF, and it is a THIRD axis, not a restatement of kind: the
+       phrase shelf carries three one-shots (bell, riser, sweep) and an audio
+       channel is exactly where those belong. Dropped here once already —
+       POOL.push copies a fixed field list and adding one to the hint is not
+       enough. Measured: shelf_one 0 of 272 before, 250 after. */
+    shelf:(hint&&hint.shelf)||null});
   const added=POOL[POOL.length-1];
   if(added.src&&added.src.f)POOLBYF.set(added.src.f,added);
   POOLVER++;

@@ -34,6 +34,31 @@ def phrase(desc, extra=""):
             f"close mic, dry studio recording, expressive playing{extra}")
 
 # name -> (prompt, seconds asked of the model)
+TAGS = {
+    "banjoroll":   ('loop', 'plk'),
+    "bell":        ('one', 'plk'),
+    "brushkit":    ('loop', 'perc'),
+    "cellostac":   ('loop', 'plk'),
+    "choirpad":    ('loop', 'pad'),
+    "drone":       ('loop', 'pad'),
+    "flamenco":    ('loop', 'plk'),
+    "harp":        ('loop', 'plk'),
+    "kalimba":     ('loop', 'plk'),
+    "koto":        ('loop', 'plk'),
+    "marimba":     ('loop', 'plk'),
+    "nylonlick":   ('loop', 'plk'),
+    "pianoriff":   ('loop', 'keys'),
+    "prepiano":    ('loop', 'keys'),
+    "rain":        ('loop', 'fx'),
+    "rhodesvamp":  ('loop', 'keys'),
+    "riser":       ('one', 'fx'),
+    "steelriff":   ('loop', 'plk'),
+    "sweep":       ('one', 'fx'),
+    "tabla":       ('loop', 'perc'),
+    "upright":     ('loop', 'bass'),
+    "vowel":       ('loop', 'pad'),
+}
+
 PROMPTS = {
     # --- strings you pick ---
     "nylonlick": (phrase("fingerpicked nylon string guitar lick, folk, "
@@ -151,7 +176,12 @@ def main():
         tmp.unlink()
 
         manifest = [m for m in manifest if m.get("name") != name]
-        manifest.append({"name": name, "file": fn, "bpm": BPM, "bars": BARS})
+        # kind and cat were HAND-ADDED to the manifest and this line never
+        # wrote them, so every regen silently dropped both. TAGS is the
+        # authority now; an untagged name defaults to a plain loop.
+        ent = {"name": name, "file": fn, "bpm": BPM, "bars": BARS}
+        ent["kind"], ent["cat"] = TAGS.get(name, ("loop", "fx"))
+        manifest.append(ent)
         mpath.write_text(json.dumps(manifest, indent=1))
         print(f"  → samples/{fn}  ({len(wav)/44100:.2f}s)", flush=True)
 

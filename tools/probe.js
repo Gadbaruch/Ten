@@ -4641,6 +4641,7 @@ const HELP = {
     { k: 'cursor',   args: 'chs=9 — ping ten-grsyn: tv/g/tpos/cpos' },
     { k: 'preset',   args: 'names=SNR,S909 note=48 ch=8 — library name, played and measured' },
     { k: 'key',      args: 'code=KeyA hold=120 shift=0 alt=0 ctrl=0 meta=0' },
+    { k: 'shelf',    args: 'one=kik loop=pad — the shelf split, the type filters, and that a session take beats both' },
     { k: 'syscopy',  args: 'ch=3 — cmd+C: patch JSON to the system clipboard for ONE channel, silent for a block or the desk' },
     { k: 'keypath',  args: 'code=KeyA ch=9 kmode=0 auto=1 arp=0 hold=400 — did the app CLAIM the key, and which engine door did it reach' },
     { k: 'roundtrip',args: 'ch=9 kmode=0 auto=1 arp=1 div=0.25 keys=KeyA,KeyS — record a phrase and replay it: did the head do the same thing twice' },
@@ -4738,6 +4739,39 @@ async function probeSysCopy() {
   return { cols: ['sys', 'bytes', 'keys', 'name', 'cat', 'clip', 'err'], rows };
 }
 
+/* THE TWO SHELVES ARE SPLIT, AND WHAT YOU MADE IS NOT (Gad, 2026-08-29:
+   "seperate audio samples from one shots and loops"). The browsers filter on
+   `shelf`, NOT on `kind` — the phrase shelf carries three one-shots (bell,
+   riser, sweep) and an audio channel is exactly where a riser belongs. Adds a
+   session take and proves it survives both the shelf split and a type filter,
+   because poolKindOf is a heuristic and a hard filter must never be able to
+   lose a recording. */
+async function probeShelf() {
+  const fac = POOL.filter(e => e && e.src && e.src.k === 'f');
+  const nm = v => v.map(i => POOL[i].name);
+  const b = AC.createBuffer(1, 4410, 44100), d = b.getChannelData(0);
+  for (let i = 0; i < 4410; i++) d[i] = Math.sin(i * 0.05) * Math.exp(-i / 800);
+  poolAdd(b, '__probe_take', { k: 'r' });
+  const has = v => nm(v).includes('__probe_take');
+  const rows = [
+    { k: 'shelf tags', one: fac.filter(e => e.shelf === 'one').length,
+      loop: fac.filter(e => e.shelf === 'loop').length, note: 'of ' + fac.length + ' factory' },
+    { k: 'view, all', one: poolView('one', '').length, loop: poolView('loop', '').length,
+      note: 'smp op | audio ch' },
+    { k: 'one-shots on phrase shelf', one: 0,
+      loop: nm(poolView('loop', '')).filter(n => ['bell', 'riser', 'sweep'].includes(n)).length,
+      note: 'must be 3 — a riser is audio-channel material' },
+    { k: 'type filter', one: poolView('one', str(P.one, 'kik')).length,
+      loop: poolView('loop', str(P.loop, 'pad')).length,
+      note: str(P.one, 'kik') + ' | ' + str(P.loop, 'pad') },
+    { k: 'your take visible', one: has(poolView('one', '')) ? 1 : 0,
+      loop: has(poolView('loop', '')) ? 1 : 0, note: 'both must be 1' },
+    { k: 'take beats a filter', one: has(poolView('one', str(P.one, 'kik'))) ? 1 : 0,
+      loop: has(poolView('loop', str(P.loop, 'pad'))) ? 1 : 0, note: 'both must be 1' },
+  ];
+  return { cols: ['one', 'loop', 'note'], rows };
+}
+
 const PROBES = { level: probeLevel, spectrum: probeSpectrum, cursor: probeCursor,
                    preset: probePreset, key: probeKey, keypath: probeKeyPath,
                    roundtrip: probeRoundTrip,
@@ -4775,7 +4809,8 @@ const PROBES = { level: probeLevel, spectrum: probeSpectrum, cursor: probeCursor
                    pwm: probePwm,
                    pwmall: probePwmAll,
                    spread: probeSpread,
-                   syscopy: probeSysCopy };
+                   syscopy: probeSysCopy,
+                   shelf: probeShelf };
   const fn = PROBES[NAME];
   out = fn ? await fn() : (NAME === 'help' ? HELP : { cols: [], rows: [], err: 'no probe named ' + NAME });
 } catch (e) {
