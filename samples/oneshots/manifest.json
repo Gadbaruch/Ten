@@ -2182,5 +2182,45 @@
   "inst": "hat-open",
   "style": "ac-funk",
   "cat": "hh"
+ },
+ {
+  "name": "funk-cymbal",
+  "file": "oneshots/acoustic/funk/cymbal.flac",
+  "kind": "one",
+  "inst": "cymbal",
+  "style": "ac-funk",
+  "cat": "cymb"
+ },
+ {
+  "name": "funk-tom",
+  "file": "oneshots/acoustic/funk/tom.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "ac-funk",
+  "cat": "tom"
+ },
+ {
+  "name": "funk-cowbell",
+  "file": "oneshots/acoustic/funk/cowbell.flac",
+  "kind": "one",
+  "inst": "cowbell",
+  "style": "ac-funk",
+  "cat": "perc"
+ },
+ {
+  "name": "funk-shaker",
+  "file": "oneshots/acoustic/funk/shaker.flac",
+  "kind": "one",
+  "inst": "shaker",
+  "style": "ac-funk",
+  "cat": "perc"
+ },
+ {
+  "name": "vint-kick",
+  "file": "oneshots/acoustic/vint/kick.flac",
+  "kind": "one",
+  "inst": "kick",
+  "style": "ac-vint",
+  "cat": "kik"
  }
 ]

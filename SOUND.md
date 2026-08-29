@@ -195,6 +195,32 @@ gap, stated as a list rather than as a principle. The last one is structural:
 `genSpice` gives a modulator a second route only for an LFO's pan drift, so
 "one source, two destinations" is essentially unexplored.
 
+**Gad's intent:** *"a lush synth key sound, can be good for fusion neofunk with
+90's touch of psychedelic and clean digital soul."*
+
+**DORAC** (snr, same day) is built the OPPOSITE way from every snare in
+`PRESETS0`, and adds five more:
+
+    PINK noise as the root       every SNR recipe here uses white `nse`
+    partials at 2.01 and 3.25    deliberately inharmonic AND deliberately
+                                 just-off; the table writes clean ratios
+    amp env at amt 200           driving the envelope past unity
+    KEY -> filter freq on a DRUM keytracking as a percussion move
+    sat -> comp 0.15 -> verb     PARALLEL compression, never once generated
+
+**Gad's intent:** *"a snare that is actually sounding really like an amen break
+snare and is good for jungle dnb, or heavy hiphop or triphop, its totally
+synthesised but it has that gritty sampled vibe."*
+
+**That last clause is the brief the table cannot fill.** Every drum archetype
+here reaches for realism or for a machine; "synthesised but gritty like a
+sample" is a third thing, and the recipe for it is the inharmonic just-off
+partials over pink noise, not the sat.
+
+⚠ DORAC peaks at **1.045** — over full scale, ~5dB above the factory SNR's
+0.577. Left as he made it; the master comp catches it, but it has no headroom
+when layered.
+
 ## 7. HOW A PRESET GETS SHELVED
 
 cmd+C on the channel puts the patch on the system clipboard as JSON; paste it
