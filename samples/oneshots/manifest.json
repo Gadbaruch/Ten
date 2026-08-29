@@ -1998,5 +1998,54 @@
   "inst": "fx",
   "style": "dr5",
   "cat": "zap"
+ },
+ {
+  "name": "snare-1",
+  "file": "oneshots/snare/snare-1.flac",
+  "kind": "one",
+  "inst": "snare",
+  "style": "acoustic",
+  "cat": "snr"
+ },
+ {
+  "name": "snare-2",
+  "file": "oneshots/snare/snare-2.flac",
+  "kind": "one",
+  "inst": "snare",
+  "style": "acoustic",
+  "cat": "snr"
+ },
+ {
+  "name": "snare-3",
+  "file": "oneshots/snare/snare-3.flac",
+  "kind": "one",
+  "inst": "snare",
+  "style": "acoustic",
+  "cat": "snr"
+ },
+ {
+  "name": "snare-4",
+  "file": "oneshots/snare/snare-4.flac",
+  "kind": "one",
+  "inst": "snare",
+  "style": "acoustic",
+  "cat": "snr"
+ },
+ {
+  "name": "snare-5",
+  "file": "oneshots/snare/snare-5.flac",
+  "kind": "one",
+  "inst": "snare",
+  "style": "acoustic",
+  "cat": "snr"
+ },
+ {
+  "name": "snare-rr",
+  "file": "oneshots/snare/snare-rr.flac",
+  "kind": "one",
+  "inst": "snare",
+  "style": "acoustic-rr",
+  "cat": "snr",
+  "slots": 5
  }
 ]
