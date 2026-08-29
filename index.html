@@ -1471,7 +1471,7 @@ const recPlayed=(pi,tBeat,midi,vel,durBeats)=>recPlayNote(pi,tBeat,sndOut(pi,mid
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-29.1109';
+const BUILD='2026-08-29.1119';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -4114,7 +4114,7 @@ function mergeToKit(){
   const lane=pat.lanes[tgt];
   lane.unit=unit; lane.count=count; lane.auto=false;
   lane.events=out.sort((a,b)=>a.t-b.t);
-  S.prepFocus=60;
+  S.prepFocus=KBBASE;      // the focused pad starts at the home key, where rate is 1
   for(const ch of sel.slice(1))initLane(pat.lanes[ch]);
   engine.rebuildRack(tgt); engine.refresh(tgt);
   for(const ch of sel.slice(1)){engine.rebuildRack(ch); engine.refresh(ch);}
@@ -7168,7 +7168,18 @@ class Voice{
        FILTERS instead — that's how hardware drum machines transpose noise.
        Samplers (smp) DO repitch, since that's what a sampler is. */
     const noiseRoot=isNoiseW(rootW);   // still used for buffer choice and start offset
-    const noteRatio=Math.pow(2,(midi-60)/12);
+    /* RATIO 1x IS TRUE PITCH, AT THE HOME KEY (Gad, 2026-08-29: "ratio 1x
+       should be true pitch"). The root was 60 while the keyboard's home key is
+       KBBASE 48, so `rat: 1` on the key under your hand played the sample an
+       OCTAVE DOWN — measured, tools/probe.sh smprate: note 48 gave rate 0.52,
+       and rate 1.0 only arrived at note 60. `rat` is a RATIO and a ratio of one
+       has to mean one.
+
+       SCOPED, and this is why it is safe: noteRatio is the BUFFER playback
+       ratio and nothing else. A tonal oscillator takes its pitch from
+       `440*2^((midi-69)/12)` on the line below and never reads this, so no
+       synth voice moves. Only samples and noise buffers do. */
+    const noteRatio=Math.pow(2,(midi-KBBASE)/12);
     /* rootFreq is the pitch BEFORE op 0's ratio/fine, so a live edit to those
        can rebuild every operator's frequency from scratch (see oscRefresh) */
     this.noteRatio=noteRatio;
@@ -7882,7 +7893,7 @@ class Voice{
            const st9=(W9.rev?1-W9.hi:W9.lo)*d9, en9=(W9.rev?1-W9.lo:W9.hi)*d9;
            if(en9>st9+0.005){s2.loopStart=st9; s2.loopEnd=en9; s2._off=st9;}
            if(Math.round(op.lps||0)===1)s2.loop=false;}
-          const ratio=Math.pow(2,(midi-60)/12)*op.rat*Math.pow(2,(op.fine||0)/1200);
+          const ratio=Math.pow(2,(midi-KBBASE)/12)*op.rat*Math.pow(2,(op.fine||0)/1200);  // same root as op 0
           setF(s2.playbackRate,ratio);        // glides with the rest — see op 0
 
           (this.opPitch[i]=this.opPitch[i]||[]).push({pm:s2.playbackRate,base:ratio,kind:'smp'});
@@ -14788,12 +14799,14 @@ function genLane(pat,pi,mutate,ctx){
     if(rnd()<0.4)push(1.5,58,0.5,0.12);
   }
   else if(cat==='kit'){                        // a kit writes the whole beat by itself
-    /* AT MIDDLE C, on the KITMAP layout — the old lines wrote 36..43, which is
-       two octaves below where a sampler plays at rate 1.0 (see KITLIFT) and on
-       a lane list that no longer exists: 43 was 'wood' and is the CYMBAL now.
+    /* AT THE HOME OCTAVE, on the KITMAP layout. These were 60..71 because 60
+       was where a sampler played at rate 1.0; the root is KBBASE now, so
+       writing 60 would fire every pad an OCTAVE UP. The pad CHOICE is by pitch
+       class and never cared — `pcOf` is mod 12 — but the playback rate cares
+       absolutely, which is exactly the kind of coupling that hides.
        KP names the pads so this cannot drift out of step with KITMAP again. */
-    const KP={kick:60,snare:61,hatC:62,hatO:63,clap:64,tom:65,rim:66,
-              cymbal:67,cowbell:68,conga:69,shaker:70,clave:71};
+    const KP={kick:48,snare:49,hatC:50,hatO:51,clap:52,tom:53,rim:54,
+              cymbal:55,cowbell:56,conga:57,shaker:58,clave:59};
     for(let bar=0;bar<L;bar+=4)for(const o of C.kick)push(bar+o,KP.kick,0.95,0.15);
     for(let bar=0;bar<L;bar+=4){push(bar+1,KP.snare,0.9,0.15);push(bar+3,KP.snare,0.9,0.15);}
     const st=C.hatScheme===1?0.25:0.5;
@@ -17071,7 +17084,12 @@ const KBHOME=KBSEQ.indexOf('KeyA');
    nowhere else. KeyA was giving 26.9Hz.
    Only the KIT lifts. A synth channel with a sampler op is PLAYING notes, and
    an octave down there is a musical choice rather than a mistake. */
-const KITLIFT=12;
+/* KITLIFT IS GONE, and it had to go in the same move. It existed to push a kit
+   pad from the home key up to MIDI 60, because 60 was where a sampler played at
+   rate 1. With the root moved to KBBASE the home key IS rate 1, so the lift
+   would now push kits an octave ABOVE native — the very bug it was added to
+   fix, mirrored. Kit behaviour is unchanged: home key, native pitch, before and
+   after. What changes is that synth-channel sampler ops finally agree with it. */
 function kbNote(code,chrom,noChord){
   const raw=KBSEQ.indexOf(code); if(raw<0)return null;
   const i=raw-KBHOME;
@@ -17126,7 +17144,7 @@ function noteOf(code,pi){
      assumption that rots. Inside noteOf every caller gets it, including
      keyForOffset's reverse map — which decides which key LIGHTS UP for a note
      and was pointing at a key an octave away on kit channels. */
-  return kit?v+KITLIFT:v;
+  return v;
 }
 const isNoteKey=code=>noteOf(code)!=null;
 /* kept for the places that want the piano map itself */
@@ -17138,7 +17156,7 @@ function keyForOffset(off,pi){
      channel highlights a key an octave from the one you pressed */
   const p9=pi!=null?S.presets[pi]:null;
   const kit=!!(p9&&isKit(p9)), self9=!!(p9&&isChordMaster(p9));
-  const o=kit?off-KITLIFT:off;
+  const o=off;
   if(!kbFull()){for(const k in NOTEKEYS_PIANO)if(NOTEKEYS_PIANO[k]===o)return k;return null;}
   for(const code of KBSEQ)if(kbNote(code,kit,self9)===o)return code;
   return null;

@@ -2047,5 +2047,46 @@
   "style": "acoustic-rr",
   "cat": "snr",
   "slots": 5
+ },
+ {
+  "name": "kick-1",
+  "file": "oneshots/kick/kick-1.flac",
+  "kind": "one",
+  "inst": "kick",
+  "style": "acoustic",
+  "cat": "kik"
+ },
+ {
+  "name": "kick-2",
+  "file": "oneshots/kick/kick-2.flac",
+  "kind": "one",
+  "inst": "kick",
+  "style": "acoustic",
+  "cat": "kik"
+ },
+ {
+  "name": "kick-3",
+  "file": "oneshots/kick/kick-3.flac",
+  "kind": "one",
+  "inst": "kick",
+  "style": "acoustic",
+  "cat": "kik"
+ },
+ {
+  "name": "kick-4",
+  "file": "oneshots/kick/kick-4.flac",
+  "kind": "one",
+  "inst": "kick",
+  "style": "acoustic",
+  "cat": "kik"
+ },
+ {
+  "name": "kick-rr",
+  "file": "oneshots/kick/kick-rr.flac",
+  "kind": "one",
+  "inst": "kick",
+  "style": "acoustic-rr",
+  "cat": "kik",
+  "slots": 4
  }
 ]
