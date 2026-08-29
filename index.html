@@ -1471,7 +1471,7 @@ const recPlayed=(pi,tBeat,midi,vel,durBeats)=>recPlayNote(pi,tBeat,sndOut(pi,mid
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-29.1345';
+const BUILD='2026-08-29.1409';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -13658,7 +13658,11 @@ function unpackRacks(d){
    old lane list was kik·snr·hh·hh·perc·tom·cymb·wood·zap·perc·snr·kik — two
    kicks, two snares, a zap, and no clap, rim, cowbell or clave anywhere — so
    a stored copy has to be dropped or it shadows the definition forever. */
-const LIBV=32;   // bump BOTH: libStore writes it, libAll checks it
+const LIBV=34;   // bump BOTH: libStore writes it, libAll checks it
+/* 33/34: the ten factory synth kits KT01-10 are built by kitPads(), whose pad
+   faders moved from MIXT to the measured SYNLVL. They are STORED, so
+   without this bump every existing library keeps the old unbalanced ones
+   forever and the change is invisible to anyone who has run TEN before. */
 function libStore(a){libMigrated=true; libCache=null; libNoCache=null;
   /* `gen` entries are built from this file and the manifest every boot — see
      smpKitEntries. Writing them would cost 831KB for nothing and would let a
@@ -15715,6 +15719,52 @@ function padLvl(inst,buf,dcyF,cat,rate){
   if(L==null)return {lvl:(MIXT[cat]||MIXT.misc).lvl,pan:role.pan};
   return {lvl:+clamp(Math.pow(10,(MIXREF+role.lu-L)/20),0.05,3).toFixed(3),pan:role.pan};
 }
+/* ---- AND WHAT A GENERATED DRUM PAD WEIGHS  (2026-08-29) ----------------
+   A synth pad has no buffer, so `padLoud` has nothing to read and the fader
+   has to come from somewhere else. MEASURED, `tools/probe.sh synthlvl`, 288
+   rolled pads fired at each slot's own note — a synth drum is pitched by its
+   pad the way a sample is rated by it, so the note is part of the answer.
+
+   ⚠ CALIBRATED ON KIT PADS, NOT ON STANDALONE PRESETS. The first table was
+   measured by putting a generated drum on a plain channel at fader 1.0, and
+   it landed the synth kits 3.8 dB under. A kit pad does not take the channel
+   path: it gets its OWN bus in voiceOut and the kit channel's fader on top,
+   and the difference is not one constant — measured per slot it ran from
+   -2.8 dB on the kick to -11.6 on the open hat. The numbers below are
+   `lufs - 20log10(lvl)` read off the ten factory synth kits themselves, which
+   is invariant to the fader and so a proper fixed point.
+
+   ⚠ **AND A TABLE CANNOT FINISH THIS JOB.** The same measurement says so:
+
+       predictor                       residual SD
+       per-category constant              6.39 dB
+       category + the amp envelope's
+         own dB over the 400ms block      5.81 dB
+       per-VOICING (47 groups, n=1..6)    3.44 dB   — and over-fit
+       PER-SLOT MEDIAN (this table)       6.59 dB
+
+   The generator's own randomising moves a pad by ±10 dB inside one recipe:
+   hat-open spans -42.5 to -6.0 across rolls, rim -42.4 to -13.4. That is not
+   an offset waiting for a constant, it is a distribution, and the only thing
+   that reads a distribution is a measurement of the individual roll.
+
+   So this table buys the MEAN and nothing else: mean |error| 7.45 -> 4.48 dB,
+   and — the part that is worth more than it looks — it puts synth pads on the
+   SAME absolute reference as sampled ones, so a synth kit and an 808 kit no
+   longer differ by 9.8 dB of kick. The within-kit residual is untouched and
+   `MIX.md` says what would actually fix it. */
+const SYNLVL={'kick':-16.7,'snare':-24.4,'hat-closed':-27.9,'hat-open':-30.8,
+  'clap':-28.1,'tom':-17.1,'rim':-23.1,'cymbal':-17.4,'cowbell':-24.2,
+  'conga':-22.9,'shaker':-21.3,'ride':-18.8};
+/* -20.0 LUFS at the kick, the same absolute a sampled kit is calibrated to.
+   SYNLVL is already in measured bus LUFS at fader 1.0, so unlike MIXREF there
+   is no chain gain to carry — the target is the target. */
+const MIXABS=-20.0;
+function synthPadLvl(inst,cat){
+  const role=MIXROLE[inst]||MIXROLE.perc, base=SYNLVL[inst];
+  if(base==null)return {...(MIXT[cat]||MIXT.misc)};
+  return {lvl:+clamp(Math.pow(10,(MIXABS+role.lu-base)/20),0.05,3).toFixed(3),pan:role.pan};
+}
 const KITMAP=[
   {inst:'kick',      cat:'kik',  alt:['sub']},
   {inst:'snare',     cat:'snr',  alt:['clap','rim']},
@@ -15931,9 +15981,12 @@ function kitPads(rnd,wild){    // 12 complete pad chains, one per pitch class
     const kp=genPreset(c,rnd,wild??0.3);kp.cat=c;kp.name=NN[i];delete kp.kit;
     /* A PAD'S LEVEL IS THE CHANNEL FADER FOR THAT PAD — it multiplies with the
        kit channel's own, so a pad left at a generated 0.4 came out half of what
-       the same drum does on its own channel. Give each pad the level its kind
-       gets everywhere else and let the kit fader be the only other stage. */
-    kp.mix={...(MIXT[c]||MIXT.misc)};
+       the same drum does on its own channel. MIXT gave it its KIND's level,
+       which was the right instinct and the wrong table: `snr` covers snare,
+       clap AND rim, and none of the three wants the same fader. SYNLVL is the
+       measured one, per SLOT, on the same -20.0 LUFS reference as a sampled
+       kit — so a synth kit and an 808 kit are finally the same loudness. */
+    kp.mix=synthPadLvl(slot.inst,c);
     return kp;});
 }
 function kitNotes(pool,rnd){   // (legacy) map every playable midi to a drum preset name
@@ -15989,7 +16042,12 @@ function randomizeKit(pi,wildOverride){
     }
     if(!kp){
       kp=genPreset(slot.cat,rnd,w); kp.cat=slot.cat; delete kp.kit;
-      kp.mix={...(MIXT[slot.cat]||MIXT.misc)};        // a pad's level is its kind's
+      /* ⚠ THE SAME SCALE AS THE PADS BESIDE IT. The sampled branches above
+         already set their faders from a measurement of the take; this one was
+         still reading MIXT, so a rolled kit carried TWO level scales at once —
+         a measured hat next to a table-valued one, in the same twelve pads.
+         At high wildness that is up to 15% of them. */
+      kp.mix=synthPadLvl(slot.inst,slot.cat);
       synth++;
     }
     kp.name=NN[i];

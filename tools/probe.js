@@ -4641,9 +4641,10 @@ const HELP = {
     { k: 'cursor',   args: 'chs=9 — ping ten-grsyn: tv/g/tpos/cpos' },
     { k: 'preset',   args: 'names=SNR,S909 note=48 ch=8 — library name, played and measured' },
     { k: 'key',      args: 'code=KeyA hold=120 shift=0 alt=0 ctrl=0 meta=0' },
+    { k: 'synthlvl', args: 'k=8 slots=0,1,2 seed=4000 — what a GENERATED drum pad weighs, with its voicing and envelope, to fit a build-time predictor' },
     { k: 'mixbus',   args: 'kit=KT808 bars=2 bpm=120 at=ch|master ref=brushkit — the whole kit playing, gated LUFS + PLR + band balance, against a real drum record' },
     { k: 'padpred',  args: 'kit=KT808 — offline buffer+envelope loudness vs the measured bus, to prove the model' },
-    { k: 'kitmix',   args: 'kit=KT808,KTLIN ms=400 — BS.1770 loudness + 8-band balance of every pad in a kit, against the role target' },
+    { k: 'kitmix',   args: 'kit=KT808,KTLIN|ROLL|ROLL80 ms=400 — BS.1770 loudness + 8-band balance of every pad in a kit, against the role target' },
     { k: 'smploud',  args: 'ch=4 ms=200 names=a,b,c — perceptual loudness of samples vs a synth op, and the median deficit' },
     { k: 'smprate',  args: 'ch=4 notes=36,48,60,72 — which note plays a sample at its own speed' },
     { k: 'smpdiag',  args: 'ch=4 file=oneshots/snare/linn-snare-03.flac note=48 — the file vs the op: level, band balance, stereo' },
@@ -5281,10 +5282,30 @@ async function probeKitMix() {
   const rows = [], sr = AC.sampleRate;
   try {
     for (const nm of names) {
-      const en = kits.find(e => e.name === nm);
-      if (!en) { rows.push({ k: nm, err: 'no such kit' }); continue; }
-      unstash(ch, { data: JSON.parse(JSON.stringify(en.data)), loop: keep.loop });
-      await sleep(60);
+      /* `ROLL` and `ROLL80` measure a kit the DICE made, at that wildness —
+         the path randomizeKit takes, which is not the path a library kit
+         takes and had never been measured. */
+      if (/^ROLL/i.test(nm)) {
+        const w = parseFloat(nm.slice(4)) || 35;
+        unstash(ch, keep);
+        S.presets[ch].cat = 'kit';
+        randomizeKit(ch, w);
+        /* THE CHANNEL FADER IS THE CHANNEL'S, not the roll's — randomizeKit
+           replaces p.kit and leaves p.mix alone, so whatever preset was on
+           this channel keeps its own level. A factory kit arrives at MIXT.kit,
+           so match it, or the rolled kit is measured against a fader that
+           happened to be there: the first run read every rolled kick at -26.8
+           LUFS against a -20.0 target for exactly that reason. */
+        S.presets[ch].mix.lvl = (MIXT.kit || {}).lvl != null ? MIXT.kit.lvl : 0.95;
+        S.presets[ch].mix.pan = 0;
+        engine.rebuildRack(ch); engine.refresh(ch);
+        await sleep(80);
+      } else {
+        const en = kits.find(e => e.name === nm);
+        if (!en) { rows.push({ k: nm, err: 'no such kit' }); continue; }
+        unstash(ch, { data: JSON.parse(JSON.stringify(en.data)), loop: keep.loop });
+        await sleep(60);
+      }
       const p = S.presets[ch];
       let kickL = null;
       for (let i = 0; i < 12; i++) {
@@ -5307,7 +5328,8 @@ async function probeKitMix() {
         const bd = bands(L, R, sr, w.o, w.take);
         if (i === 0) kickL = lu;
         const smp = ((K.osc && K.osc[0] && K.osc[0].smp) || {}).f || '';
-        rows.push({ k: slot.inst, file: smp.split('/').pop().replace('.flac', ''),
+        rows.push({ k: slot.inst, file: smp ? smp.split('/').pop().replace('.flac', '')
+                                            : 'SYNTH ' + (K.name || ''),
                     lvl: r3((K.mix || {}).lvl), lufs: +lu.toFixed(1),
                     'vs kick': kickL == null ? 0 : +(lu - kickL).toFixed(1),
                     tgt: MIXTARGET[slot.inst] == null ? '—' : MIXTARGET[slot.inst],
@@ -5573,6 +5595,75 @@ async function probeMixBus() {
                 + 'bands are % of spectral energy, Welch-averaged over the whole take' };
 }
 
+/* ---------------- synthlvl: what a GENERATED drum pad weighs -------------- *
+ * The sampled path measures the buffer. A synth pad has no buffer, so the
+ * question is whether its loudness can be PREDICTED from the preset — which is
+ * all a kit roll has at the moment it must choose a fader.
+ *
+ * This rolls k presets per KITMAP slot, at that slot's own NOTE (a synth drum
+ * is pitched by the pad the same way a sample is rated by it), renders each at
+ * fader 1.0, and records alongside the measurement everything a build-time
+ * predictor could legally use: the voicing name the generator encodes into the
+ * preset name, and the amp envelope. `env` here is the envelope's own
+ * contribution in dB, computed exactly as the engine schedules it — so
+ * `meas - env` is what is LEFT once the envelope is accounted for, and if that
+ * clusters per voicing then a voicing table plus this term is the model. */
+function envTermDb(e, sr) {
+  const aA = Math.max(0.001, e.a || 0.003), aS = e.s == null ? 1 : e.s;
+  const aD = e.d == null ? 0.1 : e.d, tau = Math.max(0.005, aD / 3);
+  const n = Math.round(0.4 * sr);
+  let sq = 0;
+  for (let i = 0; i < n; i++) {
+    const t = i / sr;
+    const g = t < aA ? t / aA : aS + (1 - aS) * Math.exp(-(t - aA) / tau);
+    sq += g * g;
+  }
+  return 10 * Math.log10(Math.max(sq / n, 1e-12));
+}
+async function probeSynthLvl() {
+  const ch = Math.max(1, Math.min(9, Math.round(num(P.ch, 9))));
+  const k = Math.max(1, Math.round(num(P.k, 8)));
+  const slots = list(P.slots, ['0','1','2','3','4','5','6','7','8','9','10','11']).map(Number);
+  const seed0 = Math.round(num(P.seed, 4000));
+  const keep = stash(ch), rows = [], sr = AC.sampleRate;
+  try {
+    for (const si of slots) {
+      const slot = KITMAP[si]; if (!slot) continue;
+      for (let i = 0; i < k; i++) {
+        const rnd = mulberry32(seed0 + si * 977 + i * 31);
+        let pre; try { pre = genPreset(slot.cat, rnd, 0.3); } catch (e) { continue; }
+        pre.cat = slot.cat; delete pre.kit;
+        const dat = presetData(pre);
+        setP(ch, pre.name, slot.cat, dat);
+        S.presets[ch].mix.lvl = 1.0; S.presets[ch].mix.pan = 0;
+        engine.rebuildRack(ch); engine.refresh(ch);
+        await sleep(35); pin(ch);
+        engine.allOff(); await sleep(30);
+        const bus = busOf(ch); if (!bus) continue;
+        const t = tap(bus); await sleep(20);
+        engine.noteOn(AC.currentTime + 0.02, ch, KBBASE + si, 1.0);
+        await sleep(520); engine.allOff();
+        const [L, R] = t.stop(), w = windowOf(L, R);
+        const [kL, kR] = kWeight(L, R, sr);
+        const lu = lufsOf(kL, kR, w.o, Math.min(Math.round(0.4 * sr), L.length - w.o));
+        const e0 = (S.presets[ch].env || [])[0] || {};
+        const ampMod = (S.presets[ch].mod || []).find(m => m && m.src === 1);
+        const ae = ampMod ? ampMod : e0;
+        const et = envTermDb(ae, sr);
+        rows.push({ k: slot.inst + '#' + i, cat: slot.cat, slot: si, nm: pre.name,
+                    voice: String(pre.name).slice(3),
+                    a: r3(ae.a), d: r3(ae.d), s: r3(ae.s),
+                    meas: +lu.toFixed(1), env: +et.toFixed(1),
+                    resid: +(lu - et).toFixed(1) });
+      }
+    }
+  } finally { unstash(ch, keep); }
+  return { cols: ['cat', 'slot', 'nm', 'voice', 'a', 'd', 's', 'meas', 'env', 'resid'], rows,
+           notes: 'meas = BS.1770 momentary at fader 1.0, at the pad\'s own note · '
+                + 'env = the amp envelope\'s own dB over the same 400ms · '
+                + 'resid = meas - env, what a build-time table would have to supply' };
+}
+
 const PROBES = { level: probeLevel, spectrum: probeSpectrum, cursor: probeCursor,
                    preset: probePreset, key: probeKey, keypath: probeKeyPath,
                    roundtrip: probeRoundTrip,
@@ -5619,7 +5710,8 @@ const PROBES = { level: probeLevel, spectrum: probeSpectrum, cursor: probeCursor
                    smploud: probeSmpLoud,
                    kitmix: probeKitMix,
                    padpred: probePadPred,
-                   mixbus: probeMixBus };
+                   mixbus: probeMixBus,
+                   synthlvl: probeSynthLvl };
   const fn = PROBES[NAME];
   out = fn ? await fn() : (NAME === 'help' ? HELP : { cols: [], rows: [], err: 'no probe named ' + NAME });
 } catch (e) {

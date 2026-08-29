@@ -179,6 +179,98 @@ balance Welch-averaged over the whole take.
   0.0% air are artifacts of both. The kits reading 11-14% above 6kHz against
   that is expected, not a fault. **OPEN: TEN has no reference worth the name.**
 
+
+## 9. THE SYNTH KITS — measured, and why a table is the ceiling
+
+`padLoud` reads a buffer. `kitPads()` and the synth fallback inside
+`randomizeKit` have no buffer, so KT01-10 and the generated pads in a roll
+never went near it. **MEASURED**, `tools/probe.sh kitmix` on KT01-10:
+
+      mean |error| 7.45 dB · median 5.00 · 74/120 pads more than 3 dB out
+      51/120 more than 6 dB · worst 35.1 · kick spread kit to kit 9.8 dB
+
+Worse than the sampled kits had ever been.
+
+**AND A TABLE CANNOT FIX IT.** `tools/probe.sh synthlvl` rolled 288 pads at
+each slot's own note and asked what predicts their loudness:
+
+      predictor                                  residual SD
+      per-category constant                         6.39 dB
+      category + the amp envelope's own dB          5.81 dB
+      per-VOICING (47 groups, n=1..6)               3.44 dB   — and over-fit
+      per-SLOT median  (SYNLVL, what shipped)       6.59 dB
+
+The generator's own randomising moves a pad by ±10 dB inside one recipe:
+hat-open spans -42.5 to -6.0 across rolls, rim -42.4 to -13.4. That is a
+DISTRIBUTION, not an offset waiting for a constant, and the only thing that
+reads a distribution is a measurement of the individual roll.
+
+**MEASURED — what SYNLVL bought anyway:**
+
+                                     BEFORE     AFTER
+      mean |error| vs role target     7.45      4.95  dB
+      median |error|                  5.00      3.60  dB
+      pads more than 3 dB out       74/120    66/120
+      pads more than 6 dB out       51/120    33/120
+      kick spread, kit to kit         9.80      9.60  dB
+      kick mean LUFS (target -20.0) -18.17    -21.00
+
+The mean moved and the tail shrank by a third. **The kick spread did not move
+at all, exactly as the residual analysis said it would not** — synth kits still
+do not match each other, because each kit's kick is a different roll of the
+dice and no per-slot number knows which roll it got.
+
+⚠ **CALIBRATE ON KIT PADS, NOT ON STANDALONE PRESETS.** The first SYNLVL was
+measured by putting a generated drum on a plain channel at fader 1.0 and landed
+the synth kits 3.8 dB under. A kit pad does not take the channel path — it gets
+its own bus in `voiceOut` with the kit channel's fader on top — and the
+difference is not one constant: per slot it ran from -2.8 dB on the kick to
+-11.6 on the open hat. The shipped table is `lufs - 20log10(lvl)` read off the
+ten factory kits themselves, which is invariant to the fader and so a fixed
+point.
+
+**LIBV had to go to 34.** KT01-10 are STORED, so without the bump every
+existing library keeps the old faders forever and the change is invisible to
+anyone who has run TEN before.
+
+## 10. ROLLED KITS — MEASURED, and they were already right
+
+`randomizeKit` builds its sampled pads through the same `smpPad`, so the
+measured fader reaches a roll. That was asserted when the sampled work shipped
+and not checked; `tools/probe.sh kitmix kit=ROLL` checks it now — twelve rolled
+kits, 144 pads:
+
+      wild 35   mean |error| 1.36 dB · median 0.15 · 11/72 pads over 3 dB
+      wild 80   mean |error| 1.26 dB · median 0.10 ·  9/72
+      sampled pads only, wild 80:  0.97 dB mean, 0.10 median
+
+⚠ **ONE REAL BUG WAS HIDING THERE.** `randomizeKit`'s third branch — the synth
+fallback when no take fits the slot — was still reading `MIXT`, so **a rolled
+kit could carry TWO level scales at once**: a measured hat next to a
+table-valued one, in the same twelve pads. At wild 80 that is up to 15% of
+them. It uses `synthPadLvl` now, so a rolled kit is on one scale even where it
+is part synthetic.
+
+⚠ **AND A MEASUREMENT TRAP, for anyone testing a roll.** `randomizeKit`
+replaces `p.kit` and leaves `p.mix` alone — the CHANNEL fader is the channel's,
+not the roll's. Measuring a roll onto whatever preset happened to be on the
+channel read every rolled kick at -26.8 LUFS against a -20.0 target. The probe
+sets the channel to `MIXT.kit` first.
+
+## 11. WHAT WOULD ACTUALLY FIX THE SYNTH PADS
+
+Measure them. The cost is smaller than it looks, and the reason is
+architectural: **every kit pad already has its OWN bus** (`voiceOut` builds
+`kitBuses[pi][pc]`), so all twelve can be tapped separately, fired at once, and
+read independently in a SINGLE 400ms pass — not twelve passes. One silent
+render per kit, at roll time and at boot for the factory ten, would put synth
+pads on the same footing as sampled ones: from 4.95 dB to the ~0.4 dB the
+sampled path gets.
+
+**DESIGNED, not built, and it is Gad's call**, because it is not free: a kit
+would settle its levels a moment after you roll it rather than at the keypress,
+and that is a UX change, not an implementation detail.
+
 ## 8. OPEN
 
 - **A real reference.** One brush-kit MP3 is not a tonal-balance reference.
@@ -187,9 +279,9 @@ balance Welch-averaged over the whole take.
   `cr78-rim-01` (-34.2). The system already gives them everything the clamp
   allows. The honest fix is upstream: either keep takes this far under out of
   `kitPick`, or normalise them on the shelf.
-- **The synth kits KT01-10 still use MIXT.** They are generated, not sampled,
-  so `padLoud` has no buffer to read and the fix does not reach them. They need
-  either a render-time measurement or a per-archetype table.
+- **The synth kits are on SYNLVL and that is the ceiling for a table** —
+  4.95 dB mean error, kick spread still 9.6 dB. Section 11 is what would fix
+  them and why it needs a decision first.
 - **Standalone drum channels still use MIXT.** Only kit PADS are measured. A
   `hh` channel on its own is still a category constant.
 - **The automix.** `mixChannel()` sets levels, pans and sends from `MIXT` for

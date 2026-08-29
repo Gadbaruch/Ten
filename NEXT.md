@@ -1,3 +1,73 @@
+# ALL THE KITS, AND THE ROLLED ONES — 2026-08-29
+
+Gad: *"can you improve the levels of all the kits and make it apply also for
+rolled kits? or you did it already?"*
+
+Half done, and the honest answer needed measuring. Full write-up in `MIX.md`
+sections 9-11.
+
+## ROLLED KITS — already right, now PROVEN, and one real bug found
+
+Sampled pads in a roll go through the same `smpPad`, so the measured fader did
+reach them. Twelve rolled kits, 144 pads, `tools/probe.sh kitmix kit=ROLL`:
+
+      wild 35   mean |error| 1.36 dB · median 0.15 · 11/72 pads over 3 dB
+      wild 80   mean |error| 1.26 dB · median 0.10 ·  9/72
+
+⚠ **BUT `randomizeKit`'s SYNTH FALLBACK still read MIXT**, so a rolled kit
+could carry TWO level scales at once — a measured hat beside a table-valued
+one, in the same twelve pads, up to 15% of them at high wildness. Fixed.
+
+⚠ **MEASUREMENT TRAP: `randomizeKit` leaves `p.mix` alone.** The channel fader
+is the channel's, not the roll's. Measuring a roll onto whatever preset was on
+the channel read every rolled kick at -26.8 LUFS against -20.0. The probe sets
+`MIXT.kit` first; so should anything else that measures a roll.
+
+## SYNTH KITS KT01-10 — improved, and the ceiling is now known
+
+They were the worst thing in the instrument and nobody had looked:
+
+      mean |error| 7.45 dB · 74/120 pads over 3 dB · kick spread 9.8 dB
+
+⚠ **AND NO TABLE CAN FIX THEM.** `tools/probe.sh synthlvl`, 288 rolled pads:
+
+      per-category constant                6.39 dB residual SD
+      category + amp-envelope term         5.81 dB
+      per-VOICING (47 groups)              3.44 dB   and over-fit
+      per-SLOT median (SYNLVL, shipped)    6.59 dB
+
+The generator moves a pad ±10 dB INSIDE one recipe — hat-open spans -42.5 to
+-6.0 across rolls. That is a distribution, not an offset, and only a
+measurement of the individual roll reads a distribution.
+
+Shipped anyway, because the mean and the tail were worth having:
+
+                                     BEFORE     AFTER
+      mean |error| vs role target     7.45      4.95  dB
+      median |error|                  5.00      3.60  dB
+      pads more than 6 dB out       51/120    33/120
+      kick spread, kit to kit         9.80      9.60  dB   <- unmoved, as predicted
+      kick mean LUFS (target -20.0) -18.17    -21.00
+
+⚠ **CALIBRATE ON KIT PADS.** The first SYNLVL was measured on standalone
+presets and landed 3.8 dB under — a kit pad takes `voiceOut`'s own bus plus the
+kit channel's fader, and the gap is not one constant (-2.8 dB on the kick,
+-11.6 on the open hat). The shipped table is `lufs - 20log10(lvl)` read off the
+factory kits themselves, which is fader-invariant and so a fixed point.
+
+**LIBV 32 -> 34** — KT01-10 are STORED, so without the bump every existing
+library keeps the old faders forever.
+
+## THE OPEN DECISION — measuring the synth pads
+
+Every kit pad already has its OWN bus (`voiceOut` -> `kitBuses[pi][pc]`), so
+all twelve can be tapped separately, fired together and read in a SINGLE 400ms
+pass. One silent render per kit — at roll, and at boot for the factory ten —
+would take synth pads from 4.95 dB to the ~0.4 dB the sampled path gets.
+
+It is not free: **the kit would settle its levels a moment after you roll it**
+rather than at the keypress. That is a UX change and it is Gad's call.
+
 # A DRUM MIX IS A MEASUREMENT — 2026-08-29
 
 Gad: *"teach yourself online how to do proper music production mixing ... come
