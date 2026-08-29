@@ -1471,7 +1471,7 @@ const recPlayed=(pi,tBeat,midi,vel,durBeats)=>recPlayNote(pi,tBeat,sndOut(pi,mid
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-29.1149';
+const BUILD='2026-08-29.1207';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1835,6 +1835,14 @@ const POOLBYF=new Map();             // src.f -> entry, so a preset's sample ref
    before the kit block itself is reached. See smpKitEntries. */
 let SMPKITCACHE=null;
 let SHELFN=0;                        // how many one-shots the manifest promised
+/* …AND HOW MANY OF THOSE WILL NEVER ARRIVE. A manifest row whose file is gone
+   404s, is swallowed by loadShelf's catch, and never reaches the POOL — so
+   `have` can never reach SHELFN and the "wait until the shelf is all there"
+   guard below waits forever. Gad deleted five snares he did not like and
+   every sampled factory kit vanished with them, KT808 included: kits became
+   roll-only and nothing said why. A shelf is COMPLETE when every row has
+   SETTLED, not when every row has succeeded. */
+let SHELFMISS=0;
 /* THE ENGINE ARRIVES AS AN ARGUMENT and is never read from the outer const.
    `rebuildRack` runs while `const engine = new Engine()` is still evaluating,
    and reading a const from inside its own initialiser is a ReferenceError, not
@@ -13028,13 +13036,13 @@ function loadShelf(url,ord0,shelf){
       en=Object.assign({shelf:shelf},en);
       fetch('samples/'+en.file).then(r=>r.ok?r.arrayBuffer():null)
         .then(ab=>ab&&AC.decodeAudioData(ab))
-        .then(buf=>{if(!buf)return;
+        .then(buf=>{if(!buf){if(shelf==='one')SHELFMISS++; return;}
           poolAdd(buf,en.name||fName(en.file),{k:'f',f:en.file},
                   Object.assign({ord:ord0+i},en));
           /* only a LOOP can seed a cloud, and asking 666 times would be 666
              walks of the channel list for nothing */
           if((en.kind||'')!=='one')seedCloud();})
-        .catch(()=>{});
+        .catch(()=>{if(shelf==='one')SHELFMISS++;});
     });
     return man.length;
   }).catch(()=>0);
@@ -15682,7 +15690,9 @@ function smpKitEntries(){
      kit — the 2.5s invalidation would replace it, but not before it had been
      browsed. SHELFN is the manifest's own count. */
   const have=POOL.filter(e=>e&&e.inst).length;
-  if(!have||(SHELFN&&have<SHELFN))return [];  // shelf not in yet: ask again next call
+  /* SETTLED, not succeeded — see SHELFMISS. Subtracting the rows that failed
+     is what stops one deleted file from disabling every sampled kit forever. */
+  if(!have||(SHELFN&&have<SHELFN-SHELFMISS))return [];  // shelf not in yet: ask again
   const out=[];
   SMPKITS.forEach(([style,nm,sh],ki)=>{
     if(style&&!POOL.some(e=>e&&e.style===style))return;    // that machine was pruned away

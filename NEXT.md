@@ -1,3 +1,56 @@
+# ONE DELETED FILE KILLED EVERY SAMPLED KIT — 2026-08-29
+
+## THE BUG  (Gad: "I cant access the new presets by scrolling presets only with roll")
+
+He deleted five acoustic snares he did not like. Every sampled factory kit
+disappeared with them — **KT808, KTLIN, all ten machine kits and all ten new
+acoustic ones** — and nothing said why. Kits became roll-only.
+
+`smpKitEntries()` guards with *"do not build from a half-loaded shelf"*:
+
+      if(!have || (SHELFN && have < SHELFN)) return [];
+
+`SHELFN` is the MANIFEST's row count. A row whose file is gone 404s, is
+swallowed by loadShelf's `.catch(()=>{})`, and never reaches the POOL — so
+`have` can never reach `SHELFN` and the guard waits forever. Measured at the
+moment of the report: **have 295, SHELFN 300, smpKitEntries 0.**
+
+**A shelf is COMPLETE when every row has SETTLED, not when every row has
+SUCCEEDED.** `SHELFMISS` counts the rows that will never arrive and the guard
+subtracts it. Proven by putting a deliberately-missing row back:
+
+      have 295   SHELFN 296   SHELFMISS 1   ->  20 kits built
+      (before the fix, that exact state gave 0)
+
+`libAll()` now offers all 30: KT01-10 synth, KT808/TR8/LIN/C78/505/RX5/DR5/
+MRK/MX1/MX2 machine, KTJAZ/ROK/FNK/DRY/BIG/TGT/DMP/BRT/DRK/VIN acoustic.
+
+⚠ **THE SHAPE TO REMEMBER: a silent `.catch(()=>{})` feeding a completeness
+counter.** The count is a promise, the catch breaks it, and the guard waits on
+a number that can never arrive. Anything else that gates on "all of X loaded"
+wants the same audit.
+
+## THE ACOUSTIC BANK MOVED, for inspection in Finder
+
+    samples/oneshots/acoustic/{kick,snare,rim,hatcl,hatop,ride,bell,
+                               crash,tomhi,tomlo,shake,tamb}/
+
+45 files, out of the machine folders they were mixed into. **Kits are
+unaffected** — they are `gen:true`, rebuilt from the manifest every boot, so
+they follow the new paths by themselves. A SAVED SET that references an old
+path (`oneshots/kick/kick-1.flac`) will not resolve; worth knowing if a test
+set from this morning comes back with a silent pad.
+
+Five dead manifest rows pruned. Manifest is 295 rows, 0 missing files.
+
+## STILL OPEN
+
+- **Volume still a bit low** (Gad, testing further). The makeup closed 7.5dB to
+  3.1dB against a saw; the rest is crest factor. If he wants more it is one
+  constant, and the honest next step is a gentle clip rather than raw gain.
+- Sample ops on **slots 1-9** still miss the 4.4dB makeup — op 0 only.
+- **Round-robin** still needs the `stp` mod-route field; `-rr` files sit unused.
+
 # TEN ACOUSTIC KITS, AND THE SAMPLE LEVEL FIX — 2026-08-29
 
 ## THE SAMPLE PATH: THREE FIXES, ALL MEASURED
