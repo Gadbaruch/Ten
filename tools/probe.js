@@ -4641,7 +4641,7 @@ const HELP = {
     { k: 'cursor',   args: 'chs=9 — ping ten-grsyn: tv/g/tpos/cpos' },
     { k: 'preset',   args: 'names=SNR,S909 note=48 ch=8 — library name, played and measured' },
     { k: 'key',      args: 'code=KeyA hold=120 shift=0 alt=0 ctrl=0 meta=0' },
-    { k: 'mixbus',   args: 'kit=KT808 bars=2 bpm=120 ref=brushkit — the whole kit playing, gated LUFS + PLR + band balance, against a real drum record' },
+    { k: 'mixbus',   args: 'kit=KT808 bars=2 bpm=120 at=ch|master ref=brushkit — the whole kit playing, gated LUFS + PLR + band balance, against a real drum record' },
     { k: 'padpred',  args: 'kit=KT808 — offline buffer+envelope loudness vs the measured bus, to prove the model' },
     { k: 'kitmix',   args: 'kit=KT808,KTLIN ms=400 — BS.1770 loudness + 8-band balance of every pad in a kit, against the role target' },
     { k: 'smploud',  args: 'ch=4 ms=200 names=a,b,c — perceptual loudness of samples vs a synth op, and the median deficit' },
@@ -5471,6 +5471,41 @@ const MIXPAT = [
   [10, [1, 3, 5, 7, 9, 11, 13, 15]],  // shaker — offbeat sixteenths
   [11, [2, 6, 10, 14]],        // ride
 ];
+/* THE BALANCE OF THE MIX, NOT OF ITS FIRST HIT. `bands` reads one 16384-point
+   window — 372ms — which over a four-second pattern is the kick and nothing
+   else. Welch: average the POWER spectra of successive windows at 50% overlap
+   across the whole recording, so every hat and every crash is in the answer in
+   proportion to how often it plays. Density is half of what tonal balance
+   means for drums. */
+function bandsAvg(L, R, sr) {
+  const N = 16384, half = N >> 1, hop = N >> 1;
+  const acc = new Float64Array(half);
+  const re = new Float64Array(N), im = new Float64Array(N);
+  const n = Math.min(L.length, R.length);
+  let wins = 0;
+  for (let o = 0; o + N <= n; o += hop) {
+    for (let i = 0; i < N; i++) {
+      re[i] = ((L[o + i] || 0) + (R[o + i] || 0)) * 0.5 *
+              (0.5 - 0.5 * Math.cos(2 * Math.PI * i / N));
+      im[i] = 0;
+    }
+    fft(re, im);
+    for (let k = 1; k < half; k++) acc[k] += re[k] * re[k] + im[k] * im[k];
+    wins++;
+  }
+  const e = MIXBANDS.map(() => 0);
+  let tot = 0, sw = 0, sm = 0;
+  for (let k = 1; k < half; k++) {
+    const hz = k * sr / N, m = acc[k];
+    tot += m; const mag = Math.sqrt(m); sw += mag * hz; sm += mag;
+    for (let b = 0; b < MIXBANDS.length; b++)
+      if (hz >= MIXBANDS[b][1] && hz < MIXBANDS[b][2]) { e[b] += m; break; }
+  }
+  const out = { wins };
+  MIXBANDS.forEach(([nm], b) => out[nm] = tot ? +(100 * e[b] / tot).toFixed(1) : 0);
+  out.cent = sm ? Math.round(sw / sm) : 0;
+  return out;
+}
 async function probeMixBus() {
   const ch = Math.max(1, Math.min(9, Math.round(num(P.ch, 9))));
   const want = str(P.kit, 'KT808').split(',');
@@ -5488,9 +5523,12 @@ async function probeMixBus() {
       if (a > pk) pk = a; if (b > pk) pk = b;
     }
     const pkDb = 20 * Math.log10(Math.max(pk, 1e-9));
-    const bd = bands(L, R, sr, 0, Math.min(L.length, 16384));
+    let over = 0;
+    for (let i = 0; i < L.length; i++)
+      if (Math.abs(L[i]) > 1 || Math.abs(R[i] || 0) > 1) over++;
+    const bd = bandsAvg(L, R, sr);
     return Object.assign({ k, lufs: +ig.lufs.toFixed(1), mmax: +ig.mmax.toFixed(1),
-      peak: +pkDb.toFixed(1), PLR: +(pkDb - ig.lufs).toFixed(1), cent: bd.cent,
+      peak: +pkDb.toFixed(1), over: over, PLR: +(pkDb - ig.lufs).toFixed(1), cent: bd.cent,
       sub: bd.sub, low: bd.low, lomid: bd.lomid, mid: bd.mid, himid: bd.himid,
       pres: bd.pres, bril: bd.bril, air: bd.air }, extra || {});
   };
@@ -5501,7 +5539,12 @@ async function probeMixBus() {
       unstash(ch, { data: JSON.parse(JSON.stringify(en.data)), loop: keep.loop });
       await sleep(80); pin(ch);
       engine.allOff(); await sleep(50);
-      const bus = busOf(ch); if (!bus) { rows.push({ k: nm, err: 'no bus' }); continue; }
+      /* THE MASTER, NOT THE CHANNEL, when asked. Web Audio is float and does
+         not clip between nodes, so a channel-bus peak over 1.0 is not a fault
+         — the only place clipping is real is the last node before the
+         destination. `at=master` taps engine.comp, post-compressor. */
+      const bus = str(P.at, 'ch') === 'master' ? engine.comp : busOf(ch);
+      if (!bus) { rows.push({ k: nm, err: 'no bus' }); continue; }
       const t = tap(bus); await sleep(30);
       const t0 = AC.currentTime + 0.08;
       for (let b = 0; b < bars; b++) for (const [pad, steps] of MIXPAT)
@@ -5523,11 +5566,11 @@ async function probeMixBus() {
           R = b.numberOfChannels > 1 ? b.getChannelData(1) : L;
     rows.push(report('REF ' + refName, L, R, { src: 'file ' + b.duration.toFixed(2) + 's' }));
   } else rows.push({ k: 'REF ' + refName, err: 'not on the shelf' });
-  return { cols: ['src', 'lufs', 'mmax', 'peak', 'PLR', 'cent', 'sub', 'low', 'lomid', 'mid',
+  return { cols: ['src', 'lufs', 'mmax', 'peak', 'over', 'PLR', 'cent', 'sub', 'low', 'lomid', 'mid',
                   'himid', 'pres', 'bril', 'air'], rows,
            notes: 'lufs = BS.1770 INTEGRATED, gated · mmax = loudest 400ms block · '
                 + 'PLR = peak minus integrated, the crest factor mastering reads · '
-                + 'bands are % of spectral energy over the first 16384 samples' };
+                + 'bands are % of spectral energy, Welch-averaged over the whole take' };
 }
 
 const PROBES = { level: probeLevel, spectrum: probeSpectrum, cursor: probeCursor,

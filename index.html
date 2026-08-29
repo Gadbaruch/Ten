@@ -1471,7 +1471,7 @@ const recPlayed=(pi,tBeat,midi,vel,durBeats)=>recPlayNote(pi,tBeat,sndOut(pi,mid
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-29.1333';
+const BUILD='2026-08-29.1342';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -15679,9 +15679,14 @@ const MIXROLE={
 /* THE ONE CONSTANT THE WHOLE TABLE HANGS OFF: the padLoud value a kick must
    have, after its own fader, to land at -20.0 LUFS on the channel bus.
    -20.0 is the MEDIAN of the twelve kits as they were, so half the kits move
-   up a little and half down, and nothing jumps. The measured voice-chain gain
-   between padLoud and the bus is -2.85dB, so MIXREF = -20.0 + 2.85. */
-const MIXREF=-17.15;
+   up a little and half down, and nothing jumps.
+
+   CALIBRATED, NOT DERIVED. The first value came from a mean chain gain of
+   -2.85dB and landed the kick at -19.15 across the ten machine kits — 0.85dB
+   hot, because that mean was taken over pads at twelve different playback
+   RATES and the kick is the only one at 1.0x. Measuring the kick alone and
+   subtracting is the honest way to set it. */
+const MIXREF=-18.0;
 /* A pad's fader, from its own loudness. Clamped: a near-dead take (dr5-shaker
    -01 measured 40dB under its role) asks for 100x and gets 3x, which helps it
    without blowing the channel up. */

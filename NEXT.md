@@ -1,3 +1,105 @@
+# A DRUM MIX IS A MEASUREMENT — 2026-08-29
+
+Gad: *"teach yourself online how to do proper music production mixing ... come
+up a system to make a mix, listen to it, analyse it, compare to reference or to
+best practices and fix, so we can improve the kit presets first and the automix
+later on."*
+
+**The system is written up in `MIX.md`.** This is what changed and what it cost.
+
+## THE FINDING
+
+Every sampled pad took its fader from `MIXT` — one number per CATEGORY, so
+every hat in every kit got 0.35 and every cymbal 0.30. Measured with an
+ITU-R BS.1770 K-weighted meter across all twelve sampled kits, 144 pads:
+
+      mean |error| against the role target     3.7 dB
+      pads more than 3 dB out                57/144   (40%)
+      worst pad                               40.1 dB
+      kick loudness, kit to kit                8.2 dB spread
+      SAME ROLE, SAME FADER, ACROSS BANKS     38.7 dB spread
+
+⚠ **THE SHAPE TO REMEMBER: a per-CATEGORY constant standing in for a per-TAKE
+measurement.** It is not a wrong number, it is the wrong KIND of number. And
+peak cannot substitute — all 273 takes on the shelf peak at 0.8912 (normalised
+to -1 dBFS) while their loudness spans **32 dB**.
+
+## THE FIX — ten machine kits, 120 pads
+
+                                     BEFORE     AFTER
+      mean |error| vs role target     3.70      0.42  dB
+      median |error|                  2.40      0.10  dB
+      p90 |error|                     8.80      0.40  dB
+      pads more than 1 dB out        88/120     3/120
+      kick spread, kit to kit         6.20      0.50  dB
+      kick mean LUFS (target -20.0) -21.19    -20.01
+
+`padLoud(buf, dcyF, rate)` measures the take under its own amp envelope at its
+own rate; `MIXROLE` says where each INSTRUMENT sits in LU relative to the kick,
+and where it sits in the room. `MIXREF` is the single constant tying the table
+to an absolute level.
+
+**THE THREE THINGS THAT HAD TO BE EXACTLY RIGHT**, each caught by predicting
+offline and measuring through the engine (`tools/probe.sh padpred` — if the
+model is right the difference is ONE constant):
+
+1. **The 400ms block is FIXED and ZERO-PADDED.** The silence after a 60ms rim
+   is part of its loudness. Truncating to the take cost 8.25 dB of spread.
+2. **The envelope time constant is d/3, not d** — what the engine schedules.
+3. **⚠ EACH PAD PLAYS AT ITS OWN RATE.** A kit pad is a NOTE, pad *n* is
+   KBBASE+*n*, and a sample op plays at `2^((midi-KBBASE)/12)` — so pad 11 runs
+   at **1.89x** and pad 0 at 1.00x. On KTJAZ the cymbal and the ride are the
+   same file with identical envelopes: **-27.4 LUFS and -42.8, fifteen decibels
+   apart.** Anything that reasons about a kit pad's sound and ignores the pad
+   INDEX is wrong, and this is the second time rate has bitten (see the KITLIFT
+   near-miss).
+
+## WHAT WAS DELIBERATELY NOT BUILT, because it was measured first
+
+- **No high-pass on any pad.** Every non-kick, non-tom pad has under 2% of its
+  energy below 120Hz — there is no mud, and toms carry 78-97% down there.
+- **No peak guard.** Four pads exceed 1.0 on the CHANNEL bus, which is not
+  clipping: Web Audio is float between nodes. At the master, post-comp, over a
+  full pattern: **0 samples over 1.0** on KT808, KTLIN, KTRX5.
+
+## NEW PROBES
+
+      tools/probe.sh kitmix  kit=KT808        every pad's LUFS + 8-band balance
+                                              against its role target
+      tools/probe.sh padpred kit=KT808        offline model vs measured bus —
+                                              the test that keeps the model honest
+      tools/probe.sh mixbus  kit=KT808 at=master   the whole kit playing: gated
+                                              INTEGRATED LUFS, PLR, clip count,
+                                              Welch band balance, vs a real record
+
+## ⚠ ANOTHER SESSION IS WORKING IN THIS DIRECTORY
+
+At 15:33 a session working on BES1 ran `git add -A && git commit` and swept
+this work-in-progress into `eccd305`, whose message says nothing about it.
+Nothing was lost. It is also adding acoustic banks (`acoustic/funk/*`,
+`acoustic/rock/*`) and rewriting `samples/oneshots/manifest.json` live.
+
+**That corrupted a round of measurements**: KTJAZ and KTROK read as broadband
+hiss on every pad — kick centroid 11kHz, 37% air — because their FLACs were
+being written while the page decoded them. The machine kits were untouched and
+are what every number above is measured on.
+
+**STAGE FILES EXPLICITLY WHILE THIS LASTS. Never `git add -A` here.**
+
+## STILL OPEN, from this work
+
+- **KTJAZ / KTROK and the acoustic kits are UNMEASURED** — re-run
+  `tools/probe.sh kitmix` on them once the other session's sample writes settle.
+- **Two bad samples.** `dr5-shaker-01` (-39.6 LUFS, 30dB under a typical take)
+  and `cr78-rim-01` (-34.2) are the only three pads still outside 1 dB. The
+  fader clamp already gives them everything it can; the fix is upstream —
+  keep takes this far under out of `kitPick`, or normalise the shelf.
+- **Synth kits KT01-10 still use MIXT** — generated, so `padLoud` has no buffer.
+- **Standalone drum channels still use MIXT** — only kit PADS are measured.
+- **TEN has no reference recording worth the name.** `brushkit` is the only real
+  drum loop on the shelf, it is an MP3, and it is a BRUSH kit — its 0.4%
+  brilliance and 0.0% air are codec and instrument, not a target to mix toward.
+
 # ONE DELETED FILE KILLED EVERY SAMPLED KIT — 2026-08-29
 
 ## THE BUG  (Gad: "I cant access the new presets by scrolling presets only with roll")
