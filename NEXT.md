@@ -86,6 +86,46 @@ are what every number above is measured on.
 
 **STAGE FILES EXPLICITLY WHILE THIS LASTS. Never `git add -A` here.**
 
+## QA CHECKLIST — the mix work, ordered by what is most likely to be wrong
+
+Localhost 3033, reload (no save-format change, your set survives).
+
+1. **AN OLD SAVED SET KEEPS ITS OLD, UNBALANCED KIT.** `serialize()` stores
+   `presets`, and a kit pad's `mix.lvl` rides inside it — so a set saved before
+   today comes back with the levels it was saved with. **Re-pick the kit from
+   the library** to get the balanced one. Not a format change, nothing to
+   export first; just a thing that will look like the fix did not work.
+   MEASURED: the fix is in `libAll()`'s kits, not in stored sets.
+2. **Play any machine kit — 808, TR8, LIN, C78, 505, RX5, MRK, MX1.** Every pad
+   should sit where a drum belongs, with no reaching for a fader. The hats,
+   shaker, cymbal and ride came UP the most; a few kicks came DOWN. Right looks
+   like: the hat audible under the snare without hunting for it, the ride a
+   texture and not a bell. Bug looked like: hats 12 to 20 dB under the kick and
+   effectively missing. MEASURED — mean error 3.70 -> 0.42 dB, 88/120 pads out
+   by more than 1 dB -> 3/120.
+3. **KTDR5's closed hat is still nearly silent, and KTMX2's shaker with it.**
+   EXPECTED TO FAIL. Both are `dr5-shaker-01`, which is 30 dB below a normal
+   take; the fader clamp already gives it 3x and it is still 21.6 dB under.
+   Confirm it is only these two pads. MEASURED.
+4. **Kits should now match EACH OTHER.** Switch between 808, MRK and RX5 without
+   touching anything — no kit should jump. Bug looked like: 8.2 dB between the
+   loudest and quietest kit's kick. MEASURED — kick spread 6.20 -> 0.50 dB,
+   every kit's kick at -20.0 LUFS.
+5. **The kit should be WIDER.** Hi-hat right (closed and open the SAME place —
+   it is one hi-hat), ride and crash left, rim right, cowbell left, shaker wide
+   right. Bug looked like: snare, clap and rim all at +0.05 because all three
+   are cat `snr`. NOT MEASURED — this is a judgement by ear, and the one thing
+   here shipped on reasoning rather than a number.
+6. **Roll a kit.** `randomizeKit` goes through the same `smpPad`, so a rolled
+   kit should be balanced too. NOT MEASURED — the sweep was on factory kits only.
+7. **KTJAZ and KTROK are UNVERIFIED.** Their sample files were being rewritten
+   by another session while I measured, and every pad read as hiss. If they
+   sound wrong, that is why — re-run `tools/probe.sh kitmix kit=KTJAZ` once the
+   acoustic banks settle. NOT MEASURED.
+8. **Synth kits KT01-10 are UNCHANGED.** They are generated, so there is no
+   buffer to measure and they still use `MIXT`. If they now sound unbalanced
+   next to the sampled kits, that is the next job, not a regression.
+
 ## STILL OPEN, from this work
 
 - **KTJAZ / KTROK and the acoustic kits are UNMEASURED** — re-run
