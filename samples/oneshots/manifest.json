@@ -2350,5 +2350,373 @@
   "inst": "cowbell",
   "style": "ac-regg",
   "cat": "perc"
+ },
+ {
+  "name": "regg-shaker",
+  "file": "oneshots/acoustic/regg/shaker.flac",
+  "kind": "one",
+  "inst": "shaker",
+  "style": "ac-regg",
+  "cat": "perc"
+ },
+ {
+  "name": "latn-kick",
+  "file": "oneshots/acoustic/latn/kick.flac",
+  "kind": "one",
+  "inst": "kick",
+  "style": "ac-latn",
+  "cat": "kik"
+ },
+ {
+  "name": "latn-snare",
+  "file": "oneshots/acoustic/latn/snare.flac",
+  "kind": "one",
+  "inst": "snare",
+  "style": "ac-latn",
+  "cat": "snr"
+ },
+ {
+  "name": "latn-rim",
+  "file": "oneshots/acoustic/latn/rim.flac",
+  "kind": "one",
+  "inst": "rim",
+  "style": "ac-latn",
+  "cat": "snr"
+ },
+ {
+  "name": "latn-hat-closed",
+  "file": "oneshots/acoustic/latn/hat-closed.flac",
+  "kind": "one",
+  "inst": "hat-closed",
+  "style": "ac-latn",
+  "cat": "hh"
+ },
+ {
+  "name": "latn-hat-open",
+  "file": "oneshots/acoustic/latn/hat-open.flac",
+  "kind": "one",
+  "inst": "hat-open",
+  "style": "ac-latn",
+  "cat": "hh"
+ },
+ {
+  "name": "latn-cymbal",
+  "file": "oneshots/acoustic/latn/cymbal.flac",
+  "kind": "one",
+  "inst": "cymbal",
+  "style": "ac-latn",
+  "cat": "cymb"
+ },
+ {
+  "name": "latn-tom",
+  "file": "oneshots/acoustic/latn/tom.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "ac-latn",
+  "cat": "tom"
+ },
+ {
+  "name": "latn-cowbell",
+  "file": "oneshots/acoustic/latn/cowbell.flac",
+  "kind": "one",
+  "inst": "cowbell",
+  "style": "ac-latn",
+  "cat": "perc"
+ },
+ {
+  "name": "latn-shaker",
+  "file": "oneshots/acoustic/latn/shaker.flac",
+  "kind": "one",
+  "inst": "shaker",
+  "style": "ac-latn",
+  "cat": "perc"
+ },
+ {
+  "name": "orch-kick",
+  "file": "oneshots/acoustic/orch/kick.flac",
+  "kind": "one",
+  "inst": "kick",
+  "style": "ac-orch",
+  "cat": "kik"
+ },
+ {
+  "name": "orch-snare",
+  "file": "oneshots/acoustic/orch/snare.flac",
+  "kind": "one",
+  "inst": "snare",
+  "style": "ac-orch",
+  "cat": "snr"
+ },
+ {
+  "name": "orch-rim",
+  "file": "oneshots/acoustic/orch/rim.flac",
+  "kind": "one",
+  "inst": "rim",
+  "style": "ac-orch",
+  "cat": "snr"
+ },
+ {
+  "name": "orch-hat-closed",
+  "file": "oneshots/acoustic/orch/hat-closed.flac",
+  "kind": "one",
+  "inst": "hat-closed",
+  "style": "ac-orch",
+  "cat": "hh"
+ },
+ {
+  "name": "orch-hat-open",
+  "file": "oneshots/acoustic/orch/hat-open.flac",
+  "kind": "one",
+  "inst": "hat-open",
+  "style": "ac-orch",
+  "cat": "hh"
+ },
+ {
+  "name": "orch-cymbal",
+  "file": "oneshots/acoustic/orch/cymbal.flac",
+  "kind": "one",
+  "inst": "cymbal",
+  "style": "ac-orch",
+  "cat": "cymb"
+ },
+ {
+  "name": "orch-tom",
+  "file": "oneshots/acoustic/orch/tom.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "ac-orch",
+  "cat": "tom"
+ },
+ {
+  "name": "orch-cowbell",
+  "file": "oneshots/acoustic/orch/cowbell.flac",
+  "kind": "one",
+  "inst": "cowbell",
+  "style": "ac-orch",
+  "cat": "perc"
+ },
+ {
+  "name": "orch-shaker",
+  "file": "oneshots/acoustic/orch/shaker.flac",
+  "kind": "one",
+  "inst": "shaker",
+  "style": "ac-orch",
+  "cat": "perc"
+ },
+ {
+  "name": "brsh-kick",
+  "file": "oneshots/acoustic/brsh/kick.flac",
+  "kind": "one",
+  "inst": "kick",
+  "style": "ac-brsh",
+  "cat": "kik"
+ },
+ {
+  "name": "brsh-snare",
+  "file": "oneshots/acoustic/brsh/snare.flac",
+  "kind": "one",
+  "inst": "snare",
+  "style": "ac-brsh",
+  "cat": "snr"
+ },
+ {
+  "name": "brsh-rim",
+  "file": "oneshots/acoustic/brsh/rim.flac",
+  "kind": "one",
+  "inst": "rim",
+  "style": "ac-brsh",
+  "cat": "snr"
+ },
+ {
+  "name": "brsh-hat-closed",
+  "file": "oneshots/acoustic/brsh/hat-closed.flac",
+  "kind": "one",
+  "inst": "hat-closed",
+  "style": "ac-brsh",
+  "cat": "hh"
+ },
+ {
+  "name": "brsh-hat-open",
+  "file": "oneshots/acoustic/brsh/hat-open.flac",
+  "kind": "one",
+  "inst": "hat-open",
+  "style": "ac-brsh",
+  "cat": "hh"
+ },
+ {
+  "name": "brsh-cymbal",
+  "file": "oneshots/acoustic/brsh/cymbal.flac",
+  "kind": "one",
+  "inst": "cymbal",
+  "style": "ac-brsh",
+  "cat": "cymb"
+ },
+ {
+  "name": "brsh-tom",
+  "file": "oneshots/acoustic/brsh/tom.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "ac-brsh",
+  "cat": "tom"
+ },
+ {
+  "name": "brsh-cowbell",
+  "file": "oneshots/acoustic/brsh/cowbell.flac",
+  "kind": "one",
+  "inst": "cowbell",
+  "style": "ac-brsh",
+  "cat": "perc"
+ },
+ {
+  "name": "brsh-shaker",
+  "file": "oneshots/acoustic/brsh/shaker.flac",
+  "kind": "one",
+  "inst": "shaker",
+  "style": "ac-brsh",
+  "cat": "perc"
+ },
+ {
+  "name": "dry-kick",
+  "file": "oneshots/acoustic/dry/kick.flac",
+  "kind": "one",
+  "inst": "kick",
+  "style": "ac-dry",
+  "cat": "kik"
+ },
+ {
+  "name": "dry-snare",
+  "file": "oneshots/acoustic/dry/snare.flac",
+  "kind": "one",
+  "inst": "snare",
+  "style": "ac-dry",
+  "cat": "snr"
+ },
+ {
+  "name": "dry-rim",
+  "file": "oneshots/acoustic/dry/rim.flac",
+  "kind": "one",
+  "inst": "rim",
+  "style": "ac-dry",
+  "cat": "snr"
+ },
+ {
+  "name": "dry-hat-closed",
+  "file": "oneshots/acoustic/dry/hat-closed.flac",
+  "kind": "one",
+  "inst": "hat-closed",
+  "style": "ac-dry",
+  "cat": "hh"
+ },
+ {
+  "name": "dry-hat-open",
+  "file": "oneshots/acoustic/dry/hat-open.flac",
+  "kind": "one",
+  "inst": "hat-open",
+  "style": "ac-dry",
+  "cat": "hh"
+ },
+ {
+  "name": "dry-cymbal",
+  "file": "oneshots/acoustic/dry/cymbal.flac",
+  "kind": "one",
+  "inst": "cymbal",
+  "style": "ac-dry",
+  "cat": "cymb"
+ },
+ {
+  "name": "dry-tom",
+  "file": "oneshots/acoustic/dry/tom.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "ac-dry",
+  "cat": "tom"
+ },
+ {
+  "name": "dry-cowbell",
+  "file": "oneshots/acoustic/dry/cowbell.flac",
+  "kind": "one",
+  "inst": "cowbell",
+  "style": "ac-dry",
+  "cat": "perc"
+ },
+ {
+  "name": "dry-shaker",
+  "file": "oneshots/acoustic/dry/shaker.flac",
+  "kind": "one",
+  "inst": "shaker",
+  "style": "ac-dry",
+  "cat": "perc"
+ },
+ {
+  "name": "big-kick",
+  "file": "oneshots/acoustic/big/kick.flac",
+  "kind": "one",
+  "inst": "kick",
+  "style": "ac-big",
+  "cat": "kik"
+ },
+ {
+  "name": "big-snare",
+  "file": "oneshots/acoustic/big/snare.flac",
+  "kind": "one",
+  "inst": "snare",
+  "style": "ac-big",
+  "cat": "snr"
+ },
+ {
+  "name": "big-rim",
+  "file": "oneshots/acoustic/big/rim.flac",
+  "kind": "one",
+  "inst": "rim",
+  "style": "ac-big",
+  "cat": "snr"
+ },
+ {
+  "name": "big-hat-closed",
+  "file": "oneshots/acoustic/big/hat-closed.flac",
+  "kind": "one",
+  "inst": "hat-closed",
+  "style": "ac-big",
+  "cat": "hh"
+ },
+ {
+  "name": "big-hat-open",
+  "file": "oneshots/acoustic/big/hat-open.flac",
+  "kind": "one",
+  "inst": "hat-open",
+  "style": "ac-big",
+  "cat": "hh"
+ },
+ {
+  "name": "big-cymbal",
+  "file": "oneshots/acoustic/big/cymbal.flac",
+  "kind": "one",
+  "inst": "cymbal",
+  "style": "ac-big",
+  "cat": "cymb"
+ },
+ {
+  "name": "big-tom",
+  "file": "oneshots/acoustic/big/tom.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "ac-big",
+  "cat": "tom"
+ },
+ {
+  "name": "big-cowbell",
+  "file": "oneshots/acoustic/big/cowbell.flac",
+  "kind": "one",
+  "inst": "cowbell",
+  "style": "ac-big",
+  "cat": "perc"
+ },
+ {
+  "name": "big-shaker",
+  "file": "oneshots/acoustic/big/shaker.flac",
+  "kind": "one",
+  "inst": "shaker",
+  "style": "ac-big",
+  "cat": "perc"
  }
 ]

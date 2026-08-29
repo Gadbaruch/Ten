@@ -78,13 +78,20 @@ NEG = ("drum machine, electronic drums, 808, 909, synthetic, sampled, midi, "
 
 
 def main():
-    args = [a for a in sys.argv[1:] if not a.startswith("-")]
     # --insts lets a drum be added to kits that are already rendered, without
     # re-rendering the eight that are fine. That is how `ride` got in.
-    only = None
+    #
+    # AND ITS VALUE IS NOT A KIT NAME. The first version filtered args on
+    # "does not start with -", so `--insts ride` put `ride` in the kit list and
+    # the run died on KeyError: 'ride' after loading the whole model. Skip the
+    # word after the flag.
+    only, skip = None, set()
     for i, a in enumerate(sys.argv):
         if a == "--insts" and i + 1 < len(sys.argv):
             only = set(sys.argv[i + 1].split(","))
+            skip.add(i + 1)
+    args = [a for i, a in enumerate(sys.argv)
+            if i > 0 and not a.startswith("-") and i not in skip]
     if "--list" in sys.argv:
         for k, (st, room) in KITS.items():
             print(f"{k:5s} {st:8s} {room}")
