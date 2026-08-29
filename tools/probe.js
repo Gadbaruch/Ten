@@ -4641,6 +4641,8 @@ const HELP = {
     { k: 'cursor',   args: 'chs=9 — ping ten-grsyn: tv/g/tpos/cpos' },
     { k: 'preset',   args: 'names=SNR,S909 note=48 ch=8 — library name, played and measured' },
     { k: 'key',      args: 'code=KeyA hold=120 shift=0 alt=0 ctrl=0 meta=0' },
+    { k: 'smprate',  args: 'ch=4 notes=36,48,60,72 — which note plays a sample at its own speed' },
+    { k: 'smpdiag',  args: 'ch=4 file=oneshots/snare/linn-snare-03.flac note=48 — the file vs the op: level, band balance, stereo' },
     { k: 'press',    args: 'ch=4 amt=90 note=48 — does src=press actually move a param (the hall-effect wire, without the board)' },
     { k: 'veldecay', args: 'ch=4 key=tmul|d amt=90 note=48 — does a velocity mod actually shorten a note' },
     { k: 'shelf',    args: 'one=kik loop=pad — the shelf split, the type filters, and that a session take beats both' },
@@ -4901,6 +4903,176 @@ async function probePress() {
   return { cols: ['press', 'param'], rows, notes: 'src=press -> flt[0].frq amt ' + amt };
 }
 
+/* WHY DOES A SAMPLE SOUND WORSE THROUGH THE OP THAN IN FINDER? (Gad,
+   2026-08-29: "it sounds to me like TEN is sounding not as good ... muffled,
+   much quiter and a bit phasing like its mono combined channels".)
+
+   Decodes the file itself as the REFERENCE, then renders the same buffer
+   through a sample op in several configurations and measures all of them the
+   same way: level, spectral balance in four bands, brightness, and L/R
+   correlation. The configurations isolate one setting at a time, so the answer
+   names a dial rather than confirming a feeling.
+
+   Gad's ch4 as saved: rat 2, uni 2, sprd 12, wide 0.6 — a sample op playing
+   TWO copies detuned twelve cents, at double rate. */
+async function probeSmpDiag() {
+  const ch = num(P.ch, 4), note = num(P.note, 48);
+  const file = str(P.file, 'oneshots/snare/linn-snare-03.flac');
+  const keep = stash(ch);
+  const rows = [];
+  const band = (S, f, lo, hi) => {
+    let a = 0; for (let i = 0; i < S.length; i++) if (f[i] >= lo && f[i] < hi) a += S[i] * S[i];
+    return a;
+  };
+  const meas = (k, L, R, extra) => {
+    const n = Math.min(L.length, R.length);
+    let pk = 0, sq = 0, lr = 0, ll = 0, rr = 0;
+    for (let i = 0; i < n; i++) {
+      const a = Math.abs(L[i]) > Math.abs(R[i]) ? Math.abs(L[i]) : Math.abs(R[i]);
+      if (a > pk) pk = a;
+      const m = (L[i] + R[i]) * 0.5; sq += m * m;
+      lr += L[i] * R[i]; ll += L[i] * L[i]; rr += R[i] * R[i];
+    }
+    const rms = Math.sqrt(sq / Math.max(1, n));
+    const corr = (ll > 1e-12 && rr > 1e-12) ? lr / Math.sqrt(ll * rr) : 1;
+    /* ALIGN TO THE ONSET BEFORE WINDOWING, or the comparison is meaningless.
+       The first version windowed both signals from sample 0 — but the file's
+       attack IS sample 0, where a Hann window is zero, while the op's attack
+       sits ~45ms in where the window is already open. That alone moves the
+       measured brightness, so the whole "the op is muffled" read was an
+       artefact of my own window. Find the hit, then window from there. */
+    let on = 0, pk2 = 0;
+    for (let i = 0; i < n; i++) { const a = Math.abs(L[i]) + Math.abs(R[i]); if (a > pk2) pk2 = a; }
+    for (let i = 0; i < n; i++) { if (Math.abs(L[i]) + Math.abs(R[i]) > pk2 * 0.02) { on = i; break; } }
+    const N = 8192, m2 = new Float32Array(N);
+    for (let i = 0; i < N && on + i < n; i++)
+      m2[i] = (L[on + i] + R[on + i]) * 0.5 * (0.5 - 0.5 * Math.cos(2 * Math.PI * i / N));
+    const re = new Float64Array(N), im = new Float64Array(N);
+    for (let i = 0; i < N; i++) re[i] = m2[i];
+    // cheap DFT over log-spaced probe bins is enough for a balance read
+    const sr = AC.sampleRate, half = N / 2;
+    const S = new Float64Array(half), f = new Float64Array(half);
+    for (let b = 0; b < half; b++) f[b] = b * sr / N;
+    // goertzel-free: use the analyser-style magnitude via a real FFT surrogate
+    // (N is small and this runs once per row, so a direct transform is fine)
+    for (let b = 1; b < half; b++) {
+      let sre = 0, sim = 0, w = 2 * Math.PI * b / N;
+      for (let i = 0; i < N; i++) { sre += re[i] * Math.cos(w * i); sim -= re[i] * Math.sin(w * i); }
+      S[b] = Math.sqrt(sre * sre + sim * sim) / N;
+    }
+    let tot = 0, cen = 0;
+    for (let b = 1; b < half; b++) { tot += S[b]; cen += S[b] * f[b]; }
+    cen = tot > 0 ? cen / tot : 0;
+    const lo = band(S, f, 20, 250), md = band(S, f, 250, 2000),
+          hi = band(S, f, 2000, 8000), air = band(S, f, 8000, 20000);
+    const T = lo + md + hi + air || 1;
+    rows.push({ k, peak: +pk.toFixed(3), rms: +rms.toFixed(4),
+                lo: Math.round(lo / T * 100), mid: Math.round(md / T * 100),
+                hi: Math.round(hi / T * 100), air: Math.round(air / T * 100),
+                cen: Math.round(cen), 'L/R': +corr.toFixed(3), note: extra || '' });
+  };
+
+  try {
+    const ab = await (await fetch('samples/' + file)).arrayBuffer();
+    const ref = await AC.decodeAudioData(ab.slice(0));
+    const rl = ref.getChannelData(0);
+    const rr2 = ref.numberOfChannels > 1 ? ref.getChannelData(1) : rl;
+    meas('THE FILE', rl, rr2, ref.numberOfChannels + 'ch ' + ref.duration.toFixed(3) + 's');
+
+    const CFG = [
+      { k: 'op, plain',        rat: 1, uni: 1, sprd: 0,  wide: 0,   n: 'defaults' },
+      { k: 'op, rat 2',        rat: 2, uni: 1, sprd: 0,  wide: 0,   n: 'ch4 rate' },
+      { k: 'op, uni 2 sprd12', rat: 1, uni: 2, sprd: 12, wide: 0.6, n: 'ch4 voice' },
+      { k: 'op, ch4 as saved', rat: 2, uni: 2, sprd: 12, wide: 0.6, n: 'both' },
+    ];
+    for (const c of CFG) {
+      const p = S.presets[ch];
+      for (const k of Object.keys(p)) if (k !== 'modLoop') delete p[k];
+      Object.assign(p, JSON.parse(JSON.stringify(presetData(genPreset('kik', mulberry32(3), 0.1)))));
+      p.osc[0] = { wav: 9, mode: 0, dst: 0, rat: c.rat, amt: 1, fine: 0, ph: 0, phm: 1, lps: 1 };
+      for (let i = 1; i < p.osc.length; i++) if (p.osc[i]) p.osc[i].amt = 0;
+      for (const x of p.flt) if (x) x.typ = 0;
+      for (const x of p.fx) if (x) x.typ = 0;
+      for (const x of p.amp) if (x) x.typ = 0;
+      for (const m of p.mod) if (m) { m.src = 0; m.routes = [{ dst: 0, idx: 0, amt: 100, ctr: 0, tgt: null }]; }
+      for (const e of p.env) if (e) e.dst = 0;
+      p.mod[0] = { src: 1, rsel: 0, mac: 0, a: 0.0005, d: 2.0, s: 1, r: 0.5, crv: 0, tmul: 1,
+        routes: [{ dst: 1, idx: 0, amt: 100, ctr: 0, tgt: null,
+                   addr: { rack: 'voice', slot: 0, key: 'amp', lbl: 'amp' } }] };
+      Object.assign(p.vox, { mode: 1, uni: c.uni, sprd: c.sprd, wide: c.wide, slop: 0 });
+      p.mix.lvl = 1; p.mix.pan = 0; p._folded = true; p._addr = true;
+      engine.rebuildRack(ch); engine.refresh(ch);
+      engine.opSamples.set(smpKey(ch, 0, null), ref);
+      engine.rebuildRack(ch);
+      engine.allOff(); await sleep(80);
+      const bus = busOf(ch); if (!bus) { rows.push({ k: c.k, note: 'no bus' }); continue; }
+      const t = tap(bus); await sleep(30);
+      engine.noteOn(AC.currentTime + 0.02, ch, note, 1.0);
+      await sleep(600);
+      engine.allOff();
+      const [L, R] = t.stop();
+      meas(c.k, L, R, c.n);
+    }
+  } finally { unstash(ch, keep); }
+  return { cols: ['peak', 'rms', 'lo', 'mid', 'hi', 'air', 'cen', 'L/R', 'note'], rows,
+           notes: 'lo/mid/hi/air = % of energy under 250 / 250-2k / 2-8k / over 8k' };
+}
+
+/* AT WHICH NOTE DOES A SAMPLE PLAY AT ITS OWN SPEED? The spectral read in
+   smpdiag says the op is an octave down at KBBASE, but a spectrum measured over
+   a fixed window is confounded by the very rate it is trying to measure. Length
+   is not: a 0.140s file played at rate 1 lasts 0.140s, at rate 0.5 it lasts
+   0.280s, and nothing about the window changes that. */
+async function probeSmpRate() {
+  const ch = num(P.ch, 4);
+  const file = str(P.file, 'oneshots/snare/linn-snare-03.flac');
+  const notes = str(P.notes, '36,48,60,63,65,72').split(',').map(Number);
+  const keep = stash(ch);
+  const rows = [];
+  try {
+    const ab = await (await fetch('samples/' + file)).arrayBuffer();
+    const ref = await AC.decodeAudioData(ab.slice(0));
+    rows.push({ k: 'THE FILE', dur: +ref.duration.toFixed(3), rate: 1, peak: '', semis: '' });
+    const p = S.presets[ch];
+    for (const k of Object.keys(p)) if (k !== 'modLoop') delete p[k];
+    Object.assign(p, JSON.parse(JSON.stringify(presetData(genPreset('kik', mulberry32(3), 0.1)))));
+    p.osc[0] = { wav: 9, mode: 0, dst: 0, rat: 1, amt: 1, fine: 0, ph: 0, phm: 1, lps: 1 };
+    for (let i = 1; i < p.osc.length; i++) if (p.osc[i]) p.osc[i].amt = 0;
+    for (const x of p.flt) if (x) x.typ = 0;
+    for (const x of p.fx) if (x) x.typ = 0;
+    for (const x of p.amp) if (x) x.typ = 0;
+    for (const m of p.mod) if (m) { m.src = 0; m.routes = [{ dst: 0, idx: 0, amt: 100, ctr: 0, tgt: null }]; }
+    for (const e of p.env) if (e) e.dst = 0;
+    p.mod[0] = { src: 1, rsel: 0, mac: 0, a: 0.0005, d: 3, s: 1, r: 0.5, crv: 0, tmul: 1,
+      routes: [{ dst: 1, idx: 0, amt: 100, ctr: 0, tgt: null,
+                 addr: { rack: 'voice', slot: 0, key: 'amp', lbl: 'amp' } }] };
+    Object.assign(p.vox, { mode: 1, uni: 1, sprd: 0, wide: 0, slop: 0 });
+    p.mix.lvl = 1; p._folded = true; p._addr = true;
+    for (const note of notes) {
+      engine.rebuildRack(ch); engine.refresh(ch);
+      engine.opSamples.set(smpKey(ch, 0, null), ref);
+      engine.rebuildRack(ch);
+      engine.allOff(); await sleep(70);
+      const bus = busOf(ch); if (!bus) continue;
+      const t = tap(bus); await sleep(25);
+      engine.noteOn(AC.currentTime + 0.02, ch, note, 1.0);
+      await sleep(700);
+      engine.allOff();
+      const w = t.stop()[0];
+      let pk = 0; for (let i = 0; i < w.length; i++) { const a = Math.abs(w[i]); if (a > pk) pk = a; }
+      let first = -1, last = 0;
+      for (let i = 0; i < w.length; i++) if (Math.abs(w[i]) > pk * 0.01) { if (first < 0) first = i; last = i; }
+      const dur = first < 0 ? 0 : (last - first) / AC.sampleRate;
+      const rate = dur > 0 ? ref.duration / dur : 0;
+      rows.push({ k: 'note ' + note, dur: +dur.toFixed(3), rate: +rate.toFixed(3),
+                  peak: +pk.toFixed(3),
+                  semis: rate > 0 ? +(12 * Math.log2(rate)).toFixed(1) : '' });
+    }
+  } finally { unstash(ch, keep); }
+  return { cols: ['dur', 'rate', 'peak', 'semis'], rows,
+           notes: 'rate = file duration / played duration; semis = how far off native' };
+}
+
 const PROBES = { level: probeLevel, spectrum: probeSpectrum, cursor: probeCursor,
                    preset: probePreset, key: probeKey, keypath: probeKeyPath,
                    roundtrip: probeRoundTrip,
@@ -4941,7 +5113,9 @@ const PROBES = { level: probeLevel, spectrum: probeSpectrum, cursor: probeCursor
                    syscopy: probeSysCopy,
                    shelf: probeShelf,
                    veldecay: probeVelDecay,
-                   press: probePress };
+                   press: probePress,
+                   smpdiag: probeSmpDiag,
+                   smprate: probeSmpRate };
   const fn = PROBES[NAME];
   out = fn ? await fn() : (NAME === 'help' ? HELP : { cols: [], rows: [], err: 'no probe named ' + NAME });
 } catch (e) {
