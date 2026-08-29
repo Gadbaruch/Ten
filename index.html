@@ -1471,7 +1471,7 @@ const recPlayed=(pi,tBeat,midi,vel,durBeats)=>recPlayNote(pi,tBeat,sndOut(pi,mid
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-29.1119';
+const BUILD='2026-08-29.1122';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -7830,7 +7830,34 @@ class Voice{
       const sum=ac.createGain(); sum.gain.value=1;
       const ob0=this.opBias&&this.opBias[0]?1+this.opBias[0]:1;
       const g0=src?ac.createGain():null;
-      if(g0)g0.gain.value=ops[0].off?0:clamp(ops[0].amt*ob0,0,4);
+      /* A SAMPLE PLAYS BACK AT THE LEVEL OF THE FILE (Gad, 2026-08-29: "all of
+         the kits sound way less strong than the synth, and I always have to
+         compensate with a distortion or clip"). Two fixed losses sat between a
+         buffer and the bus and neither is musical:
+
+           x0.85   the voice headroom on this.amp
+           x0.707  a StereoPanner attenuating a MONO source at centre — and
+                   passing a STEREO one through untouched, which is why the
+                   same snare measured 0.534 as mono and 0.755 as stereo,
+                   exactly sqrt(2) apart
+
+         So the makeup is per-buffer, not a constant: undo the headroom always,
+         undo the pan law only for the mono buffers that actually paid it. A
+         peak-normalised sample now leaves at the peak it arrived with, and
+         mono and stereo finally agree.
+
+         MEASURED, tools/probe.sh smploud, rms over the ear's 200ms integration
+         window against a saw at the same amt: kick -6.1dB, snare -9.9, clap
+         -13.5, rim -18.4, median -7.5. This closes 4.4dB of that. THE REST IS
+         CREST FACTOR and is left alone on purpose — a drum has 10-24dB of it
+         against a saw's 6, and flattening that is what a clipper is for, not
+         something an instrument should do behind your back. */
+      let smpMk=1;
+      if(isS){
+        const b0=E.opSamples.get(this.smpK(0));
+        smpMk=(1/0.85)*((!b0||b0.numberOfChannels<2)?Math.SQRT2:1);
+      }
+      if(g0)g0.gain.value=ops[0].off?0:clamp(ops[0].amt*ob0*smpMk,0,4);
       /* A SILENT OPERATOR STILL RAN. Ops 1-9 are skipped at zero level, op 0
          never was — so a preset that silences its first operator to build the
          sound out of the others carried a muted oscillator per unison copy

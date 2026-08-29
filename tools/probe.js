@@ -4641,6 +4641,7 @@ const HELP = {
     { k: 'cursor',   args: 'chs=9 — ping ten-grsyn: tv/g/tpos/cpos' },
     { k: 'preset',   args: 'names=SNR,S909 note=48 ch=8 — library name, played and measured' },
     { k: 'key',      args: 'code=KeyA hold=120 shift=0 alt=0 ctrl=0 meta=0' },
+    { k: 'smploud',  args: 'ch=4 ms=200 names=a,b,c — perceptual loudness of samples vs a synth op, and the median deficit' },
     { k: 'smprate',  args: 'ch=4 notes=36,48,60,72 — which note plays a sample at its own speed' },
     { k: 'smpdiag',  args: 'ch=4 file=oneshots/snare/linn-snare-03.flac note=48 — the file vs the op: level, band balance, stereo' },
     { k: 'press',    args: 'ch=4 amt=90 note=48 — does src=press actually move a param (the hall-effect wire, without the board)' },
@@ -5079,6 +5080,93 @@ async function probeSmpRate() {
            notes: 'rate = file duration / played duration; semis = how far off native' };
 }
 
+/* HOW MUCH QUIETER IS A SAMPLE THAN A SYNTH, PERCEPTUALLY? (Gad, 2026-08-29:
+   "i dont think its fair to compare a saw or sin db with a drum sample ... a
+   synth is consistent volume. It sounds way louder than a drum hit, which has
+   very, very short loud transient, and the rest is quite low volume.")
+
+   He is right and the first comparison was wrong: peak-matched, a saw and a
+   snare sit 0.87dB apart and sound nothing alike. Crest factor is the whole
+   story — the ear integrates energy over roughly 200ms, so that is the window
+   to measure in, not the tallest spike.
+
+   Renders each factory drum through the op at amt 1 and a saw at amt 1, and
+   reports RMS over 200ms from the onset. The MEDIAN deficit is the honest
+   makeup: a constant offset that puts the sample path in the same ballpark,
+   NOT a per-sample normalisation — a hat should still be quieter than a kick. */
+async function probeSmpLoud() {
+  const ch = num(P.ch, 4);
+  const names = str(P.names, 'linn-snare-03,tr808-kick-08,tr909-snare-01,linn-kick-01,'
+                           + 'tr808-hat-closed-01,tr707-tom-03,tr909-clap-02,linn-tom-01')
+                .split(',');
+  const WIN = num(P.ms, 200) / 1000;
+  const keep = stash(ch);
+  const rows = [];
+  const loud = (w) => {
+    let pk = 0;
+    for (let i = 0; i < w.length; i++) { const a = Math.abs(w[i]); if (a > pk) pk = a; }
+    let on = 0;
+    for (let i = 0; i < w.length; i++) if (Math.abs(w[i]) > pk * 0.02) { on = i; break; }
+    const n = Math.min(w.length - on, Math.round(WIN * AC.sampleRate));
+    let sq = 0;
+    for (let i = 0; i < n; i++) sq += w[on + i] * w[on + i];
+    return { rms: Math.sqrt(sq / Math.max(1, n)), pk };
+  };
+  const build = (wav, smpBuf) => {
+    const p = S.presets[ch];
+    for (const k of Object.keys(p)) if (k !== 'modLoop') delete p[k];
+    Object.assign(p, JSON.parse(JSON.stringify(presetData(genPreset('kik', mulberry32(3), 0.1)))));
+    p.osc[0] = { wav, mode: 0, dst: 0, rat: 1, amt: 1, fine: 0, ph: 0, phm: 1, lps: 1, pw: 0.5 };
+    for (let i = 1; i < p.osc.length; i++) if (p.osc[i]) p.osc[i].amt = 0;
+    for (const x of p.flt) if (x) x.typ = 0;
+    for (const x of p.fx) if (x) x.typ = 0;
+    for (const x of p.amp) if (x) x.typ = 0;
+    for (const m of p.mod) if (m) { m.src = 0; m.routes = [{ dst: 0, idx: 0, amt: 100, ctr: 0, tgt: null }]; }
+    for (const e of p.env) if (e) e.dst = 0;
+    p.mod[0] = { src: 1, rsel: 0, mac: 0, a: 0.0005, d: 3, s: 1, r: 0.5, crv: 0, tmul: 1,
+      routes: [{ dst: 1, idx: 0, amt: 100, ctr: 0, tgt: null,
+                 addr: { rack: 'voice', slot: 0, key: 'amp', lbl: 'amp' } }] };
+    Object.assign(p.vox, { mode: 1, uni: 1, sprd: 0, wide: 0, slop: 0 });
+    p.mix.lvl = 1; p._folded = true; p._addr = true;
+    engine.rebuildRack(ch); engine.refresh(ch);
+    if (smpBuf) { engine.opSamples.set(smpKey(ch, 0, null), smpBuf); engine.rebuildRack(ch); }
+  };
+  const render = async () => {
+    engine.allOff(); await sleep(70);
+    const bus = busOf(ch); if (!bus) return null;
+    const t = tap(bus); await sleep(25);
+    engine.noteOn(AC.currentTime + 0.02, ch, KBBASE, 1.0);
+    await sleep(500);
+    engine.allOff();
+    return loud(t.stop()[0]);
+  };
+  const db = x => 20 * Math.log10(Math.max(x, 1e-9));
+  try {
+    build(2, null);
+    const saw = await render();
+    rows.push({ k: 'SYNTH saw', rms: +saw.rms.toFixed(4), peak: +saw.pk.toFixed(3),
+                crest: +db(saw.pk / saw.rms).toFixed(1), 'vs saw dB': 0 });
+    const defs = [];
+    for (const nm of names) {
+      const e = POOL.find(x => x && x.name === nm);
+      if (!e || !e.buf) { rows.push({ k: nm, rms: '', peak: '', crest: '', 'vs saw dB': 'not on shelf' }); continue; }
+      build(9, e.buf);
+      const r = await render();
+      if (!r) continue;
+      const d = db(r.rms / saw.rms);
+      defs.push(d);
+      rows.push({ k: nm, rms: +r.rms.toFixed(4), peak: +r.pk.toFixed(3),
+                  crest: +db(r.pk / r.rms).toFixed(1), 'vs saw dB': +d.toFixed(1) });
+    }
+    defs.sort((a, b) => a - b);
+    const med = defs.length ? defs[Math.floor(defs.length / 2)] : 0;
+    rows.push({ k: '— MEDIAN DEFICIT —', rms: '', peak: '', crest: '',
+                'vs saw dB': +med.toFixed(1) });
+  } finally { unstash(ch, keep); }
+  return { cols: ['rms', 'peak', 'crest', 'vs saw dB'], rows,
+           notes: 'rms over ' + Math.round(WIN * 1000) + 'ms from onset; crest = peak/rms in dB' };
+}
+
 const PROBES = { level: probeLevel, spectrum: probeSpectrum, cursor: probeCursor,
                    preset: probePreset, key: probeKey, keypath: probeKeyPath,
                    roundtrip: probeRoundTrip,
@@ -5121,7 +5209,8 @@ const PROBES = { level: probeLevel, spectrum: probeSpectrum, cursor: probeCursor
                    veldecay: probeVelDecay,
                    press: probePress,
                    smpdiag: probeSmpDiag,
-                   smprate: probeSmpRate };
+                   smprate: probeSmpRate,
+                   smploud: probeSmpLoud };
   const fn = PROBES[NAME];
   out = fn ? await fn() : (NAME === 'help' ? HELP : { cols: [], rows: [], err: 'no probe named ' + NAME });
 } catch (e) {
