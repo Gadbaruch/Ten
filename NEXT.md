@@ -1,3 +1,81 @@
+# TEN ACOUSTIC KITS, AND THE SAMPLE LEVEL FIX — 2026-08-29
+
+## THE SAMPLE PATH: THREE FIXES, ALL MEASURED
+
+**1. `rat: 1` is TRUE PITCH at the home key.** The buffer root was MIDI 60
+while the keyboard's home is KBBASE 48, so `rat: 1` under your hand played an
+octave down. `tools/probe.sh smprate` measures by DURATION, which no window can
+confound — note 48 read 0.52 before and 1.04 after.
+
+  SCOPED: `noteRatio` is the BUFFER ratio only; a tonal oscillator reads
+  `440*2^((midi-69)/12)` on the next line, so no synth voice moved.
+
+  ⚠ **KITLIFT had to go in the same move**, and the near-miss was the kit
+  PATTERN GENERATOR: it wrote notes 60..71 *because* 60 was rate 1.0. Pad choice
+  is by pitch class and never cared (pcOf is mod 12); playback RATE cares
+  absolutely. Left alone every generated kit beat would have fired an octave up.
+  KP is 48..59 now.
+
+**2. A sample plays back at the LEVEL OF THE FILE.** Gad: *"all of the kits
+sound way less strong than the synth, and I always have to compensate with a
+distortion or clip."* He was right and my first comparison was wrong — I matched
+PEAK, which is meaningless across crest factors. `tools/probe.sh smploud`
+measures rms over the ear's ~200ms integration window:
+
+                    crest    before    after
+      SYNTH saw      6.1dB       0        0
+      tr808-kick    11.3        -6.1     -1.6
+      linn-snare    12.5        -7.3     -2.9
+      tr808-clap    18.7       -13.5     -9.1
+      tr808-rim     23.6       -18.4    -13.9
+      MEDIAN                    -7.5     -3.1
+
+  Two fixed losses, neither musical: `x0.85` voice headroom and `x0.707` from a
+  StereoPanner attenuating MONO at centre while passing STEREO through — the
+  same snare measured 0.534 mono and 0.755 stereo, sqrt(2) apart. Makeup is PER
+  BUFFER: undo the headroom always, the pan law only for mono. Peak 0.534 ->
+  0.889 against the file's own 0.891; stereo lands 0.887, so the two agree now.
+
+  **The remaining -3.1dB is CREST FACTOR and is left alone deliberately.**
+  Flattening it is what a clipper is for.
+
+  ⚠ SCOPE: **op 0 only.** A sample on ops 1-9 is still 4.4dB under.
+
+**3. `phase` and `trig` are gone from the sample op** — a BufferSource has
+neither. Hidden, not deleted, so nothing saved changes shape.
+
+## THE ACOUSTIC BANK AND TEN KITS
+
+`tools/gen_hits.py` — 12 drums, ONE render each plus DSP variations. 50 files,
+17.3MB, 24-bit stereo FLAC. The instrument names are REMAPPED to KITMAP's
+vocabulary (`hatcl`->hat-closed, `crash`->cymbal, `bell`->cowbell, `tomhi/lo`
+->tom, `shake`->shaker) because `kitPick` matches on `inst` — without that the
+whole bank is invisible to the kit builder.
+
+**Ten kits, via the existing `SMPKITS`/`sampleKit` machinery** rather than
+hand-built pads. A third field carries CHARACTER, which is what makes them ten
+kits rather than ten shuffles — the machine kits need none because their
+SAMPLES differ, while the acoustic bank is one drummer in one room:
+
+      KTJAZ 1.03/1.30/lp9000   KTROK 0.97/1.35/drv     KTFNK 1.02/0.75/hp90
+      KTDRY 1.00/0.50          KTBIG 0.94/1.60         KTTGT 1.05/0.60/hp120
+      KTDMP 0.98/0.70/lp4200   KTBRT 1.04/1.10/hp60    KTDRK 0.93/1.20/lp3000
+      KTVIN 0.96/0.85/lp6000/drv                       (tune / tmul / tone)
+
+`tmul` is set on the MOD rack, not `env[0]` — smpPad has already folded and
+foldMod returns early on `_folded`, so the fold is where the engine reads.
+
+**No LIBV bump**: these are `gen:true`, built in memory and filtered out of
+libStore, so they are derived rather than stored.
+
+Verified: all 10 build, **12/12 pads filled**, and the slot mapping is musical.
+
+⚠ **8.7MB of that 17.3 is the `-rr` concatenations**, which are duplicate audio
+and unusable until the round-robin `stp` feature exists. Gad said keep them.
+`samples/` is 41MB now and the whole shelf loads at boot — if that starts to
+hurt, deleting the `-rr` files and their manifest rows is the first cut, and
+`gen_hits.py --rr` rebuilds them.
+
 # ONE-SHOTS, ROUND-ROBIN, AND ACE-STEP ON ICE — 2026-08-29
 
 ## ⏸ ACE-STEP 1.5 — NOT INSTALLED, GAD'S CALL  ("i dont want to install that yet")

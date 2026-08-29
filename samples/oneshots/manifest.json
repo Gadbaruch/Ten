@@ -2088,5 +2088,327 @@
   "style": "acoustic-rr",
   "cat": "snr",
   "slots": 5
+ },
+ {
+  "name": "rim-1",
+  "file": "oneshots/rim/rim-1.flac",
+  "kind": "one",
+  "inst": "rim",
+  "style": "acoustic",
+  "cat": "snr"
+ },
+ {
+  "name": "rim-2",
+  "file": "oneshots/rim/rim-2.flac",
+  "kind": "one",
+  "inst": "rim",
+  "style": "acoustic",
+  "cat": "snr"
+ },
+ {
+  "name": "rim-3",
+  "file": "oneshots/rim/rim-3.flac",
+  "kind": "one",
+  "inst": "rim",
+  "style": "acoustic",
+  "cat": "snr"
+ },
+ {
+  "name": "rim-rr",
+  "file": "oneshots/rim/rim-rr.flac",
+  "kind": "one",
+  "inst": "rim",
+  "style": "acoustic-rr",
+  "cat": "snr",
+  "slots": 3
+ },
+ {
+  "name": "hatcl-1",
+  "file": "oneshots/hatcl/hatcl-1.flac",
+  "kind": "one",
+  "inst": "hat-closed",
+  "style": "acoustic",
+  "cat": "hh"
+ },
+ {
+  "name": "hatcl-2",
+  "file": "oneshots/hatcl/hatcl-2.flac",
+  "kind": "one",
+  "inst": "hat-closed",
+  "style": "acoustic",
+  "cat": "hh"
+ },
+ {
+  "name": "hatcl-3",
+  "file": "oneshots/hatcl/hatcl-3.flac",
+  "kind": "one",
+  "inst": "hat-closed",
+  "style": "acoustic",
+  "cat": "hh"
+ },
+ {
+  "name": "hatcl-4",
+  "file": "oneshots/hatcl/hatcl-4.flac",
+  "kind": "one",
+  "inst": "hat-closed",
+  "style": "acoustic",
+  "cat": "hh"
+ },
+ {
+  "name": "hatcl-rr",
+  "file": "oneshots/hatcl/hatcl-rr.flac",
+  "kind": "one",
+  "inst": "hat-closed",
+  "style": "acoustic-rr",
+  "cat": "hh",
+  "slots": 4
+ },
+ {
+  "name": "hatop-1",
+  "file": "oneshots/hatop/hatop-1.flac",
+  "kind": "one",
+  "inst": "hat-open",
+  "style": "acoustic",
+  "cat": "hh"
+ },
+ {
+  "name": "hatop-2",
+  "file": "oneshots/hatop/hatop-2.flac",
+  "kind": "one",
+  "inst": "hat-open",
+  "style": "acoustic",
+  "cat": "hh"
+ },
+ {
+  "name": "hatop-3",
+  "file": "oneshots/hatop/hatop-3.flac",
+  "kind": "one",
+  "inst": "hat-open",
+  "style": "acoustic",
+  "cat": "hh"
+ },
+ {
+  "name": "hatop-rr",
+  "file": "oneshots/hatop/hatop-rr.flac",
+  "kind": "one",
+  "inst": "hat-open",
+  "style": "acoustic-rr",
+  "cat": "hh",
+  "slots": 3
+ },
+ {
+  "name": "ride-1",
+  "file": "oneshots/ride/ride-1.flac",
+  "kind": "one",
+  "inst": "ride",
+  "style": "acoustic",
+  "cat": "cymb"
+ },
+ {
+  "name": "ride-2",
+  "file": "oneshots/ride/ride-2.flac",
+  "kind": "one",
+  "inst": "ride",
+  "style": "acoustic",
+  "cat": "cymb"
+ },
+ {
+  "name": "ride-3",
+  "file": "oneshots/ride/ride-3.flac",
+  "kind": "one",
+  "inst": "ride",
+  "style": "acoustic",
+  "cat": "cymb"
+ },
+ {
+  "name": "ride-rr",
+  "file": "oneshots/ride/ride-rr.flac",
+  "kind": "one",
+  "inst": "ride",
+  "style": "acoustic-rr",
+  "cat": "cymb",
+  "slots": 3
+ },
+ {
+  "name": "bell-1",
+  "file": "oneshots/bell/bell-1.flac",
+  "kind": "one",
+  "inst": "cowbell",
+  "style": "acoustic",
+  "cat": "cymb"
+ },
+ {
+  "name": "bell-2",
+  "file": "oneshots/bell/bell-2.flac",
+  "kind": "one",
+  "inst": "cowbell",
+  "style": "acoustic",
+  "cat": "cymb"
+ },
+ {
+  "name": "bell-rr",
+  "file": "oneshots/bell/bell-rr.flac",
+  "kind": "one",
+  "inst": "cowbell",
+  "style": "acoustic-rr",
+  "cat": "cymb",
+  "slots": 2
+ },
+ {
+  "name": "crash-1",
+  "file": "oneshots/crash/crash-1.flac",
+  "kind": "one",
+  "inst": "cymbal",
+  "style": "acoustic",
+  "cat": "cymb"
+ },
+ {
+  "name": "crash-2",
+  "file": "oneshots/crash/crash-2.flac",
+  "kind": "one",
+  "inst": "cymbal",
+  "style": "acoustic",
+  "cat": "cymb"
+ },
+ {
+  "name": "crash-rr",
+  "file": "oneshots/crash/crash-rr.flac",
+  "kind": "one",
+  "inst": "cymbal",
+  "style": "acoustic-rr",
+  "cat": "cymb",
+  "slots": 2
+ },
+ {
+  "name": "tomhi-1",
+  "file": "oneshots/tomhi/tomhi-1.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "acoustic",
+  "cat": "tom"
+ },
+ {
+  "name": "tomhi-2",
+  "file": "oneshots/tomhi/tomhi-2.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "acoustic",
+  "cat": "tom"
+ },
+ {
+  "name": "tomhi-3",
+  "file": "oneshots/tomhi/tomhi-3.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "acoustic",
+  "cat": "tom"
+ },
+ {
+  "name": "tomhi-rr",
+  "file": "oneshots/tomhi/tomhi-rr.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "acoustic-rr",
+  "cat": "tom",
+  "slots": 3
+ },
+ {
+  "name": "tomlo-1",
+  "file": "oneshots/tomlo/tomlo-1.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "acoustic",
+  "cat": "tom"
+ },
+ {
+  "name": "tomlo-2",
+  "file": "oneshots/tomlo/tomlo-2.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "acoustic",
+  "cat": "tom"
+ },
+ {
+  "name": "tomlo-3",
+  "file": "oneshots/tomlo/tomlo-3.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "acoustic",
+  "cat": "tom"
+ },
+ {
+  "name": "tomlo-rr",
+  "file": "oneshots/tomlo/tomlo-rr.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "acoustic-rr",
+  "cat": "tom",
+  "slots": 3
+ },
+ {
+  "name": "shake-1",
+  "file": "oneshots/shake/shake-1.flac",
+  "kind": "one",
+  "inst": "shaker",
+  "style": "acoustic",
+  "cat": "perc"
+ },
+ {
+  "name": "shake-2",
+  "file": "oneshots/shake/shake-2.flac",
+  "kind": "one",
+  "inst": "shaker",
+  "style": "acoustic",
+  "cat": "perc"
+ },
+ {
+  "name": "shake-3",
+  "file": "oneshots/shake/shake-3.flac",
+  "kind": "one",
+  "inst": "shaker",
+  "style": "acoustic",
+  "cat": "perc"
+ },
+ {
+  "name": "shake-rr",
+  "file": "oneshots/shake/shake-rr.flac",
+  "kind": "one",
+  "inst": "shaker",
+  "style": "acoustic-rr",
+  "cat": "perc",
+  "slots": 3
+ },
+ {
+  "name": "tamb-1",
+  "file": "oneshots/tamb/tamb-1.flac",
+  "kind": "one",
+  "inst": "perc",
+  "style": "acoustic",
+  "cat": "perc"
+ },
+ {
+  "name": "tamb-2",
+  "file": "oneshots/tamb/tamb-2.flac",
+  "kind": "one",
+  "inst": "perc",
+  "style": "acoustic",
+  "cat": "perc"
+ },
+ {
+  "name": "tamb-3",
+  "file": "oneshots/tamb/tamb-3.flac",
+  "kind": "one",
+  "inst": "perc",
+  "style": "acoustic",
+  "cat": "perc"
+ },
+ {
+  "name": "tamb-rr",
+  "file": "oneshots/tamb/tamb-rr.flac",
+  "kind": "one",
+  "inst": "perc",
+  "style": "acoustic-rr",
+  "cat": "perc",
+  "slots": 3
  }
 ]
