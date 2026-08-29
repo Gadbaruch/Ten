@@ -6,6 +6,37 @@ rolled kits? or you did it already?"*
 Half done, and the honest answer needed measuring. Full write-up in `MIX.md`
 sections 9-11.
 
+## QA CHECKLIST — all kits + rolled kits
+
+Localhost 3033, reload. **LIBV went 32 -> 34, so your library re-lays its
+factory half.** Anything you SAVED as a user preset is untouched; anything you
+edited on a factory kit and did not save is not.
+
+1. **Roll a kit a few times (any wildness).** Every pad should sit right with
+   no fader hunting, and it should not matter whether the roll leaned on one
+   machine or scattered. MEASURED — 12 rolled kits, 144 pads: mean |error|
+   1.36 dB at wild 35, 1.26 at wild 80, median 0.10-0.15 dB.
+2. **Roll at HIGH wildness (80+) several times.** This is where a roll falls
+   back to a synthesised pad, and that branch was the bug — one kit carrying
+   two level scales. Right looks like: the odd synth pad sits in the kit rather
+   than jumping out of it. It will still be the LOOSEST pad in the kit; it
+   should not be a different instrument's worth of level. MEASURED —
+   synth pads in a roll: 6.22 dB mean before, and they are on the same scale
+   now, but see 4.
+3. **Compare a synth kit to a sampled one — KT03 against KT808.** They should
+   be roughly the same overall loudness now. Bug looked like: synth kits 9.8 dB
+   apart from each other and off the sampled ones. MEASURED — synth kick mean
+   -18.17 -> -21.00 LUFS against a -20.0 target.
+4. **KT01-10 are STILL the loose ones and this is EXPECTED.** 4.95 dB mean
+   error against 0.42 for the sampled kits, and the kick spread between them is
+   unchanged at 9.6 dB. A per-slot table cannot do better — MIX.md 9 has the
+   four models and their residuals. If they bother you, MIX.md 11 is the fix
+   and it needs your decision.
+5. **Your saved sets still carry their old kit levels** — unchanged from last
+   time. Re-pick the kit from the library to get the balanced one.
+6. **KTJAZ / KTROK and the acoustic kits are STILL unverified** — the other
+   session is still writing those sample files.
+
 ## ROLLED KITS — already right, now PROVEN, and one real bug found
 
 Sampled pads in a roll go through the same `smpPad`, so the measured fader did
