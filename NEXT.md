@@ -1,3 +1,79 @@
+# NINE DRUM BREAKS, GENERATED NOT SAMPLED — 2026-08-29
+
+## THE BREAKS  (`samples/breaks/`, `tools/gen_breaks.py`)
+
+Gad wanted classic breaks — amen, jungle, 90s hiphop — "free to use". **They
+are not free, and the free-sample sites do not make them free.** The Amen is
+Richard Spencer / The Winstons and unexpired; sampling one in a track is a grey
+area because the statute of limitations ran out on old infringements, but
+REDISTRIBUTING the recording is a different act and TEN ships from a public
+repo.
+
+**Vetted, with evidence, before deciding:**
+
+- **freesound — case by case, and it proves the point inside one site.**
+  DigitalUnderglow's are *"classic acoustic drum breaks, run through a
+  reel-to-reel tape recorder"*, the uploader's own playing. OaSyntax's "Jungle
+  Breaks" are `170_amen_A_.wav`, `170_funky_drummer.wav`, and its own
+  descriptions say *"the 'amen' break by The Winstons"*. Same badge, opposite
+  legality.
+- **creazilla — REJECTED.** Blanket *"Public Domain (CC0)"* on every item, but
+  its stated Source is Freesound.org: it is a MIRROR and inherits the
+  mislabelling. The item inspected was derived from BandLab's breakbeat pack,
+  and its own "more like this" rail is a wall of Amen rips under that badge,
+  one reading *"The famous 'amen break' by 'the winstons' cutted."*
+- **selekt — COULD NOT VERIFY.** Vercel bot checkpoint in the browser, 403 to
+  fetch. Bot detection is not something to work around. Their claims are the
+  most credible of the three but claims are not terms. **If Gad downloads one
+  pack and shows the certificate, that settles it.**
+
+**THE RULE: a CC0 tag is a claim by an uploader, not a verified fact** — and
+for the most-sampled recordings in history that claim is wrong more often than
+right.
+
+**So: generated, on the pipeline this repo already had.** `gen_breaks.py`
+follows `gen_samples.py` — stable-audio-open-1.0 locally, original performances
+in the style, never a specific record. Nine shipped, `cat:'perc'` on the phrase
+shelf, so `perc` in the audio channel now holds 11 with tabla and brushkit.
+
+      jungle/dnb 170, 4 bar   junglechop  jungleroll  ragga  stepper
+      boom bap   2 bar        boombap 90  hardknock 90  dustyswing 90
+                              lofibreak 90  bongobreak 100
+
+Every duration lands exactly on its bar count — 5.647s at 170/4bar, 5.333s at
+90/2bar — so they loop on the grid.
+
+⚠ **THREE WERE CUT rather than shipped quiet.** Twelve rendered; three came
+back with ONE onset:
+
+      darkcore    onsets 1  rms 0.241  crest  3.6   a distorted WASH
+      ridebreak   onsets 1  rms 0.032  crest 27     near-silent, one hit
+      funkbreak   onsets 1  rms 0.036  crest 23.8   the same
+
+against 10-37 onsets and crest 5.5-13 on the nine kept. **All three prompts
+leaned on TEXTURE words** — "distorted edges", "heavy on the ride", "tight
+pocket" — and gave the model nothing rhythmic to hold, so it rendered a tone.
+Prompts are rewritten in `gen_breaks.py` naming the pattern out loud, with
+fresh seeds in `SEED`; the re-roll **did not finish** — the render degraded
+1.06s/step to 49s/step, ~50x, under memory pressure from a second model load.
+Re-run on a quiet machine and measure before keeping.
+
+## THE TYPE DIAL IS AN AUDITION  (build 2026-08-28.2334, LIVE)
+
+Gad: *"when changing audio ch or smp type - load a sample from that type
+immediatly"*. A filter you must turn a second dial to hear is a filter you have
+to think about. First of the new view, every time, flash names what landed.
+Both loads are now one function each — `smpPut` for an op slot, `audPut` for a
+channel — because the type dial needed the identical thing and two copies is
+how one stops matching. THREE call sites: the grain page dial, the
+instrument-rack row, the smp op dial.
+
+      audio ch   plk -> nylonlick   keys -> pianoriff   bass -> upright
+      smp op     kik -> tr808-kick-08   snr -> tr808-snare-03
+
+`lps` reads 1 on every one of those, so the non-looping default rides the
+audition too.
+
 # THE PRESS WIRE WAS ALREADY THERE — 2026-08-29
 
 ## TWO "BLOCKED" CALLS, BOTH WRONG  (SOUND.md corrected)

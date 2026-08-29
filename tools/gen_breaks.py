@@ -44,10 +44,10 @@ BREAKS = {
                    "accents, sparse and springy", 170, 4, 8.0),
     "stepper":    ("half time stepper drum and bass break, heavy deep kick, "
                    "sparse cracking snare on three, dark", 170, 4, 8.0),
-    "darkcore":   ("darkcore rave breakbeat, roughly chopped drums, distorted "
-                   "edges, 1993 hardcore jungle", 170, 4, 8.0),
-    "ridebreak":  ("funk drum break heavy on the ride cymbal, open hi hat, "
-                   "live kit played hard in a dry room", 170, 4, 8.0),
+    "darkcore": ("hardcore rave breakbeat, kick snare kick snare, chopped amen drums, "
+                   "steady driving pattern, crunchy 1993 jungle", 170, 4, 8.0),
+    "ridebreak":("funk drum break, steady kick and snare groove with a ride cymbal "
+                   "riding every beat, live drummer, dry room", 170, 4, 8.0),
     # ---- boom bap / 90s hiphop ----------------------------------------
     "boombap":    ("dusty 90s boom bap hip hop drum break, fat kick, cracking "
                    "snare, vinyl crackle, swung", 90, 2, 7.0),
@@ -57,11 +57,21 @@ BREAKS = {
                    "brushed snare, warm and dusty", 90, 2, 7.0),
     "lofibreak":  ("lo fi sampled soul drum break, tape saturation, room mics, "
                    "loose and human", 90, 2, 7.0),
-    "funkbreak":  ("1970s funk drum break, live kit, open hi hat, tight pocket, "
-                   "close mic, the drummer alone", 95, 2, 7.0),
+    "funkbreak":("1970s funk drum break, tight repeating kick snare groove, open hi "
+                   "hat on the offbeat, live kit close miked", 95, 2, 7.0),
     "bongobreak": ("latin funk drum break with congas and bongos, live "
                    "percussion, hand drums, breakbeat", 100, 2, 7.0),
 }
+
+# RE-ROLLS. First pass gave three takes with ONE onset — measured, and the
+# shape says what went wrong: darkcore came back rms 0.241 crest 3.6, a
+# distorted WASH with no hits in it; ridebreak and funkbreak came back rms
+# ~0.03 crest ~25, near-silent with a single transient. All three prompts
+# leaned on texture words ("distorted edges", "heavy on the ride", "tight
+# pocket") and gave the model nothing rhythmic to hold, so it rendered a
+# TONE. The rewrites below name the pattern out loud. Seed moved too — the
+# same seed on a barely-changed prompt lands in the same place.
+SEED = {"darkcore": 917, "ridebreak": 433, "funkbreak": 761}
 
 NEG = ("low quality, distorted, clipping, hiss, midi, synthetic, sequenced, "
        "quantized, silence, fade out, music, melody, bass guitar, vocals")
@@ -110,7 +120,7 @@ def main():
                      audio_end_in_s=secs,
                      num_inference_steps=100,
                      generator=torch.Generator(device="cpu").manual_seed(
-                         sum(map(ord, name)) * 7 + 11)).audios[0]
+                         sum(map(ord, name)) * 7 + 11 + SEED.get(name, 0))).audios[0]
         wav = audio.T.float().cpu().numpy()
         if wav.ndim == 1: wav = wav[:, None]
 
