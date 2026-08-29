@@ -1471,7 +1471,7 @@ const recPlayed=(pi,tBeat,midi,vel,durBeats)=>recPlayNote(pi,tBeat,sndOut(pi,mid
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-29.1207';
+const BUILD='2026-08-29.1305';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -14841,14 +14841,14 @@ function genLane(pat,pi,mutate,ctx){
        absolutely, which is exactly the kind of coupling that hides.
        KP names the pads so this cannot drift out of step with KITMAP again. */
     const KP={kick:48,snare:49,hatC:50,hatO:51,clap:52,tom:53,rim:54,
-              cymbal:55,cowbell:56,conga:57,shaker:58,clave:59};
+              cymbal:55,cowbell:56,conga:57,shaker:58,ride:59};
     for(let bar=0;bar<L;bar+=4)for(const o of C.kick)push(bar+o,KP.kick,0.95,0.15);
     for(let bar=0;bar<L;bar+=4){push(bar+1,KP.snare,0.9,0.15);push(bar+3,KP.snare,0.9,0.15);}
     const st=C.hatScheme===1?0.25:0.5;
     for(let t=0;t<L;t+=st)if(rnd()<0.9){const on=Math.abs(t%1)<1e-9;
       push(t,on?KP.hatC:(rnd()<0.12?KP.hatO:KP.hatC),on?0.65:0.4,0.05);}
     if(rnd()<0.5)for(let i=0;i<3;i++)push(L-0.75+i*0.25,KP.tom,0.4+i*0.15,0.1);  // tom ruff
-    if(rnd()<0.4)push(2.5,KP.clave,0.5,0.1);                                     // wood accent
+    if(rnd()<0.4)push(2.5,KP.ride,0.5,0.1);                                      // ride accent
     if(rnd()<0.35)for(let bar=0;bar<L;bar+=4)push(bar+2,KP.clap,0.7,0.1);        // clap on 3
   }
   else if(DRUMCATS.includes(cat)){             // perc/wood/zap: syncopated answers to the kick
@@ -15524,7 +15524,13 @@ const KITMAP=[
   {inst:'cowbell',   cat:'perc', alt:['clave','wood','bongo']},
   {inst:'conga',     cat:'perc', alt:['bongo','timbale','tom']},
   {inst:'shaker',    cat:'perc', alt:['perc','hat-closed']},
-  {inst:'clave',     cat:'wood', alt:['wood','rim','perc']},
+  /* RIDE, NOT CLAVE (Gad, 2026-08-29: "missing a ride sizzle there"). All
+     twelve pads were taken and only ONE was a cymbal, so a ride had to displace
+     something — and clave is the thinnest slot on the shelf, 3 machine samples
+     against ride's 6, used by the pattern generator for a single
+     40%-probability wood accent. Every machine kit gains a ride too. Anything
+     still wanting a clave resolves through the alts. */
+  {inst:'ride',      cat:'cymb', alt:['cymbal','hat-open','clave']},
 ];
 /* ONE SAMPLED PAD. The envelope is deliberately a GATE and not a shape: the
    sample already has an attack and a decay, and putting a second one over it
@@ -15655,17 +15661,18 @@ function sampleKit(style,rnd){
 const SMPKITS=[['tr808','KT808'],['tr8','KTTR8'],['linn','KTLIN'],['cr78','KTC78'],
                ['tr505','KT505'],['rx5','KTRX5'],['dr5','KTDR5'],['mrk2','KTMRK'],
                ['lofi','KTLOF'],[null,'KTMX1'],[null,'KTMX2'],
-               /* the acoustic bank — tools/gen_hits.py, one kit per character */
-               ['acoustic','KTJAZ',{tune:1.03,tmul:1.30,lp:9000}],
-               ['acoustic','KTROK',{tune:0.97,tmul:1.35,drv:0.22}],
-               ['acoustic','KTFNK',{tune:1.02,tmul:0.75,hp:90}],
-               ['acoustic','KTDRY',{tune:1.00,tmul:0.50}],
-               ['acoustic','KTBIG',{tune:0.94,tmul:1.60}],
-               ['acoustic','KTTGT',{tune:1.05,tmul:0.60,hp:120}],
-               ['acoustic','KTDMP',{tune:0.98,tmul:0.70,lp:4200}],
-               ['acoustic','KTBRT',{tune:1.04,tmul:1.10,hp:60}],
-               ['acoustic','KTDRK',{tune:0.93,tmul:1.20,lp:3000}],
-               ['acoustic','KTVIN',{tune:0.96,tmul:0.85,lp:6000,drv:0.18}]];
+               /* THE TEN ACOUSTIC KITS — tools/gen_kits.py. Each is its own
+                  RECORDING SESSION, not one bank reshaped ten ways (Gad,
+                  2026-08-29: "ten acoustic kits each one sounding different,
+                  different genres, different styles ... without any variations
+                  inside of each kit per sample"). So no character field: the
+                  difference is in the SAMPLES, exactly as it is for the machine
+                  kits, where a TR-808 and an RX5 differ because their samples do
+                  and not because of anything done to them afterwards. */
+               ['ac-jazz','KTJAZ'],['ac-rock','KTROK'],['ac-funk','KTFNK'],
+               ['ac-vint','KTVIN'],['ac-regg','KTREG'],['ac-latn','KTLAT'],
+               ['ac-orch','KTORC'],['ac-brsh','KTBRS'],['ac-dry','KTDRY'],
+               ['ac-big','KTBIG']];
 /* GENERATED, NEVER STORED — and both halves of that matter.
 
    The first version wrote these into the library with libStore(), on a single
@@ -15694,19 +15701,11 @@ function smpKitEntries(){
      is what stops one deleted file from disabling every sampled kit forever. */
   if(!have||(SHELFN&&have<SHELFN-SHELFMISS))return [];  // shelf not in yet: ask again
   const out=[];
-  SMPKITS.forEach(([style,nm,sh],ki)=>{
+  SMPKITS.forEach(([style,nm],ki)=>{
     if(style&&!POOL.some(e=>e&&e.style===style))return;    // that machine was pruned away
     const pads=sampleKit(style,mulberry32(9000+ki*77));
     if(!pads)return;
-    if(sh)for(const pad of pads){
-      if(!pad)continue;
-      if(sh.tune&&pad.osc&&pad.osc[0])
-        pad.osc[0].rat=+clamp((pad.osc[0].rat||1)*sh.tune,0.125,16).toFixed(3);
-      if(sh.tmul&&pad.mod)for(const m of pad.mod)if(m&&m.src===1)m.tmul=sh.tmul;
-      if(sh.lp)pad.flt[0]={typ:1,frq:sh.lp,q:0.7,gn:0,par:0,pol:0,spr:0.4,lvl:1};
-      else if(sh.hp)pad.flt[0]={typ:2,frq:sh.hp,q:0.7,gn:0,par:0,pol:0,spr:0.4,lvl:1};
-      if(sh.drv)pad.amp[0]={typ:7,drv:sh.drv,mix:0.5,par:0};
-    }
+
     const p=basePreset(nm); p.cat='kit';
     Object.assign(p.osc[0],{wav:0,rat:0.5});
     Object.assign(p.env[0],{a:0.001,d:0.25,s:0,r:0.05});

@@ -2000,374 +2000,107 @@
   "cat": "zap"
  },
  {
-  "name": "kick-1",
-  "file": "oneshots/acoustic/kick/kick-1.flac",
+  "name": "jazz-kick",
+  "file": "oneshots/acoustic/jazz/kick.flac",
   "kind": "one",
   "inst": "kick",
-  "style": "acoustic",
+  "style": "ac-jazz",
   "cat": "kik"
  },
  {
-  "name": "kick-2",
-  "file": "oneshots/acoustic/kick/kick-2.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "acoustic",
-  "cat": "kik"
- },
- {
-  "name": "kick-3",
-  "file": "oneshots/acoustic/kick/kick-3.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "acoustic",
-  "cat": "kik"
- },
- {
-  "name": "kick-4",
-  "file": "oneshots/acoustic/kick/kick-4.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "acoustic",
-  "cat": "kik"
- },
- {
-  "name": "kick-rr",
-  "file": "oneshots/acoustic/kick/kick-rr.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "acoustic-rr",
-  "cat": "kik",
-  "slots": 4
- },
- {
-  "name": "snare-2",
-  "file": "oneshots/acoustic/snare/snare-2.flac",
+  "name": "jazz-snare",
+  "file": "oneshots/acoustic/jazz/snare.flac",
   "kind": "one",
   "inst": "snare",
-  "style": "acoustic",
+  "style": "ac-jazz",
   "cat": "snr"
  },
  {
-  "name": "rim-1",
-  "file": "oneshots/acoustic/rim/rim-1.flac",
+  "name": "jazz-rim",
+  "file": "oneshots/acoustic/jazz/rim.flac",
   "kind": "one",
   "inst": "rim",
-  "style": "acoustic",
+  "style": "ac-jazz",
   "cat": "snr"
  },
  {
-  "name": "rim-2",
-  "file": "oneshots/acoustic/rim/rim-2.flac",
-  "kind": "one",
-  "inst": "rim",
-  "style": "acoustic",
-  "cat": "snr"
- },
- {
-  "name": "rim-3",
-  "file": "oneshots/acoustic/rim/rim-3.flac",
-  "kind": "one",
-  "inst": "rim",
-  "style": "acoustic",
-  "cat": "snr"
- },
- {
-  "name": "rim-rr",
-  "file": "oneshots/acoustic/rim/rim-rr.flac",
-  "kind": "one",
-  "inst": "rim",
-  "style": "acoustic-rr",
-  "cat": "snr",
-  "slots": 3
- },
- {
-  "name": "hatcl-1",
-  "file": "oneshots/acoustic/hatcl/hatcl-1.flac",
+  "name": "jazz-hat-closed",
+  "file": "oneshots/acoustic/jazz/hat-closed.flac",
   "kind": "one",
   "inst": "hat-closed",
-  "style": "acoustic",
+  "style": "ac-jazz",
   "cat": "hh"
  },
  {
-  "name": "hatcl-2",
-  "file": "oneshots/acoustic/hatcl/hatcl-2.flac",
-  "kind": "one",
-  "inst": "hat-closed",
-  "style": "acoustic",
-  "cat": "hh"
- },
- {
-  "name": "hatcl-3",
-  "file": "oneshots/acoustic/hatcl/hatcl-3.flac",
-  "kind": "one",
-  "inst": "hat-closed",
-  "style": "acoustic",
-  "cat": "hh"
- },
- {
-  "name": "hatcl-4",
-  "file": "oneshots/acoustic/hatcl/hatcl-4.flac",
-  "kind": "one",
-  "inst": "hat-closed",
-  "style": "acoustic",
-  "cat": "hh"
- },
- {
-  "name": "hatcl-rr",
-  "file": "oneshots/acoustic/hatcl/hatcl-rr.flac",
-  "kind": "one",
-  "inst": "hat-closed",
-  "style": "acoustic-rr",
-  "cat": "hh",
-  "slots": 4
- },
- {
-  "name": "hatop-1",
-  "file": "oneshots/acoustic/hatop/hatop-1.flac",
+  "name": "jazz-hat-open",
+  "file": "oneshots/acoustic/jazz/hat-open.flac",
   "kind": "one",
   "inst": "hat-open",
-  "style": "acoustic",
+  "style": "ac-jazz",
   "cat": "hh"
  },
  {
-  "name": "hatop-2",
-  "file": "oneshots/acoustic/hatop/hatop-2.flac",
-  "kind": "one",
-  "inst": "hat-open",
-  "style": "acoustic",
-  "cat": "hh"
- },
- {
-  "name": "hatop-3",
-  "file": "oneshots/acoustic/hatop/hatop-3.flac",
-  "kind": "one",
-  "inst": "hat-open",
-  "style": "acoustic",
-  "cat": "hh"
- },
- {
-  "name": "hatop-rr",
-  "file": "oneshots/acoustic/hatop/hatop-rr.flac",
-  "kind": "one",
-  "inst": "hat-open",
-  "style": "acoustic-rr",
-  "cat": "hh",
-  "slots": 3
- },
- {
-  "name": "ride-1",
-  "file": "oneshots/acoustic/ride/ride-1.flac",
-  "kind": "one",
-  "inst": "ride",
-  "style": "acoustic",
-  "cat": "cymb"
- },
- {
-  "name": "ride-2",
-  "file": "oneshots/acoustic/ride/ride-2.flac",
-  "kind": "one",
-  "inst": "ride",
-  "style": "acoustic",
-  "cat": "cymb"
- },
- {
-  "name": "ride-3",
-  "file": "oneshots/acoustic/ride/ride-3.flac",
-  "kind": "one",
-  "inst": "ride",
-  "style": "acoustic",
-  "cat": "cymb"
- },
- {
-  "name": "ride-rr",
-  "file": "oneshots/acoustic/ride/ride-rr.flac",
-  "kind": "one",
-  "inst": "ride",
-  "style": "acoustic-rr",
-  "cat": "cymb",
-  "slots": 3
- },
- {
-  "name": "bell-1",
-  "file": "oneshots/acoustic/bell/bell-1.flac",
-  "kind": "one",
-  "inst": "cowbell",
-  "style": "acoustic",
-  "cat": "cymb"
- },
- {
-  "name": "bell-2",
-  "file": "oneshots/acoustic/bell/bell-2.flac",
-  "kind": "one",
-  "inst": "cowbell",
-  "style": "acoustic",
-  "cat": "cymb"
- },
- {
-  "name": "bell-rr",
-  "file": "oneshots/acoustic/bell/bell-rr.flac",
-  "kind": "one",
-  "inst": "cowbell",
-  "style": "acoustic-rr",
-  "cat": "cymb",
-  "slots": 2
- },
- {
-  "name": "crash-1",
-  "file": "oneshots/acoustic/crash/crash-1.flac",
+  "name": "jazz-cymbal",
+  "file": "oneshots/acoustic/jazz/cymbal.flac",
   "kind": "one",
   "inst": "cymbal",
-  "style": "acoustic",
+  "style": "ac-jazz",
   "cat": "cymb"
  },
  {
-  "name": "crash-2",
-  "file": "oneshots/acoustic/crash/crash-2.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "acoustic",
-  "cat": "cymb"
- },
- {
-  "name": "crash-rr",
-  "file": "oneshots/acoustic/crash/crash-rr.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "acoustic-rr",
-  "cat": "cymb",
-  "slots": 2
- },
- {
-  "name": "tomhi-1",
-  "file": "oneshots/acoustic/tomhi/tomhi-1.flac",
+  "name": "jazz-tom",
+  "file": "oneshots/acoustic/jazz/tom.flac",
   "kind": "one",
   "inst": "tom",
-  "style": "acoustic",
+  "style": "ac-jazz",
   "cat": "tom"
  },
  {
-  "name": "tomhi-2",
-  "file": "oneshots/acoustic/tomhi/tomhi-2.flac",
+  "name": "jazz-cowbell",
+  "file": "oneshots/acoustic/jazz/cowbell.flac",
   "kind": "one",
-  "inst": "tom",
-  "style": "acoustic",
-  "cat": "tom"
+  "inst": "cowbell",
+  "style": "ac-jazz",
+  "cat": "perc"
  },
  {
-  "name": "tomhi-3",
-  "file": "oneshots/acoustic/tomhi/tomhi-3.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "acoustic",
-  "cat": "tom"
- },
- {
-  "name": "tomhi-rr",
-  "file": "oneshots/acoustic/tomhi/tomhi-rr.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "acoustic-rr",
-  "cat": "tom",
-  "slots": 3
- },
- {
-  "name": "tomlo-1",
-  "file": "oneshots/acoustic/tomlo/tomlo-1.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "acoustic",
-  "cat": "tom"
- },
- {
-  "name": "tomlo-2",
-  "file": "oneshots/acoustic/tomlo/tomlo-2.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "acoustic",
-  "cat": "tom"
- },
- {
-  "name": "tomlo-3",
-  "file": "oneshots/acoustic/tomlo/tomlo-3.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "acoustic",
-  "cat": "tom"
- },
- {
-  "name": "tomlo-rr",
-  "file": "oneshots/acoustic/tomlo/tomlo-rr.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "acoustic-rr",
-  "cat": "tom",
-  "slots": 3
- },
- {
-  "name": "shake-1",
-  "file": "oneshots/acoustic/shake/shake-1.flac",
+  "name": "jazz-shaker",
+  "file": "oneshots/acoustic/jazz/shaker.flac",
   "kind": "one",
   "inst": "shaker",
-  "style": "acoustic",
+  "style": "ac-jazz",
   "cat": "perc"
  },
  {
-  "name": "shake-2",
-  "file": "oneshots/acoustic/shake/shake-2.flac",
+  "name": "rock-kick",
+  "file": "oneshots/acoustic/rock/kick.flac",
   "kind": "one",
-  "inst": "shaker",
-  "style": "acoustic",
-  "cat": "perc"
+  "inst": "kick",
+  "style": "ac-rock",
+  "cat": "kik"
  },
  {
-  "name": "shake-3",
-  "file": "oneshots/acoustic/shake/shake-3.flac",
+  "name": "rock-snare",
+  "file": "oneshots/acoustic/rock/snare.flac",
   "kind": "one",
-  "inst": "shaker",
-  "style": "acoustic",
-  "cat": "perc"
+  "inst": "snare",
+  "style": "ac-rock",
+  "cat": "snr"
  },
  {
-  "name": "shake-rr",
-  "file": "oneshots/acoustic/shake/shake-rr.flac",
+  "name": "rock-rim",
+  "file": "oneshots/acoustic/rock/rim.flac",
   "kind": "one",
-  "inst": "shaker",
-  "style": "acoustic-rr",
-  "cat": "perc",
-  "slots": 3
+  "inst": "rim",
+  "style": "ac-rock",
+  "cat": "snr"
  },
  {
-  "name": "tamb-1",
-  "file": "oneshots/acoustic/tamb/tamb-1.flac",
+  "name": "rock-hat-closed",
+  "file": "oneshots/acoustic/rock/hat-closed.flac",
   "kind": "one",
-  "inst": "perc",
-  "style": "acoustic",
-  "cat": "perc"
- },
- {
-  "name": "tamb-2",
-  "file": "oneshots/acoustic/tamb/tamb-2.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "acoustic",
-  "cat": "perc"
- },
- {
-  "name": "tamb-3",
-  "file": "oneshots/acoustic/tamb/tamb-3.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "acoustic",
-  "cat": "perc"
- },
- {
-  "name": "tamb-rr",
-  "file": "oneshots/acoustic/tamb/tamb-rr.flac",
-  "kind": "one",
-  "inst": "perc",
-  "style": "acoustic-rr",
-  "cat": "perc",
-  "slots": 3
+  "inst": "hat-closed",
+  "style": "ac-rock",
+  "cat": "hh"
  }
 ]
