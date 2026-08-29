@@ -1,3 +1,86 @@
+# ONE-SHOTS, ROUND-ROBIN, AND ACE-STEP ON ICE — 2026-08-29
+
+## ⏸ ACE-STEP 1.5 — NOT INSTALLED, GAD'S CALL  ("i dont want to install that yet")
+
+The evidence says the model is the ceiling, so this is the move when it is
+wanted — it is parked, not rejected.
+
+**Why it is the right next model:** stable-audio-open is a SOUND DESIGN model
+by Stability's own framing, and it shows. Measured grid error across everything
+it has made here:
+
+      nylonlick 18.0ms   kalimba 16.3ms   banjoroll 19.6ms   marimba 11.7ms
+      pianoriff 15.5ms   rockkit 15.0ms   jazzbrush 20.8ms   tabla   14.2ms
+
+**Uniformly 12-20ms out, INCLUDING the guitar and kalimba loops Gad likes.**
+That answers his question "the older loops were tight, just the drums sound
+sloppy, how come?" — **they are not tighter. A plucked string has a soft attack
+and hides 18ms; a snare is a transient and exposes it.** Same error, opposite
+verdict. Prompting shaves milliseconds off this; it does not reach 5ms.
+
+**ACE-Step 1.5** — github.com/ace-step/ACE-Step-1.5, Apache-2.0/MIT, a genuine
+MUSIC model rather than a texture one, native Apple Silicon (MPS + MLX, and a
+dedicated port at clockworksquirrel/ace-step-apple-silicon).
+
+    COST     brew install python@3.11   (the machine has 3.9; ACE pins 3.11)
+             a fresh venv, ~10GB core pull, ~16GB with the XL
+    FITS     M1 Max / 32GB RAM / 28GB free — fits, without much room
+
+## ⚠ tools/tighten.py — BUILT, AND IT MAKES THINGS WORSE. DO NOT USE.
+
+Time-warps hits onto the grid, and the arithmetic works — jazzbrush 20.8 ->
+5.1ms, funkkit 42.8 -> 9.5ms, and it correctly DETECTS swing (both wanted
+triplet grids; straight sixteenths barely moved them).
+
+**But it warps by RESAMPLING, which shifts pitch.** Gad: *"they sound way worse
+now haha, cause the pitch is all over the place"*. On cymbal wash and brushes
+it is glaring. **The correct mechanism for drums is SLICE-AND-PLACE** — cut at
+the onsets, move the slices, never stretch the audio, so no pitch change is
+possible. About twenty minutes to rewrite; not done, because Gad moved on.
+
+## ACOUSTIC ONE-SHOTS — `tools/gen_hits.py`
+
+Gad: *"you make pretty good one shots lets make more acoustic drums for the
+kits?"* **One-shots are the shape this model is actually good at**: the loop
+attempts failed on TIMING, and a one-shot has no grid to miss.
+
+12 drums x 2-5 variations = 38 renders, each variation the SAME prompt on a
+different seed, so five snares are recognisably one drum hit differently.
+Writes to the DRUM shelf (`samples/oneshots/<inst>/`), so they reach a smp op
+and kits and never the audio channel.
+
+## ROUND-ROBIN — 90% ALREADY EXISTS, and this is the finding
+
+Gad: *"can you think of a hack to have 3-4 variations per snare/cymble that
+every hit shuffles through a variation? ... would this require a new feature or
+can we use what we have?"*
+
+**MEASURED — the pieces are there:**
+
+- `destList` offers **`osc[n].sst`** and **`osc[n].sen`** — sample start and
+  span ARE modulation destinations
+- they are **`'ctrl'`** kind, not `'next'`: the classifier's own comment says
+  *"start and end reach a running note two ways and both answer live"*
+- **`rnd` is mod source 5**, and it is NOT in the LIVE set (`src===6||7||MAC`),
+  so it is sampled per note rather than swept during one
+
+So `rnd -> sst` with `sen` = 1/N is round-robin, on a file holding N takes end
+to end. `gen_hits.py --rr` writes exactly that file — equal-length slots,
+because start=i/N span=1/N is only true if every slot is the same length.
+
+**THE ONE MISSING PIECE: the random is CONTINUOUS**, so it lands mid-hit rather
+than on a slice boundary. Wanted: an optional **`stp` (steps) on a mod route** —
+snap the modulated value to N steps. Defaults off, so no save-format change and
+no existing preset moves. General beyond this: a stepped LFO is an arpeggio, a
+stepped random on a filter is a sample-and-hold with musical values.
+
+## ⚠ BOTH DEV SERVERS WERE FOUND DEAD
+
+3032 and 3033 were both down mid-session — almost certainly OOM-killed by the
+Stable Audio renders, which is worth knowing before starting a long one: the
+model load plus two node servers plus a browser is enough to lose them. Watch
+for it, and restart with preview_start `ten-gad` / `ten-main`.
+
 # NINE DRUM BREAKS, GENERATED NOT SAMPLED — 2026-08-29
 
 ## THE BREAKS  (`samples/breaks/`, `tools/gen_breaks.py`)

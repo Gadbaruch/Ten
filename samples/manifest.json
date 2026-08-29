@@ -160,5 +160,29 @@
   "file": "vowel.mp3",
   "kind": "loop",
   "cat": "pad"
+ },
+ {
+  "name": "jazzbrush",
+  "file": "drums/jazzbrush.flac",
+  "bpm": 120.0,
+  "bars": 2,
+  "kind": "loop",
+  "cat": "perc"
+ },
+ {
+  "name": "funkkit",
+  "file": "drums/funkkit.flac",
+  "bpm": 100.0,
+  "bars": 2,
+  "kind": "loop",
+  "cat": "perc"
+ },
+ {
+  "name": "rockkit",
+  "file": "drums/rockkit.flac",
+  "bpm": 120.0,
+  "bars": 2,
+  "kind": "loop",
+  "cat": "perc"
  }
 ]

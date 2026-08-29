@@ -36,46 +36,56 @@ import json, sys, pathlib
 # Two families: whole GROOVES a drummer plays, and single ELEMENTS to layer.
 KIT = ("acoustic drum kit, real drummer, studio recording with room "
        "microphones, natural cymbals and skins")
+# ASK FOR A PERFORMANCE, NOT A SOUND. Gad on the first acoustic pass: "only the
+# fun kit is actually playing a rhythm, but the rhythm is very loose, and it's
+# only a high hat. And the Jazz brush rock kit, both of them are just one shot."
+# The kit words were right and the PLAYING words were missing entirely, so the
+# model rendered a drum rather than a drummer. This suffix is on every prompt.
+GRV = ("playing a steady repeating groove all the way through, the same "
+       "pattern every bar, locked to the beat, no fill, no intro, no ending")
 
+# ONE OR TWO BARS, never more (Gad: "Each one can also be just one bar. You
+# know? or two bars max"). A short loop is also the easier ask: the model has
+# to hold a pattern for three seconds instead of six.
 DRUMS = {
     # ---- grooves, by genre --------------------------------------------
     "jazzbrush":  (f"jazz drums played with brushes, swirling on the snare, "
-                   f"swung ride, brushed, {KIT}", 120, 2, 6.5),
-    "jazzride":   (f"swing jazz ride cymbal pattern with sticks, hi hat on two "
-                   f"and four, walking swing feel, {KIT}", 140, 2, 6.5),
+                   f"swung ride, {GRV}, {KIT}", 120, 2, 14.0),
+    "jazzride":   (f"swing jazz ride cymbal with sticks, hi hat on two and "
+                   f"four, walking swing, {GRV}, {KIT}", 140, 2, 14.0),
     "funkkit":    (f"funk drum groove, tight backbeat, ghost notes on the "
-                   f"snare, crisp hi hat sixteenths, {KIT}", 100, 2, 6.5),
-    "discokit":   (f"disco drum groove, four on the floor kick, open hi hat on "
-                   f"the offbeat, live seventies drummer, {KIT}", 120, 2, 6.5),
-    "rockkit":    (f"rock drum groove hit hard, big backbeat snare, crash "
-                   f"accents, large live room, {KIT}", 120, 2, 6.5),
-    "dubdrop":    (f"reggae one drop drum groove, rim click on three, deep "
-                   f"soft kick, laid back, {KIT}", 75, 2, 8.0),
-    "dubstepper": (f"reggae steppers drum groove, kick on every beat, timbale "
-                   f"rim, spacious dub, {KIT}", 75, 2, 8.0),
-    "dnbacoustic":(f"drum and bass groove played live on an acoustic kit, fast "
-                   f"broken beat, real cymbals, no electronics, {KIT}", 174, 4, 8.5),
-    "junglelive": (f"jungle breakbeat played by a live drummer on an acoustic "
-                   f"kit, syncopated snares, ride bell, {KIT}", 174, 4, 8.5),
+                   f"snare, sixteenth hi hats, {GRV}, {KIT}", 100, 2, 16.0),
+    "discokit":   (f"disco drum groove, four on the floor kick every beat, "
+                   f"open hi hat offbeats, {GRV}, {KIT}", 120, 2, 14.0),
+    "rockkit":    (f"rock drum groove hit hard, backbeat snare on two and "
+                   f"four, eighth note hi hats, {GRV}, {KIT}", 120, 2, 14.0),
+    "dubdrop":    (f"reggae one drop groove, rim click on beat three, deep "
+                   f"soft kick, {GRV}, {KIT}", 75, 1, 14.0),
+    "dubstepper": (f"reggae steppers groove, kick on every beat, timbale rim, "
+                   f"{GRV}, {KIT}", 75, 1, 14.0),
+    "dnbacoustic":(f"fast drum and bass groove played live on an acoustic kit, "
+                   f"broken beat, real cymbals, {GRV}, {KIT}", 174, 2, 14.0),
+    "junglelive": (f"jungle breakbeat played live on an acoustic kit, "
+                   f"syncopated snares, ride bell, {GRV}, {KIT}", 174, 2, 14.0),
     "boombapkit": (f"nineties hip hop drum groove played live, fat lazy kick, "
-                   f"cracking rimshot snare, dusty room, {KIT}", 90, 2, 7.5),
+                   f"cracking rimshot snare, {GRV}, {KIT}", 90, 2, 16.0),
     # ---- single elements, to layer or to sit under a groove ------------
-    "hatsixteen": (f"closed hi hat playing steady sixteenth notes, sticks on a "
-                   f"real cymbal, dry and close miked, {KIT}", 100, 2, 6.5),
-    "hatopen":    (f"hi hat pattern opening and closing with the foot pedal, "
-                   f"sizzling open accents, {KIT}", 100, 2, 6.5),
-    "ridepattern":(f"ride cymbal pattern played with sticks, shimmering wash, "
-                   f"steady rhythm, {KIT}", 100, 2, 6.5),
-    "ridebell":   (f"ride cymbal bell pattern, bright pinging accents on the "
-                   f"bell, {KIT}", 100, 2, 6.5),
-    "snareghost": (f"snare drum alone playing a backbeat with quiet ghost notes "
-                   f"between, rimshots, brushless sticks, {KIT}", 100, 2, 6.5),
-    "snarepress": (f"snare drum articulations, press roll, buzz roll and flams, "
-                   f"marching snare technique, {KIT}", 100, 2, 6.5),
-    "tomgroove":  (f"tribal tom tom groove around the kit, floor tom and rack "
-                   f"toms, mallets and sticks, {KIT}", 100, 2, 6.5),
-    "kicksnare":  (f"plain kick and snare backbeat, no cymbals, dry close "
-                   f"miked, {KIT}", 100, 2, 6.5),
+    "hatsixteen": (f"closed hi hat alone, steady sixteenth notes, sticks on a "
+                   f"real cymbal, dry, {GRV}, {KIT}", 100, 2, 14.0),
+    "hatopen":    (f"hi hat alone opening and closing on the foot pedal, "
+                   f"sizzling offbeat accents, {GRV}, {KIT}", 100, 2, 14.0),
+    "ridepattern":(f"ride cymbal alone played with sticks, steady shimmering "
+                   f"rhythm, {GRV}, {KIT}", 100, 2, 14.0),
+    "ridebell":   (f"ride cymbal bell alone, bright pinging accents, {GRV}, "
+                   f"{KIT}", 100, 2, 14.0),
+    "snareghost": (f"snare drum alone, backbeat with quiet ghost notes "
+                   f"between and rimshots, {GRV}, {KIT}", 100, 2, 14.0),
+    "snarepress": (f"snare drum alone, press rolls buzz rolls and flams, "
+                   f"marching technique, {GRV}, {KIT}", 100, 2, 14.0),
+    "tomgroove":  (f"tom tom groove around the kit, floor tom and rack toms, "
+                   f"{GRV}, {KIT}", 100, 2, 14.0),
+    "kicksnare":  (f"kick and snare backbeat alone, no cymbals, dry close "
+                   f"miked, {GRV}, {KIT}", 100, 2, 14.0),
 }
 
 # THE WHOLE BUDGET SPENT ON ONE FIGHT. The first pass used generic quality
@@ -84,7 +94,11 @@ DRUMS = {
 NEG = ("drum machine, electronic drums, drum computer, 808, 909, linndrum, "
        "sampled drums, synthetic, sequenced, quantized, midi, programmed, "
        "breakcore, edm, synth, bass guitar, melody, vocals, low quality, "
-       "clipping, silence, fade out")
+       "clipping, "
+       # …and against the OTHER failure: a single hit ringing out, which is
+       # what jazzbrush and rockkit came back as.
+       "single hit, one shot, isolated drum hit, sparse, silence, empty, "
+       "ambient, cymbal swell, drum solo, fill, applause")
 
 
 def main():
@@ -134,13 +148,33 @@ def main():
         wav = audio.T.float().cpu().numpy()
         if wav.ndim == 1: wav = wav[:, None]
 
-        # start on the first hit, then keep EXACTLY the bar count so the loop
-        # lands on the grid — a groove that does not loop cleanly is not a loop
-        env = np.abs(wav).max(axis=1)
-        thr = max(1e-4, env.max() * 0.003)
-        on = int(np.argmax(env > thr))
+        # CUT THE BUSIEST BAR, NOT THE FIRST ONE. Starting at the first onset
+        # and keeping N bars is what turned a stray hit into a four-second
+        # "loop": if the model plays one crash and then noodles, the first
+        # onset is the crash. So render THREE loops' worth, find every onset,
+        # and take the window — starting ON an onset, so the loop begins on a
+        # hit — that contains the most of them. The groove is in there; the
+        # job is to find it rather than to hope it starts at the top.
+        mono = wav.mean(axis=1)
+        h = int(0.01 * 44100)                       # 10ms frames
+        fr = np.array([np.sqrt((mono[i:i + h] ** 2).mean())
+                       for i in range(0, len(mono) - h, h)])
+        dfr = np.diff(fr)
+        thr = max(dfr.std() * 1.5, 1e-4)
+        ons = (np.where((dfr[1:] > thr) & (dfr[:-1] <= thr))[0] + 1) * h
         keep = int(round(loop * 44100))
-        wav = wav[on:on + keep]
+        start, dens = 0, -1
+        for o in ons:
+            if o + keep > len(mono):
+                break
+            n = int(((ons >= o) & (ons < o + keep)).sum())
+            if n > dens:
+                start, dens = int(o), n
+        if dens < 0:                                 # no onsets at all
+            start, dens = 0, 0
+        wav = wav[start:start + keep]
+        per_bar = dens / max(bars, 1)
+        note = "" if per_bar >= 4 else "   ⚠ THIN — %.1f hits/bar" % per_bar
         e = int(0.005 * 44100)
         if len(wav) > 2 * e:
             ramp = np.linspace(0, 1, e)[:, None]
@@ -159,7 +193,8 @@ def main():
                          "bars": bars, "kind": "loop", "cat": "perc"})
         mpath.write_text(json.dumps(manifest, indent=1))
         sz = (here / "samples" / fn).stat().st_size
-        print(f"  → samples/{fn}  ({len(wav)/44100:.2f}s, {sz//1024}kB)", flush=True)
+        print(f"  → samples/{fn}  ({len(wav)/44100:.2f}s, {sz//1024}kB, "
+              f"{dens} hits in {bars} bar = {per_bar:.1f}/bar){note}", flush=True)
 
     print(f"\ndone — {len(manifest)} entries in samples/manifest.json; "
           "reload TEN, audio channel, type 'perc'.")
