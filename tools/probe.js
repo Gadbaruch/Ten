@@ -4641,6 +4641,9 @@ const HELP = {
     { k: 'cursor',   args: 'chs=9 — ping ten-grsyn: tv/g/tpos/cpos' },
     { k: 'preset',   args: 'names=SNR,S909 note=48 ch=8 — library name, played and measured' },
     { k: 'key',      args: 'code=KeyA hold=120 shift=0 alt=0 ctrl=0 meta=0' },
+    { k: 'mixbus',   args: 'kit=KT808 bars=2 bpm=120 ref=brushkit — the whole kit playing, gated LUFS + PLR + band balance, against a real drum record' },
+    { k: 'padpred',  args: 'kit=KT808 — offline buffer+envelope loudness vs the measured bus, to prove the model' },
+    { k: 'kitmix',   args: 'kit=KT808,KTLIN ms=400 — BS.1770 loudness + 8-band balance of every pad in a kit, against the role target' },
     { k: 'smploud',  args: 'ch=4 ms=200 names=a,b,c — perceptual loudness of samples vs a synth op, and the median deficit' },
     { k: 'smprate',  args: 'ch=4 notes=36,48,60,72 — which note plays a sample at its own speed' },
     { k: 'smpdiag',  args: 'ch=4 file=oneshots/snare/linn-snare-03.flac note=48 — the file vs the op: level, band balance, stereo' },
@@ -5167,6 +5170,366 @@ async function probeSmpLoud() {
            notes: 'rms over ' + Math.round(WIN * 1000) + 'ms from onset; crest = peak/rms in dB' };
 }
 
+/* ---------------- THE MIX METER  (2026-08-29) -------------------------- *
+ * Everything above measures a sound. This measures a MIX, and the unit it
+ * measures in is the one mixing engineers actually use: ITU-R BS.1770
+ * K-weighted loudness, not bare RMS.
+ *
+ * WHY NOT RMS. `smploud` compares rms over 200ms and that is what found the
+ * -7.5dB sample deficit, so it is not wrong — but it weights 40Hz and 4kHz the
+ * same, and the ear does not. A kick and a hat matched by rms are not matched
+ * by ear, and a drum mix is precisely a question about kicks against hats.
+ *
+ * The K filter is derived here from BS.1770's design parameters rather than
+ * pasted at 48k, because AC.sampleRate is 44100 on this machine. VERIFIED: at
+ * fs=48000 the derivation reproduces the published coefficients
+ *   shelf  1.53512485958697 -2.69169618940638 1.19839281085285
+ *                           -1.69065929318241  0.73248077421585
+ *   rlb    1 -2 1           -1.99004745483398  0.99007225036621
+ * to 8.9e-16 — machine precision, so the meter is the spec's and not an
+ * approximation of it. */
+function kCoeffs(fs) {
+  let db = 3.999843853973347, f0 = 1681.974450955533, Q = 0.7071752369554196;
+  let K = Math.tan(Math.PI * f0 / fs), Vh = Math.pow(10, db / 20);
+  let Vb = Math.pow(Vh, 0.4996667741545416), a0 = 1 + K / Q + K * K;
+  const sh = [(Vh + Vb * K / Q + K * K) / a0, 2 * (K * K - Vh) / a0,
+              (Vh - Vb * K / Q + K * K) / a0, 2 * (K * K - 1) / a0, (1 - K / Q + K * K) / a0];
+  f0 = 38.13547087602444; Q = 0.5003270373238773;
+  K = Math.tan(Math.PI * f0 / fs); a0 = 1 + K / Q + K * K;
+  const hp = [1, -2, 1, 2 * (K * K - 1) / a0, (1 - K / Q + K * K) / a0];
+  return [sh, hp];
+}
+function biq(x, c) {
+  const [b0, b1, b2, a1, a2] = c, y = new Float64Array(x.length);
+  let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+  for (let i = 0; i < x.length; i++) {
+    const xn = x[i], yn = b0 * xn + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+    x2 = x1; x1 = xn; y2 = y1; y1 = yn; y[i] = yn;
+  }
+  return y;
+}
+/* K-weight a whole recording ONCE, from its start, so the filter has real
+   history by the time the window opens. Measuring a block from the middle of
+   an unfiltered buffer starts the biquad at rest and reads a transient of the
+   meter rather than of the sound. */
+function kWeight(L, R, sr) {
+  const [sh, hp] = kCoeffs(sr), n = Math.max(L.length, R.length);
+  const cast = ch => { const o = new Float64Array(n); for (let i = 0; i < n; i++) o[i] = ch[i] || 0; return o; };
+  return [biq(biq(cast(L), sh), hp), biq(biq(cast(R), sh), hp)];
+}
+/* one BS.1770 block: -0.691 + 10log10(sum over channels of mean square),
+   G = 1.0 for L and R. This is MOMENTARY loudness when the block is 400ms,
+   which is the right window for a drum hit — it reads level and duration at
+   once, so a click that is loud but 8ms long does not score as a kick. */
+function lufsOf(kL, kR, o, n) {
+  if (n <= 0) return -120;
+  let sl = 0, sr2 = 0;
+  for (let i = o; i < o + n; i++) { sl += kL[i] * kL[i]; sr2 += kR[i] * kR[i]; }
+  return -0.691 + 10 * Math.log10(Math.max(sl / n + sr2 / n, 1e-20));
+}
+/* WHERE THE ENERGY SITS, in the eight bands a mixer names. Returned as a
+   percentage of total spectral energy, because that is what a tonal-balance
+   judgement is: nobody asks how many dB the air band has, they ask whether it
+   is too much of the sound. */
+const MIXBANDS = [['sub', 20, 60], ['low', 60, 120], ['lomid', 120, 300], ['mid', 300, 800],
+                  ['himid', 800, 2500], ['pres', 2500, 6000], ['bril', 6000, 12000],
+                  ['air', 12000, 20000]];
+function bands(L, R, sr, o, take) {
+  const N = 16384, re = new Float64Array(N), im = new Float64Array(N);
+  const n = Math.min(take, N);
+  for (let i = 0; i < n; i++)
+    re[i] = ((L[o + i] || 0) + (R[o + i] || 0)) * 0.5 * (0.5 - 0.5 * Math.cos(2 * Math.PI * i / n));
+  fft(re, im);
+  const half = N >> 1, e = MIXBANDS.map(() => 0);
+  let tot = 0, sw = 0, sm = 0;
+  for (let k = 1; k < half; k++) {
+    const hz = k * sr / N, m = re[k] * re[k] + im[k] * im[k];
+    tot += m; sw += Math.sqrt(m) * hz; sm += Math.sqrt(m);
+    for (let b = 0; b < MIXBANDS.length; b++)
+      if (hz >= MIXBANDS[b][1] && hz < MIXBANDS[b][2]) { e[b] += m; break; }
+  }
+  const out = {};
+  MIXBANDS.forEach(([nm], b) => out[nm] = tot ? +(100 * e[b] / tot).toFixed(1) : 0);
+  out.cent = sm ? Math.round(sw / sm) : 0;
+  return out;
+}
+
+/* THE TARGET. Loudness of each drum role in LU relative to the KICK, which is
+   the reference every drum mix is built around. Cross-read from published
+   mixing practice (kick -12..-8 dBFS, snare -10..-6, hats -18..-14, overheads
+   ~60% of kick+snare) and written as one table so it can be argued with in one
+   place instead of being spread through the code as constants. */
+const MIXTARGET = {
+  kick: 0, sub: 0, snare: -1, clap: -3.5, rim: -9, tom: -3.5,
+  'hat-closed': -6.5, 'hat-open': -6, cymbal: -7, ride: -9,
+  cowbell: -8, conga: -5, bongo: -6, shaker: -11, clave: -9, timbale: -5,
+  wood: -9, perc: -7, fx: -8,
+};
+
+/* ---------------- kitmix: the balance inside one kit ------------------- */
+async function probeKitMix() {
+  const ch = Math.max(1, Math.min(9, Math.round(num(P.ch, 9))));
+  const want = str(P.kit, '');
+  const MSWIN = num(P.ms, 400) / 1000;      // the BS.1770 momentary block
+  const HOLD = num(P.hold, 700);            // how long to record per pad
+  const vel = num(P.vel, 1.0);
+  const lib = (typeof libAll === 'function') ? libAll() : [];
+  const kits = lib.filter(e => e && e.cat === 'kit');
+  if (!kits.length) return { cols: [], rows: [], err: 'no kits in libAll() — shelf not in yet?' };
+  const names = want ? want.split(',') : [kits[0].name];
+  const keep = stash(ch);
+  const rows = [], sr = AC.sampleRate;
+  try {
+    for (const nm of names) {
+      const en = kits.find(e => e.name === nm);
+      if (!en) { rows.push({ k: nm, err: 'no such kit' }); continue; }
+      unstash(ch, { data: JSON.parse(JSON.stringify(en.data)), loop: keep.loop });
+      await sleep(60);
+      const p = S.presets[ch];
+      let kickL = null;
+      for (let i = 0; i < 12; i++) {
+        const K = p.kit && p.kit[i];
+        const slot = (typeof KITMAP !== 'undefined' && KITMAP[i]) || { inst: '?' };
+        if (!K) { rows.push({ k: nm + ' ' + slot.inst, err: 'empty pad' }); continue; }
+        pin(ch);
+        engine.allOff(); await sleep(40);
+        const bus = busOf(ch); if (!bus) { rows.push({ k: slot.inst, err: 'no bus' }); continue; }
+        const t = tap(bus); await sleep(25);
+        engine.noteOn(AC.currentTime + 0.02, ch, KBBASE + i, vel);
+        await sleep(HOLD);
+        engine.allOff();
+        const [L, R] = t.stop();
+        const w = windowOf(L, R);
+        const [kL, kR] = kWeight(L, R, sr);
+        const nBlk = Math.min(Math.round(MSWIN * sr), Math.max(0, L.length - w.o));
+        const lu = lufsOf(kL, kR, w.o, nBlk);
+        const lv = levels(L, R, w.o, w.take);
+        const bd = bands(L, R, sr, w.o, w.take);
+        if (i === 0) kickL = lu;
+        const smp = ((K.osc && K.osc[0] && K.osc[0].smp) || {}).f || '';
+        rows.push({ k: slot.inst, file: smp.split('/').pop().replace('.flac', ''),
+                    lvl: r3((K.mix || {}).lvl), lufs: +lu.toFixed(1),
+                    'vs kick': kickL == null ? 0 : +(lu - kickL).toFixed(1),
+                    tgt: MIXTARGET[slot.inst] == null ? '—' : MIXTARGET[slot.inst],
+                    err_: kickL == null || MIXTARGET[slot.inst] == null ? ''
+                          : +((lu - kickL) - MIXTARGET[slot.inst]).toFixed(1),
+                    peak: lv.peak, crest: +(20 * Math.log10(Math.max(lv.peak, 1e-9) /
+                          Math.max(lv.rms, 1e-9))).toFixed(1),
+                    cent: bd.cent, sub: bd.sub, low: bd.low, lomid: bd.lomid, mid: bd.mid,
+                    himid: bd.himid, pres: bd.pres, bril: bd.bril, air: bd.air });
+      }
+      const errs = rows.filter(r => typeof r.err_ === 'number').map(r => Math.abs(r.err_));
+      if (errs.length) {
+        errs.sort((a, b) => a - b);
+        rows.push({ k: '— ' + nm + ' spread —',
+                    err_: +errs[errs.length - 1].toFixed(1),
+                    lufs: +(errs.reduce((a, b) => a + b, 0) / errs.length).toFixed(1) });
+      }
+    }
+  } finally { unstash(ch, keep); }
+  return { cols: ['file', 'lvl', 'lufs', 'vs kick', 'tgt', 'err_', 'peak', 'crest', 'cent',
+                  'sub', 'low', 'lomid', 'mid', 'himid', 'pres', 'bril', 'air'], rows,
+           notes: 'lufs = BS.1770 momentary over ' + Math.round(MSWIN * 1000) +
+                  'ms from onset · "vs kick" is LU relative to pad 0 · err_ = vs kick minus tgt' +
+                  ' · on the summary row err_ is the WORST pad and lufs the MEAN |err|' +
+                  ' · bands are % of spectral energy' };
+}
+
+/* ---------------- padpred: does the OFFLINE model predict the BUS? ----- *
+ * The fix has to compute a pad's level at BUILD time, from the buffer, with
+ * no rendering — a rolled kit cannot wait 12 seconds for a measurement. So
+ * before trusting that arithmetic, prove it: predict each pad's loudness from
+ * its buffer plus its own amp envelope, then measure the same pad through the
+ * engine and subtract. If the model is right the difference is ONE constant —
+ * the voice chain's gain — and not a per-pad fudge. */
+function padLoudOffline(buf, dcyF, sr, rate) {
+  rate = rate > 0 ? rate : 1;
+  if (!buf) return null;
+  const n = buf.length, L = buf.getChannelData(0);
+  const R = buf.numberOfChannels > 1 ? buf.getChannelData(1) : L;
+  /* the envelope the voice will actually schedule: a 0.4ms ramp, then
+     setTargetAtTime with the time constant d/3 toward sustain 0 */
+  const dur = buf.duration || 0.4;
+  const d = Math.max(0.02, Math.min(5, dur * dcyF));
+  const tau = Math.max(0.005, d / 3), aA = 0.0004;
+  /* onset first — a take with 20ms of leader would otherwise spend the
+     envelope's loudest moment on silence */
+  let pk = 0; for (let i = 0; i < n; i++) { const a = Math.abs(L[i]); if (a > pk) pk = a; }
+  const thr = Math.max(1e-5, pk * 0.02);
+  let o = 0; for (let i = 0; i < n; i++) if (Math.abs(L[i]) >= thr) { o = i; break; }
+  /* A FIXED 400ms BLOCK, ZERO-PADDED — not "as much buffer as there is".
+     BS.1770 momentary loudness averages over 400ms whatever the source does,
+     so the silence after a 60ms rim is PART of its loudness and is exactly why
+     a rim reads quieter than a kick of the same peak. Truncating the block to
+     the take instead put the model out by 10log10(take/0.4) — measured as an
+     8.25dB spread in the chain gain, worst on the shortest pads (rim 0.06s,
+     -10.34dB) and near zero on the longest (clap 1.27s, -2.47dB). */
+  const blk = Math.round(0.4 * sr);
+  const eL = new Float32Array(blk), eR = new Float32Array(blk);
+  for (let j = 0; j < blk; j++) {
+    const x = o + j * rate, i0 = Math.floor(x); if (i0 + 1 >= n) break;
+    const fr = x - i0, t = j / sr, g = t < aA ? t / aA : Math.exp(-(t - aA) / tau);
+    eL[j] = (L[i0] + (L[i0 + 1] - L[i0]) * fr) * g;
+    eR[j] = (R[i0] + (R[i0 + 1] - R[i0]) * fr) * g;
+  }
+  const [kL, kR] = kWeight(eL, eR, sr);
+  return lufsOf(kL, kR, 0, blk);
+}
+async function probePadPred() {
+  const ch = Math.max(1, Math.min(9, Math.round(num(P.ch, 9))));
+  const want = str(P.kit, 'KT808').split(',');
+  const kits = (typeof libAll === 'function' ? libAll() : []).filter(e => e && e.cat === 'kit');
+  const keep = stash(ch), rows = [], sr = AC.sampleRate;
+  try {
+    for (const nm of want) {
+      const en = kits.find(e => e.name === nm);
+      if (!en) { rows.push({ k: nm, err: 'no such kit' }); continue; }
+      unstash(ch, { data: JSON.parse(JSON.stringify(en.data)), loop: keep.loop });
+      await sleep(60);
+      const p = S.presets[ch];
+      for (let i = 0; i < 12; i++) {
+        const K = p.kit && p.kit[i]; if (!K) continue;
+        const slot = KITMAP[i], f = ((K.osc && K.osc[0] && K.osc[0].smp) || {}).f;
+        const e = POOL.find(x => x && x.src && x.src.f === f);
+        if (!e || !e.buf) { rows.push({ k: nm + ':' + slot.inst, err: 'no buffer for ' + f }); continue; }
+        const dur = e.buf.duration, dcyF = (K.env && K.env[0] && K.env[0].d) ? K.env[0].d / dur
+                                          : kitDcy(slot.inst);
+        const pred = padLoudOffline(e.buf, dcyF, sr, Math.pow(2, i / 12));
+        pin(ch); engine.allOff(); await sleep(40);
+        const bus = busOf(ch); const t = tap(bus); await sleep(25);
+        engine.noteOn(AC.currentTime + 0.02, ch, KBBASE + i, 1.0);
+        await sleep(650); engine.allOff();
+        const [L, R] = t.stop(), w = windowOf(L, R);
+        const [kL, kR] = kWeight(L, R, sr);
+        const meas = lufsOf(kL, kR, w.o, Math.min(Math.round(0.4 * sr), L.length - w.o));
+        const lvl = (K.mix || {}).lvl != null ? K.mix.lvl : 0.8;
+        const lvlDb = 20 * Math.log10(Math.max(lvl, 1e-9));
+        rows.push({ k: nm + ':' + slot.inst, dur: +dur.toFixed(3), dcy: +dcyF.toFixed(3),
+                    lvl: +lvl.toFixed(3), pred: +pred.toFixed(1), meas: +meas.toFixed(1),
+                    gain: +(meas - pred - lvlDb).toFixed(2) });
+      }
+    }
+  } finally { unstash(ch, keep); }
+  const gs = rows.filter(r => typeof r.gain === 'number').map(r => r.gain).sort((a, b) => a - b);
+  if (gs.length) {
+    const mean = gs.reduce((a, b) => a + b, 0) / gs.length;
+    const sd = Math.sqrt(gs.reduce((a, b) => a + (b - mean) * (b - mean), 0) / gs.length);
+    rows.push({ k: '— CHAIN GAIN —', pred: +mean.toFixed(2), meas: +sd.toFixed(2),
+                gain: +(gs[gs.length - 1] - gs[0]).toFixed(2) });
+  }
+  return { cols: ['dur', 'dcy', 'lvl', 'pred', 'meas', 'gain'], rows,
+           notes: 'gain = meas - pred - 20log10(lvl): the voice chain, which the model does NOT '
+                + 'include. On the summary row: pred = its MEAN, meas = its SD, gain = its RANGE. '
+                + 'A small SD means the offline model predicts the bus and the fix can be arithmetic.' };
+}
+
+/* ---------------- mixbus: the whole kit, against a real record ---------- *
+ * kitmix weighs the pads against each other. This plays them TOGETHER and asks
+ * the two questions a mix engineer actually asks of a drum bus: how loud is it
+ * (BS.1770 INTEGRATED, gated — not a peak, not an rms), and where does its
+ * energy sit. Then it asks the same of a real drum recording off the loop
+ * shelf, so the answer is a comparison and not an opinion. */
+
+/* GATED INTEGRATED LOUDNESS, the real one: 400ms blocks at 75% overlap, an
+   absolute gate at -70 LUFS, then a relative gate 10 LU below the mean of what
+   survived. The gate is the whole point — without it the silence between hits
+   drags a drum loop's reading down by several LU and two patterns of different
+   density stop being comparable. */
+function lufsIntegrated(kL, kR, sr) {
+  const blk = Math.round(0.4 * sr), hop = Math.round(blk / 4);
+  const n = Math.min(kL.length, kR.length), zs = [];
+  for (let o = 0; o + blk <= n; o += hop) {
+    let sl = 0, s2 = 0;
+    for (let i = o; i < o + blk; i++) { sl += kL[i] * kL[i]; s2 += kR[i] * kR[i]; }
+    zs.push(sl / blk + s2 / blk);
+  }
+  if (!zs.length) return { lufs: -120, blocks: 0 };
+  const L = z => -0.691 + 10 * Math.log10(Math.max(z, 1e-20));
+  let keep = zs.filter(z => L(z) > -70);
+  if (!keep.length) return { lufs: -120, blocks: 0 };
+  const relGate = L(keep.reduce((a, b) => a + b, 0) / keep.length) - 10;
+  const k2 = keep.filter(z => L(z) > relGate);
+  const use = k2.length ? k2 : keep;
+  return { lufs: L(use.reduce((a, b) => a + b, 0) / use.length), blocks: use.length,
+           mmax: Math.max(...zs.map(L)) };
+}
+/* A DRUM PATTERN THAT IS REPRESENTATIVE, because band balance is a question
+   about DENSITY as much as level: a hat on every eighth puts far more energy in
+   the mix than a crash on bar one, whatever their faders say. Steps are
+   sixteenths; each row is which pad, on which steps of a bar. */
+const MIXPAT = [
+  [0,  [0, 6, 10]],            // kick
+  [1,  [4, 12]],               // snare
+  [2,  [0, 2, 4, 6, 8, 10, 12]],  // hat closed — eighths, minus the one the open takes
+  [3,  [14]],                  // hat open
+  [4,  [12]],                  // clap, doubling the backbeat
+  [5,  [11, 15]],              // tom
+  [6,  [7]],                   // rim
+  [7,  [0]],                   // cymbal — bar 1 only, see below
+  [8,  [3]],                   // cowbell
+  [9,  [9]],                   // conga
+  [10, [1, 3, 5, 7, 9, 11, 13, 15]],  // shaker — offbeat sixteenths
+  [11, [2, 6, 10, 14]],        // ride
+];
+async function probeMixBus() {
+  const ch = Math.max(1, Math.min(9, Math.round(num(P.ch, 9))));
+  const want = str(P.kit, 'KT808').split(',');
+  const bpm = num(P.bpm, 120), bars = Math.max(1, Math.round(num(P.bars, 2)));
+  const refName = str(P.ref, 'brushkit');
+  const kits = (typeof libAll === 'function' ? libAll() : []).filter(e => e && e.cat === 'kit');
+  const keep = stash(ch), rows = [], sr = AC.sampleRate;
+  const spb = 60 / bpm, step = spb / 4, barT = spb * 4;
+  const report = (k, L, R, extra) => {
+    const [kL, kR] = kWeight(L, R, sr);
+    const ig = lufsIntegrated(kL, kR, sr);
+    let pk = 0;
+    for (let i = 0; i < L.length; i++) {
+      const a = Math.abs(L[i]), b = Math.abs(R[i] || 0);
+      if (a > pk) pk = a; if (b > pk) pk = b;
+    }
+    const pkDb = 20 * Math.log10(Math.max(pk, 1e-9));
+    const bd = bands(L, R, sr, 0, Math.min(L.length, 16384));
+    return Object.assign({ k, lufs: +ig.lufs.toFixed(1), mmax: +ig.mmax.toFixed(1),
+      peak: +pkDb.toFixed(1), PLR: +(pkDb - ig.lufs).toFixed(1), cent: bd.cent,
+      sub: bd.sub, low: bd.low, lomid: bd.lomid, mid: bd.mid, himid: bd.himid,
+      pres: bd.pres, bril: bd.bril, air: bd.air }, extra || {});
+  };
+  try {
+    for (const nm of want) {
+      const en = kits.find(e => e.name === nm);
+      if (!en) { rows.push({ k: nm, err: 'no such kit' }); continue; }
+      unstash(ch, { data: JSON.parse(JSON.stringify(en.data)), loop: keep.loop });
+      await sleep(80); pin(ch);
+      engine.allOff(); await sleep(50);
+      const bus = busOf(ch); if (!bus) { rows.push({ k: nm, err: 'no bus' }); continue; }
+      const t = tap(bus); await sleep(30);
+      const t0 = AC.currentTime + 0.08;
+      for (let b = 0; b < bars; b++) for (const [pad, steps] of MIXPAT)
+        for (const s of steps) {
+          if (pad === 7 && b !== 0) continue;                 // the crash lands once
+          engine.noteOn(t0 + b * barT + s * step, ch, KBBASE + pad, 1.0);
+        }
+      await sleep((bars * barT + 0.6) * 1000);
+      engine.allOff();
+      const [L, R] = t.stop();
+      rows.push(report(nm, L, R, { src: 'kit' }));
+    }
+  } finally { unstash(ch, keep); }
+  /* THE REFERENCE IS A RECORD, analysed as a FILE — no engine in the path, so
+     nothing this instrument does can flatter it. */
+  const re = POOL.find(e => e && e.name === refName && e.buf);
+  if (re) {
+    const b = re.buf, L = b.getChannelData(0),
+          R = b.numberOfChannels > 1 ? b.getChannelData(1) : L;
+    rows.push(report('REF ' + refName, L, R, { src: 'file ' + b.duration.toFixed(2) + 's' }));
+  } else rows.push({ k: 'REF ' + refName, err: 'not on the shelf' });
+  return { cols: ['src', 'lufs', 'mmax', 'peak', 'PLR', 'cent', 'sub', 'low', 'lomid', 'mid',
+                  'himid', 'pres', 'bril', 'air'], rows,
+           notes: 'lufs = BS.1770 INTEGRATED, gated · mmax = loudest 400ms block · '
+                + 'PLR = peak minus integrated, the crest factor mastering reads · '
+                + 'bands are % of spectral energy over the first 16384 samples' };
+}
+
 const PROBES = { level: probeLevel, spectrum: probeSpectrum, cursor: probeCursor,
                    preset: probePreset, key: probeKey, keypath: probeKeyPath,
                    roundtrip: probeRoundTrip,
@@ -5210,7 +5573,10 @@ const PROBES = { level: probeLevel, spectrum: probeSpectrum, cursor: probeCursor
                    press: probePress,
                    smpdiag: probeSmpDiag,
                    smprate: probeSmpRate,
-                   smploud: probeSmpLoud };
+                   smploud: probeSmpLoud,
+                   kitmix: probeKitMix,
+                   padpred: probePadPred,
+                   mixbus: probeMixBus };
   const fn = PROBES[NAME];
   out = fn ? await fn() : (NAME === 'help' ? HELP : { cols: [], rows: [], err: 'no probe named ' + NAME });
 } catch (e) {

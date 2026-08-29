@@ -2102,5 +2102,85 @@
   "inst": "hat-closed",
   "style": "ac-rock",
   "cat": "hh"
+ },
+ {
+  "name": "rock-hat-open",
+  "file": "oneshots/acoustic/rock/hat-open.flac",
+  "kind": "one",
+  "inst": "hat-open",
+  "style": "ac-rock",
+  "cat": "hh"
+ },
+ {
+  "name": "rock-cymbal",
+  "file": "oneshots/acoustic/rock/cymbal.flac",
+  "kind": "one",
+  "inst": "cymbal",
+  "style": "ac-rock",
+  "cat": "cymb"
+ },
+ {
+  "name": "rock-tom",
+  "file": "oneshots/acoustic/rock/tom.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "ac-rock",
+  "cat": "tom"
+ },
+ {
+  "name": "rock-cowbell",
+  "file": "oneshots/acoustic/rock/cowbell.flac",
+  "kind": "one",
+  "inst": "cowbell",
+  "style": "ac-rock",
+  "cat": "perc"
+ },
+ {
+  "name": "rock-shaker",
+  "file": "oneshots/acoustic/rock/shaker.flac",
+  "kind": "one",
+  "inst": "shaker",
+  "style": "ac-rock",
+  "cat": "perc"
+ },
+ {
+  "name": "funk-kick",
+  "file": "oneshots/acoustic/funk/kick.flac",
+  "kind": "one",
+  "inst": "kick",
+  "style": "ac-funk",
+  "cat": "kik"
+ },
+ {
+  "name": "funk-snare",
+  "file": "oneshots/acoustic/funk/snare.flac",
+  "kind": "one",
+  "inst": "snare",
+  "style": "ac-funk",
+  "cat": "snr"
+ },
+ {
+  "name": "funk-rim",
+  "file": "oneshots/acoustic/funk/rim.flac",
+  "kind": "one",
+  "inst": "rim",
+  "style": "ac-funk",
+  "cat": "snr"
+ },
+ {
+  "name": "funk-hat-closed",
+  "file": "oneshots/acoustic/funk/hat-closed.flac",
+  "kind": "one",
+  "inst": "hat-closed",
+  "style": "ac-funk",
+  "cat": "hh"
+ },
+ {
+  "name": "funk-hat-open",
+  "file": "oneshots/acoustic/funk/hat-open.flac",
+  "kind": "one",
+  "inst": "hat-open",
+  "style": "ac-funk",
+  "cat": "hh"
  }
 ]

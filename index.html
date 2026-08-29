@@ -1471,7 +1471,7 @@ const recPlayed=(pi,tBeat,midi,vel,durBeats)=>recPlayNote(pi,tBeat,sndOut(pi,mid
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-29.1305';
+const BUILD='2026-08-29.1333';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -4357,11 +4357,31 @@ function mkJ(name,cat,d){
 
    THE RULE, and it is the whole point of this block:
      · a preset that arrives from Gad goes HERE, never in PRESETS0
-     · adding one needs LIBV bumped, or the stored library shadows it forever
+     · adding one needs NOTHING else — libInit re-lays when a name in here is
+       missing from the shelf, so no LIBV bump and nothing to remember
      · a batch regen rewrites PRESETS0 and this function is not touched
    Each entry keeps his own line of intent as a comment — category does not
    carry intent, and it is the expensive thing to reconstruct later. */
 const GIVEN=()=>[
+  /* BES1 — keys. GAD'S, 2026-08-29, pasted from ctrl+c on ch5 of his own set.
+     A hard-SYNCED detuned saw stack through a FORMANT filter whose SPREAD is
+     swept by a 0.22Hz LFO, into a keytracked triple filter, a phaser and a
+     filt fx. Down an octave on trs.
+
+     WORTH KEEPING FOR WHAT IT REACHES THAT THE GENERATOR NEVER DOES, which is
+     the coverage principle in SOUND.md made concrete — five things no roll has
+     ever produced:
+       · osc mode 3, SYNC (the table only ever writes add/fm)
+       · flt typ 8 FORMANT and typ 11 TRIPLE (rolls use lp/hp/bp)
+       · an LFO on a filter's SPREAD rather than its frequency
+       · KEY -> filter freq at amt 200, hard tracking as a design choice
+       · ONE modulator with TWO routes (flt freq AND vox wide)
+     Every one of those is reachable in the racks and unreachable by a roll.
+
+     ⚠ ITS INTENT LINE IS MISSING — he did not send one and the shelf protocol
+     asks for it. Category does not carry intent and reconstructing it later is
+     the expensive part; ask before this is used to teach an archetype. */
+  {"name":"BES1","cat":"keys","tr":0,"trs":-12,"prep":null,"au":{"gain":0.9,"semis":0,"rate":1,"st":0,"en":1,"fit":1,"src":0,"pmode":0,"chan":0,"kmode":0,"auto":1,"start":0,"kvol":1,"lvol":1,"wnd":50,"cues":{},"cmode":0},"osc":[{"wav":2,"mode":0,"dst":0,"rat":2,"amt":1,"fine":0,"ph":0,"phm":0,"pw":0.8,"id":0},{"wav":2,"mode":3,"dst":0,"rat":3,"amt":0.85,"fine":0,"ph":0,"phm":0,"pw":0.8,"id":5},{"wav":2,"mode":0,"dst":0,"rat":2,"amt":1,"fine":20,"ph":0,"phm":0,"pw":0.5,"id":6},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":0,"pw":0.11,"id":3},{"wav":2,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":0,"pw":0.5,"id":4},{"wav":2,"mode":0,"dst":0,"rat":0.5,"amt":0,"fine":5,"ph":0,"phm":0,"pw":0.5,"id":1},{"wav":2,"mode":1,"dst":0,"rat":8,"amt":0,"fine":0,"ph":50,"phm":0,"pw":0.5,"id":2},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":0,"pw":0.5},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":0,"pw":0.5},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":0,"pw":0.5}],"amp":[{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0}],"flt":[{"typ":8,"frq":303.5725786900489,"q":0.8,"gn":0,"par":0,"pol":1,"spr":0.27,"lvl":1,"id":0},{"typ":11,"frq":12777.83535513651,"q":6.3,"gn":0,"par":1,"pol":0,"spr":1,"lvl":1,"id":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1}],"env":[{"dst":1,"idx":0,"amt":100,"a":0.005,"d":0.15,"s":0.7,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0}],"lfo":[{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30}],"mod":[{"src":1,"rsel":0,"mac":0,"routes":[{"dst":1,"idx":0,"amt":100,"tgt":null,"addr":{"rack":"voice","slot":0,"key":"amp","lbl":"amp"}}],"a":0.002,"d":0.2301669073057623,"s":0.77,"r":0.22517998136852485,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":0,"fch":1,"fa":0.01,"fr":0.15,"fg":4,"id":0,"tmul":1},{"src":2,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":80,"tgt":null,"addr":{"rack":"flt","slot":0,"key":"spr","lbl":"spread","sid":0}}],"a":0.005,"d":0.15,"s":0,"r":0.2,"crv":0,"wav":0,"rate":0.21990232555520017,"ph":0,"syn":0,"rdiv":4,"ltr":0,"fch":1,"fa":0.01,"fr":0.15,"fg":4,"id":3,"off":false},{"src":1,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":55,"tgt":null,"addr":{"rack":"flt","slot":0,"key":"frq","lbl":"freq","sid":0}}],"a":0.011920928955078125,"d":1.3421772800000007,"s":0.05,"r":3.6379788070917156,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":1,"fch":1,"fa":0.01,"fr":0.15,"fg":4,"id":1,"off":false},{"src":2,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"tgt":null,"addr":{"rack":"flt","slot":1,"key":"frq","lbl":"freq","sid":1}},{"dst":0,"idx":0,"amt":15,"tgt":null,"addr":{"rack":"vox","slot":0,"key":"wide","lbl":"wide"}}],"a":0.005,"d":0.15,"s":0,"r":0.2,"crv":0,"wav":0,"rate":0.05,"ph":0,"syn":0,"rdiv":4,"ltr":0,"fch":1,"fa":0.01,"fr":0.15,"fg":4,"id":2,"off":false,"skw":-25},{"src":4,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":200,"tgt":null,"addr":{"rack":"flt","slot":1,"key":"frq","lbl":"freq","sid":1}}],"a":0.005,"d":0.15,"s":0,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":0,"fch":1,"fa":0.01,"fr":0.15,"fg":4,"id":4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"tgt":null}],"a":0.005,"d":0.15,"s":0,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":0,"fch":1,"fa":0.01,"fr":0.15,"fg":4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"tgt":null}],"a":0.005,"d":0.15,"s":0,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":0,"fch":1,"fa":0.01,"fr":0.15,"fg":4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"tgt":null}],"a":0.005,"d":0.15,"s":0,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":0,"fch":1,"fa":0.01,"fr":0.15,"fg":4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"tgt":null}],"a":0.005,"d":0.15,"s":0,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":0,"fch":1,"fa":0.01,"fr":0.15,"fg":4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"tgt":null}],"a":0.005,"d":0.15,"s":0,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":0,"fch":1,"fa":0.01,"fr":0.15,"fg":4}],"fx":[{"typ":14,"p1":0.65,"p2":0.08,"p3":0.25,"p4":0.35,"p5":0.5,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.15,"rv":0,"id":0},{"typ":1,"p1":0.27,"p2":0.35,"p3":3,"p4":0.3,"p5":-0.2,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.0186,"rv":0,"id":1},{"typ":2,"p1":0.65,"p2":0.15,"p3":0.25,"p4":0.35,"p5":0.48,"p6":0.6,"p7":0.9,"p8":0.2,"mix":0.365,"rv":0,"id":2},{"typ":23,"p1":0.36,"p2":0,"p3":1,"p4":0,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.8118,"rv":0,"id":3},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0}],"ply":[{"typ":0,"p1":2,"p2":0.06,"p3":0,"p4":0,"p5":0,"p6":0,"p7":1,"p8":1,"id":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0}],"vox":{"mode":0,"glide":0,"uni":2,"sprd":10,"wide":1,"slop":0.03,"fmw":0},"macro":[0,0,0,0],"mix":{"lvl":1,"pan":0},"code":null,"pmodel":null,"psel":0,"cp":[1,1,1,0.5,0,0,0.5,0.3],"kit":null,"vof":0.55,"_folded":true,"_addr":true,"_sid":{"mod":5}}
 ];
 const PRESETS0=()=>[
  mkP('KCK','kik',p=>{Object.assign(p.osc[0],{wav:0,rat:0.25,ph:90});
@@ -13644,7 +13664,16 @@ function libInit(){
   for(const en of cur)if(en.cat==='drum')en.cat=drumCatOf(en.data||{});   // user drums: migrate
   const users=cur.filter(en=>!en.factory);
   const need=CATS.filter(c2=>c2!=='audio').length*10;
-  if(cur.length-users.length>=need)return;                // factory set already complete
+  /* …BUT NOT IF ONE OF GAD'S IS MISSING. The early-out asks only "are there
+     enough factory entries", which is true the moment the dice have filled the
+     categories — so adding a preset to GIVEN() would never appear in a library
+     that already existed, and the comment there promising a LIBV bump would
+     have been the only way in. Self-healing is better than a version number
+     somebody has to remember: if a GIVEN preset is not on the shelf, re-lay.
+     Named entries, so this costs one Set per boot and nothing else. */
+  const have=new Set(cur.map(en=>en&&en.name));
+  const missing=GIVEN().some(p=>!have.has(p.name));
+  if(!missing&&cur.length-users.length>=need)return;      // factory set already complete
   const arr=PRESETS0().map(p=>({name:p.name,cat:p.cat,factory:true,data:presetData(p)}))
     /* GAD'S OWN, laid every time from GIVEN() so they cannot go missing, and
        marked so anything downstream can tell them from a generated one. They
@@ -15512,6 +15541,155 @@ function drumCatOf(d){        // guess a subtype for a legacy 'drum' preset
    the CR-78 has no clap, the Maestro Rhythm King has no cowbell, and a kit
    with holes in it is worse than a kit that borrows. First entry is what the
    pad wants; the rest are what it will settle for, nearest first. */
+/* ===== THE MIX METER — a pad's fader is a MEASUREMENT  (2026-08-29) ======
+   Gad: "take a kit and give me a drums mix that sounds like high production
+   level ... come up a system to make a mix."
+
+   Every sampled pad used to take its level from MIXT, which is ONE NUMBER PER
+   CATEGORY: every hat in every kit got 0.35, every cymbal 0.30. Measured with
+   a BS.1770 meter across all twelve sampled kits — 144 pads, tools/probe.sh
+   kitmix:
+
+       mean |error| against the role target    3.7 dB
+       pads more than 3 dB out               57/144   (40%)
+       worst pad                              40.1 dB  (KTDR5 hat-closed)
+       kick loudness, kit to kit               8.2 dB spread
+
+   and the number that decides the whole design: THE SAME ROLE AT THE SAME
+   FADER VALUE SPANNED 38.7 dB ACROSS BANKS. A category constant is not a
+   wrong value, it is the wrong KIND of value — loudness is a property of the
+   TAKE, not of the slot the take sits in. No table of twelve numbers can
+   balance a kit it has not heard.
+
+   SO THE METER IS BS.1770 K-WEIGHTING, NOT rms. rms weights 40Hz and 4kHz the
+   same and the ear does not, and a drum mix is precisely the question of a
+   kick against a hat. `smploud` found the -7.5dB sample deficit with rms and
+   that was fine — it was comparing like with like. This is not.
+
+   The coefficients are DERIVED rather than pasted, because the published table
+   is 48kHz and AC.sampleRate here is 44100. VERIFIED: at fs=48000 this
+   derivation reproduces the published coefficients
+       shelf 1.53512485958697 -2.69169618940638 1.19839281085285
+                              -1.69065929318241  0.73248077421585
+       rlb   1 -2 1           -1.99004745483398  0.99007225036621
+   to 9e-16 — machine precision, so this is the spec's meter and not an
+   approximation of it. */
+function kCoef(fs){
+  let db=3.999843853973347,f0=1681.974450955533,Q=0.7071752369554196;
+  let K=Math.tan(Math.PI*f0/fs),Vh=Math.pow(10,db/20),Vb=Math.pow(Vh,0.4996667741545416),
+      a0=1+K/Q+K*K;
+  const sh=[(Vh+Vb*K/Q+K*K)/a0,2*(K*K-Vh)/a0,(Vh-Vb*K/Q+K*K)/a0,2*(K*K-1)/a0,(1-K/Q+K*K)/a0];
+  f0=38.13547087602444; Q=0.5003270373238773;
+  K=Math.tan(Math.PI*f0/fs); a0=1+K/Q+K*K;
+  return [sh,[1,-2,1,2*(K*K-1)/a0,(1-K/Q+K*K)/a0]];
+}
+function kBiq(x,c){
+  const[b0,b1,b2,a1,a2]=c,y=new Float64Array(x.length);
+  let x1=0,x2=0,y1=0,y2=0;
+  for(let i=0;i<x.length;i++){const xn=x[i],yn=b0*xn+b1*x1+b2*x2-a1*y1-a2*y2;
+    x2=x1;x1=xn;y2=y1;y1=yn;y[i]=yn;}
+  return y;
+}
+/* HOW LOUD THIS PAD WILL ACTUALLY SOUND: the take under its own amp envelope,
+   over the 400ms block BS.1770 measures a momentary loudness in.
+
+   THREE THINGS THAT LOOK LIKE DETAILS AND ARE NOT:
+
+   · THE BLOCK IS A FIXED 400ms, ZERO-PADDED — not "as much take as there is".
+     Momentary loudness averages over 400ms whatever the source does, so the
+     SILENCE AFTER a 60ms rim is part of its loudness, and is exactly why a rim
+     reads quieter than a kick of the same peak. Truncating the block to the
+     take instead put the model out by 10log10(take/0.4): measured as an 8.25dB
+     spread, worst on the shortest pads (rim 0.06s, -10.3dB) and near zero on
+     the longest (clap 1.27s, -2.5dB). Fixing it took the spread to 3.5dB and
+     the SD to 0.93dB, which is the repeatability of the bus measurement
+     itself.
+   · THE ENVELOPE'S TIME CONSTANT IS d/3, NOT d. The engine schedules
+     `setTargetAtTime(0, at+a, max(0.005, d/3))`, so the pad is down to 1/e in
+     a third of its decay setting. Modelling it as d makes every short pad read
+     louder than it plays.
+   · THE ONSET IS FOUND FIRST. A take with 20ms of leader would otherwise
+     spend the envelope's loudest moment on silence.
+   · AND THE PAD'S OWN PLAYBACK RATE, which is the one that hurt. A kit pad is
+     a NOTE — pad n is KBBASE+n — and a sample op plays at
+     noteRatio = 2^((midi-KBBASE)/12), so pad 11 runs at 1.89x and pad 0 at
+     1.00x. The twelve pads of a kit are twelve different SPEEDS. Measured on
+     KTJAZ, where the cymbal and the ride are the same file: pad 7 rendered
+     -27.4 LUFS and pad 11 -42.8, fifteen decibels apart for one take, with
+     identical envelopes and peaks two decibels apart exactly as their faders
+     were. A model that ignores rate reads them as the same sound.
+
+   Memoised per (buffer, decay) — a kit roll asks twelve times and a library
+   rebuild asks 264, and this is a few hundred thousand multiply-adds each. */
+const PADLOUD=new WeakMap();
+function padLoud(buf,dcyF,rate){
+  if(!buf||!buf.length)return null;
+  rate=rate>0?rate:1;
+  const key=(+dcyF).toFixed(3)+'@'+rate.toFixed(4);
+  let m=PADLOUD.get(buf); if(!m)PADLOUD.set(buf,m={});
+  if(m[key]!==undefined)return m[key];
+  const sr=buf.sampleRate,n=buf.length,L=buf.getChannelData(0),
+        R=buf.numberOfChannels>1?buf.getChannelData(1):L;
+  const d=clamp((buf.duration||0.4)*dcyF,0.02,5),tau=Math.max(0.005,d/3),aA=0.0004;
+  let pk=0; for(let i=0;i<n;i++){const a=Math.abs(L[i]); if(a>pk)pk=a;}
+  const thr=Math.max(1e-5,pk*0.02);
+  let o=0; for(let i=0;i<n;i++)if(Math.abs(L[i])>=thr){o=i;break;}
+  const blk=Math.round(0.4*sr);
+  const eL=new Float32Array(blk),eR=new Float32Array(blk);
+  /* read the take at the pad's rate, envelope it in REAL time — the decay is
+     scheduled in seconds and does not speed up with the sample */
+  for(let j=0;j<blk;j++){
+    const x=o+j*rate,i0=Math.floor(x); if(i0+1>=n)break;
+    const fr=x-i0,t=j/sr,g=t<aA?t/aA:Math.exp(-(t-aA)/tau);
+    eL[j]=(L[i0]+(L[i0+1]-L[i0])*fr)*g;
+    eR[j]=(R[i0]+(R[i0+1]-R[i0])*fr)*g;}
+  const[sh,hp]=kCoef(sr);
+  const cast=c=>{const a=new Float64Array(blk);for(let i=0;i<blk;i++)a[i]=c[i];return a;};
+  const yL=kBiq(kBiq(cast(eL),sh),hp),yR=kBiq(kBiq(cast(eR),sh),hp);
+  let sl=0,sr2=0; for(let i=0;i<blk;i++){sl+=yL[i]*yL[i];sr2+=yR[i]*yR[i];}
+  return m[key]=-0.691+10*Math.log10(Math.max(sl/blk+sr2/blk,1e-20));
+}
+/* WHERE EACH DRUM SITS, in loudness and in the room. One row per INSTRUMENT,
+   which is the correction: KITMAP maps clap AND rim AND snare all onto cat
+   'snr', so MIXT gave a rimshot the same 0.9 fader as the snare and the same
+   +0.05 pan. Three different instruments cannot share one seat.
+
+   `lu` is LU relative to the KICK, which is the reference every drum mix is
+   built around. Cross-read from published mixing practice — kick -12..-8 dBFS,
+   snare -10..-6, hats -18..-14, overheads around 60% of kick and snare — and
+   kept as ONE TABLE so it can be argued with in one place.
+
+   `pan` is a right-handed kit from the AUDIENCE's side, which is the
+   convention MIXT was already using (hats right, cymbals left): hi-hat right,
+   ride and crash left, floor tom left of centre, kick and snare up the middle.
+   hat-closed and hat-open share a pan because they are ONE hi-hat — MIXT could
+   not express that either way, since both were cat 'hh'. The hand percussion
+   is not part of the kit at all, so it is spread wider than any of it. */
+const MIXROLE={
+  kick :{lu:  0, pan: 0    }, sub  :{lu:  0, pan: 0    },
+  snare:{lu: -1, pan: 0.03 }, clap :{lu:-3.5,pan:-0.10 },
+  tom  :{lu:-3.5,pan:-0.18 }, rim  :{lu: -9, pan: 0.30 },
+  'hat-closed':{lu:-6.5,pan:0.28}, 'hat-open':{lu:-6,pan:0.28},
+  cymbal:{lu:-7,pan:-0.30 }, ride :{lu: -9, pan:-0.38 },
+  conga:{lu: -5, pan:-0.24 }, bongo:{lu: -6, pan:-0.28 },
+  timbale:{lu:-5,pan:-0.20 }, cowbell:{lu:-8,pan:-0.34 },
+  shaker:{lu:-11,pan: 0.38 }, clave:{lu: -9, pan: 0.34 },
+  wood :{lu: -9, pan: 0.34 }, perc :{lu: -7, pan: 0.26 },
+  fx   :{lu: -8, pan: 0    }};
+/* THE ONE CONSTANT THE WHOLE TABLE HANGS OFF: the padLoud value a kick must
+   have, after its own fader, to land at -20.0 LUFS on the channel bus.
+   -20.0 is the MEDIAN of the twelve kits as they were, so half the kits move
+   up a little and half down, and nothing jumps. The measured voice-chain gain
+   between padLoud and the bus is -2.85dB, so MIXREF = -20.0 + 2.85. */
+const MIXREF=-17.15;
+/* A pad's fader, from its own loudness. Clamped: a near-dead take (dr5-shaker
+   -01 measured 40dB under its role) asks for 100x and gets 3x, which helps it
+   without blowing the channel up. */
+function padLvl(inst,buf,dcyF,cat,rate){
+  const role=MIXROLE[inst]||MIXROLE.perc, L=padLoud(buf,dcyF,rate);
+  if(L==null)return {lvl:(MIXT[cat]||MIXT.misc).lvl,pan:role.pan};
+  return {lvl:+clamp(Math.pow(10,(MIXREF+role.lu-L)/20),0.05,3).toFixed(3),pan:role.pan};
+}
 const KITMAP=[
   {inst:'kick',      cat:'kik',  alt:['sub']},
   {inst:'snare',     cat:'snr',  alt:['clap','rim']},
@@ -15560,7 +15738,7 @@ const KITDCY={kick:[0.45,0.9],sub:[0.5,1.0],snare:[0.35,0.8],clap:[0.35,0.8],
   perc:[0.25,0.7],fx:[0.5,1.1]};
 const kitDcy=(inst,rnd)=>{const r=KITDCY[inst]||[0.3,0.8];
   return rnd?r[0]+rnd()*(r[1]-r[0]):(r[0]+r[1])/2;};
-function smpPad(nm,cat,e,dcyF){
+function smpPad(nm,cat,e,dcyF,inst,pad){
   const kp=basePreset(nm); kp.cat=cat; delete kp.kit;
   kp.osc[0]={wav:9,mode:0,dst:0,rat:1,amt:1,fine:0,ph:0,phm:0,
              sst:0,sen:1,lps:1,smp:{f:e.src.f}};
@@ -15577,7 +15755,11 @@ function smpPad(nm,cat,e,dcyF){
                            s:0,r:0.02});
   kp.flt[0]={typ:0,frq:18000,q:0.7,gn:0};
   kp.vox.mode=0;
-  kp.mix={...(MIXT[cat]||MIXT.misc)};
+  /* THE FADER IS A MEASUREMENT OF THE TAKE, not a lookup of its category —
+     see MIXROLE and padLoud above. `inst` is the SLOT's instrument and not
+     the take's, deliberately: a shaker standing in for a hat is mixed as a
+     hat, because that is the seat it is playing. */
+  kp.mix=padLvl(inst||e.inst||'perc',e.buf,dcyF??0.7,cat,Math.pow(2,(pad||0)/12));
   /* FOLDED HERE, and it matters. The engine reads modulation out of the MOD
      rack, and foldMod is what moves an envelope's a/d/s/r onto it. A FACTORY
      kit got folded on the way through setPresetData, but randomizeKit writes
@@ -15630,10 +15812,10 @@ function sampleKit(style,rnd){
   rnd=rnd||Math.random;
   const pads=KITMAP.map((slot,i)=>{
     const e=kitPick(style,slot,rnd);
-    return e?smpPad(NN[i],slot.cat,e,kitDcy(slot.inst)):null;
+    return e?smpPad(NN[i],slot.cat,e,kitDcy(slot.inst),slot.inst,i):null;
   });
   return pads.every(x=>!x)?null:pads.map((k,i)=>k||smpPad(NN[i],KITMAP[i].cat,
-    POOL.find(e=>e&&e.src&&e.src.f)||{src:{f:''}}));
+    POOL.find(e=>e&&e.src&&e.src.f)||{src:{f:''}},undefined,KITMAP[i].inst,i));
 }
 /* THE FACTORY SAMPLED KITS. These cannot be laid down by libInit(): it runs at
    boot and the one-shot shelf arrives over the network a moment later, so at
@@ -15774,11 +15956,11 @@ function randomizeKit(pi,wildOverride){
     let kp=null;
     if(home&&rnd()>=stray){
       const e=kitPick(home,slot,rnd,true);            // this machine ONLY
-      if(e){kp=smpPad(NN[i],slot.cat,e,kitDcy(slot.inst,rnd)); fromHome++;}
+      if(e){kp=smpPad(NN[i],slot.cat,e,kitDcy(slot.inst,rnd),slot.inst,i); fromHome++;}
     }
     if(!kp&&home&&rnd()<0.85){
       const e=kitPick(null,slot,rnd);                 // anybody's box
-      if(e){kp=smpPad(NN[i],slot.cat,e,kitDcy(slot.inst,rnd)); borrowed++;}
+      if(e){kp=smpPad(NN[i],slot.cat,e,kitDcy(slot.inst,rnd),slot.inst,i); borrowed++;}
     }
     if(!kp){
       kp=genPreset(slot.cat,rnd,w); kp.cat=slot.cat; delete kp.kit;

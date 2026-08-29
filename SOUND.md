@@ -177,6 +177,24 @@ effects and width. **DESIGNED, not built.** Derive the desk profile from the
 PATCHES, never by measuring live audio — rolls must stay instant and
 deterministic, the same deal `archlvl` already made.
 
+## 6b. WHAT GAD'S OWN PRESETS REACH THAT NO ROLL DOES
+
+The coverage principle in section 1 is abstract until a real patch of his is
+measured against the archetype table. **BES1** (keys, shelved 2026-08-29,
+`GIVEN()`) does five things the generator has never once produced:
+
+    osc mode 3, SYNC             the table only ever writes add and fm
+    flt typ 8 FORMANT            rolls use lp / hp / bp, nothing else
+    flt typ 11 TRIPLE            same
+    an LFO on a filter's SPREAD  rolls modulate frequency, never spread
+    KEY -> filter freq at 200    hard tracking as a deliberate voice
+    ONE modulator, TWO routes    flt freq AND vox wide from one LFO
+
+Every one is reachable in the racks and unreachable by a roll — which is the
+gap, stated as a list rather than as a principle. The last one is structural:
+`genSpice` gives a modulator a second route only for an LFO's pan drift, so
+"one source, two destinations" is essentially unexplored.
+
 ## 7. HOW A PRESET GETS SHELVED
 
 cmd+C on the channel puts the patch on the system clipboard as JSON; paste it
