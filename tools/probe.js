@@ -4641,10 +4641,11 @@ const HELP = {
     { k: 'cursor',   args: 'chs=9 — ping ten-grsyn: tv/g/tpos/cpos' },
     { k: 'preset',   args: 'names=SNR,S909 note=48 ch=8 — library name, played and measured' },
     { k: 'key',      args: 'code=KeyA hold=120 shift=0 alt=0 ctrl=0 meta=0' },
+    { k: 'kitcal',   args: 'kit=KT01 — all twelve pads measured on their own buses in ONE 400ms pass' },
     { k: 'synthlvl', args: 'k=8 slots=0,1,2 seed=4000 — what a GENERATED drum pad weighs, with its voicing and envelope, to fit a build-time predictor' },
     { k: 'mixbus',   args: 'kit=KT808 bars=2 bpm=120 at=ch|master ref=brushkit — the whole kit playing, gated LUFS + PLR + band balance, against a real drum record' },
     { k: 'padpred',  args: 'kit=KT808 — offline buffer+envelope loudness vs the measured bus, to prove the model' },
-    { k: 'kitmix',   args: 'kit=KT808,KTLIN|ROLL|ROLL80 ms=400 — BS.1770 loudness + 8-band balance of every pad in a kit, against the role target' },
+    { k: 'kitmix',   args: 'kit=KT808,KTLIN|ROLL|ROLL80 ms=400 real=1 — BS.1770 loudness + 8-band balance of every pad in a kit, against the role target' },
     { k: 'smploud',  args: 'ch=4 ms=200 names=a,b,c — perceptual loudness of samples vs a synth op, and the median deficit' },
     { k: 'smprate',  args: 'ch=4 notes=36,48,60,72 — which note plays a sample at its own speed' },
     { k: 'smpdiag',  args: 'ch=4 file=oneshots/snare/linn-snare-03.flac note=48 — the file vs the op: level, band balance, stereo' },
@@ -5303,8 +5304,18 @@ async function probeKitMix() {
       } else {
         const en = kits.find(e => e.name === nm);
         if (!en) { rows.push({ k: nm, err: 'no such kit' }); continue; }
-        unstash(ch, { data: JSON.parse(JSON.stringify(en.data)), loop: keep.loop });
-        await sleep(60);
+        if (num(P.real, 0)) {
+          /* THE PATH THE APP TAKES. unstash writes the preset straight in, which
+             is right for measuring a library entry but skips setPresetData —
+             and calibKit hangs off setPresetData. `real=1` loads the way
+             picking a preset does, then waits for the calibration queue. */
+          setP(ch, en.name, 'kit', JSON.parse(JSON.stringify(en.data)));
+          try { await CALQ; } catch (_) {}
+          await sleep(120);
+        } else {
+          unstash(ch, { data: JSON.parse(JSON.stringify(en.data)), loop: keep.loop });
+          await sleep(60);
+        }
       }
       const p = S.presets[ch];
       let kickL = null;
@@ -5664,6 +5675,74 @@ async function probeSynthLvl() {
                 + 'resid = meas - env, what a build-time table would have to supply' };
 }
 
+/* ---------------- kitcal: the whole kit measured in ONE pass ------------- *
+ * The prototype of what a shipped calibration would do. Twelve pads share a
+ * channel bus, so measuring them one at a time costs twelve 400ms passes —
+ * five seconds a kit, fifty for the ten factory synth kits, which is why the
+ * table was the only option. But every pad already owns its OWN bus
+ * (voiceOut -> kitBuses[pi][pc].out), so all twelve can be tapped separately,
+ * fired together, and read in a SINGLE 400ms window.
+ *
+ * This proves the two things that decide whether it can ship: that twelve
+ * simultaneous pads do not steal each other's voices, and that a per-pad tap
+ * hears only its own pad. */
+async function probeKitCal() {
+  const ch = Math.max(1, Math.min(9, Math.round(num(P.ch, 9))));
+  const nm = str(P.kit, 'KT01');
+  const kits = (typeof libAll === 'function' ? libAll() : []).filter(e => e && e.cat === 'kit');
+  const en = kits.find(e => e.name === nm);
+  if (!en) return { cols: [], rows: [], err: 'no kit named ' + nm };
+  const keep = stash(ch), rows = [], sr = AC.sampleRate;
+  const t0 = performance.now();
+  try {
+    unstash(ch, { data: JSON.parse(JSON.stringify(en.data)), loop: keep.loop });
+    await sleep(80); pin(ch);
+    engine.allOff(); await sleep(40);
+    /* SILENCE THE CHANNEL AT ITS ONLY EXIT. trim -> mSum is the single path to
+       the master, so cutting it makes the pass inaudible while everything
+       upstream still renders. */
+    const B = engine.buses[ch];
+    try { B.trim.disconnect(engine.mSum); } catch (_) {}
+    /* the pad buses are built LAZILY on first note, so ask for them first or
+       there is nothing to tap */
+    for (let i = 0; i < 12; i++) try { engine.voiceOut(ch, KBBASE + i); } catch (_) {}
+    const store = (engine.kitBuses || {})[ch] || {};
+    const taps = [];
+    for (let i = 0; i < 12; i++) {
+      const kb = store[i];
+      taps.push(kb && kb.out ? tap(kb.out) : null);
+    }
+    await sleep(30);
+    const at = AC.currentTime + 0.05;
+    for (let i = 0; i < 12; i++) engine.noteOn(at, ch, KBBASE + i, 1.0);
+    await sleep(520);
+    engine.allOff();
+    for (let i = 0; i < 12; i++) {
+      const t = taps[i]; if (!t) { rows.push({ k: 'pad' + i, err: 'no pad bus' }); continue; }
+      const [L, R] = t.stop();
+      const w = windowOf(L, R);
+      const [kL, kR] = kWeight(L, R, sr);
+      const lu = lufsOf(kL, kR, w.o, Math.min(Math.round(0.4 * sr), L.length - w.o));
+      const K = S.presets[ch].kit[i] || {};
+      const lvl = (K.mix || {}).lvl != null ? K.mix.lvl : 0.8;
+      const inst = KITMAP[i].inst;
+      const at1 = lu - 20 * Math.log10(Math.max(lvl, 1e-9));   // its loudness at fader 1.0
+      const want = -20.0 + ((MIXROLE[inst] || MIXROLE.perc).lu);
+      rows.push({ k: inst, lvl: r3(lvl), lufs: +lu.toFixed(1), at1: +at1.toFixed(1),
+                  tgt: want, 'new lvl': +Math.max(0.05, Math.min(3,
+                    Math.pow(10, (want - at1) / 20))).toFixed(3),
+                  'would be': +(want).toFixed(1) });
+    }
+    try { B.trim.connect(engine.mSum); } catch (_) {}
+  } finally { unstash(ch, keep); try { engine.buses[ch].trim.connect(engine.mSum); } catch (_) {} }
+  rows.push({ k: '— one pass took —', lufs: Math.round(performance.now() - t0) });
+  return { cols: ['lvl', 'lufs', 'at1', 'tgt', 'new lvl', 'would be'], rows,
+           notes: 'lufs = what the pad measured at its CURRENT fader, on its own bus, with all '
+                + 'twelve sounding at once · at1 = its loudness at fader 1.0 · '
+                + '"new lvl" is the fader that would put it on target · the last row is '
+                + 'wall-clock milliseconds for the whole kit' };
+}
+
 const PROBES = { level: probeLevel, spectrum: probeSpectrum, cursor: probeCursor,
                    preset: probePreset, key: probeKey, keypath: probeKeyPath,
                    roundtrip: probeRoundTrip,
@@ -5711,7 +5790,8 @@ const PROBES = { level: probeLevel, spectrum: probeSpectrum, cursor: probeCursor
                    kitmix: probeKitMix,
                    padpred: probePadPred,
                    mixbus: probeMixBus,
-                   synthlvl: probeSynthLvl };
+                   synthlvl: probeSynthLvl,
+                   kitcal: probeKitCal };
   const fn = PROBES[NAME];
   out = fn ? await fn() : (NAME === 'help' ? HELP : { cols: [], rows: [], err: 'no probe named ' + NAME });
 } catch (e) {

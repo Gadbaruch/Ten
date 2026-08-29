@@ -257,32 +257,80 @@ not the roll's. Measuring a roll onto whatever preset happened to be on the
 channel read every rolled kick at -26.8 LUFS against a -20.0 target. The probe
 sets the channel to `MIXT.kit` first.
 
-## 11. WHAT WOULD ACTUALLY FIX THE SYNTH PADS
+## 11. AND THEN IT WAS BUILT — the synth pads are MEASURED now
 
-Measure them. The cost is smaller than it looks, and the reason is
-architectural: **every kit pad already has its OWN bus** (`voiceOut` builds
-`kitBuses[pi][pc]`), so all twelve can be tapped separately, fired at once, and
-read independently in a SINGLE 400ms pass — not twelve passes. One silent
-render per kit, at roll time and at boot for the factory ten, would put synth
-pads on the same footing as sampled ones: from 4.95 dB to the ~0.4 dB the
-sampled path gets.
+Gad, after seeing what a table could and could not do: *"boot only — calibrate
+the ten factory synth kits once."*
 
-**DESIGNED, not built, and it is Gad's call**, because it is not free: a kit
-would settle its levels a moment after you roll it rather than at the keypress,
-and that is a UX change, not an implementation detail.
+⚠ **THERE IS NO BOOT.** `AC.resume()` is only ever called from a user gesture,
+so the AudioContext is SUSPENDED until the first keypress and nothing renders
+before it. The nearest honest thing to what was asked — one-time, invisible, no
+cost on a roll — is to calibrate a kit the first time it is LOADED, and cache
+the answer forever. `calibKit()`, hanging off `setPresetData`.
 
-## 8. OPEN
+**WHY IT IS ONE PASS AND NOT TWELVE.** Twelve pads share a channel bus, so
+measuring them one at a time costs twelve 400ms windows — five seconds a kit,
+which is why the table looked like the only option. But every pad already owns
+its own bus (`voiceOut` -> `kitBuses[pi][pc].out`), so all twelve can be tapped
+separately, **fired together**, and read in a SINGLE window. **MEASURED**:
+712-732ms for a whole kit, and against the same kits measured one pad at a time
+it agrees to **SD 0.20-0.34 dB** — twelve simultaneous pads neither steal each
+other's voices nor bleed between buses. A pad's own bus sits ahead of the
+channel fader, one constant: **+1.94 dB, SD 0.27** over four kits and 48 pads.
 
-- **A real reference.** One brush-kit MP3 is not a tonal-balance reference.
-  Until there is one, the high end is judged by the role table alone.
-- **Two bad samples.** `dr5-shaker-01` (-39.6 LUFS, 30dB under) and
-  `cr78-rim-01` (-34.2). The system already gives them everything the clamp
-  allows. The honest fix is upstream: either keep takes this far under out of
-  `kitPick`, or normalise them on the shelf.
-- **The synth kits are on SYNLVL and that is the ceiling for a table** —
-  4.95 dB mean error, kick spread still 9.6 dB. Section 11 is what would fix
-  them and why it needs a decision first.
-- **Standalone drum channels still use MIXT.** Only kit PADS are measured. A
-  `hh` channel on its own is still a category constant.
-- **The automix.** `mixChannel()` sets levels, pans and sends from `MIXT` for
-  the whole song. Everything here is the drum half of the problem.
+**MEASURED — what it costs, in the app, on the real path:**
+
+      first load of a synth kit    587 ms   (one calibration pass)
+      the same kit again             5 ms   (cache)
+      an all-sampled kit (KT808)     2 ms   (skipped: nothing to measure)
+
+**MEASURED — what it bought.** KT01-10, 120 pads, four generations of the same
+question:
+
+                                    MIXT   SYNLVL   CAL 3x  CAL peak
+      mean |error| vs role target   7.45     4.95     0.85     0.32  dB
+      median |error|                5.00     3.60     0.10     0.10  dB
+      p90 |error|                  18.80    12.20     2.70     0.60  dB
+      worst pad                    35.10    22.40    13.90     8.50  dB
+      pads >1 dB out              96/120   97/120   12/120    8/120
+      pads >3 dB out              74/120   66/120   10/120    3/120
+      pads >6 dB out              51/120   33/120    6/120    1/120
+      kick spread, kit to kit       9.80     9.60     0.30     0.30  dB
+      kick mean LUFS (target -20) -18.17   -21.00   -20.05   -19.94
+
+**0.32 dB — better than the sampled path's 0.42.** Which is the whole argument
+of this document arriving at its end: measurement beats every table, including
+the good ones.
+
+⚠ **THE CEILING IS THE MEASUREMENT'S, NOT A CONSTANT.** After the first
+calibrated pass twelve pads were still off target and **every single one was
+pinned at the 3x fader clamp** — not one was a bad measurement. The estimated
+paths clamp at 3x because they are estimating, and over-correcting a guess
+gives you noise. A pad that has been HEARD has only one real limit, its own
+peak: `pkCap = 0.95 / pk1`, hard-stopped at 8x. That took the mean from 0.85 to
+0.32 and the worst pad peak on the channel bus is 0.855.
+
+**WHAT IT DELIBERATELY DOES NOT DO:**
+
+- **Sampled pads.** Already inside half a decibel from `padLoud`, and a pass is
+  not free. An all-sampled kit skips it entirely and costs 2ms.
+- **Rolled kits.** Gad's call — no cost on a roll. A roll's synthesised pads
+  keep `SYNLVL`, which is why that table is still there and still worth having.
+- **Anything while the transport is running.** The pass mutes the channel at
+  `trim -> mSum` for half a second, and half a second of a muted channel under
+  a running take is half a bar of his performance. It declines and measures the
+  kit the next time it is loaded standing still.
+
+**THE CACHE INVALIDATES ITSELF.** `calId` hashes the pads' own osc/env/flt/amp/
+mod — not their names, which repeat — AND the tuning constants `CALOFF` and
+`MIXABS`. Change `genPreset` and every hash moves; change the calibration's
+reference and every hash moves. A baked table would have gone quietly wrong
+instead. `localStorage['ten-kitcal-v1']`.
+
+## 12. THE FOUR PADS THAT ARE STILL OUT
+
+Three of 120 are more than 3 dB from target and all four over 2 dB are at the
+**8x hard ceiling** — generated pads the recipe made almost silent (a hat-open
+8.5 dB under even at 8x). They are a generator question, not a mixing one: a
+recipe that can produce a pad 30 dB below its siblings is worth looking at on
+its own terms.

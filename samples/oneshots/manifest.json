@@ -2222,5 +2222,133 @@
   "inst": "kick",
   "style": "ac-vint",
   "cat": "kik"
+ },
+ {
+  "name": "vint-snare",
+  "file": "oneshots/acoustic/vint/snare.flac",
+  "kind": "one",
+  "inst": "snare",
+  "style": "ac-vint",
+  "cat": "snr"
+ },
+ {
+  "name": "vint-rim",
+  "file": "oneshots/acoustic/vint/rim.flac",
+  "kind": "one",
+  "inst": "rim",
+  "style": "ac-vint",
+  "cat": "snr"
+ },
+ {
+  "name": "vint-hat-closed",
+  "file": "oneshots/acoustic/vint/hat-closed.flac",
+  "kind": "one",
+  "inst": "hat-closed",
+  "style": "ac-vint",
+  "cat": "hh"
+ },
+ {
+  "name": "vint-hat-open",
+  "file": "oneshots/acoustic/vint/hat-open.flac",
+  "kind": "one",
+  "inst": "hat-open",
+  "style": "ac-vint",
+  "cat": "hh"
+ },
+ {
+  "name": "vint-cymbal",
+  "file": "oneshots/acoustic/vint/cymbal.flac",
+  "kind": "one",
+  "inst": "cymbal",
+  "style": "ac-vint",
+  "cat": "cymb"
+ },
+ {
+  "name": "vint-tom",
+  "file": "oneshots/acoustic/vint/tom.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "ac-vint",
+  "cat": "tom"
+ },
+ {
+  "name": "vint-cowbell",
+  "file": "oneshots/acoustic/vint/cowbell.flac",
+  "kind": "one",
+  "inst": "cowbell",
+  "style": "ac-vint",
+  "cat": "perc"
+ },
+ {
+  "name": "vint-shaker",
+  "file": "oneshots/acoustic/vint/shaker.flac",
+  "kind": "one",
+  "inst": "shaker",
+  "style": "ac-vint",
+  "cat": "perc"
+ },
+ {
+  "name": "regg-kick",
+  "file": "oneshots/acoustic/regg/kick.flac",
+  "kind": "one",
+  "inst": "kick",
+  "style": "ac-regg",
+  "cat": "kik"
+ },
+ {
+  "name": "regg-snare",
+  "file": "oneshots/acoustic/regg/snare.flac",
+  "kind": "one",
+  "inst": "snare",
+  "style": "ac-regg",
+  "cat": "snr"
+ },
+ {
+  "name": "regg-rim",
+  "file": "oneshots/acoustic/regg/rim.flac",
+  "kind": "one",
+  "inst": "rim",
+  "style": "ac-regg",
+  "cat": "snr"
+ },
+ {
+  "name": "regg-hat-closed",
+  "file": "oneshots/acoustic/regg/hat-closed.flac",
+  "kind": "one",
+  "inst": "hat-closed",
+  "style": "ac-regg",
+  "cat": "hh"
+ },
+ {
+  "name": "regg-hat-open",
+  "file": "oneshots/acoustic/regg/hat-open.flac",
+  "kind": "one",
+  "inst": "hat-open",
+  "style": "ac-regg",
+  "cat": "hh"
+ },
+ {
+  "name": "regg-cymbal",
+  "file": "oneshots/acoustic/regg/cymbal.flac",
+  "kind": "one",
+  "inst": "cymbal",
+  "style": "ac-regg",
+  "cat": "cymb"
+ },
+ {
+  "name": "regg-tom",
+  "file": "oneshots/acoustic/regg/tom.flac",
+  "kind": "one",
+  "inst": "tom",
+  "style": "ac-regg",
+  "cat": "tom"
+ },
+ {
+  "name": "regg-cowbell",
+  "file": "oneshots/acoustic/regg/cowbell.flac",
+  "kind": "one",
+  "inst": "cowbell",
+  "style": "ac-regg",
+  "cat": "perc"
  }
 ]

@@ -217,9 +217,20 @@ here reaches for realism or for a machine; "synthesised but gritty like a
 sample" is a third thing, and the recipe for it is the inharmonic just-off
 partials over pink noise, not the sat.
 
-⚠ DORAC peaks at **1.045** — over full scale, ~5dB above the factory SNR's
-0.577. Left as he made it; the master comp catches it, but it has no headroom
-when layered.
+**K909** (kik, same day) — *"a hardcore techno kick"*. A sine sub at rat 0.25
+with a SQUARE at rat 16 for the click, resonant lowpass 671Hz q5.9, 63ms amp
+decay, 209ms pitch env at 80 — then **two saturators in series, both at mix 1**,
+on different curves. Four more gaps:
+
+    TWO fx of the SAME type in series   genSpice writes at most one fx
+    amp env crv -100                    every roll leaves the curve at 0
+    an op at rat 16                     a partial six octaves up, as the click
+    sub at rat 0.25 beneath it          the voice spans eight octaves
+
+⚠ **All three of Gad's peak over full scale**: K909 1.441 (rms 0.706), DORAC
+1.031, against factory KCK 0.874 and SNR 0.577. That is the two saturators and
+the amt-200 amp env doing what they were asked to. Left exactly as he made
+them — but the generator must not copy the LEVELS from these, only the moves.
 
 ## 7. HOW A PRESET GETS SHELVED
 

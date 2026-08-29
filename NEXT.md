@@ -1,3 +1,98 @@
+# THE SYNTH PADS ARE MEASURED NOW — 2026-08-29
+
+Gad chose it after seeing what a table could not do: *"boot only — calibrate
+the ten factory synth kits once."* Built. `MIX.md` 11-12 is the full account.
+
+## ⚠ THERE IS NO BOOT
+
+`AC.resume()` is only ever called from a user gesture, so the AudioContext is
+SUSPENDED until the first keypress and **nothing renders before it**. Anything
+that wants to measure audio "at boot" cannot. The nearest honest thing to what
+was asked — one-time, invisible, nothing on a roll — is to calibrate a kit the
+first time it is LOADED and cache it forever. `calibKit()`, off
+`setPresetData`.
+
+## ONE PASS, NOT TWELVE — and this is why it was possible at all
+
+Twelve pads share a channel bus, so measuring them one at a time is twelve
+400ms windows, five seconds a kit, fifty for the factory ten. **But every pad
+already owns its own bus** — `voiceOut` -> `kitBuses[pi][pc].out` — so all
+twelve can be tapped separately, FIRED TOGETHER, and read in a single window.
+
+MEASURED: 712-732ms for a whole kit, agreeing with the same kits measured one
+pad at a time to **SD 0.20-0.34 dB**. Twelve simultaneous pads neither steal
+each other's voices nor bleed between buses. The pad bus sits ahead of the
+channel fader by **+1.94 dB, SD 0.27** across four kits and 48 pads — one
+constant, `CALOFF`, because it is one gain.
+
+    first load of a synth kit    587 ms
+    the same kit again             5 ms   (cache)
+    an all-sampled kit             2 ms   (skipped — nothing to measure)
+
+## WHAT IT BOUGHT — KT01-10, 120 pads
+
+                                MIXT   SYNLVL   CAL 3x  CAL peak
+    mean |error| vs target      7.45     4.95     0.85     0.32  dB
+    median |error|              5.00     3.60     0.10     0.10  dB
+    p90 |error|                18.80    12.20     2.70     0.60  dB
+    pads >3 dB out            74/120   66/120   10/120    3/120
+    kick spread, kit to kit     9.80     9.60     0.30     0.30  dB
+    kick mean LUFS (tgt -20)  -18.17   -21.00   -20.05   -19.94
+
+**0.32 dB, better than the sampled path's 0.42** — which is this whole line of
+work arriving at its point: a measurement beats every table, including the good
+ones.
+
+⚠ **THE CEILING HAS TO BE THE MEASUREMENT'S.** After the first calibrated pass
+twelve pads were still off and **every one was pinned at the 3x clamp** — not a
+single bad measurement among them. An estimate clamps at 3x because
+over-correcting a guess gives noise; a pad that has been HEARD has only its own
+peak to respect. `pkCap = 0.95/pk1`, hard stop 8x. Mean 0.85 -> 0.32, worst
+channel-bus peak 0.855.
+
+## WHAT IT DELIBERATELY SKIPS
+
+- **Sampled pads** — already inside half a dB from `padLoud`; a pass is not free.
+- **Rolled kits** — Gad's call, nothing on a roll. Their synth pads keep SYNLVL,
+  which is why that table is still there.
+- **Anything with the transport running** — the pass mutes the channel at
+  `trim -> mSum` for half a second, and that is half a bar of his take. It
+  declines and measures next time the kit is loaded standing still.
+
+⚠ **THE CACHE INVALIDATES ITSELF.** `calId` hashes the pads' osc/env/flt/amp/mod
+— not their names, which repeat — AND `CALOFF`/`MIXABS`. Change `genPreset` or
+the calibration's reference and every hash moves. A baked table would have gone
+quietly wrong instead. Key `ten-kitcal-v1`.
+
+## STILL OUT: four pads, and they are a GENERATOR question
+
+Three of 120 are over 3 dB, and all four over 2 dB sit at the 8x hard ceiling —
+generated pads the recipe made almost silent (one hat-open is 8.5 dB under even
+at 8x). **A drum recipe that can produce a pad 30 dB below its siblings is
+worth looking at on its own terms**, and that is not a mixing fix.
+
+## QA CHECKLIST — the calibrated synth kits
+
+1. **Pick KT01 through KT10 in turn.** Each should sit at the same loudness as
+   the 808 kit and be internally balanced. The FIRST time you pick one there is
+   a ~0.6s pause where that channel is silent while it measures itself; after
+   that it is instant, forever. MEASURED — mean |error| 7.45 -> 0.32 dB, kick
+   spread between kits 9.8 -> 0.3 dB.
+2. **Pick the same synth kit twice.** The second time must be instant (5ms) and
+   sound identical. If it re-measures every time, the cache hash is not
+   matching — that is the bug to report.
+3. **Pick a SAMPLED kit (KT808).** Must be instant, 2ms, no silent moment at
+   all — it has nothing to measure. If a sampled kit pauses, the synth-pad test
+   in calibKit is wrong.
+4. **Load a synth kit WHILE THE TRANSPORT IS RUNNING.** It must NOT go silent
+   for half a second — calibration declines while playing. This is the one that
+   would eat a take, so it is worth doing deliberately.
+5. **Roll a kit.** Unchanged and uncalibrated by design — no pause, no silence.
+   Sampled pads measured, synthesised pads on SYNLVL. MEASURED — 1.26-1.36 dB
+   mean, median 0.10-0.15.
+6. **Four pads across KT01-10 are still quiet and this is EXPECTED** — they are
+   at the 8x ceiling because the generator made them nearly silent.
+
 # ALL THE KITS, AND THE ROLLED ONES — 2026-08-29
 
 Gad: *"can you improve the levels of all the kits and make it apply also for

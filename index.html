@@ -1471,7 +1471,7 @@ const recPlayed=(pi,tBeat,midi,vel,durBeats)=>recPlayNote(pi,tBeat,sndOut(pi,mid
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-29.1409';
+const BUILD='2026-08-29.1427';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -4386,9 +4386,12 @@ const GIVEN=()=>[
      jungle dnb, or heavy hiphop or triphop, its totally synthesised but it has
      that gritty sampled vibe."
 
-     PINK noise root with two TRIANGLE partials at 2.01 and 3.25 — the .01 is
-     the point, a slow beat against a true octave — under a 58ms decay with a
-     3ms release, through sat into parallel comp and a trace of verb.
+     PINK noise root at rat 2 with two TRIANGLE partials at 2.01 and 3.25 —
+     the .01 is the point, a slow beat against a true octave — under a 58ms
+     decay with a 3ms release, through sat into parallel comp and a trace of
+     verb. (rat was 1 as he first sent it; "you can make the first op ratio 2x
+     will sound better" — on a NOISE root rat is the buffer's playback rate,
+     so 2 is brighter grit rather than a transposition.)
 
      AND IT IS BUILT THE OPPOSITE WAY FROM EVERY SNARE IN PRESETS0, which is
      why it is worth more than one more drum. Five things no roll does:
@@ -4401,7 +4404,22 @@ const GIVEN=()=>[
          the generator has never once written
      "Totally synthesised but it has that gritty sampled vibe" is the brief the
      archetype table cannot currently fill. */
-  {"name":"DORAC","cat":"snr","tr":0,"trs":0,"prep":null,"au":{"gain":0.9,"semis":0,"rate":1,"st":0,"en":1,"fit":1,"src":0,"pmode":0,"chan":0,"kmode":0,"auto":1,"start":0,"kvol":1,"lvol":1,"wnd":50,"cues":{}},"osc":[{"wav":10,"mode":0,"dst":0,"rat":1,"amt":1,"fine":0,"ph":0,"phm":0,"pw":0.5,"id":0},{"wav":1,"mode":0,"dst":0,"rat":2.01,"amt":0.4,"fine":0,"ph":0,"phm":0,"pw":0.5,"id":1},{"wav":1,"mode":0,"dst":0,"rat":3.25,"amt":0.26,"fine":0,"ph":0,"phm":0,"pw":0.5,"id":2},{"wav":9,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":0,"pw":0.5,"id":3},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":0,"pw":0.5},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":0,"pw":0.5},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":0,"pw":0.5},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":0,"pw":0.5},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":0,"pw":0.5},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":0,"pw":0.5}],"amp":[{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0}],"flt":[{"typ":1,"frq":12710.361568096632,"q":0.1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1,"id":0},{"typ":2,"frq":291.28868186256256,"q":1,"gn":0,"par":0,"pol":1,"spr":0.4,"lvl":1,"id":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1}],"env":[{"dst":1,"idx":0,"amt":100,"a":0.005,"d":0.15,"s":0.7,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0}],"lfo":[{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30}],"mod":[{"src":1,"rsel":0,"mac":0,"routes":[{"dst":1,"idx":0,"amt":200,"ctr":0,"tgt":null,"addr":{"rack":"voice","slot":0,"key":"amp","lbl":"amp"}}],"a":0.001,"d":0.058231422796283044,"s":0,"r":0.0031665934879948803,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":0,"fch":1,"fa":0.01,"fr":0.15,"fg":4,"id":0,"tmul":1},{"src":4,"rsel":0,"mac":0,"routes":[{"dst":3,"idx":1,"amt":50,"ctr":0,"tgt":null,"addr":{"rack":"flt","slot":0,"key":"frq","lbl":"freq","sid":0}}],"a":0.005,"d":0.15,"s":0.7,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":0,"fch":1,"fa":0.01,"fr":0.15,"fg":4,"id":1},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"ctr":0,"tgt":null}],"a":0.005,"d":0.15,"s":0.7,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":0,"fch":1,"fa":0.01,"fr":0.15,"fg":4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"ctr":0,"tgt":null}],"a":0.005,"d":0.15,"s":0.7,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":0,"fch":1,"fa":0.01,"fr":0.15,"fg":4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"ctr":0,"tgt":null}],"a":0.005,"d":0.15,"s":0.7,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":0,"fch":1,"fa":0.01,"fr":0.15,"fg":4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"ctr":0,"tgt":null}],"a":0.005,"d":0.15,"s":0.7,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":0,"fch":1,"fa":0.01,"fr":0.15,"fg":4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"ctr":0,"tgt":null}],"a":0.005,"d":0.15,"s":0.7,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":0,"fch":1,"fa":0.01,"fr":0.15,"fg":4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"ctr":0,"tgt":null}],"a":0.005,"d":0.15,"s":0.7,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":0,"fch":1,"fa":0.01,"fr":0.15,"fg":4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"ctr":0,"tgt":null}],"a":0.005,"d":0.15,"s":0.7,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":0,"fch":1,"fa":0.01,"fr":0.15,"fg":4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"ctr":0,"tgt":null}],"a":0.005,"d":0.15,"s":0.7,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":0,"fch":1,"fa":0.01,"fr":0.15,"fg":4}],"fx":[{"typ":21,"p1":0.7,"p2":0.5,"p3":1,"p4":0.3,"p5":0.47,"p6":0.5,"p7":0.51,"p8":0.45,"mix":0.1596,"rv":0,"id":1},{"typ":9,"p1":0.8,"p2":0.3,"p3":0.3,"p4":0,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.15,"rv":0,"id":4},{"typ":8,"p1":0.29,"p2":0.87,"p3":1,"p4":0.3,"p5":0.18,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.0254,"rv":2,"id":3},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0}],"ply":[{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0}],"vox":{"mode":1,"glide":0,"uni":1,"sprd":12,"wide":0.6,"slop":0.008},"macro":[0,0,0,0],"mix":{"lvl":0.944,"pan":0},"code":null,"pmodel":null,"psel":0,"cp":[1,1,1,0.5,0,0,0.5,0.3],"kit":null,"_folded":true,"_addr":true}
+  {"name":"DORAC","cat":"snr","tr":0,"trs":0,"prep":null,"au":{"gain":0.9,"semis":0,"rate":1,"st":0,"en":1,"fit":1,"src":0,"pmode":0,"chan":0,"kmode":0,"auto":1,"start":0,"kvol":1,"lvol":1,"wnd":50,"cues":{}},"osc":[{"wav":10,"mode":0,"dst":0,"rat":2,"amt":1,"fine":0,"ph":0,"phm":0,"pw":0.5,"id":0},{"wav":1,"mode":0,"dst":0,"rat":2.01,"amt":0.4,"fine":0,"ph":0,"phm":0,"pw":0.5,"id":1},{"wav":1,"mode":0,"dst":0,"rat":3.25,"amt":0.26,"fine":0,"ph":0,"phm":0,"pw":0.5,"id":2},{"wav":9,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":0,"pw":0.5,"id":3},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":0,"pw":0.5},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":0,"pw":0.5},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":0,"pw":0.5},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":0,"pw":0.5},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":0,"pw":0.5},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":0,"pw":0.5}],"amp":[{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0}],"flt":[{"typ":1,"frq":12710.361568096632,"q":0.1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1,"id":0},{"typ":2,"frq":291.28868186256256,"q":1,"gn":0,"par":0,"pol":1,"spr":0.4,"lvl":1,"id":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1}],"env":[{"dst":1,"idx":0,"amt":100,"a":0.005,"d":0.15,"s":0.7,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0}],"lfo":[{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30}],"mod":[{"src":1,"rsel":0,"mac":0,"routes":[{"dst":1,"idx":0,"amt":200,"ctr":0,"tgt":null,"addr":{"rack":"voice","slot":0,"key":"amp","lbl":"amp"}}],"a":0.001,"d":0.058231422796283044,"s":0,"r":0.0031665934879948803,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":0,"fch":1,"fa":0.01,"fr":0.15,"fg":4,"id":0,"tmul":1},{"src":4,"rsel":0,"mac":0,"routes":[{"dst":3,"idx":1,"amt":50,"ctr":0,"tgt":null,"addr":{"rack":"flt","slot":0,"key":"frq","lbl":"freq","sid":0}}],"a":0.005,"d":0.15,"s":0.7,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":0,"fch":1,"fa":0.01,"fr":0.15,"fg":4,"id":1},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"ctr":0,"tgt":null}],"a":0.005,"d":0.15,"s":0.7,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":0,"fch":1,"fa":0.01,"fr":0.15,"fg":4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"ctr":0,"tgt":null}],"a":0.005,"d":0.15,"s":0.7,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":0,"fch":1,"fa":0.01,"fr":0.15,"fg":4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"ctr":0,"tgt":null}],"a":0.005,"d":0.15,"s":0.7,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":0,"fch":1,"fa":0.01,"fr":0.15,"fg":4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"ctr":0,"tgt":null}],"a":0.005,"d":0.15,"s":0.7,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":0,"fch":1,"fa":0.01,"fr":0.15,"fg":4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"ctr":0,"tgt":null}],"a":0.005,"d":0.15,"s":0.7,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":0,"fch":1,"fa":0.01,"fr":0.15,"fg":4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"ctr":0,"tgt":null}],"a":0.005,"d":0.15,"s":0.7,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":0,"fch":1,"fa":0.01,"fr":0.15,"fg":4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"ctr":0,"tgt":null}],"a":0.005,"d":0.15,"s":0.7,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":0,"fch":1,"fa":0.01,"fr":0.15,"fg":4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"ctr":0,"tgt":null}],"a":0.005,"d":0.15,"s":0.7,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":0,"fch":1,"fa":0.01,"fr":0.15,"fg":4}],"fx":[{"typ":21,"p1":0.7,"p2":0.5,"p3":1,"p4":0.3,"p5":0.47,"p6":0.5,"p7":0.51,"p8":0.45,"mix":0.1596,"rv":0,"id":1},{"typ":9,"p1":0.8,"p2":0.3,"p3":0.3,"p4":0,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.15,"rv":0,"id":4},{"typ":8,"p1":0.29,"p2":0.87,"p3":1,"p4":0.3,"p5":0.18,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.0254,"rv":2,"id":3},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0}],"ply":[{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0}],"vox":{"mode":1,"glide":0,"uni":1,"sprd":12,"wide":0.6,"slop":0.008},"macro":[0,0,0,0],"mix":{"lvl":0.944,"pan":0},"code":null,"pmodel":null,"psel":0,"cp":[1,1,1,0.5,0,0,0.5,0.3],"kit":null,"_folded":true,"_addr":true},
+  /* K909 — kik. GAD'S, 2026-08-29, ch1. His words: "a hardcore techno kick."
+
+     A sine sub at rat 0.25 with a SQUARE at rat 16 for the click, a resonant
+     lowpass at 671Hz q5.9, a 63ms amp decay and a 209ms PITCH env at amt 80 —
+     then TWO SATURATORS IN SERIES, both at mix 1, on different curves (p3 0
+     then p3 3). That series pair is the gabber chain and the generator has no
+     concept of it: genSpice writes at most one fx and never two of a kind.
+
+     What it reaches that no roll does:
+       · TWO fx slots of the SAME type in series, both at full mix
+       · amp env crv -100 — the envelope CURVE, which every roll leaves at 0
+       · an op at rat 16, a partial six octaves up used purely as the click
+       · sub at rat 0.25 under it, so the voice spans eight octaves
+     The pitch env at 80 over 209ms is the one thing here the table does have. */
+  {"name":"K909","cat":"kik","tr":0,"trs":-12,"prep":null,"au":{"gain":0.9,"semis":0,"rate":1,"st":0,"en":1,"fit":1,"src":0,"pmode":0,"chan":0,"cmode":0,"kmode":0,"auto":1,"start":0,"kvol":1,"lvol":1,"wnd":50,"cues":{}},"osc":[{"wav":0,"mode":0,"dst":0,"rat":0.25,"amt":1,"fine":0,"ph":0,"phm":0,"pw":0.5,"id":0},{"wav":3,"mode":0,"dst":0,"rat":16,"amt":0.32,"fine":0,"ph":0,"phm":0,"pw":0.5,"id":1},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":1,"pw":0.5},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":1,"pw":0.5},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":1,"pw":0.5},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":1,"pw":0.5},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":1,"pw":0.5},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":1,"pw":0.5},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":1,"pw":0.5},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":1,"pw":0.5}],"amp":[{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0}],"flt":[{"typ":1,"frq":671.1022555084099,"q":5.9,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1,"id":0},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1}],"env":[{"dst":1,"idx":0,"amt":100,"a":0.005,"d":0.15,"s":0.7,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0}],"lfo":[{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30}],"mod":[{"src":1,"rsel":0,"mac":0,"routes":[{"dst":1,"idx":0,"amt":100,"tgt":null,"addr":{"rack":"voice","slot":0,"key":"amp","lbl":"amp"}}],"a":0.001,"d":0.06291456000000005,"s":0,"r":0.05,"crv":-100,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":1,"fch":1,"fa":0.01,"fr":0.15,"fg":4,"id":0},{"src":1,"rsel":0,"mac":0,"routes":[{"dst":2,"idx":0,"amt":80,"tgt":null,"addr":{"rack":"voice","slot":0,"key":"pitch","lbl":"pitch"}}],"a":0.001,"d":0.20861625671386724,"s":0,"r":0.03,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":1,"fch":1,"fa":0.01,"fr":0.15,"fg":4,"id":1},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"tgt":null}],"a":0.005,"d":0.15,"s":0,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":1,"fch":1,"fa":0.01,"fr":0.15,"fg":4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"tgt":null}],"a":0.005,"d":0.15,"s":0,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":1,"fch":1,"fa":0.01,"fr":0.15,"fg":4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"tgt":null}],"a":0.005,"d":0.15,"s":0,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":1,"fch":1,"fa":0.01,"fr":0.15,"fg":4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"tgt":null}],"a":0.005,"d":0.15,"s":0,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":1,"fch":1,"fa":0.01,"fr":0.15,"fg":4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"tgt":null}],"a":0.005,"d":0.15,"s":0,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":1,"fch":1,"fa":0.01,"fr":0.15,"fg":4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"tgt":null}],"a":0.005,"d":0.15,"s":0,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":1,"fch":1,"fa":0.01,"fr":0.15,"fg":4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"tgt":null}],"a":0.005,"d":0.15,"s":0,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":1,"fch":1,"fa":0.01,"fr":0.15,"fg":4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"tgt":null}],"a":0.005,"d":0.15,"s":0,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":1,"fch":1,"fa":0.01,"fr":0.15,"fg":4}],"fx":[{"typ":21,"p1":1,"p2":1,"p3":0,"p4":0.3,"p5":1,"p6":0.5,"p7":0.7,"p8":0.45,"mix":1,"rv":0,"id":0},{"typ":21,"p1":0.9,"p2":1,"p3":3,"p4":0.35,"p5":1,"p6":0.5,"p7":0.64,"p8":0.45,"mix":1,"rv":0,"id":1},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0}],"ply":[{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0}],"vox":{"mode":1,"glide":0,"uni":1,"sprd":12,"wide":0.6,"slop":0.008},"macro":[0,0,0,0],"mix":{"lvl":0.95,"pan":0},"code":null,"pmodel":null,"psel":0,"cp":[1,1,1,0.5,0,0,0.5,0.3],"kit":null,"vof":0}
 ];
 const PRESETS0=()=>[
  mkP('KCK','kik',p=>{Object.assign(p.osc[0],{wav:0,rat:0.25,ph:90});
@@ -10582,7 +10600,11 @@ class Engine{
     const g=keep(ac.createGain()); g.gain.value=(K.mix&&K.mix.lvl!=null)?K.mix.lvl:0.8;
     const pn=keep(ac.createStereoPanner()); pn.pan.value=(K.mix&&K.mix.pan)||0;
     cur.connect(g); g.connect(pn); pn.connect(this.buses[pi].vIn);   // channel fx still apply on top
-    store[pc]={in:inN,rack,sig};
+    /* `out` is the pad's own last node, and it is here so a pad can be
+       MEASURED on its own. Twelve pads share a channel bus, so anything
+       reading buses[pi] hears all twelve at once; reading `out` per pad is
+       what lets a whole kit be calibrated in ONE pass instead of twelve. */
+    store[pc]={in:inN,rack,sig,out:pn};
     return inN;
   }
   applyBusPreps(pi,midi){
@@ -13573,10 +13595,25 @@ function withSmpKits(items){
      and empty the entire library, which is exactly how that bug went last
      time. */
   let gen=[];
-  try{gen=smpKitEntries();}catch(_){return items;}
-  if(!gen.length)return items;
-  const own=new Set(gen.map(k=>k.name));
-  return items.filter(en=>!(en&&en.factory&&own.has(en.name))).concat(gen);
+  try{gen=smpKitEntries();}catch(_){gen=[];}
+  /* GAD'S OWN ARE DERIVED TOO, for the same two reasons the kits are. They
+     live in THIS FILE, so the file is the truth — and a stored copy shadowing
+     an edited one is not hypothetical: DORAC's op-0 ratio was corrected here
+     and the library went on serving the old value, because libInit only ever
+     re-laid when a NAME was missing and the name was already there. Appended
+     on every call, filtered out of libStore by the same `gen` flag, always
+     fresh, and no version number for anybody to remember.
+
+     They REPLACE a factory entry of the same name — the rule the kits already
+     follow. Gad's K909 therefore wins over the factory K909 of the same name,
+     which is the right way round: it is his shelf. */
+  let mine=[];
+  try{mine=GIVEN().map(p=>({name:p.name,cat:p.cat,factory:true,given:true,
+                            gen:true,data:presetData(p)}));}catch(_){mine=[];}
+  const add=gen.concat(mine);
+  if(!add.length)return items;
+  const own=new Set(add.map(k=>k.name));
+  return items.filter(en=>!(en&&en.factory&&own.has(en.name))).concat(add);
 }
 /* preset -> its number within its category, which is what the Inst row shows.
    Built once per library change instead of scanned per channel per frame. */
@@ -13688,22 +13725,17 @@ function libInit(){
   for(const en of cur)if(en.cat==='drum')en.cat=drumCatOf(en.data||{});   // user drums: migrate
   const users=cur.filter(en=>!en.factory);
   const need=CATS.filter(c2=>c2!=='audio').length*10;
-  /* …BUT NOT IF ONE OF GAD'S IS MISSING. The early-out asks only "are there
-     enough factory entries", which is true the moment the dice have filled the
-     categories — so adding a preset to GIVEN() would never appear in a library
-     that already existed, and the comment there promising a LIBV bump would
-     have been the only way in. Self-healing is better than a version number
-     somebody has to remember: if a GIVEN preset is not on the shelf, re-lay.
-     Named entries, so this costs one Set per boot and nothing else. */
-  const have=new Set(cur.map(en=>en&&en.name));
-  const missing=GIVEN().some(p=>!have.has(p.name));
-  if(!missing&&cur.length-users.length>=need)return;      // factory set already complete
+  /* (GIVEN is NOT checked here any more, and must not be: it is appended by
+     libAll as a derived entry and never stored, so "is it on the shelf" is
+     false every boot — which would re-roll the dice every boot and change the
+     generated presets under him.) */
+  if(cur.length-users.length>=need)return;                // factory set already complete
   const arr=PRESETS0().map(p=>({name:p.name,cat:p.cat,factory:true,data:presetData(p)}))
-    /* GAD'S OWN, laid every time from GIVEN() so they cannot go missing, and
-       marked so anything downstream can tell them from a generated one. They
-       count toward the per-category ten below, so three of his in a category
-       means seven rolled rather than eleven entries. */
-    .concat(GIVEN().map(p=>({name:p.name,cat:p.cat,factory:true,given:true,data:presetData(p)})));
+    /* GAD'S OWN COUNT TOWARD THE PER-CATEGORY TEN — two of his in a category
+       means eight rolled rather than twelve entries — but they are not laid
+       down here. libAll appends them derived; this only reserves their slots
+       so the dice do not fill the shelf past ten. */
+    .concat(GIVEN().map(p=>({name:p.name,cat:p.cat,_reserve:true})));
   for(const cat of CATS){
     if(cat==='audio'||cat==='kit')continue;
     const rnd=mulberry32(cat.split('').reduce((a2,ch)=>a2*31+ch.charCodeAt(0),7));
@@ -13725,7 +13757,7 @@ function libInit(){
       arr.push({name:p.name,cat:'kit',factory:true,data:presetData(p)}); i++;
     }
   }
-  libStore(arr.concat(users));
+  libStore(arr.filter(en=>!en._reserve).concat(users));
 }
 function applyPresetData(pi,name,cat,data){
   pushUndo('preset');
@@ -13787,6 +13819,10 @@ function setPresetData(pi,name,cat,data){   // same, no undo — for composite g
   S.presets[pi]=p;
   engine.rebuildRack(pi); engine.refresh(pi);
   dirty=true; dirtySave=true;
+  /* A KIT WITH SYNTHESISED PADS GETS MEASURED, ONCE, HERE — see calibKit.
+     Fire and forget: it is cached after the first time, it no-ops on an
+     all-sampled kit, and it declines while the transport is running. */
+  if(p.cat==='kit')calibKit(pi);
 }
 function jumpPreset(pi,n){
   const p=S.presets[pi], pool=libAll().filter(en=>en.cat===(p.cat||'misc'));
@@ -15764,6 +15800,170 @@ function synthPadLvl(inst,cat){
   const role=MIXROLE[inst]||MIXROLE.perc, base=SYNLVL[inst];
   if(base==null)return {...(MIXT[cat]||MIXT.misc)};
   return {lvl:+clamp(Math.pow(10,(MIXABS+role.lu-base)/20),0.05,3).toFixed(3),pan:role.pan};
+}
+/* ---- CALIBRATION: measuring the pads a table cannot reach  (2026-08-29) ---
+   Gad chose this after seeing what SYNLVL could and could not do: "boot only —
+   calibrate the ten factory synth kits once."
+
+   ⚠ THERE IS NO BOOT. `AC.resume()` is only ever called from a user gesture,
+   so the AudioContext is SUSPENDED until the first keypress and nothing
+   renders before it. The nearest honest thing to what he asked for — one-time,
+   invisible, no cost on a roll — is to calibrate a kit the first time it is
+   LOADED, and cache the answer forever after. The factory ten get measured
+   once each, on whichever channel they land on, and never again.
+
+   WHY IT IS ONE PASS AND NOT TWELVE. Twelve pads share a channel bus, so
+   reading them off `buses[pi]` gets all twelve at once and measuring them one
+   at a time costs twelve windows — five seconds a kit. But every pad already
+   owns its own bus (`voiceOut` -> `kitBuses[pi][pc].out`), so all twelve can
+   be tapped separately, FIRED TOGETHER, and read in a single 400ms window.
+   MEASURED: 712-732ms wall clock for a whole kit, and against the same kits
+   measured one pad at a time it agrees to SD 0.20-0.34 dB. Twelve simultaneous
+   pads neither steal each other's voices nor bleed between buses.
+
+   SYNTH PADS ONLY. A sampled pad is already inside half a decibel from
+   `padLoud`, and a pass is not free — so an all-sampled kit skips this
+   entirely and costs nothing. */
+/* A pad's own bus sits AHEAD of the channel fader and the channel rack, and
+   the role targets are written in channel-bus terms. MEASURED across four kits
+   and 48 pads: +1.94 dB, SD 0.27. One constant, because it is one gain. */
+const CALOFF=1.94;
+const CALKEY='ten-kitcal-v1';
+let CALCACHE=null, CALQ=Promise.resolve();
+function calStore(){
+  if(CALCACHE)return CALCACHE;
+  try{CALCACHE=JSON.parse(localStorage.getItem(CALKEY)||'{}')||{};}catch(_){CALCACHE={};}
+  return CALCACHE;
+}
+/* AN ID FOR A SET OF PADS, not a name. Names repeat, and a pad can be edited
+   under one — but more importantly this has to INVALIDATE ITSELF: change
+   genPreset and every hash moves, every lookup misses, and the kit is measured
+   again. A baked table would have gone quietly wrong instead. */
+function calId(kit,idx){
+  let h=2166136261;
+  const feed=s=>{for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619);}};
+  /* THE TUNING IS IN THE HASH TOO. Move CALOFF or the target reference and
+     every cached answer was computed against a different question — folding
+     them in means the cache invalidates ITSELF rather than needing a key bump
+     somebody has to remember. Same reason the pads are hashed and not named. */
+  feed('v1|'+CALOFF+'|'+MIXABS+'|');
+  for(const i of idx){const k=kit[i]||{};
+    feed(i+'|'+(k.name||'')+'|'+JSON.stringify(k.osc||0)+JSON.stringify(k.env||0)
+        +JSON.stringify(k.flt||0)+JSON.stringify(k.amp||0)+JSON.stringify(k.mod||0));}
+  return (h>>>0).toString(36);
+}
+/* THE CLOCK IS THE AUDIO THREAD, not setTimeout. A page making no sound has
+   its timers clamped to 1/s (CLAUDE.md), and this pass deliberately makes no
+   sound — so it counts SAMPLES and resolves from onaudioprocess, which cannot
+   be clamped. */
+function calRec(node,secs){
+  const sp=AC.createScriptProcessor(4096,2,2), L=[], R=[];
+  const need=Math.round(secs*AC.sampleRate); let got=0, fin;
+  const done=new Promise(r=>fin=r);
+  sp.onaudioprocess=e=>{
+    if(got>=need)return;
+    L.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+    R.push(new Float32Array(e.inputBuffer.getChannelData(1)));
+    got+=e.inputBuffer.length; if(got>=need)fin();
+  };
+  const sink=AC.createGain(); sink.gain.value=0;      // pulled, and silent
+  node.connect(sp); sp.connect(sink); sink.connect(AC.destination);
+  let stopped=false, out=null;
+  return {done,stop(){
+    if(stopped)return out;
+    stopped=true;
+    try{node.disconnect(sp);}catch(_){}
+    try{sp.disconnect(); sink.disconnect();}catch(_){}
+    const fl=a=>{const n=a.reduce((s,x)=>s+x.length,0),o=new Float32Array(n);
+      let k=0; for(const x of a){o.set(x,k);k+=x.length;} return o;};
+    return out=[fl(L),fl(R)];
+  }};
+}
+/* the same BS.1770 momentary block padLoud uses, on a recording instead of a
+   buffer — 400ms from where the sound actually starts */
+function calLufs(L,R){
+  const sr=AC.sampleRate, n=Math.max(L.length,R.length);
+  if(!n)return null;
+  let pk=0, sum=0;
+  for(let i=0;i<n;i++){const a=Math.abs(L[i]||0), b=Math.abs(R[i]||0);
+    if(a>pk)pk=a; if(b>pk)pk=b; sum=a+b;}
+  if(pk<1e-6)return null;                       // that pad never sounded
+  const thr=pk*0.02; let o=0;
+  for(let i=0;i<n;i++)if(Math.max(Math.abs(L[i]||0),Math.abs(R[i]||0))>=thr){o=i;break;}
+  const blk=Math.min(Math.round(0.4*sr),n-o);
+  if(blk<sr*0.05)return null;
+  const [sh,hp]=kCoef(sr);
+  const cast=c=>{const a=new Float64Array(blk); for(let i=0;i<blk;i++)a[i]=c[o+i]||0; return a;};
+  const yL=kBiq(kBiq(cast(L),sh),hp), yR=kBiq(kBiq(cast(R),sh),hp);
+  let sl=0,s2=0; for(let i=0;i<blk;i++){sl+=yL[i]*yL[i]; s2+=yR[i]*yR[i];}
+  return {lu:-0.691+10*Math.log10(Math.max(sl/blk+s2/blk,1e-20)), pk:pk};
+}
+function calibKit(pi){                    // queued, so a set with three kits serialises
+  CALQ=CALQ.then(()=>calibKitNow(pi)).catch(()=>{});
+  return CALQ;
+}
+async function calibKitNow(pi){
+  const p=S.presets[pi];
+  if(!p||p.cat!=='kit'||!Array.isArray(p.kit))return false;
+  const idx=[];
+  for(let i=0;i<12;i++){const k=p.kit[i];
+    if(k&&!(k.osc&&k.osc[0]&&k.osc[0].smp&&k.osc[0].smp.f))idx.push(i);}
+  if(!idx.length)return false;                       // all sampled: already measured
+  const store=calStore(), id=calId(p.kit,idx);
+  const apply=tab=>{let n=0;
+    for(const i of idx){const k=p.kit[i];
+      if(tab[i]!=null&&k&&k.mix){k.mix.lvl=tab[i]; n++;}}
+    if(n){engine.rebuildRack(pi); engine.refresh(pi); dirty=true; dirtySave=true;}
+    return n;};
+  if(store[id]){apply(store[id]); return true;}      // free, every time after the first
+  /* NOT WHILE ANYTHING IS AT STAKE. A suspended context renders nothing, and
+     muting a channel for half a second under a running transport would eat
+     half a bar of his take. Either way the kit is measured the next time it is
+     loaded standing still. */
+  if(AC.state!=='running'||T.playing)return false;
+  const B=engine.buses[pi]; if(!B)return false;
+  const recs=[];
+  try{
+    try{B.trim.disconnect(engine.mSum);}catch(_){}   // the channel's only exit
+    engine.allOff();
+    for(const i of idx)try{engine.voiceOut(pi,KBBASE+i);}catch(_){}  // build the pad buses
+    const kb=(engine.kitBuses||{})[pi]||{};
+    for(const i of idx)recs.push(kb[i]&&kb[i].out?calRec(kb[i].out,0.52):null);
+    const at=AC.currentTime+0.05;
+    for(const i of idx)try{engine.noteOn(at,pi,KBBASE+i,1.0);}catch(_){}
+    await Promise.race([Promise.all(recs.filter(Boolean).map(r=>r.done)),
+                        new Promise(r=>setTimeout(r,4000))]);   // never hang on a dead pad
+    engine.allOff();
+    const tab={};
+    idx.forEach((i,j)=>{
+      const r=recs[j]; if(!r)return;
+      const w=r.stop(); if(!w)return;
+      const m=calLufs(w[0],w[1]); if(!m)return;
+      const lvl=Math.max(((p.kit[i]||{}).mix||{}).lvl||1,1e-9);
+      const at1=m.lu-CALOFF-20*Math.log10(lvl);       // its loudness at fader 1.0
+      const role=MIXROLE[KITMAP[i].inst]||MIXROLE.perc;
+      /* A CEILING THE MEASUREMENT SETS, not a constant. The estimated paths
+         clamp at 3x because they are estimating — over-correct a bad guess and
+         you get noise. This pad has been HEARD, so the only real limit is its
+         own peak, and the generator makes pads quiet enough to need more than
+         3x: MEASURED, every one of the twelve pads still off target after the
+         first calibrated pass was pinned at that ceiling and none was a bad
+         measurement. `pk1` is the pad's peak at fader 1.0 on its own bus;
+         0.95 there is conservative, since channel-bus peaks of 1.18 already
+         measured 0 clipped samples at the master. */
+      const pk1=Math.max(m.pk/lvl,1e-6), pkCap=Math.min(8,0.95/pk1);
+      tab[i]=+clamp(Math.pow(10,(MIXABS+role.lu-at1)/20),0.05,Math.max(0.05,pkCap)).toFixed(3);
+    });
+    if(Object.keys(tab).length){
+      store[id]=tab;
+      try{localStorage.setItem(CALKEY,JSON.stringify(store));}catch(_){}
+      apply(tab);
+    }
+  }finally{
+    for(const r of recs)if(r)try{r.stop();}catch(_){}
+    try{B.trim.connect(engine.mSum);}catch(_){}       // a duplicate connect is a no-op
+  }
+  return true;
 }
 const KITMAP=[
   {inst:'kick',      cat:'kik',  alt:['sub']},
