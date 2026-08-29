@@ -2718,5 +2718,85 @@
   "inst": "shaker",
   "style": "ac-big",
   "cat": "perc"
+ },
+ {
+  "name": "jazz-ride",
+  "file": "oneshots/acoustic/jazz/ride.flac",
+  "kind": "one",
+  "inst": "ride",
+  "style": "ac-jazz",
+  "cat": "cymb"
+ },
+ {
+  "name": "rock-ride",
+  "file": "oneshots/acoustic/rock/ride.flac",
+  "kind": "one",
+  "inst": "ride",
+  "style": "ac-rock",
+  "cat": "cymb"
+ },
+ {
+  "name": "funk-ride",
+  "file": "oneshots/acoustic/funk/ride.flac",
+  "kind": "one",
+  "inst": "ride",
+  "style": "ac-funk",
+  "cat": "cymb"
+ },
+ {
+  "name": "vint-ride",
+  "file": "oneshots/acoustic/vint/ride.flac",
+  "kind": "one",
+  "inst": "ride",
+  "style": "ac-vint",
+  "cat": "cymb"
+ },
+ {
+  "name": "regg-ride",
+  "file": "oneshots/acoustic/regg/ride.flac",
+  "kind": "one",
+  "inst": "ride",
+  "style": "ac-regg",
+  "cat": "cymb"
+ },
+ {
+  "name": "latn-ride",
+  "file": "oneshots/acoustic/latn/ride.flac",
+  "kind": "one",
+  "inst": "ride",
+  "style": "ac-latn",
+  "cat": "cymb"
+ },
+ {
+  "name": "orch-ride",
+  "file": "oneshots/acoustic/orch/ride.flac",
+  "kind": "one",
+  "inst": "ride",
+  "style": "ac-orch",
+  "cat": "cymb"
+ },
+ {
+  "name": "brsh-ride",
+  "file": "oneshots/acoustic/brsh/ride.flac",
+  "kind": "one",
+  "inst": "ride",
+  "style": "ac-brsh",
+  "cat": "cymb"
+ },
+ {
+  "name": "dry-ride",
+  "file": "oneshots/acoustic/dry/ride.flac",
+  "kind": "one",
+  "inst": "ride",
+  "style": "ac-dry",
+  "cat": "cymb"
+ },
+ {
+  "name": "big-ride",
+  "file": "oneshots/acoustic/big/ride.flac",
+  "kind": "one",
+  "inst": "ride",
+  "style": "ac-big",
+  "cat": "cymb"
  }
 ]

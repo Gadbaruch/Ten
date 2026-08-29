@@ -1,3 +1,78 @@
+# TEN ACOUSTIC KITS, AND THREE PRESETS OF GAD'S — 2026-08-29
+
+## THE KITS  (KTJAZ KTROK KTFNK KTVIN KTREG KTLAT KTORC KTBRS KTDRY KTBIG)
+
+100 renders — 10 drums x 10 kits, `tools/gen_kits.py`, 24-bit stereo FLAC in
+`samples/oneshots/acoustic/<kit>/`. All ten assemble **12/12 pads and every pad
+comes from its own kit**, no borrowing.
+
+**Each kit is its own RECORDING SESSION**, not one bank reshaped. That was the
+correction that mattered — Gad: *"ten acoustic kits each one sounding
+different ... every single sample should be just a single one shot."* The first
+attempt made ten kits by tuning/enveloping/filtering ONE bank, which was never
+going to work: a TR-808 and an RX5 differ because their SAMPLES differ.
+
+MEASURED, snare across all ten, against the abandoned variation batch:
+
+                          ten kits    variations
+      centroid spread     1761 Hz      241 Hz
+      spectral distance    0.868        0.470
+      waveform corr       -0.004       +0.718
+
+**-0.004 is statistically unrelated** — ten different drums, where the
+variations were one drum reshaped (+0.718). And the character tracks the
+prompts: regg darkest and longest (2127Hz, 2.17s, damped dub studio), dry
+shortest (1.01s, dead room), jazz/brsh/latn brightest (~3880Hz).
+
+**A RIDE TOOK CLAVE'S KITMAP PAD.** All twelve were taken and only one was a
+cymbal. Clave was the thinnest slot on the shelf — 3 machine samples against
+ride's 6 — used for a single 40%-probability wood accent. Every machine kit
+gains a ride too; anything wanting a clave resolves through the alts. KP and
+the accent line moved with it.
+
+⚠ `samples/` is **44MB** and the whole shelf loads at boot. First cut if boot
+starts dragging.
+
+## THREE PRESETS OF GAD'S, AND `GIVEN` IS NOW DERIVED
+
+`BES1/keys`, `DORAC/snr`, `K909/kik` — all `given:true`, all carrying his own
+intent line. **Two bugs surfaced getting them there, both worth remembering:**
+
+⚠ **A stored copy shadowed an edited one.** DORAC's op-0 ratio was corrected in
+the file and the library went on serving the old value, because libInit only
+re-laid when a NAME was missing and the name was there.
+
+⚠ **K909 collided with a factory kick of the same name** and was appended,
+shadowed and unreachable — the same duplicate-name trap already recorded for
+K808 in the SMPKITS comment.
+
+**One change fixed both: GIVEN entries are DERIVED**, exactly like the sampled
+kits — rebuilt on every `libAll`, filtered out of `libStore` by the same `gen`
+flag, and REPLACING a factory entry of the same name. The file is always the
+truth, no LIBV to remember, and Gad's K909 wins over the factory one, which is
+the right way round on his own shelf. libInit only RESERVES their slots so the
+dice still stop at ten.
+
+**The self-heal added earlier had to be REMOVED** — with GIVEN never stored,
+"is it on the shelf" is false every boot, which would re-roll every generated
+preset underneath him each time.
+
+⚠ All three of his peak OVER FULL SCALE: K909 1.441, DORAC 1.031, against
+factory KCK 0.874. That is two saturators at mix 1 and an amt-200 amp env doing
+what they were asked. Left as he made them — **the generator should learn the
+MOVES from these, not the levels.** The moves are listed in SOUND.md 6b.
+
+## STILL OPEN
+
+- **Volume** — makeup closed 7.5dB to 3.1dB against a saw; rest is crest factor.
+  If he wants more, a gentle clip beats raw gain. Sample ops on **slots 1-9**
+  still miss the 4.4dB makeup; op 0 only.
+- **Round-robin** needs the `stp` mod-route field. Dropped at Gad's request but
+  `sst`/`sen`/`rnd` are all still there for whenever.
+- **The dynamics layer** is next in SOUND.md's order: vel/key evaluated at
+  NOTE-ON (they are `'next'` kind today, so a vel route lands a note late),
+  then the veldecay harness, then the layer itself.
+
 # THE SYNTH PADS ARE MEASURED NOW — 2026-08-29
 
 Gad chose it after seeing what a table could not do: *"boot only — calibrate
