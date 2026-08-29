@@ -4980,6 +4980,11 @@ async function probeSmpDiag() {
     meas('THE FILE', rl, rr2, ref.numberOfChannels + 'ch ' + ref.duration.toFixed(3) + 's');
 
     const CFG = [
+      /* THE REFERENCE THAT MATTERS: a SYNTH op at the identical settings. "A
+         sample is quieter than Finder" is the pan law and is by design; "a
+         sample is quieter than a saw at the same amt" would be a real
+         inconsistency, and only this row can tell them apart. */
+      { k: 'synth saw, amt 1', rat: 1, uni: 1, sprd: 0,  wide: 0,   n: 'wav 2', wav: 2 },
       { k: 'op, plain',        rat: 1, uni: 1, sprd: 0,  wide: 0,   n: 'defaults' },
       { k: 'op, rat 2',        rat: 2, uni: 1, sprd: 0,  wide: 0,   n: 'ch4 rate' },
       { k: 'op, uni 2 sprd12', rat: 1, uni: 2, sprd: 12, wide: 0.6, n: 'ch4 voice' },
@@ -4989,7 +4994,8 @@ async function probeSmpDiag() {
       const p = S.presets[ch];
       for (const k of Object.keys(p)) if (k !== 'modLoop') delete p[k];
       Object.assign(p, JSON.parse(JSON.stringify(presetData(genPreset('kik', mulberry32(3), 0.1)))));
-      p.osc[0] = { wav: 9, mode: 0, dst: 0, rat: c.rat, amt: 1, fine: 0, ph: 0, phm: 1, lps: 1 };
+      p.osc[0] = { wav: c.wav === undefined ? 9 : c.wav, mode: 0, dst: 0, rat: c.rat,
+                   amt: 1, fine: 0, ph: 0, phm: 1, lps: 1 };
       for (let i = 1; i < p.osc.length; i++) if (p.osc[i]) p.osc[i].amt = 0;
       for (const x of p.flt) if (x) x.typ = 0;
       for (const x of p.fx) if (x) x.typ = 0;

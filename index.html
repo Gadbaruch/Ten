@@ -1471,7 +1471,7 @@ const recPlayed=(pi,tBeat,midi,vel,durBeats)=>recPlayNote(pi,tBeat,sndOut(pi,mid
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-29.0829';
+const BUILD='2026-08-29.1109';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -2070,8 +2070,17 @@ const OSC_P=sl=>[
      a time to get from 1 to 3 is eight presses of a key that should take two */
   SP('ratio','rat','lin',{min:0.125,max:16,step:0.125,mul:2,fmt:v=>'×'+v}),
   SP('fine','fine','lin',{min:-100,max:100,step:5,fmt:v=>v+'c'}),
-  SP('phase','ph','lin',{min:0,max:355,step:5,fmt:v=>v+'°'}),
-  SP('trig','phm','enum',{opts:['rtrg','free']})];
+  /* NOT ON A SAMPLE (Gad, 2026-08-29: "on smp op you can remove phase and trig
+     slots - they arent used"). He is right and the audio path says so: wav 9
+     builds an AudioBufferSourceNode, which has no phase to set and no free-run
+     to choose — it starts at its crop offset and that is that. `ph`/`phm` are
+     read only by setWave and by the phase engine's per-operator accumulators,
+     neither of which a buffer reaches. Two dead dials in the row you walk
+     through most. The FIELDS stay on the slot so nothing saved changes shape;
+     only the browsing row loses them. */
+  ...(Math.round((sl&&sl.wav)||0)===9?[]:[
+    SP('phase','ph','lin',{min:0,max:355,step:5,fmt:v=>v+'°'}),
+    SP('trig','phm','enum',{opts:['rtrg','free']})])];
 /* peaking and the two shelves are the only types with a gain; on a lowpass it
    is a control that does nothing, sitting in the row you walk through most. */
 const FLT_GAINY=new Set(['peq','lsh','hsh']);
