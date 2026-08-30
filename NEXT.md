@@ -83,6 +83,130 @@ probe in probe.js for *"wt op modulating the position of a wavetable is very
 crackly"*. Left alone; only NEXT.md was committed from here. **Check `git
 status` before staging anything in this repo — this is the second time today.**
 
+# THE WAVETABLE IS AN AUDIO-RATE OSCILLATOR NOW — 2026-08-30 (late)
+
+Gad: *"still the position of wt isnt clean enough both in terms of the xfade,
+and more importantly at fast modulations like put lfo at max speed on the
+position and it will be inacurate and noisey."*
+
+## HE WAS RIGHT AND NO CROSSFADE COULD EVER HAVE FIXED IT
+
+Position was written on the **8ms control tick — 125 writes a second — and the
+LFO goes to 40Hz.** That is the MODULATOR being undersampled. What you hear is
+alias of the modulation, not of the audio, and how carefully two tables cross
+over is beside the point. At 40Hz over the full range the position moves **41
+rungs per tick**.
+
+⚠ **THE SHAPE TO RECOGNISE, because two whole rounds of work went into the
+wrong layer before this was named.** When a modulation destination sounds
+"noisy and inaccurate" and every measurement of the CROSSOVER comes back clean
+or ambiguous, ask what rate the MODULATOR is being sampled at. Nyquist applies
+to control signals too.
+
+## THE MEASUREMENT THAT SETTLES IT
+
+A 40Hz sine LFO on pos a puts real sidebands at `k*f0 ± 40`. A position written
+at 125Hz folds it and puts them at `k*f0 ± 85` as well — a frequency nothing in
+the patch has any business producing. `tools/probe.sh wtalias` reads both,
+either side of five harmonics, and reports the alias against the true one.
+Both builds, same table, same note:
+
+                        h2      h4      h8     h12     h20
+      before          -9.5    +4.0   -25.7   -18.7   -28.0   dB
+      after          -47.2   -35.3   -35.9   -60.9   -59.0
+      improvement      -38     -39     -10     -42     -31
+
+⚠ **At harmonic 4 the alias was +4dB LOUDER THAN THE REAL MODULATION.** The
+dominant thing he was hearing was the fold. It is now 35-61dB under the signal
+it belongs to.
+
+⚠ The metric **degenerates below about 10Hz**: the fold lands at |125 - F|,
+which at F=5 is 120Hz and f0 is 131 — so the "alias" bin is measuring the note's
+own harmonic structure and both builds read alike. The probe says so now.
+
+## WHAT `ten-wt` IS
+
+A worklet oscillator. 2048-point frames, band-limited once at note-on from the
+nominal pitch, read **per sample**, with `pos a`, `pos b`, `morph` and `fold` as
+real a-rate AudioParams. It is what Vital and Serum are: a table READ, not a
+table SWAP.
+
+- **It answers to `.frequency` and `.detune`.** Those are the worklet's own
+  params under the names the builder already reaches for, so `opPitch`,
+  `opDet`, `setF`, glide and every pitch envelope take it for an oscillator and
+  none of them had to learn about worklets. That shim is why this was ~120
+  lines and not ~500.
+- **The band limit is a LADDER, not an octave.** A mipmap per octave — Vital's
+  `kFrequencyBins` — throws away up to a full octave of harmonics at the top of
+  each bucket, which on a bright wavetable is most of the character. Twelve
+  half-octave steps (`WTHL`) cost 30% at worst.
+- **Tables are built on the MAIN thread and shipped in.** 48 harmonics over
+  2048 points is ~100k sines per frame; doing that in the audio thread at
+  note-on is a dropout every time you touch a new table.
+- `DEST_AUDIO` gained `osc.posa/posb/mrph/fold`, so the mod rack wires them at
+  note-on and `wtLive` now only ever sees hand edits and table changes.
+
+## AND IT TOOK THE MAIN THREAD BACK
+
+Position modulation no longer allocates a single PeriodicWave.
+
+    MEASURED, six voices at unison 4 = 24 worklet nodes, 40Hz LFO on position
+      control tick   median 8.1ms   p95 8.9ms   max 12.9ms
+      against        28-46ms max on the control-tick path with ONE voice
+
+⚠ **The intermittent bursts that this morning's work could not explain were
+that jitter**, and they are gone with the cause.
+
+## NOTHING STATIC CHANGED — AND ONE THING DID
+
+All twenty tables, pos 0 and pos 1, against live: **worst level difference
+0.2dB.** K909 identical. Non-wt presets within the usual noise.
+
+⚠ **THE HONEST COST: each FRAME is peak-normalised on its own now**, where the
+native path normalised the blended recipe. That is what Vital does and it makes
+a position sweep considerably more even —
+
+      level spread across a full position sweep   12.8dB -> 9.5dB
+
+— but between two frames of very different crest the brightness curve sags:
+
+      vgame, pos 0.8    centroid 2099 -> 1444
+      both ENDS unchanged; the middle leans darker
+      morph: 1.1 to 1.8dB quieter mid-morph, centroid unmoved
+
+That is a real change to how an existing wt preset sounds at an intermediate
+position. It is the standard behaviour and it buys the even level, but it is
+the thing to listen for.
+
+The old standby-twin pair is kept as the **FALLBACK** for the few hundred
+milliseconds before the worklet module resolves, and for anything where it
+never does. ⚠ **It has not been exercised.**
+
+## QA CHECKLIST — 2026-08-30 late
+
+1. **⚠ LFO AT MAX SPEED ON POSITION — the ask.** wt op, LFO at 40Hz on `pos a`,
+   hold a note. It should be a clean fast wobble, not gritty. MEASURED: the
+   alias sideband went from +4dB ABOVE the real modulation to 35-61dB under it.
+2. **⚠ AN OLD WT PRESET AT AN INTERMEDIATE POSITION.** Park `pos a` around
+   0.7-0.9 on a bright table and compare with what you remember. It will be
+   slightly DARKER there than it was, and more even in level across the sweep.
+   MEASURED: `vgame` at 0.8, centroid 2099 -> 1444; level spread 12.8 -> 9.5dB.
+   **This is the judgement call — say if the sag is worse than the evenness.**
+3. **Slow LFO, and a hand sweep of `pos a`.** Should still be smooth; this is
+   what the morning's work was about and none of it was thrown away.
+   MEASURED at note-on parity: 0.2dB on every table at both ends.
+4. **Morph.** Up to 1.8dB quieter in the middle of a morph than it was.
+   Centroid unmoved. MEASURED, NOT LISTENED TO.
+5. **Fold.** It is a per-sample folder now with no post-fold renormalise or DC
+   trim — `tri()` bounds the output so the level barely moves, but the DC on an
+   asymmetric table is given up. NOT MEASURED against the old path.
+6. **Polyphony.** Play a big chord of a wt patch with unison up. MEASURED:
+   24 worklet nodes, control tick max 12.9ms, no dropout.
+7. **The first note after a page load.** The worklet module resolves a moment
+   after boot; before it does, wt falls back to the old oscillator pair, which
+   cannot modulate position at audio rate. NOT EXERCISED — if the very first
+   note after a reload sounds different, that is why.
+
 # THE BLEND RAMPS LINEARLY, AND TEN DIGITAL WAVETABLES — 2026-08-30 (afternoon)
 
 Gad asked whether two tables crossfading is really how a wavetable synth works,
