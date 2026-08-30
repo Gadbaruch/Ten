@@ -1518,7 +1518,7 @@ const recPlayed=(pi,tBeat,midi,vel,durBeats)=>recPlayNote(pi,tBeat,sndOut(pi,mid
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-30.1348';
+const BUILD='2026-08-30.1357';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -3352,6 +3352,24 @@ function adjust(spec,v,dir,m=1){
      to reach the tenth — one press, one option, always. Depth only means
      something where the values are a continuum. */
   if(spec.type!=='enum'&&!spec.opts)m*=dialScale();
+  /* ⚠ ONE PRESS MAY NOT CROSS THE DIAL. Nothing bounded `m`: the coarse step
+     is 10, and dialScale multiplies it AGAIN by up to ten on a bottomed
+     hall-effect key. Gad: "the rate and div param sensitivity is extreme ...
+     its impossible to fine tune anything it jumps really high values".
+     MEASURED, one press at coarse: an lfo rate 2Hz -> 18.6, its division 6 of
+     15 -> 14 (the end of the table), a filter 2k -> 6.2k. With a hard press on
+     top: 40Hz and 20kHz — the top of the range, from one keystroke.
+     For the EXPONENTIAL types the multiplier is an EXPONENT, so 10 does not
+     mean ten steps, it means the step to the TENTH: 1.25^10 is x9.3. Three is
+     the cap, which makes coarse x1.4 on a filter and x1.95 on a rate — a
+     bigger step, not a different order of magnitude.
+     Everything else is capped at a FIFTH of the param's own range, so a
+     fifteen-entry table moves three at a time and never end to end. `big` and
+     `mul` are unaffected: they only ask whether m is over 1, and they are
+     where a param states its own coarse step rather than inheriting one. */
+  if(spec.type==='freq'||spec.type==='time')m=clamp(m,0.02,3);
+  else if(spec.min!==undefined&&spec.max!==undefined&&spec.step>0)
+    m=clamp(m,0.02,Math.max(1,(spec.max-spec.min)/5/spec.step));
   if(spec.curve==='vol'){
     /* ⇧ coarse · plain · ⌥ fine, in fader units — the same three sizes the
        channel fader uses, so the two feel like one control */
