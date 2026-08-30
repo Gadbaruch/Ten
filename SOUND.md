@@ -227,10 +227,33 @@ on different curves. Four more gaps:
     an op at rat 16                     a partial six octaves up, as the click
     sub at rat 0.25 beneath it          the voice spans eight octaves
 
-⚠ **All three of Gad's peak over full scale**: K909 1.441 (rms 0.706), DORAC
+**ZIPPL** (bass, 2026-08-30) — *"a wonk bass preset good for bass music in
+general."* A sine sub at rat 0.25 FM'd by a sine at rat 8, **no filter at all**
+— the flt rack is empty and every bit of tone is two `filt` fx in series into a
+ducker. Three envelopes, and two of them go where no roll has ever sent one:
+
+    env -> osc[1].amt at 90     the FM INDEX per note. This is exactly the
+                                `oenv` section 5 calls the cheapest missing
+                                expressive axis — here it is, in the wild.
+    env -> osc[1].rat at -5     the FM RATIO, swept DOWNWARD, tmul 0.9.
+                                THAT is the wonk: the harmonic relationship
+                                itself moves during the note. Not detuning,
+                                not a filter sweep, and with no equivalent
+                                anywhere in the archetype table.
+
+Also two `filt` fx in series at mix 1, against a generator that writes at most
+one fx; and a duck the generator only ever writes at a fixed 0.4-0.65.
+
+**The pattern across all four of his presets: he modulates things the table
+treats as CONSTANTS** — filter spread, FM index, FM ratio, envelope curve. The
+table modulates amp, pitch and cutoff and essentially nothing else. That is the
+single biggest coverage gap, stated as one sentence.
+
+⚠ **Three of Gad's four peak over full scale**: K909 1.441 (rms 0.706), DORAC
 1.031, against factory KCK 0.874 and SNR 0.577. That is the two saturators and
-the amt-200 amp env doing what they were asked to. Left exactly as he made
-them — but the generator must not copy the LEVELS from these, only the moves.
+the amt-200 amp env doing what they were asked to. ZIPPL is the exception at
+0.859 and needs nothing. Left exactly as he made them — but the generator must
+not copy the LEVELS from these, only the moves.
 
 ## 7. HOW A PRESET GETS SHELVED
 
