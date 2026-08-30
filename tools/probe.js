@@ -5722,78 +5722,73 @@ async function probeShelf() {
   return { cols: ['one', 'loop', 'note'], rows };
 }
 
-/* CAN VELOCITY SHORTEN A NOTE? (Gad, 2026-08-29: "sure it is... just have a
-   vel mod with decay destenation to the smp or synth ops, easy peasy. or map
-   it to the time multiplier even.") He was right and SOUND.md said BLOCKED.
+/* CAN VELOCITY SHORTEN A NOTE? (Gad, 2026-08-30: "now do the note-on fix so
+   vel can shorten envelopes".)
 
-   BUILT ON A REAL ROLL, not a hand-assembled preset: the first attempt wired
-   mod[0] by hand and read 1486ms at every velocity — the whole capture window,
-   because an unfolded preset has no amp envelope at all and the note simply
-   never ended. foldMod/addrMod are what make a mod rack live, so the honest
-   test starts from a patch that already works and adds ONE route to it. */
+   THE EARLIER VERSION OF THIS PROBE WAS NOT TRUSTWORTHY and said so: it read
+   ~2000ms at every velocity on a 486ms envelope, because it measured a ROLLED
+   patch whose fx tail held the signal above the threshold for the whole
+   window. This one builds the patch itself — one sine, no fx, no amp stage,
+   sustain 0 — so the only thing deciding the length is the envelope.
+
+   AND IT PLAYS A SEQUENCE, because the fault under test is an OFF-BY-ONE.
+   A `next` destination is read once at note-on out of the override map, and
+   the control tick parks that map from `lastOn` on a ~6ms timer — so before
+   the note-on fix a note took the length set by the PREVIOUS note's velocity.
+   loud, soft, soft, loud exposes it: if row 2 is long, it is wearing row 1's
+   velocity. */
 async function probeVelDecay() {
-  const ch = num(P.ch, CH), note = num(P.note, NOTE);
-  const key = str(P.key, 'tmul'), lbl = key === 'tmul' ? 'time' : key === 'd' ? 'dec' : key;
+  const ch = num(P.ch, 4), amt = num(P.amt, 150);
   const keep = stash(ch);
   const rows = [];
-  let ampSlot = -1, resolves = -1, wired = false;
   try {
     const p = S.presets[ch];
-    /* a pluck: something with an audible tail to shorten */
-    const g = genPreset('plk', mulberry32(num(P.seed, 7)), 0.2);
     for (const k of Object.keys(p)) if (k !== 'modLoop') delete p[k];
-    Object.assign(p, JSON.parse(JSON.stringify(presetData(g))));
-    /* FX OFF, or this measures a REVERB TAIL. First run read ~2000ms at every
-       velocity on an envelope whose decay is 486ms with sustain 0 — the tail
-       stayed above 5% of peak for the whole window, and since a tail scales
-       with the peak the ratio was a flat 1.00 no matter what the route did. */
-    for (const x of (p.fx || [])) if (x) x.typ = 0;
-    for (const x of (p.amp || [])) if (x) x.typ = 0;
-    foldMod(p); addrMod(p);
-    /* the slot carrying the AMP envelope is the one to stretch */
-    ampSlot = (p.mod || []).findIndex(m => m && m.src === 1 &&
-      (m.routes || []).some(r => r && ((r.addr && r.addr.key === 'amp') || (!r.addr && r.dst === 1))));
-    if (ampSlot >= 0) {
-      const free = (p.mod || []).findIndex(m => m && !m.src);
-      if (free >= 0) {
-        p.mod[free] = { src: 3, rsel: 0, mac: 0, a: 0.002, d: 0.2, s: 0, r: 0.2, crv: 0, tmul: 1,
-          routes: [{ dst: 0, idx: 0, amt: num(P.amt, 95), ctr: 0, tgt: null,
-                     addr: { rack: 'mod', slot: ampSlot, key, lbl } }] };
-        wired = true;
-        resolves = resolveDest(p, p.mod[free].routes[0].addr).length;
-      }
-    }
+    Object.assign(p, JSON.parse(JSON.stringify(presetData(basePreset('VDCY')))));
+    p.cat = 'keys';
+    p.osc[0] = { wav: 0, mode: 0, dst: 0, rat: 1, amt: 1, fine: 0, ph: 0, phm: 0, pw: 0.5 };
+    for (let i = 1; i < p.osc.length; i++) if (p.osc[i]) p.osc[i].amt = 0;
+    for (const x of p.flt) if (x) x.typ = 0;
+    for (const x of p.fx) if (x) x.typ = 0;
+    for (const x of p.amp) if (x) x.typ = 0;
+    for (const e of p.env) if (e) e.dst = 0;
+    for (const m of p.mod) if (m) { m.src = 0; m.routes = [{ dst: 0, idx: 0, amt: 100, ctr: 0, tgt: null }]; }
+    p.mod[0] = { src: 1, rsel: 0, mac: 0, a: 0.001, d: 0.30, s: 0, r: 0.02, crv: 0, tmul: 1,
+      routes: [{ dst: 1, idx: 0, amt: 100, ctr: 0, tgt: null,
+                 addr: { rack: 'voice', slot: 0, key: 'amp', lbl: 'amp' } }] };
+    p.mod[1] = { src: 3, rsel: 0, mac: 0, a: 0.005, d: 0.15, s: 0, r: 0.2, crv: 0, tmul: 1,
+      routes: [{ dst: 0, idx: 0, amt: amt, ctr: 0, tgt: null,
+                 addr: { rack: 'mod', slot: 0, key: 'tmul', lbl: 'time' } }] };
+    p.mix.lvl = 0.9; p._folded = true; p._addr = true;
     engine.rebuildRack(ch); engine.refresh(ch);
+    const resolves = resolveDest(p, p.mod[1].routes[0].addr).length;
     const len = async vel => {
-      engine.allOff(); await sleep(90);
-      const bus = busOf(ch); if (!bus) return null;
-      const t = tap(bus); await sleep(30);
-      engine.noteOn(AC.currentTime + 0.02, ch, note, vel);
-      await sleep(2200);
+      engine.allOff(); await sleep(120);
+      const bus = busOf(ch); if (!bus) return 0;
+      const t = tap(bus); await sleep(25);
+      engine.noteOn(AC.currentTime + 0.02, ch, KBBASE, vel);
+      await sleep(2600);
       engine.allOff();
       const w = t.stop()[0];
-      let pk = 0; for (let i = 0; i < w.length; i++) { const x = Math.abs(w[i]); if (x > pk) pk = x; }
-      if (!(pk > 1e-4)) return { pk: 0, ms: 0 };
+      let pk = 0;
+      for (let i = 0; i < w.length; i++) { const a2 = Math.abs(w[i]); if (a2 > pk) pk = a2; }
+      if (!(pk > 1e-4)) return 0;
       let last = 0;
       for (let i = 0; i < w.length; i++) if (Math.abs(w[i]) > pk * 0.05) last = i;
-      return { pk: +pk.toFixed(4), ms: Math.round(last / AC.sampleRate * 1000) };
+      return Math.round(last / AC.sampleRate * 1000);
     };
-    /* A SEQUENCE, not three isolated notes. An env time is a 'next' kind
-       destination — read once when a note starts — so if a velocity route
-       reaches it at all, it reaches the note AFTER the one that set it. Play
-       loud, soft, soft, loud: an off-by-one shows as row N tracking row N-1. */
-    const seq = [1, 0.25, 0.25, 1];
+    const seq = [1, 0.25, 0.25, 1], ms = [];
     for (let i = 0; i < seq.length; i++) {
-      const r = await len(seq[i]);
-      rows.push({ k: (i + 1) + '. vel ' + seq[i].toFixed(2), peak: r ? r.pk : 0, ms: r ? r.ms : 0 });
+      const d = await len(seq[i]);
+      ms.push(d);
+      rows.push({ k: (i + 1) + '. vel ' + seq[i].toFixed(2), ms: d });
     }
-    const ms = rows.map(r => r.ms);
-    rows.push({ k: 'same-note effect', peak: '', ms: ms[0] ? +(ms[1] / ms[0]).toFixed(2) : 0 });
-    rows.push({ k: 'one-note-late', peak: '', ms: ms[1] ? +(ms[2] / ms[1]).toFixed(2) : 0 });
+    rows.push({ k: 'soft / loud', ms: ms[0] ? +(ms[1] / ms[0]).toFixed(2) : 0 });
+    rows.push({ k: 'row3 / row2 (1.00 = no off-by-one)', ms: ms[1] ? +(ms[2] / ms[1]).toFixed(2) : 0 });
+    rows.push({ k: 'route resolves', ms: resolves });
   } finally { unstash(ch, keep); }
-  return { cols: ['peak', 'ms'], rows,
-           notes: 'vel -> mod[' + ampSlot + '].' + key + ' amt ' + num(P.amt, 95) +
-                  ' | wired ' + wired + ' | resolves ' + resolves };
+  return { cols: ['ms'], rows,
+           notes: 'vel -> mod[0].tmul at amt ' + amt + '; soft should be SHORTER' };
 }
 
 /* IS THE PRESS WIRE REAL? (Gad, 2026-08-29: "yes do the press wire".) It turned

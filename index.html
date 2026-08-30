@@ -1518,7 +1518,7 @@ const recPlayed=(pi,tBeat,midi,vel,durBeats)=>recPlayNote(pi,tBeat,sndOut(pi,mid
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-30.1414';
+const BUILD='2026-08-30.1421';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -2899,6 +2899,18 @@ const slotNo=sl=>sl==='*'?'*':String((sl+1)%10);
    `SP('dec','d','time')` carries neither, so a decay that goes to eight seconds
    looked like it spanned 1 and a route at 200% moved it by a fifth of a second.
    These are the same defaults the arrow keys have always used. */
+/* THE DIAL'S UNITS BACK INTO THE FIELD'S. A spec may carry get/set that scale
+   — `tmul` shows as 10..400 percent and stores 0.1..4 — and anything writing
+   to the raw object rather than through the dial has to undo that. Using the
+   spec's OWN setter rather than a table means a spec that changes its mapping
+   cannot leave this behind. */
+const specRaw=(sp,v)=>{
+  if(!sp||!sp.set)return v;
+  const t={};
+  try{sp.set(t,v);}catch(_){return v;}
+  const out=t[sp.key];
+  return out===undefined?v:out;
+};
 function destSpan(sp){
   /* a menu's range is its options — without this every enum reported 0..1 and
      an automation point at option 7 drew pinned to the right-hand edge */
@@ -11010,7 +11022,18 @@ class Engine{
                200 on a bipolar source reaches both ends of whatever it is
                pointed at, and 100 reaches half. It used to be span-per-100%
                against a span it had guessed wrong. */
-            const v=destApply(sp,base,(rt.amt||0)*src/200);
+            const v0=destApply(sp,base,(rt.amt||0)*src/200);
+            /* A `next` VALUE IS PARKED FOR THE VOICE TO READ, and the voice
+               reads the RAW FIELD — so it has to be stored in the field's own
+               units, not the dial's. `tmul` is the case that exposed it: its
+               spec is a PERCENT (span 10..400, get x100) while `m.tmul` is a
+               multiplier clamped to 0.1..4, so every parked value arrived as
+               173 or 392 and clamped flat to 4. Velocity could not change an
+               envelope length by any amount because both ends of the range
+               landed on the same number. `ctrl` destinations are unaffected —
+               their live handlers take the dial's units — so only the parked
+               path converts. */
+            const v=destRate(a.rack,a.key)==='next'?specRaw(sp,v0):v0;
             const id=pi+'.'+a.rack+'.'+h.si+'.'+sp.key;
             touched[id]=1;
             this._ctrlHeld[id]={pi,si:h.si,key:sp.key,base,rack:a.rack};
@@ -11023,6 +11046,52 @@ class Engine{
       if(touched[id])continue;
       const h=this._ctrlHeld[id]; delete this._ctrlHeld[id];
       try{this._ctrlPut(h.rack,h.pi,h.si,h.key,undefined);}catch(_){}
+    }
+  }
+/* NOTE-SCOPED SOURCES, EVALUATED AT NOTE-ON (Gad, 2026-08-30: "now do the
+     note-on fix so vel can shorten envelopes").
+
+     A `next` destination — an envelope's a/d/s/r/crv/tmul, a vox field, a ply
+     field — has no node to write and no value to ramp. It is read ONCE, when a
+     note starts, out of the override map the control tick parks values in. For
+     an LFO or a macro that is exactly right.
+
+     FOR VELOCITY AND KEY IT WAS OFF BY ONE, and unusably so. The tick runs on
+     a ~6ms timer and computes from `lastOn` — so at the instant a note is
+     built, the parked value is whatever the tick last worked out, which is the
+     PREVIOUS note's velocity. `vel -> decay` gave every hit the length of the
+     one before it: a soft note after a hard one came out long, and the whole
+     thing read as broken rather than expressive. That is why the dynamics
+     layer shipped without "shorter at low vel".
+
+     So the two note-scoped sources are re-evaluated HERE, with the velocity
+     and pitch of the note actually being played, immediately before the voice
+     reads them. Everything else keeps parking on the tick. The tick's next
+     pass computes the same number from the same lastOn, so the two agree and
+     nothing fights.
+
+     ONLY vel and key: an lfo, an envelope, rnd, press, flw and macro are all
+     free-running or continuous and have no "this note's value" to speak of. */
+  _noteOnNext(pi,midi,vel){
+    const p=S.presets[pi]; if(!p||!p.mod)return;
+    for(let mi=0;mi<p.mod.length;mi++){
+      const m=p.mod[mi];
+      if(!m||m.off||!m.src||!m.routes)continue;
+      const s=Math.round(m.src);
+      if(s!==3&&s!==4)continue;
+      const val=s===3?clamp(vel,0,1):clamp((midi-60)/24,-2,2);
+      for(const rt of m.routes){
+        const a=rt.addr; if(!a||rt.dst)continue;
+        if(destRate(a.rack,a.key)!=='next')continue;
+        let hits; try{hits=resolveDest(p,a);}catch(_){continue;}
+        if(!hits||!hits.length)continue;
+        for(const h of hits){
+          const sp=h.spec; if(!sp)continue;
+          const base=(sp.get?sp.get(h.slot):h.slot[sp.key])??destSpan(sp)[0];
+          try{this.ovPut(pi,a.rack,h.si,sp.key,
+                         specRaw(sp,destApply(sp,base,(rt.amt||0)*val/200)));}catch(_){}
+        }
+      }
     }
   }
   _ctrlPut(rack,pi,si,key,v){
@@ -12141,6 +12210,10 @@ class Engine{
     if(isKit(p)&&!K)return null;
     const pre=K?K:prepEffective(p,pm);
     const lid=K?pcOf(pm):'ch';
+    /* …and the overrides this voice is about to read get THIS note's velocity
+       and pitch first. See _noteOnNext: before this line they carried the
+       previous note's. */
+    try{this._noteOnNext(pi,midi,vel);}catch(_){}
     const v=new Voice(this,at,pi,midi,vel,pre,pm,legato); v._lid=lid;
     this.act[pi].push(v);
     return v;
