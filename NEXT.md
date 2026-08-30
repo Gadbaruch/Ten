@@ -1,3 +1,97 @@
+# THE DAY, IN ONE PLACE — 2026-08-30
+
+Seven entries below cover this session in detail. This is the map, the numbers
+that matter, and one QA list so none of it needs scrolling for.
+
+**Everything here is live in build 2026-08-30.1408 or later.** ⚠ Other sessions
+were committing into this same checkout all day — see THE TRAPS below.
+
+## WHAT CHANGED, in the order it happened
+
+| | what | the number |
+|---|---|---|
+| 1 | wavetable sweep blends instead of swapping | junk added by a slow sweep 20.6 → 5.9 dB |
+| 2 | …and the blend ramps linearly, the way Vital's does | 0.2 dB steady where live gave 9.2 / 0.1 / 15.1 |
+| 3 | the dice fire on the key PRESS, not the release | all nine gestures, one roll each |
+| 4 | ten digital wavetables from AKWF (CC0) | shelf ceiling harmonic 6.0 → 24.8 |
+| 5 | **the wavetable is an audio-rate worklet oscillator** | alias sideband +4 dB ABOVE the true one → 35-61 dB under it |
+| 6 | high-resolution tables: recipes 48 → 256 harmonics, ladder → 512, Catmull-Rom | +76 dB of energy above 5kHz at C2 |
+| 7 | a synced LFO lands on the BAR, and follows the tempo | phase axis moved from the audio clock to the grid |
+| 8 | the originals redone, ten more banks, thirty tables | vgame/fm/ak04 reach harmonic 114 |
+| 9 | the shelf's loudness evened | spread 23.3 → 5.9 dB |
+| 10 | s&h / drift / skewed LFOs get a live rate | ×0.5 STUCK → ×4-11 LIVE |
+| 11 | the scope key was ALSO the fine step | 6 presses moved a rate 2.00→2.29Hz, now 2.00→7.63 |
+| 12 | one press may not cross the dial | coarse+hard press took a filter to 20kHz, now 2.8k |
+
+## ⚠ THE TRAPS, and every one of them cost real time
+
+- **A dial has THREE failure modes** — dead, too small to hear, too big to
+  place — and only the first sounds like "it doesn't work". "The LFO is not
+  live tweakable" was reported FOUR times and was items 7, 10, 11 and 12 above,
+  in that order. Every probe written for the first two PASSED on the build he
+  was calling broken, because they asked *did the value change* rather than
+  *did it change ENOUGH, and not too much*. **Measure the SIZE of a step
+  against the range it lives in.**
+- **A test that recomputes the thing it is testing is not a test.** `lfosync`'s
+  first cut derived the expected phase from the same grid function the fix
+  uses, compared it with itself, and called the FIXED build DRIFTING.
+- **An LFO is a non-stationary test signal.** A sine sweeps fast in the middle
+  and slow at the ends, so any statistic over a window reads whichever part it
+  caught: the same configuration gave `added` 0.1, 18.2 and 26.2 on three runs.
+  Drive the parameter at a constant rate instead.
+- **`spectral()` returns the PEAK BIN as `.hz`**, and its `.centroid` is
+  dominated by 8000 bins of noise floor — it read ~1500Hz for a pure sine.
+  Brightness comes from the RECIPE now, which IS the spectrum.
+- **A sweep that measures TOO CLEAN is a sweep that is not happening.** Taking
+  pwxAim's "drive the stale copy to zero" out of the straddle stalled it
+  completely and it read a residual BELOW the static floor.
+- **`cancelAndHoldAtTime` is worse than the idiom it replaces** here. It is
+  what the spec points you at; swapping that one line sent the spike
+  percentile from 7.5 to 22 and back. `AC.currentTime` is the start of the last
+  rendered quantum and is already in the past.
+- ⚠ **VERIFYING A SHIP: the build string proves nothing.** GitHub Pages sends
+  `cache-control: max-age=600`, so Gad's browser holds the old HTML for ten
+  minutes (`serve.json`'s `no-store` is for the local `npx serve` only; Pages
+  ignores it). And **other Claude sessions commit into this same working
+  directory** — HEAD moved off my commit twice today, and once the live build
+  was NEWER than mine, which read as a failed deploy when it was the opposite.
+  `git fetch`, check `git merge-base --is-ancestor <yours> HEAD`, then **grep
+  the fetched live bytes for a distinctive comment from your own change.**
+
+## NEW TOOLS
+
+    tools/probe.sh wtpos     a driven wavetable position: junk, spikes, the write gain
+    tools/probe.sh wtshelf   every table at pos 0 and 1: harmonics, brightness, level, air
+    tools/probe.sh wtalias   is the MODULATOR aliasing? the control-tick fold, found
+    tools/probe.sh lfosync   rate, which axis the phase is on, and tempo-follow
+    tools/probe.sh lforate   does a live rate change reach every LFO shape
+    tools/probe.sh rollkey   does the dice key fire on the press, for every modifier
+    tools/gen_wavetables.py  AKWF -> harmonic recipes · --scan rates every folder
+
+## QA CHECKLIST — the whole day, ordered by what is most likely wrong
+
+1. **⚠ EVERY SCOPE DIAL MOVES DIFFERENTLY.** Hold ⌃+f, ⌃+l, ⌃+e and turn. Plain
+   is ten times further than yesterday, ⌥ is the fine step, right shift is
+   coarse and is now bounded. MEASURED: lfo rate 2.00→7.63Hz in six presses
+   (was 2.29); a coarse+hard press took a filter to 20kHz and now reaches 2.8k.
+2. **⚠ EVERY WAVETABLE'S LEVEL MOVED.** The shelf is 5.9dB wide instead of 23.3
+   and sits where the native oscillators do (wt basic -10.2 · sine -9.6 ·
+   square -8.0 · saw -12.9). Anything saved with a wt op has moved.
+3. **Play the new tables low, around C1-C2** — that was the "cheap on the lower
+   octaves" complaint. MEASURED: +76dB of energy above 5kHz at C2.
+4. **LFO at max speed on `pos a`.** MEASURED: the alias sideband was +4dB ABOVE
+   the real modulation and is now 35-61dB under it.
+5. **LFO rate under a held note on s&h / drift / a SKEWED shape.** Those three
+   were completely dead. MEASURED: ×0.5-1.0 → ×4-11.
+6. **LFO on sync with the transport rolling** — it should land ON the beat, and
+   a tempo change should reach a sounding note. Trig must be FREE, not retrig.
+7. **Tap `/`** — it rolls as you press, not as you let go. `/`+↑↓ now rolls once
+   on the way to the wildness dial, which is the cost of that.
+8. **`glass` and `sub` are deliberately unchanged**, and so are the other eight
+   originals' archetypes. If `vox` no longer sounds like vowels, say so.
+9. **A big chord on `ak04` through a resonant filter** — the hottest thing on
+   the shelf. MEASURED: 0.56 at the master, zero clipped samples.
+
 # THE ACOUSTIC KITS LOADED SILENT — 2026-08-30
 
 Gad: *"all the new drum sounds i dont hear them when scrolling through the
