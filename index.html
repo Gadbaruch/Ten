@@ -1471,7 +1471,7 @@ const recPlayed=(pi,tBeat,midi,vel,durBeats)=>recPlayNote(pi,tBeat,sndOut(pi,mid
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-30.1011';
+const BUILD='2026-08-30.1118';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1750,10 +1750,24 @@ const smpKey=(pi,op,pad)=>pad==null?pi+':'+op:pi+':p'+pcOf(pad)+':'+op;
    quietest kind of wrong. The two shapes are told apart by depth (four
    segments where there are now three) and convert exactly, so a set from
    yesterday still finds its drums. */
+/* …AND IT MUST NOT EAT A TREE THAT IS CURRENT. The rule above is "four
+   segments means old", which was true when the only four-segment paths were
+   the retired machine layout. `samples/oneshots/acoustic/<kit>/<file>` is four
+   segments too, so every acoustic kit pad was silently rewritten to
+   `oneshots/<kit>/<file>`, missed POOLBYF, and came back as a NAMED HOLE —
+   the kit loaded, the names showed, nothing made a sound. Measured: all twelve
+   pads of KTJAZ resolved `pool:n`, with `oneshots/acoustic/jazz/kick.flac`
+   normalising to `oneshots/jazz/kick.flac`.
+
+   CURRENT is the list below. Anything added under samples/oneshots/ that is a
+   TREE rather than an instrument folder belongs in it, or its takes will be
+   migrated out of existence exactly like this. */
+const SMPTREES=['acoustic'];
 const smpPath=f=>{
   const t=String(f||'');
-  const m=/^oneshots\/[^/]+\/([^/]+)\/([^/]+)$/.exec(t);
-  return m?'oneshots/'+m[1]+'/'+m[2]:t;
+  const m=/^oneshots\/([^/]+)\/([^/]+)\/([^/]+)$/.exec(t);
+  if(!m||SMPTREES.includes(m[1]))return t;
+  return 'oneshots/'+m[2]+'/'+m[3];
 };
 /* the key the SOUND PAGE is pointing at: a kit edits its focused pad, and with
    no pad focused it edits the channel — the same rule modHolder already uses */
@@ -9987,34 +10001,110 @@ class Engine{
      weight just went to zero, and a reload can never be heard at any rate. */
   wtAim(w,eff,key,t,tc){
     const N=WTRUNG, n=AC.currentTime;
-    const t2=clamp(t,0,N); let i0=Math.floor(t2); if(i0>=N)i0=N-1;
-    const x=clamp(t2-i0,0,1);
-    const kOf=r=>this.wtKey(Object.assign({},eff,{[key]:r/N}));
-    const kLo=kOf(i0), kHi=kOf(i0+1);
-    /* KEEP WHATEVER IS ALREADY RIGHT — one copy re-tabled per rung crossed,
-       and never the one you can hear */
-    let aLo;
-    if(w.ka===kLo||w.kb===kHi)aLo=true;
-    else if(w.ka===kHi||w.kb===kLo)aLo=false;
-    else aLo=true;
-    const ta=aLo?kLo:kHi, tb=aLo?kHi:kLo;
-    let okA=(w.ka===ta), okB=(w.kb===tb);
-    /* THE MEASURED GAIN DECIDES, not an argument about which copy ought to be
-       silent. A copy still carrying weight keeps its table for one more tick
-       and the sound leans on the other one — the nearest rung — which is a
-       coarser step, not a click. */
-    if(!okA&&w.ga.gain.value<0.03){
-      try{w.a.setPeriodicWave(this.wtWave(Object.assign({},eff,{[key]:(aLo?i0:i0+1)/N})));
-          w.ka=ta; okA=true;}catch(_){}}
-    if(!okB&&w.gb.gain.value<0.03){
-      try{w.b.setPeriodicWave(this.wtWave(Object.assign({},eff,{[key]:(aLo?i0+1:i0)/N})));
-          w.kb=tb; okB=true;}catch(_){}}
-    let ga=aLo?1-x:x, gb=aLo?x:1-x;
-    if(!okA){ga=0; gb=1;}                    // stale: hand it to the other for one tick
-    else if(!okB){ga=1; gb=0;}
-    w.ga.gain.setTargetAtTime(ga,n,tc);
-    w.gb.gain.setTargetAtTime(gb,n,tc);
-    w.cur=ga>=gb?'a':'b';                    // the swap path still asks who is loud
+    /* A LINEAR RAMP THAT FILLS THE WHOLE INTERVAL, WHICH IS WHAT VITAL DOES.
+       setTargetAtTime is an exponential: at 1.5ms it is done in about 5ms and
+       then SITS FLAT for the rest of an 8ms tick, and that flat spot is the
+       staircase. It also explains the reading that made no sense — the junk
+       got WORSE as the crossfade got faster, which is backwards for a click
+       and exactly right for a fade that finishes early and waits.
+       Vital's wavetable oscillator recomputes every kWavetableFadeTime =
+       0.007s and lerps from the previous table to the new one across every
+       sample of that window — t = (n+1)/num_buffer_samples, reset to 0 the
+       instant the next table lands. The ramp never rests.
+       So: ramp over the interval since the LAST call, which is the best
+       predictor of the next, clamped so an idle note's first move after a gap
+       does not ramp for a second. modTick is 8ms nominal but automation calls
+       this too — the pulse-width work measured the combined rate at 5.8ms
+       median — so the interval is measured, not assumed. */
+    const dt=clamp(w.tn?n-w.tn:0.008,0.004,0.02); w.tn=n;
+    /* ⚠ NOT cancelAndHoldAtTime, which is the idiom the spec points you at and
+       MEASURED THREE TIMES WORSE HERE: at one rung a tick the spike percentile
+       went 7.5 -> 20-24 and the spike energy share 0.05 -> 0.34-0.43 by
+       swapping this one line, and back again. n is AC.currentTime, which is
+       the START of the last rendered quantum and therefore already in the
+       past; cancelAndHold at a past time plus a ramp from it does not land
+       where the arithmetic says. Read the value, pin it, ramp from the pin. */
+    const ramp=(pm,v)=>{
+      try{const cur=pm.value;
+        pm.cancelScheduledValues(n); pm.setValueAtTime(cur,n);
+        pm.linearRampToValueAtTime(v,n+dt);}
+      catch(_){try{pm.setTargetAtTime(v,n,tc);}catch(_2){}}
+    };
+    const t2=clamp(t,0,N);
+    /* HOW FAST IT IS MOVING, in rungs per tick, and the choice of algorithm is
+       made on THAT — smoothed — not on whether this particular tick's rungs
+       happened to bracket. A per-tick bracket test HUNTS between the two
+       exactly where they meet, and the hunting is worse than either of them:
+       MEASURED at a 2Hz sweep, residual crest 9.1 hunting, against 5.0 for the
+       straddle at 0.2Hz and 5.8 for the fade at 4Hz, on a floor of 5.3. */
+    const dr=w.tq==null?0:Math.abs(t2-w.tq); w.tq=t2;
+    w.dr=w.dr==null?dr:w.dr*0.75+dr*0.25;
+    if(w.dr<=0.9){
+      /* THE STRADDLE. Under a rung a tick the pair can bracket the position:
+         the rung below on one copy, the rung above on the other, blended by
+         the fraction between them. The blend follows the modulator
+         CONTINUOUSLY — there is no transient at all, and it is measurably
+         better than the fade here: 1.6dB of added junk against 11.4. */
+      let i0=Math.floor(t2); if(i0>=N)i0=N-1;
+      const x=clamp(t2-i0,0,1);
+      const kOf=r=>this.wtKey(Object.assign({},eff,{[key]:r/N}));
+      const kLo=kOf(i0), kHi=kOf(i0+1);
+      /* KEEP WHATEVER IS ALREADY RIGHT — one copy re-tabled per rung crossed,
+         and never the one you can hear */
+      let aLo;
+      if(w.ka===kLo||w.kb===kHi)aLo=true;
+      else if(w.ka===kHi||w.kb===kLo)aLo=false;
+      else aLo=true;
+      const ta=aLo?kLo:kHi, tb=aLo?kHi:kLo;
+      let okA=(w.ka===ta), okB=(w.kb===tb);
+      /* THE MEASURED GAIN DECIDES, not an argument about which copy ought to
+         be silent. */
+      if(!okA&&w.ga.gain.value<0.03){
+        try{w.a.setPeriodicWave(this.wtWave(Object.assign({},eff,{[key]:(aLo?i0:i0+1)/N})));
+            w.ka=ta; okA=true;}catch(_){}}
+      if(!okB&&w.gb.gain.value<0.03){
+        try{w.b.setPeriodicWave(this.wtWave(Object.assign({},eff,{[key]:(aLo?i0+1:i0)/N})));
+            w.kb=tb; okB=true;}catch(_){}}
+      if(okA&&okB){
+        const ga=aLo?1-x:x;
+        ramp(w.ga.gain,ga); ramp(w.gb.gain,1-ga);
+        w.cur=ga>=0.5?'a':'b';               // the swap path still asks who is loud
+        return;
+      }
+      /* ONE COPY IS RIGHT: lean entirely on it for a tick. That is not a
+         consolation prize, it is the MECHANISM — driving the stale copy to
+         zero is what creates the silence the next tick writes into, and pwxAim
+         has always done it. Taking it out stalled the straddle completely:
+         nothing reached the gate, no table ever landed, and a full-range sweep
+         read 0 writes and a residual BELOW the static floor. ⚠ A sweep that
+         measures too clean is a sweep that is not happening. */
+      if(okA||okB){
+        ramp(w.ga.gain,okA?1:0); ramp(w.gb.gain,okA?0:1);
+        w.cur=okA?'a':'b'; return;
+      }
+      /* neither, transiently — a table change, or the moment after a mode
+         switch. The fade below picks it up. */
+    }
+    /* THE FADE — VITAL'S OWN ALGORITHM, and what this degrades to above a rung
+       a tick, where no pair of adjacent rungs can bracket the position. The
+       EXACT position, not a rung, lands on the copy that is already silent and
+       the pair fades monotonically across the interval: from = what is
+       sounding, to = where we are now, every time, never a reversal. */
+    const aQ=w.ga.gain.value<=w.gb.gain.value;
+    const qg=aQ?w.ga:w.gb, og=aQ?w.gb:w.ga;
+    /* still loud means this is the first tick here: drive it to silence, keep
+       sounding the other, write on the next one. In steady state the pair
+       alternates and the write is always onto an exact zero, because a linear
+       ramp that fills the interval ARRIVES. */
+    if(qg.gain.value>0.03){ramp(qg.gain,0); ramp(og.gain,1); w.cur=aQ?'b':'a'; return;}
+    const wk=this.wtKey(eff);
+    if(w[aQ?'ka':'kb']===wk&&og.gain.value>0.999)return;   // already there, and settled
+    try{(aQ?w.a:w.b).setPeriodicWave(this.wtWave(eff));}catch(_){return;}
+    /* wtKey rounds the exact position onto one of the two bracket rungs, so
+       the straddle re-engages of its own accord when the modulator slows */
+    w[aQ?'ka':'kb']=wk;
+    ramp(qg.gain,1); ramp(og.gain,0);
+    w.cur=aQ?'a':'b';
   }
   setWave(osc,w,phDeg,width){
     if(w>=9){osc.type='sine';return;}   // 'smp' handled as a buffer source elsewhere

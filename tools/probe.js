@@ -3077,7 +3077,7 @@ async function probePwm() {
        PRODUCT of the dials and it outruns 400 rows. */
     if (Math.round(num(P.cold, 1))) engine.waveCache.clear();
     p.mod[0].off = false;
-    const B = await grab(700);
+    const B = await grab(Math.round(Math.min(4000, Math.max(700, 2000 / RATE))));
     const ea = edges(A, 0), eb = edges(B, sr / f);
     /* how many crossings a pulse MUST have over the same span: two per cycle,
        counted between the first and last rising edge so no partial cycle is
@@ -4525,10 +4525,13 @@ async function probePwmAll() {
        width was not moving at all). It IS comparable BEFORE AND AFTER on the
        same wave, because the spectrum those two builds are asked for is
        identical and only the way the width arrives changed. */
-    const junk = (x, f0) => {
+    /* ⚠ ONE 16384-POINT WINDOW IS 371ms AND AN LFO CYCLE AT 0.5Hz IS TWO
+       SECONDS, so a single centred window reads whichever 18% of the sweep it
+       landed on — MEASURED: the same configuration gave 0.1, 18.2 and 26.2 dB
+       on three consecutive runs. Every non-overlapping window across the whole
+       grab, averaged, and the grab itself is at least two full LFO periods. */
+    const junk1 = (x, f0, o) => {
       const N = 16384;
-      if (x.length < N) return null;
-      const o = Math.round((x.length - N) / 2);
       const re = new Float64Array(N), im = new Float64Array(N);
       for (let i2 = 0; i2 < N; i2++)
         re[i2] = x[o + i2] * (0.5 - 0.5 * Math.cos(2 * Math.PI * i2 / N));
@@ -4540,8 +4543,14 @@ async function probePwmAll() {
         if (Math.abs(hz - f0) < 3 * bhz) fund = Math.max(fund, m);
         if (Math.abs(hz - Math.round(hz / f0) * f0) > 25) { j2 += m * m; jn++; }
       }
-      return +(10 * Math.log10(Math.max(1e-20, j2 / Math.max(1, jn)) /
-                               Math.max(1e-20, fund * fund))).toFixed(1);
+      return { j: j2 / Math.max(1, jn), f: fund * fund };
+    };
+    const junk = (x, f0) => {
+      const N = 16384, w = Math.floor(x.length / N);
+      if (w < 1) return null;
+      let j = 0, f = 0;
+      for (let i2 = 0; i2 < w; i2++) { const r = junk1(x, f0, i2 * N); j += r.j; f += r.f; }
+      return +(10 * Math.log10(Math.max(1e-20, j / w) / Math.max(1e-20, f / w))).toFixed(1);
     };
     /* f0 FROM THE ENGINE, NOT FROM THE SIGNAL. Two origins do not necessarily
        play the same note — localStorage carries the octave — and this probe
@@ -4668,10 +4677,13 @@ async function probeWtPos() {
     const p = S.presets[ch];
     /* the same junk-between-the-teeth reading pwmall uses, and the same
        caveat: comparable BEFORE and AFTER on one wave, never to an ideal */
-    const junk = (x, f0) => {
+    /* ⚠ ONE 16384-POINT WINDOW IS 371ms AND AN LFO CYCLE AT 0.5Hz IS TWO
+       SECONDS, so a single centred window reads whichever 18% of the sweep it
+       landed on — MEASURED: the same configuration gave 0.1, 18.2 and 26.2 dB
+       on three consecutive runs. Every non-overlapping window across the whole
+       grab, averaged, and the grab itself is at least two full LFO periods. */
+    const junk1 = (x, f0, o) => {
       const N = 16384;
-      if (x.length < N) return null;
-      const o = Math.round((x.length - N) / 2);
       const re = new Float64Array(N), im = new Float64Array(N);
       for (let i2 = 0; i2 < N; i2++)
         re[i2] = x[o + i2] * (0.5 - 0.5 * Math.cos(2 * Math.PI * i2 / N));
@@ -4683,8 +4695,14 @@ async function probeWtPos() {
         if (Math.abs(hz - f0) < 3 * bhz) fund = Math.max(fund, m);
         if (Math.abs(hz - Math.round(hz / f0) * f0) > 25) { j2 += m * m; jn++; }
       }
-      return +(10 * Math.log10(Math.max(1e-20, j2 / Math.max(1, jn)) /
-                               Math.max(1e-20, fund * fund))).toFixed(1);
+      return { j: j2 / Math.max(1, jn), f: fund * fund };
+    };
+    const junk = (x, f0) => {
+      const N = 16384, w = Math.floor(x.length / N);
+      if (w < 1) return null;
+      let j = 0, f = 0;
+      for (let i2 = 0; i2 < w; i2++) { const r = junk1(x, f0, i2 * N); j += r.j; f += r.f; }
+      return +(10 * Math.log10(Math.max(1e-20, j / w) / Math.max(1e-20, f / w))).toFixed(1);
     };
     /* STEPPING vs SWEEPING, told apart without a calibrated threshold. The
        note is periodic at f0, so take the SECOND difference across one period:
@@ -4710,12 +4728,32 @@ async function probeWtPos() {
         r[i] = v; s2 += v * v; if (Math.abs(v) > mx) mx = Math.abs(v);
       }
       const rms = Math.sqrt(s2 / m);
+      /* ⚠ crest is a single MAX — extreme-value statistics, and it wanders by
+         a factor of two between identical runs. The 99.99th percentile says
+         the same thing about isolated spikes and actually repeats. */
       /* how much of the energy sits in the loudest 0.1% of samples — a spike
          train puts it all there, a noise floor spreads it evenly (0.001) */
       const srt = Array.from(r, Math.abs).sort((a, b) => b - a);
       const top = Math.max(1, Math.round(m * 0.001));
       let te = 0; for (let i = 0; i < top; i++) te += srt[i] * srt[i];
+      const p9999 = srt[Math.min(srt.length - 1, Math.round(m * 0.0001))];
+      /* WHERE the loud residual sits, in ms from the start of the tap, and how
+         many separate bursts there are — an intermittent artifact and a
+         steadily rough sweep read the same on any single statistic. */
+      /* ⚠ NOT `at` — that is the fractional-index interpolator this very
+         function calls, and shadowing it is a TDZ error a syntax check will
+         not find (CLAUDE.md says so, and here it is again). */
+      const thr = 6 * rms;
+      let peakAt = 0, mxv = 0, bursts = 0, run = 0;
+      for (let i = 0; i < m; i++) {
+        const a = Math.abs(r[i]);
+        if (a > mxv) { mxv = a; peakAt = i; }
+        if (a > thr) { if (!run) bursts++; run = 1; } else run = 0;
+      }
       return { rms: +rms.toFixed(5), crest: +(mx / Math.max(1e-12, rms)).toFixed(1),
+               p9999: +(p9999 / Math.max(1e-12, rms)).toFixed(2),
+               atMs: +((peakAt + o) / sr * 1000).toFixed(0),
+               ofMs: +(n / sr * 1000).toFixed(0), bursts,
                top01: +(te / Math.max(1e-20, s2)).toFixed(3) };
     };
     const jumps = x => {
@@ -4797,9 +4835,9 @@ async function probeWtPos() {
       L._gmax = wr.length ? +Math.max.apply(null, wr).toFixed(3) : null;
       L._gmed = wr.length
         ? +wr.slice().sort((a, b) => a - b)[wr.length >> 1].toFixed(3) : null;
-      L._span = seen.length && seen[0].v != null
-        ? +(Math.max.apply(null, seen.map(s => s.v)) -
-            Math.min.apply(null, seen.map(s => s.v))).toFixed(3) : null;
+      const vs = seen.filter(s => s.v != null).map(s => s.v);
+      L._span = vs.length
+        ? +(Math.max.apply(null, vs) - Math.min.apply(null, vs)).toFixed(3) : null;
       L._ms = +(ms / Math.max(1, seen.length)).toFixed(1);
       engine.allOff(); await sleep(50);
       return L;
@@ -4864,18 +4902,35 @@ async function probeWtPos() {
        shape dials moving looks like forever, because the key space is the
        PRODUCT of the dials and it outruns 400 rows. */
     if (Math.round(num(P.cold, 1))) engine.waveCache.clear();
-    p.mod[0].off = false;
-    const B = await grab(700);
-    p.mod[0].off = true;
+    /* ⚠ DRIVE THE POSITION, DO NOT USE AN LFO. A sine LFO sweeps fast in the
+       middle and slow at the ends, so the signal is NON-STATIONARY and every
+       statistic over the window reads whichever part it covered — the same
+       configuration gave `added` 0.1, 18.2 and 26.2 on three runs, and the
+       spike percentile read the fast middle as a spike train (topS 0.575 on a
+       sweep that has no steps in it at all).
+       A constant rate makes it stationary, makes `rungs per tick` the dial
+       that actually decides which branch of wtAim runs, and exercises exactly
+       the code path a modulator does — _ctrlPut calls wtLive the same way. */
+    const RUNGS = num(P.rungs, 0.5);            // rungs of the 64-grid per tick
+    const stepPos = RUNGS / 64;
+    let pos = 0, dir = 1;
+    const drive = setInterval(() => {
+      pos += dir * stepPos;
+      if (pos >= 1) { pos = 1; dir = -1; } else if (pos <= 0) { pos = 0; dir = 1; }
+      try { engine.wtLive(ch, 0, 'posa', pos); } catch (_) {}
+    }, 8);
+    let B;
+    try { B = await grab(1500); } finally { clearInterval(drive); }
     const jB = jumps(B), sw = junk(B, f), rB = resid(B, f);
     const tk = ticks.slice().sort((a, b) => a - b);
     const tkMed = tk.length ? +tk[tk.length >> 1].toFixed(1) : null;
     const tkMax = tk.length ? +tk[tk.length - 1].toFixed(1) : null;
-    rows.push({ k: KEY + ' ' + WTNAMES[TA] + '/' + WTNAMES[TB], hz: r3(f),
+    rows.push({ k: RUNGS + ' rung/tick ' + WTNAMES[TA] + '/' + WTNAMES[TB], hz: r3(f),
                 floor: fl, swept: sw,
                 added: (fl != null && sw != null) ? +(sw - fl).toFixed(1) : '?',
                 rF: rA && rA.rms, rS: rB && rB.rms,
-                crF: rA && rA.crest, crS: rB && rB.crest,
+                pF: rA && rA.p9999, pS: rB && rB.p9999,
+                atMs: rB && rB.atMs, ofMs: rB && rB.ofMs, bursts: rB && rB.bursts,
                 topF: rA && rA.top01, topS: rB && rB.top01,
                 r32, r33, between,
                 below: +(between - Math.min(r32, r33)).toFixed(5),
@@ -4898,13 +4953,19 @@ async function probeWtPos() {
   notes.push('calls = wtLive calls in the window · writes = the ones that actually put a ' +
              'table on an oscillator · gWrite = the WORST gain a copy had when a table ' +
              'landed ON it. 0 is silent and inaudible, near 1 is a full-scale flip.');
-  notes.push('span = how far the modulator actually moved ' + KEY + '. A perfectly smooth ' +
-             'reading on a span of 0 means nothing arrived.');
-  notes.push('rF/rS = rms of the one-period second difference, floor and swept. crF/crS = ' +
-             'its CREST (max/rms) and topS = the share of its energy in the loudest 0.1% of ' +
-             'samples. A smooth sweep raises rms and leaves crest near the floor; a STEPPING ' +
-             'one puts isolated spikes in and crest/top climb. That pair is the answer — ' +
-             '`added` cannot tell a big smooth sweep from a small steppy one.');
+  notes.push('the position is DRIVEN at a constant `rungs` per 8ms tick, not by an LFO — a ' +
+             'sine sweeps fast in the middle and slow at the ends and every statistic then ' +
+             'reads whichever part of the cycle the window caught. rungs is also the dial ' +
+             'that decides which branch of wtAim runs: under ~0.9 the straddle brackets the ' +
+             'position, over it the fade takes over.');
+  notes.push('rF/rS = rms of the one-period second difference, floor and swept. pF/pS = its ' +
+             '99.99th percentile over rms, topS = the share of its energy in the loudest 0.1% ' +
+             'of samples. A smooth sweep raises rms and leaves pS near the floor; a STEPPING ' +
+             'one puts isolated spikes in and pS/topS climb. That pair is the answer — ' +
+             '`added` cannot tell a big smooth sweep from a small steppy one. ' +
+             'The swept take is at least TWO LFO periods and `added` averages every ' +
+             'non-overlapping 16384-point window across it, because one centred window is ' +
+             '371ms and read 0.1, 18.2 and 26.2 dB on three runs of the same thing.');
   notes.push('wCall/wMiss = wtWave calls and CACHE MISSES in the swept window · wMs = total ' +
              'main-thread ms inside wtWave · perMs = ms per miss · tkMed/tkMax = the control ' +
              'tick interval while it ran. A miss rate near the tick rate with a fat perMs is ' +
@@ -4914,7 +4975,8 @@ async function probeWtPos() {
              'their mean and `below` is between minus the quieter rung. The two tables are ' +
              'each peak-normalised so they need not match, but the blend must land BETWEEN ' +
              'them: below < 0 is the pair cancelling, which would ripple once per rung.');
-  return { cols: ['hz', 'floor', 'swept', 'added', 'rF', 'rS', 'crF', 'crS', 'topF', 'topS',
+  return { cols: ['hz', 'floor', 'swept', 'added', 'rF', 'rS', 'pF', 'pS', 'atMs', 'ofMs',
+                  'bursts', 'topF', 'topS',
                   'r32', 'r33', 'between', 'below', 'dipDb',
                   'writes', 'gWrite', 'span', 'wCall', 'wMiss', 'wMs', 'perMs',
                   'tkMed', 'tkMax'], rows, notes };
@@ -5073,7 +5135,7 @@ const HELP = {
     { k: 'spread',   args: "ch=8 ty=rake \u2014 can a bank filter's spread be modulated, and does a tweak reach a held note" },
     { k: 'pwmall',   args: 'ch=8 rate=2 amt=70 wavs=0,1,2,3 \u2014 which waves still STEP their width, for waves a pulse metric cannot see' },
     { k: 'rollkey',  args: '\u2014 does the dice key fire on the PRESS, for every modifier combination' },
-    { k: 'wtpos',    args: 'ch=8 key=posa rate=2 amt=100 \u2014 does a modulated wavetable position click? clicks/s + the standby gain at the swap' },
+    { k: 'wtpos',    args: 'ch=8 rungs=0.5 \u2014 drive a wavetable position at a constant rate: junk added, spike share, and the standby gain at each write' },
     { k: 'pwm',      args: 'ch=8 wav=3 rate=2 amt=70 \u2014 is a width sweep smooth? excess edges per second = clicks' },
     { k: 'recpitch', args: 'ch=8 \u2014 played vs recorded vs replayed pitch: does the scale snap the finger and not the lane' },
     { k: 'master',   args: '\u2014 with the master selected: which lane do the loop-length and clear gestures actually move' },
