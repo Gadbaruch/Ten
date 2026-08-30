@@ -1,3 +1,87 @@
+# K909 REPLACED, AND HIS TRANSPOSE WAS BEING DROPPED — 2026-08-30
+
+Gad: *"my last kick was too much here is a replacement."*
+
+## THE REPLACEMENT
+
+Same instrument with the extremes taken off. Nine changes and every one runs
+the same way:
+
+    flt[0].frq   671 -> 20000   the resonant lowpass (q 5.9, untouched) is
+                                WIDE OPEN. That peak was most of the gabber.
+    fx[1].mix    1 -> 0.114     the second saturator was FULL WET, now a
+                                seasoning. The series pair survives.
+    fx[1].p3     3 -> 1         gentler curve, unity out (p7 0.64 -> 0.5).
+    fx[0].p1     1 -> 0.8       drive off the first one too.
+    osc[0].rat   0.25 -> 0.5    the sine body an octave UP.
+    osc[1].rat   16 -> 8        the click an octave DOWN, and
+    osc[1].wav   sqr -> tri     without its harmonic stack.
+
+**MEASURED**, both loaded on the same build so only the preset differs, one
+hit at KBBASE, tapped at the MASTER post-compressor:
+
+              LUFS    peak   crest   clipped
+      OLD     -7.7   0.775     8.1         0
+      NEW     -8.8   0.789    11.4         0
+
+**The change is CREST, not level: +3.3 dB of it.** 1.1 LU quieter is almost
+incidental. The old kick sat at 8.1 dB crest — the bottom of the 8-12 dB band
+that published mastering practice calls usable, i.e. flat — and the new one at
+11.4 is comfortably inside it. "Too much" was measurable and it was the
+dynamics, which is exactly what two saturators at full wet into a resonant peak
+will do. Neither clips: the channel bus peaks at 2.05 on both and the master
+compressor takes it to 0.78 with zero samples over 1.0.
+
+## ⚠ THE BUG UNDER IT: A GIVEN PRESET LOSES ITS TRANSPOSE
+
+Found while checking the replacement loaded as he saved it. It did not.
+
+`setPresetData` deliberately does NOT carry `trs` across a sound change — a
+channel transpose is the CHANNEL's, not the patch's — and `xtrs` is the field
+that says "this transpose belongs to the sound". `mkJ` sets it, with the
+comment *"…and it travels with the sound"*.
+
+**But a GIVEN entry never goes through `mkJ`.** Since GIVEN became derived,
+`libAll` hands the raw desk dump straight to `presetData`, so `xtrs` was never
+set and his `-12` was read as a channel transpose and dropped.
+
+    MEASURED, before: load K909 -> trs 0 on the channel, no xtrs at all.
+    MEASURED, after:  trs -12, xtrs -12.
+
+**BOTH of the presets he has given with a transpose were affected — BES1 and
+K909, both -12 — and both were coming back AN OCTAVE HIGH.** On a kick that is
+the whole sound. Fixed at the mapping point in `libAll` rather than by adding
+`xtrs` to each literal, because a field every future entry has to remember to
+carry is the thing that block exists to avoid.
+
+⚠ **THE SHAPE: a refactor that replaced a CONVERTER with a direct copy.** The
+conversion was doing more than it looked like — one line of it was the only
+thing setting a field read much later, somewhere else. Anything that stops
+calling `mkJ` wants this same audit.
+
+## AND BOTH DEV SERVERS WERE DEAD
+
+3032 and 3033 both gone mid-session, not by me. Restarted from launch.json
+(`ten-gad`, `ten-main`), both verified serving THIS directory and byte-identical
+to disk. ⚠ `npx serve` **301-redirects `/index.html` to `/`**, so a curl check
+against `/index.html` without `-L` reads 0 bytes and looks like a stale or dead
+server. Check `/`.
+
+## QA CHECKLIST — the new kick
+
+1. **Play K909 (kik shelf).** It should be the same kick with the aggression
+   off — still a hardcore kick, no longer a wall. MEASURED: crest 8.1 -> 11.4 dB
+   at the master, level 1.1 LU down, 0 clipped samples.
+2. **⚠ CHECK ITS OCTAVE FIRST, and BES1's too.** Both were loading an octave
+   HIGH until this fix. If K909 sounds thin or BES1 sounds small, the transpose
+   is not travelling and that is the bug to report. MEASURED: trs -12 and
+   xtrs -12 on the channel after loading.
+3. **Load it onto a channel that already has a transpose set.** His -12 should
+   win (it is the patch's), and your channel transpose should not leak into it.
+   NOT MEASURED — reasoned from `setPresetData`, worth one look.
+4. **No LIBV bump was needed.** GIVEN is derived and appended on every libAll,
+   so the file is the truth and a reload is enough.
+
 # TEN ACOUSTIC KITS, AND THREE PRESETS OF GAD'S — 2026-08-29
 
 ## THE KITS  (KTJAZ KTROK KTFNK KTVIN KTREG KTLAT KTORC KTBRS KTDRY KTBIG)
