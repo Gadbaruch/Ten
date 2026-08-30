@@ -1471,7 +1471,7 @@ const recPlayed=(pi,tBeat,midi,vel,durBeats)=>recPlayNote(pi,tBeat,sndOut(pi,mid
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-30.0908';
+const BUILD='2026-08-30.0947';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -16155,8 +16155,14 @@ const SMPKITS=[['tr808','KT808'],['tr8','KTTR8'],['linn','KTLIN'],['cr78','KTC78
                   difference is in the SAMPLES, exactly as it is for the machine
                   kits, where a TR-808 and an RX5 differ because their samples do
                   and not because of anything done to them afterwards. */
+               /* ac-regg is GONE — Gad, 2026-08-30: "i removed the regg kit
+                  which didnt sound great." Its files and manifest rows went
+                  with it. The style is dropped here too rather than left to
+                  fail silently: smpKitEntries skips a style with no samples,
+                  so KTREG would simply never appear and nothing would say why.
+                  tools/gen_kits.py keeps its prompt, for a re-roll. */
                ['ac-jazz','KTJAZ'],['ac-rock','KTROK'],['ac-funk','KTFNK'],
-               ['ac-vint','KTVIN'],['ac-regg','KTREG'],['ac-latn','KTLAT'],
+               ['ac-vint','KTVIN'],['ac-latn','KTLAT'],
                ['ac-orch','KTORC'],['ac-brsh','KTBRS'],['ac-dry','KTDRY'],
                ['ac-big','KTBIG']];
 /* GENERATED, NEVER STORED — and both halves of that matter.

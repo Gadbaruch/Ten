@@ -2288,78 +2288,6 @@
   "cat": "perc"
  },
  {
-  "name": "regg-kick",
-  "file": "oneshots/acoustic/regg/kick.flac",
-  "kind": "one",
-  "inst": "kick",
-  "style": "ac-regg",
-  "cat": "kik"
- },
- {
-  "name": "regg-snare",
-  "file": "oneshots/acoustic/regg/snare.flac",
-  "kind": "one",
-  "inst": "snare",
-  "style": "ac-regg",
-  "cat": "snr"
- },
- {
-  "name": "regg-rim",
-  "file": "oneshots/acoustic/regg/rim.flac",
-  "kind": "one",
-  "inst": "rim",
-  "style": "ac-regg",
-  "cat": "snr"
- },
- {
-  "name": "regg-hat-closed",
-  "file": "oneshots/acoustic/regg/hat-closed.flac",
-  "kind": "one",
-  "inst": "hat-closed",
-  "style": "ac-regg",
-  "cat": "hh"
- },
- {
-  "name": "regg-hat-open",
-  "file": "oneshots/acoustic/regg/hat-open.flac",
-  "kind": "one",
-  "inst": "hat-open",
-  "style": "ac-regg",
-  "cat": "hh"
- },
- {
-  "name": "regg-cymbal",
-  "file": "oneshots/acoustic/regg/cymbal.flac",
-  "kind": "one",
-  "inst": "cymbal",
-  "style": "ac-regg",
-  "cat": "cymb"
- },
- {
-  "name": "regg-tom",
-  "file": "oneshots/acoustic/regg/tom.flac",
-  "kind": "one",
-  "inst": "tom",
-  "style": "ac-regg",
-  "cat": "tom"
- },
- {
-  "name": "regg-cowbell",
-  "file": "oneshots/acoustic/regg/cowbell.flac",
-  "kind": "one",
-  "inst": "cowbell",
-  "style": "ac-regg",
-  "cat": "perc"
- },
- {
-  "name": "regg-shaker",
-  "file": "oneshots/acoustic/regg/shaker.flac",
-  "kind": "one",
-  "inst": "shaker",
-  "style": "ac-regg",
-  "cat": "perc"
- },
- {
   "name": "latn-kick",
   "file": "oneshots/acoustic/latn/kick.flac",
   "kind": "one",
@@ -2749,14 +2677,6 @@
   "kind": "one",
   "inst": "ride",
   "style": "ac-vint",
-  "cat": "cymb"
- },
- {
-  "name": "regg-ride",
-  "file": "oneshots/acoustic/regg/ride.flac",
-  "kind": "one",
-  "inst": "ride",
-  "style": "ac-regg",
   "cat": "cymb"
  },
  {
