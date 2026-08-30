@@ -5580,7 +5580,7 @@ const HELP = {
     { k: 'padpred',  args: 'kit=KT808 — offline buffer+envelope loudness vs the measured bus, to prove the model' },
     { k: 'kitmix',   args: 'kit=KT808,KTLIN|ROLL|ROLL80 ms=400 real=1 — BS.1770 loudness + 8-band balance of every pad in a kit, against the role target' },
     { k: 'ampstack', args: 'ch=4 rate=6 amt=100 — does an lfo on amp defeat the amp envelope' },
-    { k: 'ratstep',  args: 'm=10 — the ratio dial is a LIST: walks it, lands on it, sticks at the ends, and reads as a step' },
+    { k: 'ratstep',  args: '— the hall dial is OFF the ratio: same 0.125 step at every key depth, with op level as the control that must still scale' },
     { k: 'dyn',      args: 'cat=kik n=4 ch=4 — the dynamics layer: same roll at vel 1.0 vs 0.3' },
     { k: 'smploud',  args: 'ch=4 ms=200 names=a,b,c — perceptual loudness of samples vs a synth op, and the median deficit' },
     { k: 'smprate',  args: 'ch=4 notes=36,48,60,72 — which note plays a sample at its own speed' },
@@ -6877,63 +6877,91 @@ async function probeAmpStack() {
            notes: ['amp env decays to SILENCE in 120ms; the tail is the last 400ms of a 1.2s window'] };
 }
 
-/* THE RATIO DIAL IS A LIST NOW — does it walk it, and does the page AGREE that
- * it is a step rather than a dial? Three things go wrong here and only the
- * first is audible: the list is walked but the HUD still calls it a dial (so a
- * held arrow runs away and a hard press multiplies it), the step lands off the
- * list, or an off-list start jumps the entry it is standing next to.
+/* THE HALL DIAL IS OFF THE RATIO — the fix Gad actually asked for, and the one
+ * a "does it move?" probe would pass on the broken build. `dialScale()` returns
+ * 1 with no analog board and up to `dhi` (10 by default) with one bottomed out,
+ * so the SAME build moved 0.125 on a machine without the MonsGeek and up to
+ * 1.25 on his. The question is therefore NOT "what is the step" but "IS THE
+ * STEP THE SAME AT EVERY DEPTH", and it is asked against a control param that
+ * must still scale, so the exemption is proved targeted rather than global.
  * PURE ARITHMETIC — it touches no channel and makes no sound. */
 function probeRatStep() {
-  const spec = OSC_P({ wav: 0 }).find(x => x.key === 'rat');
-  if (!spec) return { cols: [], rows: [], err: 'no ratio spec in OSC_P' };
-  const L = spec.vals || [];
-  const on = v => L.some(x => Math.abs(x - v) < 1e-9);
-  const coarse = num(P.m, 10);
+  const osc = OSC_P({ wav: 0 });
+  const spec = osc.find(x => x.key === 'rat');
+  const ctrl = osc.find(x => x.key === 'amt');          // op level: still a dial
+  if (!spec || !ctrl) return { cols: [], rows: [], err: 'no rat/amt spec in OSC_P' };
   const rows = [];
 
-  rows.push({ k: 'spec', stepped: String(magStp(spec)), n: L.length,
-              lo: L[0], hi: L[L.length - 1],
-              note: 'stepped must be true — it is what the HUD prints and what stops a held arrow repeating' });
+  /* STAND IN FOR THE BOARD, ALL THREE GATES OF IT. `dialScale()` opens with
+   * `if(!CFG.dial||!HE.on)return 1`, and on a machine with no MonsGeek both are
+   * off — so overriding only HE.driver() left every depth reading ×1 and the
+   * probe passed the CONTROL row, which is to say it would have passed on the
+   * broken build too. Forcing all three is the difference between measuring
+   * the fix and measuring this laptop. */
+  const keepDrv = HE.driver, keepOn = HE.on, keepDial = CFG.dial;
+  const depths = [0, 0.25, 0.5, 0.75, 1];
+  const at = (d, sp, v, dir, m) => {
+    HE.driver = () => d; HE.on = true; CFG.dial = 1;
+    try { return adjust(sp, v, dir, m); }
+    finally { HE.driver = keepDrv; HE.on = keepOn; CFG.dial = keepDial; }
+  };
+  const noBoard = (sp, v, dir, m) => {
+    HE.driver = () => null; HE.on = false; CFG.dial = 0;
+    try { return adjust(sp, v, dir, m); }
+    finally { HE.driver = keepDrv; HE.on = keepOn; CFG.dial = keepDial; }
+  };
 
-  /* walk the whole list up and back down: every landing on the list, no stall
-     in the middle, and the two ends STICK rather than wrapping */
-  for (const dir of [1, -1]) {
-    let v = dir > 0 ? L[0] : L[L.length - 1], seq = [v], stall = 0, off = 0;
-    for (let i = 0; i < L.length + 4; i++) {
-      const nv = adjust(spec, v, dir, 1);
-      if (!on(nv)) off++;
-      if (nv === v) { stall++; break; }
-      v = nv; seq.push(v);
-    }
-    rows.push({ k: dir > 0 ? 'walk up' : 'walk down', n: seq.length, off,
-                end: v, endstuck: String(stall > 0), seq: seq.join(' ') });
+  rows.push({ k: 'dialScale range', lo: (HE.cfg().dlo ?? 0.2), hi: (HE.cfg().dhi ?? 10),
+              note: 'what a feather touch and a bottomed key multiply the step by' });
+
+  /* THE FIX: ratio moves the same amount however hard the key is leaned on */
+  const base = noBoard(spec, 1, 1, 1);
+  const got = depths.map(d => at(d, spec, 1, 1, 1));
+  rows.push({ k: 'ratio ×1 up', noboard: base, seq: got.join(' '),
+              same: String(got.every(v => v === base)),
+              step: +(base - 1).toFixed(4),
+              note: 'same at every depth, and the step is the old 0.125' });
+
+  /* …and it is still 0.125 wherever you are standing on the dial */
+  for (const v of [0.125, 0.5, 2, 8]) {
+    const up = depths.map(d => at(d, spec, v, 1, 1));
+    const dn = depths.map(d => at(d, spec, v, -1, 1));
+    rows.push({ k: 'ratio ' + v, seq: up.join(' '),
+                same: String(up.every(x => x === up[0]) && dn.every(x => x === dn[0])),
+                step: +(up[0] - v).toFixed(4) });
   }
 
-  /* an OFF-LIST value — a preset's 2.01, a rolled 3.755, anything a mod wrote
-     back — must step to the neighbour in the direction asked and never skip
-     the entry it is sitting beside */
-  for (const v of [2.01, 3.755, 0.175, 0.6, 15.2]) {
-    const up = adjust(spec, v, 1, 1), dn = adjust(spec, v, -1, 1);
-    rows.push({ k: 'off-list ' + v, up, dn,
-                ok: String(on(up) && on(dn) && up > v && dn < v) });
+  /* ⇧ still MULTIPLIES, and it must not pick up depth either */
+  for (const v of [0.25, 1, 3]) {
+    const cu = depths.map(d => at(d, spec, v, 1, 10));
+    const cd = depths.map(d => at(d, spec, v, -1, 10));
+    rows.push({ k: 'shift ' + v, seq: cu.join(' ') + ' | ' + cd.join(' '),
+                same: String(cu.every(x => x === cu[0]) && cd.every(x => x === cd[0])),
+                ok: String(cu[0] === v * 2 && cd[0] === v / 2) });
   }
 
-  /* coarse MULTIPLIES and may never move less than the plain step does */
-  for (const v of [0.25, 1, 3, 7, 16]) {
-    const cu = adjust(spec, v, 1, coarse), cd = adjust(spec, v, -1, coarse);
-    const fu = adjust(spec, v, 1, 1), fd = adjust(spec, v, -1, 1);
-    rows.push({ k: 'coarse ' + v, up: cu, dn: cd, fineup: fu, finedn: fd,
-                ok: String(on(cu) && on(cd) && cu >= fu && cd <= fd) });
-  }
+  /* ⌥ is the fine step, unchanged and also flat */
+  const fine = depths.map(d => at(d, spec, 1, 1, 0.1));
+  rows.push({ k: 'opt ×1 up', seq: fine.join(' '),
+              same: String(fine.every(x => x === fine[0])),
+              step: +(fine[0] - 1).toFixed(4) });
 
-  /* the pressure dial must not touch it — a stepped param is one press one
-     entry however hard the key is leaned on */
-  const hard = adjust(spec, 1, 1, 1);
-  rows.push({ k: 'x1 up', got: hard, want: L[L.indexOf(1) + 1],
-              ok: String(hard === L[L.indexOf(1) + 1]) });
+  /* THE CONTROL. op level has no `nopress`, so it MUST still spread with
+     depth — if this row reads `same true` the exemption went global and every
+     dial on the desk just lost its analog travel. */
+  const lv = depths.map(d => at(d, ctrl, 0.5, 1, 1));
+  rows.push({ k: 'CONTROL op level', seq: lv.map(x => x.toFixed(4)).join(' '),
+              same: String(lv.every(x => x === lv[0])),
+              ok: String(!lv.every(x => x === lv[0])),
+              note: 'must read same=false — this one is still a dial' });
 
-  return { cols: ['stepped', 'n', 'lo', 'hi', 'seq', 'off', 'end', 'endstuck',
-                  'up', 'dn', 'fineup', 'finedn', 'got', 'want', 'ok', 'note'], rows };
+  /* and ratio is still a DIAL to the HUD, not a menu: a held arrow must go on
+     repeating, which is how you cross 127 quarter-tones */
+  rows.push({ k: 'still a dial', stepped: String(stepSpec(spec)),
+              ok: String(stepSpec(spec) === false),
+              note: 'must be false — nopress refuses the depth, not the repeat' });
+
+  return { cols: ['lo', 'hi', 'noboard', 'seq', 'same', 'step', 'stepped', 'ok', 'note'], rows };
 }
 
 const PROBES = { level: probeLevel, spectrum: probeSpectrum, cursor: probeCursor,

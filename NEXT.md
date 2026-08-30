@@ -1,54 +1,67 @@
-# THE RATIO DIAL IS A LIST, AND A NEW BASS — 2026-08-30 (branch lfo-amp-series)
+# THE HALL DIAL COMES OFF THE RATIO, AND A NEW BASS — 2026-08-30 (on main)
 
-Two asks, both done, both on the same branch as the lfo work because that is
-where the tree was. Neither is on main yet.
+Two asks. The first was got WRONG the first time in a way worth keeping,
+because the wrong version was reasonable and the right one is one word.
 
 ## 1. "ratio param should be stepped not dial"
 
-`step` was 0.125, so ×1 to ×3 was SIXTEEN presses of a key that should take
-four, and the values in between are not ratios anybody reaches for. It walks a
-table now — `RATSTEPS`, 24 entries — one press one entry, the same
-one-press-one-place a menu gets.
+**READ AS A STEP SIZE, IT IS NOT.** The first build took him at the instrument's
+own vocabulary — "step" and "dial" are the two words the HUD prints — and gave
+ratio a table of 24 musical ratios, one press one entry, subharmonics below 1
+and harmonics above. He sent it straight back:
 
-      0.125  0.1667  0.2  0.25  0.3333  0.5  0.6667  0.75
-      1  1.5  2  2.5  3  4  5  6  7  8  9  10  11  12  14  16
+> "mm ratios steps are a bit big when not holding shift, can you do like it
+> was? when monsgeek key wasnt connected it was good, just the dial behavior
+> was hard to controll"
 
-Below 1 they are the SUBHARMONICS (1/8 1/6 1/5 1/4 1/3 1/2 2/3 3/4), which is
-where a bass body and a kick live; above it the harmonics, thinning at the top.
+**THE SECOND SENTENCE IS THE BUG AND THE FIRST IS ONLY THE SYMPTOM.**
+`dialScale()` opens with `if(!CFG.dial||!HE.on)return 1` — it is OFF with no
+analog board and multiplies by up to `dhi` (10) with one bottomed out. So the
+same build moved 0.125 per press on a machine without the MonsGeek and up to
+1.25 on his, and "when monsgeek key wasnt connected it was good" is him naming
+the variable directly. The step was never the complaint.
 
-**IT IS NOT AN ENUM, AND THAT IS THE DESIGN.** `rat` is a modulation
-destination — ZIPPL's whole wonk is an envelope on the FM ratio — and the mod
-matrix refuses an enum by name ("that is a menu — modulation needs a range").
-So the value stays a NUMBER with its min/max/step intact for destSpan, the
-dice and the matrix, and a new `vals` field is what the arrow walks. The four
-cursors that each carried their own copy of "is this a step or a dial" now ask
-one function, `stepSpec`, and it is the third term in it.
+Shipped: the spec is exactly what it was — `min 0.125, max 16, step 0.125,
+mul 2` — plus one flag, `nopress`, and one term at the one place pressure
+enters a value:
 
-**MEASURED — `tools/probe.sh ratstep`, a new probe, all rows pass:**
+    if(!stepSpec(spec)&&!spec.nopress)m*=dialScale();
 
-      stepped        true                 the HUD says "step", the held arrow
-                                          stops repeating, pressure stops
-                                          scaling it
-      walk up/down   24 entries, 0 off    ends STICK at 0.125 and 16 — a ratio
-                                          list must not wrap the way a wave
-                                          list does
-      off-list 2.01  up 2.5  dn 2         directional, never skips the entry it
-      off-list 3.755 up 4    dn 3         is standing beside. Nothing already
-      off-list 0.175 up 0.2  dn 0.1667    saved moves until the dial is touched
-      coarse ×1      up ×2   dn ×0.5      ⇧ still MULTIPLIES, and may never
-      coarse ×7      up ×14  dn ×3        move less than the plain step does
+**`nopress` IS A THIRD ANSWER AND IT IS NOT "STEPPED".** A stepped param loses
+the auto-repeat too (one press, one option), and a ratio needs the repeat —
+that is how you cross 127 quarter-tones. So it refuses the DEPTH and keeps the
+REPEAT: `stepSpec(ratio)` is still false and the HUD still says "dial".
 
-End to end with the cursor actually on the field: `focusIsStepped()` true,
-1 → 1.5 → 2 → 2.5 → 3 on four presses, two coarse presses back to 0.75.
+**MEASURED — `tools/probe.sh ratstep`, and the question it asks is the whole
+point.** Not "what is the step" but "IS THE STEP THE SAME AT EVERY DEPTH",
+across `HE.driver()` = 0, 0.25, 0.5, 0.75, 1:
 
-⚠ **THE DICE STILL ROLL OFF-LIST** — `randomizeSlot` writes `Math.round(v/step)
-*step` at step 0.125, so a rolled ratio can be ×5.375. It self-heals (the first
-press snaps it) and snapping the roll was NOT asked for, so it was left alone.
-Raise it if the rolls start feeling wrong.
+      ratio ×1 up        1.125 1.125 1.125 1.125 1.125     same, step 0.125
+      ratio ×0.5         0.625 ×5                          same, step 0.125
+      ratio ×8           8.125 ×5                          same, step 0.125
+      ⇧ ×1               2 ×5  |  0.5 ×5                   same, and still ×2
+      ⌥ ×1               1.0125 ×5                         same, step 0.0125
+      CONTROL op level   0.502 0.505 0.6 0.6 0.6           SPREADS — still a dial
+      still a dial       stepSpec false                    the repeat survives
 
-⚠ **A DELIBERATELY JUST-OFF RATIO IS NOW `fine`'S JOB.** DORAC's 2.01 is 8.6
-cents off ×2, well inside fine's ±100. Anything further than a semitone from a
-list entry can no longer be dialled by hand.
+End to end with the cursor on the field and the key BOTTOMED OUT: 1 → 1.125 →
+1.25 → 1.375 → 1.5, then ⇧ to ×3.
+
+⚠ **THE CONTROL ROW IS THE PROBE, AND THE FIRST CUT OF IT LIED.** It overrode
+`HE.driver()` only — but `CFG.dial` and `HE.on` are off on a machine with no
+MonsGeek, so `dialScale()` returned 1 at every depth, ratio read "same" and the
+control read "same" as well. It would have passed on the BROKEN build. All
+three gates are forced now, and op level spreading 0.502 → 0.6 is what proves
+the exemption is targeted rather than a desk-wide loss of analog travel.
+This is the same shape as the LFO traps below: **a probe that cannot see the
+mechanism it is testing passes for the wrong reason.**
+
+⚠ **AND THE SHAPE TO WATCH FOR NEXT TIME.** Any complaint about a dial being
+"hard to control" that arrives from a machine WITH the hall board, on a build
+that felt fine without one, is `dialScale()` until proved otherwise. Ratio was
+the first param where the depth was unusable — ×1 and ×2 are PLACES, and
+everything between them is a mistake — but it will not be the last. `nopress`
+is there for the next one.
 
 ## 2. SAGAC — Gad's bass, "kinda techno funky"
 
@@ -88,43 +101,31 @@ sound is theirs, and a future reader must not "fix" them.
 
 ## QA — play these, in this order
 
-1. **The ratio dial.** Open an osc scope and walk `ratio` with ↑↓. Right: one
-   entry per press — ×1 → ×1.5 → ×2 → ×2.5 → ×3 — and HOLDING the arrow moves
-   it ONCE, not continuously. Wrong (the old behaviour): it crawls in 0.125s
-   and runs away while held. **Measured: all 24 entries, 0 off-list.**
-2. **⇧ on ratio.** Right: ×1 → ×2 up, ×1 → ×0.5 down. It must never move LESS
-   than a plain press does. **Measured on five starts, all pass.**
-3. **The ends.** Walk to ×16 and keep pressing ↑; then to ×0.125 and keep
-   pressing ↓. Right: it STICKS. Wrong: it wraps round to the other end.
-   **Measured: sticks both ways.**
-4. **An old preset's ratio.** Load DORAC (2.01) or any BA0x and nudge ratio
-   once. Right: it steps to the neighbour ABOVE going up and BELOW going down,
-   and the value did NOT move until you touched it. **Measured on 2.01, 3.755,
-   0.175, 0.6, 15.2 — all directional.**
+1. **Ratio with the MonsGeek connected, pressing HARD.** Open an osc scope and
+   lean on ↑ over ratio. Right: 0.125 a press however hard you press —
+   ×1 → ×1.125 → ×1.25. Wrong (what you found): a hard press took a much
+   bigger bite and the dial was unplaceable. **Measured at five key depths,
+   identical at all five.**
+2. **Ratio HELD.** Hold ↑ down. Right: it goes on repeating and crosses the
+   range — it is still a dial, not a menu. Wrong: it moves once and stops.
+   **Measured: `stepSpec` false, so the repeat is untouched.**
+3. **⇧ on ratio.** Right: ×1 → ×2 up, ×1 → ×0.5 down — and the same whether
+   you press it gently or bottom it out. **Measured at five depths, identical.**
+4. **A control dial is UNCHANGED.** Same scope, walk to `level` and press hard
+   vs gently. Right: it still moves further under a hard press. Wrong: the
+   exemption went desk-wide and every dial lost its analog travel.
+   **Measured: 0.502 gentle → 0.600 bottomed.**
 5. **SAGAC on the shelf.** Library → bass. Right: it is there, twelfth in the
    category, and loads. **Measured: on the shelf, 3 ops, fmw 1.**
 6. **SAGAC's timbre.** Hold a low note for a full second. Right: it gets
    BRIGHTER for the first ~400ms while getting quieter, then shuts. Wrong: a
    static tone that only fades. **Measured: +7.1dB of sideband to 400ms, −31.5
    by 800ms.**
-7. **ZIPPL still wonks.** Its envelope on the FM RATIO is the one thing the
-   ratio change could have broken — a mod aimed at ratio must still SWEEP, not
-   step. **PROVED BY GREP, NOT BY EAR, and the grep is the better proof:
-   `vals` appears FOUR times in the whole file — the spec, `stepSpec`, and two
-   lines inside `adjust()`. `adjust()` runs on a keypress and nowhere else, so
-   no audio or mod-engine path can see the list.** An audio A/B was attempted
-   and thrown away: total high-band energy is the wrong meter for a ratio
-   sweep, which moves where the sidebands SIT rather than how much of them
-   there is — the same trap that had already caught the level measurement one
-   step earlier. Still worth playing, but nothing is riding on it.
-
-**AND THE A/B AGAINST LIVE IS CLEAN.** `tools/probe.sh preset
-names=ZIPPL,DORAC,K909,BES1 note=36 ch=4 --ab https://gadbaruch.github.io/Ten/`
-— K909 identical (hz +0, peak −0.005), BES1 identical (hz +0, peak +0.018).
-DORAC differs (+164Hz, peak −0.225) and it is NOT this branch: live is build
-2026-08-30.1126 and does not have ZIPPL on its shelf at all, so it predates
-several of today's commits. DORAC also has no lfo and no ratio modulation —
-its whole mod rack is `env → voice.amp` and `key → flt.frq`.
+7. **ZIPPL still wonks.** Its envelope on the FM RATIO is what a ratio change
+   could break. **Nothing rides on this one: the shipped fix touches `adjust()`
+   and nothing else, and `adjust()` runs on a keypress. The A/B against live
+   agrees — K909 hz +0 peak −0.005, BES1 hz +0 peak +0.018.** Worth a play
+   anyway since it is the loudest failure if wrong.
 
 # AN LFO ON AMP WAS SUMMED, NOT IN SERIES — 2026-08-30 (FIXED, branch lfo-amp-series)
 
