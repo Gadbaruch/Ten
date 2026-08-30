@@ -1494,7 +1494,7 @@ const recPlayed=(pi,tBeat,midi,vel,durBeats)=>recPlayNote(pi,tBeat,sndOut(pi,mid
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-30.1126';
+const BUILD='2026-08-30.1216';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -2013,6 +2013,17 @@ const WTF=[
    rates and costs interpolation error; 64 measured clean, so it stays. */
 const WTRUNG=64;
 const WTSHAPE={posa:1,posb:1,mrph:1,fold:1};
+/* WHICH BAND LIMIT A NOTE GETS, and it is a LADDER rather than an octave.
+   A mipmap per octave — Vital's kFrequencyBins — throws away up to a full
+   octave of harmonics at the top of each bucket, which on a bright wavetable
+   is most of the character. Half-octave steps cost 30% at worst and there are
+   only twelve of them, so the cache stays small either way. */
+const WTHL=[1,2,3,4,6,8,11,16,22,32,45,64];
+const WTBUCKET=f0=>{
+  const h=Math.max(1,Math.floor((AC.sampleRate*0.5)/Math.max(1,f0)));
+  let b=WTHL[0]; for(const v of WTHL)if(v<=h)b=v;
+  return b;
+};
 /* THE CROP, RESOLVED IN ONE PLACE. Four callers used to spell it out
    separately — the root op, ops 1-9, and the scan window sent at build and
    again on a live edit — which is four chances to disagree about what a
@@ -2764,7 +2775,12 @@ const VOICE_P=[SP('amp','amp','lin',{min:0,max:1,step:0.01,big:0.1}),
                SP('pitch','pitch','lin',{min:-1,max:1,step:0.05})];
 /* the ones that reach a live AudioParam and can therefore be driven at audio
    rate; everything else is written on the render tick */
+/* THE WAVETABLE'S FOUR SHAPE DIALS ARE AUDIO RATE NOW. They were on the
+   control tick, which is 125 writes a second against an LFO that goes to 40Hz
+   — the modulator itself was undersampled, and that is what "inaccurate and
+   noisy at fast modulations" was. ten-wt exposes them as real AudioParams. */
 const DEST_AUDIO=new Set(['flt.frq','flt.q','flt.gn','osc.amt','osc.rat','osc.fine',
+  'osc.posa','osc.posb','osc.mrph','osc.fold',
   'voice.amp','voice.pitch']);
 /* Two lanes. AUDIO is a live AudioParam and stays sample-accurate. CTRL is
    written on the render tick, which is right for everything it covers — an fx
@@ -2789,8 +2805,7 @@ const destRate=(rack,key)=>
      BufferSource has loopStart/loopEnd, which are writable while it plays.
      `play` and `smpl` stay out — one is a choice and the other is an index
      into the pool, and a modulator needs a range, not a menu. */
-  :(rack==='osc'&&(key==='pw'||key==='mrph'||key==='fold'||key==='posa'||key==='posb'
-                   ||key==='sst'||key==='sen'))?'ctrl'
+  :(rack==='osc'&&(key==='pw'||key==='sst'||key==='sen'))?'ctrl'
   /* A BANK'S SPREAD. The six shape filters all carry it and none of them could
      be modulated: with no entry here destRate returned undefined, modDests
      dropped it, and the picker said "nothing can drive spread yet". It moves
@@ -6326,6 +6341,95 @@ let fxwReady=false;
       return true;
     }
   }
+  /* ---- THE WAVETABLE, AT AUDIO RATE ------------------------------------
+     Gad, 2026-08-30: "at fast modulations like put lfo at max speed on the
+     position and it will be inacurate and noisey" — and no crossfade scheme
+     could ever have fixed it. Position was written on the 8ms control tick,
+     125 times a second, and the LFO goes to 40Hz. A 40Hz sweep sampled 125
+     times a second is the MODULATOR being undersampled: what you hear is alias
+     of the modulation, not of the audio, and how carefully two tables cross
+     over is beside the point. At 40Hz over the full range the position moves
+     41 rungs per tick.
+     So the wavetable becomes what it is in every real wavetable synth: a table
+     READ, per sample, with the position as an AudioParam. Vital's frames are
+     2048 samples with 11 band-limited copies each, picked by pitch; these are
+     the same 2048 and take their band limit ONCE, at note-on, from the nominal
+     pitch — the same deal ten-fmop already makes, for the same reason.
+     The tables are built on the MAIN thread and shipped in. Summing 48
+     harmonics over 2048 points is ~100k sines per frame and doing that in
+     here, at note-on, would be a dropout every time you touched a new table. */
+  class WTO extends AudioWorkletProcessor{
+    static get parameterDescriptors(){
+      return [
+        /* frq is a FREQUENCY, not a detune, so opPitch retunes it with the
+           same setF every native oscillator gets and legato needs no message */
+        {name:'frq',defaultValue:440,minValue:0,maxValue:22050,automationRate:'a-rate'},
+        {name:'det',defaultValue:0,minValue:-9600,maxValue:9600,automationRate:'a-rate'},
+        {name:'pa',defaultValue:0,minValue:0,maxValue:1,automationRate:'a-rate'},
+        {name:'pb',defaultValue:0,minValue:0,maxValue:1,automationRate:'a-rate'},
+        {name:'mr',defaultValue:0,minValue:0,maxValue:1,automationRate:'a-rate'},
+        {name:'fo',defaultValue:0,minValue:0,maxValue:1,automationRate:'a-rate'}
+      ];
+    }
+    constructor(){
+      super();
+      this.A=null; this.B=null; this.ph=0; this.g=0; this.dead=false;
+      this.port.onmessage=e=>{
+        var d=e.data;
+        if(d.t==='cfg'){
+          this.A=d.A; this.B=d.B;
+          if(d.ph!==undefined)this.ph=d.ph-Math.floor(d.ph);
+        }
+        else if(d.t==='kill')this.dead=true;
+      };
+    }
+    process(inp,out,P){
+      if(this.dead)return false;
+      var L=out[0][0], n=L.length, k;
+      if(!this.A||!this.A.length){for(k=0;k<n;k++)L[k]=0; return true;}
+      var A=this.A, B=(this.B&&this.B.length)?this.B:A;
+      var NA=A.length-1, NB=B.length-1;
+      var Pf=P.frq, Pd=P.det, Pa=P.pa, Pb=P.pb, Pm=P.mr, Po=P.fo;
+      var ph=this.ph, sr=sampleRate, g=this.g;
+      for(k=0;k<n;k++){
+        var f=Pf.length>1?Pf[k]:Pf[0], c=Pd.length>1?Pd[k]:Pd[0];
+        var inc=(c?f*Math.pow(2,c/1200):f)/sr;
+        var fi=ph*FMTL, i0=fi|0, fr=fi-i0, i1=(i0+1)&FMTM;
+        /* each position is a lerp between neighbouring FRAMES, then morph
+           lerps the two tables — the same order the native path baked into its
+           cache row, now once per sample instead of once per control tick */
+        var pa=Pa.length>1?Pa[k]:Pa[0]; if(pa<0)pa=0; else if(pa>1)pa=1;
+        var xa=pa*NA, a0=xa|0; if(a0>=NA)a0=NA>0?NA-1:0;
+        var fa=xa-a0, t0=A[a0], t1=A[a0<NA?a0+1:NA];
+        var v0=t0[i0]+(t0[i1]-t0[i0])*fr, v1=t1[i0]+(t1[i1]-t1[i0])*fr;
+        var y=v0+(v1-v0)*fa;
+        var m=Pm.length>1?Pm[k]:Pm[0];
+        if(m>0.0005){
+          if(m>1)m=1;
+          var pb=Pb.length>1?Pb[k]:Pb[0]; if(pb<0)pb=0; else if(pb>1)pb=1;
+          var xb=pb*NB, b0=xb|0; if(b0>=NB)b0=NB>0?NB-1:0;
+          var fb=xb-b0, u0=B[b0], u1=B[b0<NB?b0+1:NB];
+          var w0=u0[i0]+(u0[i1]-u0[i0])*fr, w1=u1[i0]+(u1[i1]-u1[i0])*fr;
+          y=y+((w0+(w1-w0)*fb)-y)*m;
+        }
+        var fo=Po.length>1?Po[k]:Po[0];
+        if(fo>0.005){
+          /* the same folder, the same squared drive — but no post-fold
+             renormalise or DC trim, because neither exists per sample. tri()
+             already bounds the output to +/-1, so the level barely moves; it
+             is the DC on an asymmetric table that this gives up. */
+          var gg=1+fo*fo*2.2, tt=(y*gg+1)%4; if(tt<0)tt+=4;
+          y=tt<2?tt-1:3-tt;
+        }
+        g+=(1-g)*0.004;                      // a short fade so a fresh cfg cannot click
+        L[k]=y*g;
+        ph+=inc; ph-=Math.floor(ph);
+      }
+      this.ph=ph; this.g=g;
+      return true;
+    }
+  }
+  registerProcessor('ten-wt',WTO);
   registerProcessor('ten-fmop',FMO);
   registerProcessor('ten-scan',SC);
   registerProcessor('ten-grsyn',GR);
@@ -7871,10 +7975,22 @@ class Voice{
       let rootWt=null;                  // wt twin for THIS unison copy (crossfade pair)
       let rootPwx=null;                 // ...and the width twin, same idea
       if(skipOp0){}
+      else if(!isN&&rootW===14&&fxwReady){
+        /* ONE NODE, READ PER SAMPLE. The standby-twin pair this replaces could
+           only ever change table on the control tick; see ten-wt for why that
+           was never going to survive a fast modulator. It answers to
+           .frequency and .detune, so everything below treats it as an
+           oscillator and none of it had to learn about worklets. */
+        src=E.wtNode(ac,ops[0],target,ops[0].phm===1?Math.random():((ops[0].ph||0)/360));
+        (this._wtN=this._wtN||[]).push(src);
+        ((this.opWtN=this.opWtN||{})[0]=this.opWtN[0]||[]).push(src);
+        pitchParam=src.frequency;
+      }
       else if(!isN&&rootW===14){
-        /* the root op gets the same standby-twin treatment as ops 1-9: a wt
-           change lands on the silent oscillator and crossfades in, so morph
-           sweeps and hand edits stop zipping. src stays the audible A side. */
+        /* THE FALLBACK, for the few hundred milliseconds before the worklet
+           module resolves — and for any browser where it never does. The old
+           standby-twin pair: a wt change lands on the silent oscillator and
+           crossfades in. src stays the audible A side. */
         src=ac.createOscillator(); src.setPeriodicWave(E.wtWave(ops[0]));
         const oB=ac.createOscillator(); oB.setPeriodicWave(E.wtWave(ops[0]));
         const gA=ac.createGain(), gB=ac.createGain();
@@ -8055,13 +8171,21 @@ class Voice{
           (this.opDet[i]=this.opDet[i]||[]).push({pm:s2.playbackRate,sc:0.5});
         }
         else if(sync){s2=ac.createOscillator();s2.setPeriodicWave(E.syncWave(wv,syncRatOf(ops,i)));setF(s2.frequency,mf);}
+        else if(wv===14&&fxwReady){
+          /* ONE NODE, READ PER SAMPLE — see ten-wt. It answers to .frequency
+             and .detune, so opPitch and opDet take it exactly as they take an
+             oscillator and the mod rack never learns the difference. */
+          const wn=E.wtNode(ac,op,fi,op.phm===1?Math.random():((op.ph||0)/360));
+          (this.opPitch[i]=this.opPitch[i]||[]).push({pm:wn.frequency,base:fi,kind:'osc'});
+          (this.opDet[i]=this.opDet[i]||[]).push({pm:wn.detune,sc:200});
+          ((this.opWtN=this.opWtN||{})[i]=this.opWtN[i]||[]).push(wn);
+          (this._wtN=this._wtN||[]).push(wn);
+          s2=wn;
+        }
         else if(wv===14){
-          /* TWO OSCILLATORS, ONE VOICE OF THE PAIR AUDIBLE. Every wt change —
-             morph under an LFO, a knob under your finger — lands its new table
-             on the STANDBY oscillator and crossfades; the swap itself is never
-             heard, so a sweep is a sweep instead of a zipper. ka/kb are the
-             cache row each copy holds — see wtLive for why that memo is half
-             the reason it is silent. */
+          /* THE FALLBACK, until the worklet module resolves — the old
+             standby-twin pair, which can only change table on the control
+             tick. ka/kb are the cache row each copy holds. */
           const oA=ac.createOscillator(), oB=ac.createOscillator();
           const gA=ac.createGain(), gB=ac.createGain(), sum2=ac.createGain();
           const pw0=E.wtWave(op);
@@ -8344,7 +8468,7 @@ class Voice{
       node.connect(merge);
       if(src){
         if(noiseRoot)src.start(at,Math.random()*src.buffer.duration);  // decorrelate unison noise voices
-        else src.start(at,src._off||0);
+        else src.start(at,src._off||0);   // ten-wt's start is a no-op shim: it runs from creation
         this.nodes.push(src);
         if(rootWt){try{rootWt.b.start(at);}catch(_){} this.nodes.push(rootWt.b);}
         if(!firstSrc)firstSrc=src;
@@ -8823,6 +8947,16 @@ class Voice{
         const ps=pd.filter(x=>x.sc>=1).map(x=>x.pm);
         if(ps.length)return {params:ps,cents:true};
       }
+      /* the wavetable's shape dials, straight onto the worklet — one entry per
+         unison copy, exactly as the pitch handles are. The span comes from the
+         spec (0..1) because none of these carries its own. */
+      if(WTSHAPE[key]!==undefined){
+        const W=this.opWtN||{};
+        const nl=(sel>=1?[W[sel-1]]:Object.values(W)).filter(Boolean).flat();
+        const nm={posa:'pa',posb:'pb',mrph:'mr',fold:'fo'}[key];
+        const ps=nl.map(nd=>nd.parameters.get(nm)).filter(Boolean);
+        if(ps.length)return {params:ps};
+      }
       if(key==='amt'||key==='level'){
         /* per-target ranges, not a flat 1 — see _opA: an FM operator's gain is
            in the thousands and a depth of 1 is nothing on it */
@@ -8889,12 +9023,13 @@ class Voice{
     /* …and the same is true of ANY voice that ended up with no node able to
        fire onended, not just an fmw one — `this.src` is null there and nothing
        else would ever splice it out. One timer covers both. */
-    if((this._fmw||!this.src)&&!this._fmwEnded){
+    if((this._fmw||this._wtN||!this.src)&&!this._fmwEnded){
       this._fmwEnded=true;
       const ms=Math.max(0,(t-AC.currentTime)*1000)+150;
       setTimeout(()=>{
-        for(const n of (this._fmw||[])){try{n.port.postMessage({t:'kill'});}catch(_){}
-                                  try{n.disconnect();}catch(_){}}
+        for(const n of (this._fmw||[]).concat(this._wtN||[])){
+          try{n.port.postMessage({t:'kill'});}catch(_){}
+          try{n.disconnect();}catch(_){}}
         const E9=this.eng||engine;   // …and out of the node-ceiling FIFO
         if(E9&&E9._fmwReg)E9._fmwReg=E9._fmwReg.filter(e=>e.v!==this);
         const a=this.eng&&this.eng.act[this.pi];
@@ -9954,6 +10089,60 @@ class Engine{
       if(mx>0)for(let n2=0;n2<N;n2++)y[n2]/=mx;}
     return y;
   }
+  /* ---- THE FRAMES THE WORKLET READS -----------------------------------
+     One 2048-point table per (bank, frame, pitch bucket), built HERE because
+     summing 48 harmonics over 2048 points is ~100k sines per frame and the
+     audio thread cannot afford that at note-on. Cached, so a bank costs its
+     frames once per pitch bucket and never again — against the native path's
+     one createPeriodicWave per position rung, which was 65 per sweep.
+     ⚠ 2048 must equal the worklet's FMTL. Two spellings of a table length is
+     two answers to where the phase index lands. */
+  wtFrames(ti,H){
+    const key=ti+':'+H;
+    this.wtF=this.wtF||new Map();
+    const hit=this.wtF.get(key); if(hit)return hit;
+    const F=WTBL[clamp(Math.round(ti),0,WTBL.length-1)][1], N=2048;
+    const out=F.map(fr=>{
+      const t=new Float32Array(N), lim=Math.min(H,fr.length);
+      for(let n=1;n<=lim;n++){
+        const a=fr[n-1]; if(!a)continue;
+        const w=2*Math.PI*n/N;
+        for(let k=0;k<N;k++)t[k]+=a*Math.sin(w*k);
+      }
+      let pk=0; for(let k=0;k<N;k++)pk=Math.max(pk,Math.abs(t[k]));
+      if(pk>0)for(let k=0;k<N;k++)t[k]/=pk;
+      return t;
+    });
+    this.wtF.set(key,out);
+    if(this.wtF.size>240)this.wtF.delete(this.wtF.keys().next().value);
+    return out;
+  }
+  wtSend(nd,op,f0,ph){
+    const H=WTBUCKET(f0);
+    try{nd.port.postMessage({t:'cfg',ph:ph||0,
+      A:this.wtFrames(Math.round(op.wta||0),H),
+      B:this.wtFrames(Math.round(op.wtb??3),H)});
+      nd._H=H;}catch(_){}
+  }
+  /* A WAVETABLE OPERATOR, as one node that answers to the same handles an
+     oscillator does. frequency/detune are the worklet's own AudioParams under
+     the names the builder and the mod rack already reach for, so opPitch,
+     opDet, setF, glide and every pitch envelope work on it unchanged — the
+     node is an oscillator as far as all of them can tell. */
+  wtNode(ac,op,f0,ph){
+    const nd=new AudioWorkletNode(ac,'ten-wt',
+      {numberOfInputs:0,numberOfOutputs:1,outputChannelCount:[1]});
+    nd.frequency=nd.parameters.get('frq');
+    nd.detune=nd.parameters.get('det');
+    nd.frequency.value=Math.max(0,f0);
+    nd.parameters.get('pa').value=clamp(op.posa||0,0,1);
+    nd.parameters.get('pb').value=clamp(op.posb||0,0,1);
+    nd.parameters.get('mr').value=clamp(op.mrph||0,0,1);
+    nd.parameters.get('fo').value=clamp(op.fold||0,0,1);
+    nd.start=()=>{}; nd.stop=()=>{};      // the VCA owns the envelope; kill comes from _end
+    this.wtSend(nd,op,f0,ph);
+    return nd;
+  }
   /* the live half: a ctrl mod or a knob under a sounding note reshapes what is
      already playing — setPeriodicWave is live, so it is one cached swap */
   /* THE STANDBY HAS TO BE SILENT WHEN THE TABLE LANDS, and at a 12ms time
@@ -9976,6 +10165,32 @@ class Engine{
   wtLive(pi,si,key,v){
     const sl=(S.presets[pi].osc||[])[si]; if(!sl||Math.round(sl.wav)!==14)return false;
     const eff=v===undefined?sl:Object.assign({},sl,{[key]:v});
+    /* THE WORKLET PATH, and it is the one that runs. A shape dial is an
+       AudioParam here, so a modulator never comes through this function at all
+       — it is wired straight to the param at note-on. What is left is HAND
+       edits and the control-tick restore, one event each, and a table change,
+       which is new frames. */
+    let hit=false;
+    for(const vo of this.act[pi]||[]){
+      for(const nd of ((vo.opWtN||{})[si])||[]){
+        hit=true;
+        if(key==='wta'||key==='wtb'){
+          /* the same pitch bucket the note was built at — re-deriving it from
+             the note's CURRENT frequency would change the band limit mid-glide,
+             which is a click the fixed limit exists to avoid */
+          try{this.wtSend(nd,eff,(AC.sampleRate*0.5)/Math.max(1,nd._H||1),undefined);}catch(_){}
+          continue;
+        }
+        const nm=WTSHAPE[key]!==undefined
+          ?{posa:'pa',posb:'pb',mrph:'mr',fold:'fo'}[key]:null;
+        if(!nm)continue;
+        const pm=nd.parameters.get(nm); if(!pm)continue;
+        /* a knob under your finger, not a modulator: a short glide so a big
+           jump does not step, and short enough to feel immediate */
+        try{pm.setTargetAtTime(clamp(eff[key]||0,0,1),AC.currentTime,0.005);}catch(_){}
+      }
+    }
+    if(hit)return true;
     /* the four SHAPE dials are continuous and are what gets swept, so they
        straddle. A table swap (wta/wtb) is one event and takes the plain
        gated exchange below. */

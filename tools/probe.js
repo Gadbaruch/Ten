@@ -5180,6 +5180,130 @@ async function probeWtShelf() {
            rows, notes };
 }
 
+/* ---------------- wtalias: is the MODULATOR itself aliasing? -------------
+ * Gad, 2026-08-30: "at fast modulations like put lfo at max speed on the
+ * position and it will be inacurate and noisey."
+ *
+ * This is the test that settles it, and it does not need a judgement call. Put
+ * a sine LFO at F on the wavetable position. If the position is a real
+ * AudioParam the timbre is modulated at F and the spectrum grows sidebands at
+ * k*f0 +/- F. If the position is written on the 8ms CONTROL TICK instead, the
+ * modulator is being sampled at ~125Hz and the sampling folds it: sidebands
+ * appear at k*f0 +/- |125 - F| as well, which for F=40 is 85Hz, a frequency
+ * nothing in the patch has any business producing.
+ *
+ * So: Goertzel at the true sideband and at the alias, either side of several
+ * harmonics, and report the ratio. alias-to-true in dB is the answer — deeply
+ * negative is clean, near zero is the fault.
+ *
+ *     tools/probe.sh wtalias ch=8 lfo=40                                      */
+async function probeWtAlias() {
+  const ch = CH === 9 ? 8 : CH;
+  const F = num(P.lfo, 40);
+  const KEY = String(P.key || 'posa');
+  const AMT = num(P.amt, 100);
+  const TICK = num(P.tick, 125);          // the control-tick rate the old path ran at
+  const sr = AC.sampleRate;
+  const keep = stash(ch);
+  const mutes = [], rows = [], notes = [];
+  try {
+    if (T.playing) stop();
+    pin(ch);
+    mutes.push(...muteOthers([ch]));
+    const p = S.presets[ch];
+    p.cat = 'keys';
+    p.osc = rack(mkOsc);
+    p.osc[0] = { wav: 14, mode: 0, dst: 0, rat: 1, amt: 1, fine: 0, ph: 0, phm: 0, pw: 0.5,
+                 /* a BRIGHT table by default — the test looks for sidebands at
+                    high harmonics and `basic` has none up there to carry them */
+                 wta: Math.round(num(P.wta, 12)), wtb: Math.round(num(P.wtb, 12)),
+                 posa: 0.5, posb: 0.5, mrph: 0, fold: 0 };
+    p.flt = rack(mkFlt); p.flt[0].typ = 0;
+    p.fx = rack(mkFx); p.env = rack(mkEnv);
+    p.env[0] = { dst: 1, idx: 0, amt: 100, a: 0.004, d: 0.02, s: 1, r: 0.05, crv: 0 };
+    p.mod = rack(mkMod);
+    p.mix.lvl = 1; p.mix.pan = 0;
+    Object.assign(modHolder(p, 'vox').vox || (p.vox = {}),
+      { mode: 0, glide: 0, uni: 1, sprd: 0, wide: 0, slop: 0, fmw: 0 });
+    p.mod[0] = Object.assign(mkMod(0), {
+      src: 2, wav: 0, rate: F, syn: 0, ltr: 0, ph: 0, off: false,
+      routes: [{ dst: 0, idx: 0, amt: AMT, tgt: null,
+                 addr: { rack: 'osc', slot: 0, key: KEY,
+                         lbl: (WTF.find(x => x.key === KEY) || { lbl: KEY }).lbl } }] });
+    S.editSnd = ch; S.curSlot = 0;
+    engine.rebuildRack(ch); engine.refresh(ch);
+    const addr = p.mod[0].routes[0].addr;
+    if (!resolveDest(p, addr).length)
+      return { cols: [], rows: [], err: 'the ' + KEY + ' route does not resolve' };
+    const lane = destRate('osc', KEY);
+
+    engine.allOff(); await sleep(80);
+    const bus = busOf(ch);
+    if (!bus) return { cols: [], rows: [], err: 'no bus on ch ' + ch };
+    engine.noteOn(AC.currentTime + 0.02, ch, NOTE, VEL);
+    await sleep(200);
+    const v = (engine.act[ch] || [])[0];
+    const wired = !!(v && v.opWtN && (v.opWtN[0] || []).length);
+    const pp = v && v.opPitch && v.opPitch[0] && v.opPitch[0][0];
+    const f0 = (pp && pp.base > 20) ? pp.base : 130.8;
+    const t = tap(bus);
+    await sleep(2000);
+    const [L] = t.stop();
+    engine.allOff(); await sleep(50);
+
+    /* Goertzel at an exact frequency, Hann-tapered — the sidebands sit a few Hz
+       from a harmonic and a bin grid cannot resolve that */
+    const N = Math.min(1 << 17, L.length - 1), o = Math.round((L.length - N) / 2);
+    const g = hz => {
+      let re = 0, im = 0; const w = 2 * Math.PI * hz / sr;
+      for (let i = 0; i < N; i++) {
+        const win = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / N), x = L[o + i] * win;
+        re += x * Math.cos(w * i); im -= x * Math.sin(w * i);
+      }
+      return 2 * Math.sqrt(re * re + im * im) / N / 0.5;
+    };
+    const ALIAS = Math.abs(TICK - F);
+    /* ⚠ EVERYTHING AGAINST THE FUNDAMENTAL, not against the local carrier. A
+       harmonic the recipe does not contain has no carrier to divide by, and
+       the first cut of this probe happily printed alias-to-carrier ratios of
+       +49dB where BOTH terms were -130dB noise. Referenced to h1 the numbers
+       stay comparable all the way up, and the carrier column then says
+       something too: junk at a harmonic the table does not have is junk. */
+    const h1 = Math.max(1e-12, g(f0)), dB = x => +(20 * Math.log10(Math.max(1e-12, x) / h1)).toFixed(1);
+    for (const k of [2, 4, 8, 12, 20]) {
+      const c = k * f0;
+      if (c + ALIAS > sr * 0.45) continue;
+      const car = g(c);
+      const tru = Math.max(g(c - F), g(c + F));
+      const ali = Math.max(g(c - ALIAS), g(c + ALIAS));
+      rows.push({ k: 'harm ' + k, hz: r3(c),
+                  carrier: dB(car), trueSb: dB(tru), aliasSb: dB(ali),
+                  aliasVsTrue: +(20 * Math.log10(Math.max(1e-12, ali) /
+                                                 Math.max(1e-12, tru))).toFixed(1) });
+    }
+    /* ⚠ THE METRIC DEGENERATES WHEN THE ALIAS LANDS ON THE HARMONIC GRID.
+       At a 5Hz LFO the fold sits at 120Hz and f0 is 131 — so the "alias" bin
+       is measuring the note's own structure and both builds read alike. Say so
+       rather than let the row be read as "no improvement". */
+    const near = Math.abs(ALIAS - Math.round(ALIAS / f0) * f0);
+    if (near < 20)
+      notes.push('!! the alias at ' + r3(ALIAS) + 'Hz is only ' + r3(near) + 'Hz from a ' +
+                 'harmonic of ' + r3(f0) + ' — this row is measuring the note, not the fold. ' +
+                 'Raise the LFO or change the note.');
+    notes.push('lfo ' + F + 'Hz on ' + KEY + ' · f0 ' + r3(f0) + 'Hz · alias sought at ' +
+               r3(ALIAS) + 'Hz (|' + TICK + ' - ' + F + '|) · route lane = ' + lane +
+               ' · worklet on the voice: ' + (wired ? 'YES' : 'no (native pair)'));
+  } finally {
+    for (const m of mutes) try { m(); } catch (_) {}
+    unstash(ch, keep);
+  }
+  notes.push('carrier/trueSb/aliasSb are dB under the FUNDAMENTAL. aliasVsTrue is the ' +
+             'one that matters: the alias sideband against the real one. Deeply negative is ' +
+             'a modulator that is actually being read at audio rate; near 0 means the ' +
+             'position is being written on a tick slow enough to fold the LFO.');
+  return { cols: ['hz', 'carrier', 'trueSb', 'aliasSb', 'aliasVsTrue'], rows, notes };
+}
+
 const HELP = {
   cols: ['args'],
   rows: [
@@ -5224,6 +5348,7 @@ const HELP = {
     { k: 'smplib',   args: 'ch=8 names=tr808-kick-01,linn-snare-01 \u2014 point a synth op at named library one-shots and hear whether they sound' },
     { k: 'spread',   args: "ch=8 ty=rake \u2014 can a bank filter's spread be modulated, and does a tweak reach a held note" },
     { k: 'pwmall',   args: 'ch=8 rate=2 amt=70 wavs=0,1,2,3 \u2014 which waves still STEP their width, for waves a pulse metric cannot see' },
+    { k: 'wtalias',  args: 'ch=8 lfo=40 \u2014 is the MODULATOR aliasing? true sideband vs the control-tick fold' },
     { k: 'wtshelf',  args: 'ch=8 \u2014 every wavetable at pos 0 and pos 1: harmonics, centroid, level' },
     { k: 'rollkey',  args: '\u2014 does the dice key fire on the PRESS, for every modifier combination' },
     { k: 'wtpos',    args: 'ch=8 rungs=0.5 \u2014 drive a wavetable position at a constant rate: junk added, spike share, and the standby gain at each write' },
@@ -6344,7 +6469,8 @@ const PROBES = { level: probeLevel, spectrum: probeSpectrum, cursor: probeCursor
                    kitcal: probeKitCal,
                    wtpos: probeWtPos,
                    rollkey: probeRollKey,
-                   wtshelf: probeWtShelf };
+                   wtshelf: probeWtShelf,
+                   wtalias: probeWtAlias };
   const fn = PROBES[NAME];
   out = fn ? await fn() : (NAME === 'help' ? HELP : { cols: [], rows: [], err: 'no probe named ' + NAME });
 } catch (e) {
