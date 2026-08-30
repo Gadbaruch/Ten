@@ -83,6 +83,118 @@ probe in probe.js for *"wt op modulating the position of a wavetable is very
 crackly"*. Left alone; only NEXT.md was committed from here. **Check `git
 status` before staging anything in this repo — this is the second time today.**
 
+# HIGH-RESOLUTION WAVETABLES, AND A SYNCED LFO THAT LANDS ON THE BAR — 2026-08-30 (evening)
+
+Gad: *"ok much smoother now - but can you make the wavetables more high
+rezolution? they sound a bit cheap esp on the lower octaves"* and *"also
+something broke with lfo doesnt do sync anymore"*.
+
+## THE LFO: SYNC IS TWO CLAIMS AND ONLY THE EASY ONE WAS TRUE
+
+The RATE was always right — 1/4 at 120bpm measures exactly 2Hz and `lfoHz` has
+been correct all along. **The PHASE never was.** A free-run LFO took its start
+phase from `at*rate*360`: the phase of a wave that has been running since the
+AudioContext started. The audio clock's zero and the TRANSPORT's zero are
+unrelated, so a synced LFO ran at exactly the right speed and landed wherever
+the page happened to have been open for.
+
+    MEASURED — the phase the builder writes, against the two candidate axes:
+      before   matches the audio CLOCK exactly (err 0.0), 163 degrees off grid
+      after    matches the GRID exactly (err 0.0), 163 degrees off the clock
+
+Its phase is a position in BEATS — one cycle per `div` of them — so it comes
+off `gridBeatsAt` now. The GRID and not `beatsAt`, because the free grid ticks
+whether or not the transport is rolling and a synced LFO should be coherent
+either way. ⚠ `syn` and `div` had to be **carried into the voice**: the builder
+was only ever handed a rate in Hz, so it could not have known.
+
+**AND A TEMPO CHANGE NEVER REACHED A SOUNDING ONE.** `setBpm` relocks fitted
+takes and grain clouds — both defined against the tempo — and left every held
+note's synced LFO at the division it was built with.
+
+    MEASURED, tempo doubled under a held note, 1/4 at 120 -> 240:
+      before  2Hz, STUCK        after  4Hz, FOLLOWS
+
+⚠ **`tools/probe.sh lfosync`'s first cut recomputed the expected phase from the
+same grid function the fix uses and compared it with itself** — so it read
+identically on both builds and called the FIXED one DRIFTING. It wraps
+`setWave` and takes the number the builder actually wrote now. **A test that
+recomputes the thing it is testing is not a test.** Its second flaw was as
+instructive: the two axes are both mod 360 and can COINCIDE at any one moment,
+so one run called the same build grid-locked AND free-running in the same
+table. Three takes, worst case, an axis only wins if it matches all of them.
+
+## THE WAVETABLES: THREE CEILINGS, AND THE LOWEST WAS THE RECIPE
+
+    MEASURED, harmonics under Nyquist against harmonics actually rendered:
+      C1  33Hz   could carry 674    was given 48    3.4 octaves thrown away
+      C2  65Hz   could carry 337    was given 48    2.4 octaves
+      C3 131Hz   could carry 168    was given 48    1.4 octaves
+
+1. **The RECIPES held 48**, because that is where the AKWF conversion was
+   trimmed back when a wavetable was a `createPeriodicWave` with 64 slots.
+   Regenerated at up to **256** (the source cycles are 600 samples, so 300 is
+   all there is), floor halved to -44dB. The dark frames stay at 3-12
+   harmonics, which is what a near-sine is.
+2. **The LADDER stopped at 64** for every note on the keyboard. Half-octave
+   steps to **512** now: a C2 gets 256, a C1 gets 512.
+3. **The TABLE READ WAS LINEAR.** Catmull-Rom now, which is what Vital uses.
+
+    MEASURED at C2, energy above 5kHz as a share of the whole:
+      the ten AKWF tables    -84..-98dB  ->  -8..-24dB    mean +76dB
+      the ten hand-written   -113..-131  ->  -146         about 25dB QUIETER
+
+⚠ **That second row is the cubic, and it is worth understanding.** Those tables
+have no harmonic above 720Hz at C2 and never did — what was up there was
+INTERPOLATION IMAGES, and they were the noise floor. Linear interpolation of a
+fractional table index leaves images ~30dB down; a 4-point cubic puts them near
+60. Shelf brightness ceiling, mean harmonic number at pos 1: **24.8 -> 40.4**.
+
+**AND IT NEEDED AN FFT.** Building a 2048-point table by summing sines is
+O(H*N) — at 256 harmonics that is half a million `Math.sin` calls per frame,
+~10ms on the main thread, five frames to a bank, at note-on. A radix-2 inverse
+transform does it in O(N log N): **1.4ms for five whole banks at 512
+harmonics**, verified against the direct sum to 5.4e-7. `fftr()` is the first
+FFT in index.html and is reusable.
+
+## COSTS, MEASURED
+
+- **CPU unchanged.** 24 worklet nodes, six voices at unison 4, 40Hz LFO on
+  position each: tick median 8.0ms, p95 8.9, max 12.3. The cubic read is four
+  times the lookups and does not show.
+- ⚠ **The ten AKWF tables moved in level, up to +7.8dB** (vgame at pos 1),
+  because a richer waveform peak-normalises differently. The hand-written ten
+  are unchanged. **The shelf's level spread is now 15.4dB, from 14.3** — the
+  open question from this morning is very slightly WORSE, not better.
+- index.html is 1.79MB, up 53KB, all of it harmonic recipes.
+- Alias rejection improved on its own: 40Hz LFO on position, alias against the
+  true sideband now **-58 to -72dB** where it was -35 to -61.
+
+## QA CHECKLIST — 2026-08-30 evening
+
+1. **⚠ PLAY THE NEW TABLES TWO OCTAVES DOWN — the ask.** `crush chip vgame fm
+   dist gap raw drawn grain sym` around C1-C2. They should have real top end
+   now instead of sounding like a cheap sample. MEASURED: +76dB mean of energy
+   above 5kHz at C2.
+2. **LFO ON SYNC, transport rolling.** Set a division and listen for it landing
+   ON the beat, not just moving at the right speed. MEASURED: the phase now
+   matches the grid axis exactly where it used to match the audio clock exactly.
+   **Trig must be FREE, not retrig** — retrig restarts at every note and was
+   never out of sync.
+3. **Change the tempo while a synced LFO is sounding.** It should follow now.
+   MEASURED: 2Hz -> 4Hz on a doubled tempo, where it used to stay at 2.
+4. **⚠ THE OLD TEN TABLES SHOULD BE UNCHANGED** — `basic glass vox brass pulse
+   metal organ fifths grit sub`. MEASURED: level within 1dB. If any of them
+   sounds different, the cubic read did it and that is the thing to report.
+5. **The new tables are up to 7.8dB LOUDER at pos 1 than this morning.** The
+   level spread across the shelf is 15.4dB. Still the open question: say if it
+   wants evening out, knowing it moves every saved wt preset.
+6. **A big chord on a wt patch, low.** First note on a new table at a new pitch
+   builds its bank — 1.4ms for five, so it should be inaudible. MEASURED as
+   CPU; not listened for.
+7. **Fast LFO on position** (the last round's ask) should still be clean.
+   MEASURED: alias rejection improved to -58..-72dB.
+
 # THE WAVETABLE IS AN AUDIO-RATE OSCILLATOR NOW — 2026-08-30 (late)
 
 Gad: *"still the position of wt isnt clean enough both in terms of the xfade,
