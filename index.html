@@ -1471,7 +1471,7 @@ const recPlayed=(pi,tBeat,midi,vel,durBeats)=>recPlayNote(pi,tBeat,sndOut(pi,mid
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-30.0947';
+const BUILD='2026-08-30.1011';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -1969,6 +1969,13 @@ const WTF=[
   SP('fold','fold','lin',{min:0,max:1,step:0.01,big:0.1,get:o=>o.fold??0,set:(o,v)=>o.fold=v,
      fmt:v=>Math.round(v*100)+'%'}),
 ];
+/* THE RUNG GRID THE SWEEPABLE DIALS BLEND ACROSS. wtWave's cache quantizes to
+   1/64, so 64 is the finest a straddle can be — a hand-dialled position is
+   then EXACT, because the blend collapses onto the single rung the cache would
+   have rounded it to anyway. Coarsening it buys headroom at high modulation
+   rates and costs interpolation error; 64 measured clean, so it stays. */
+const WTRUNG=64;
+const WTSHAPE={posa:1,posb:1,mrph:1,fold:1};
 /* THE CROP, RESOLVED IN ONE PLACE. Four callers used to spell it out
    separately — the root op, ops 1-9, and the scan window sent at build and
    again on a live edit — which is four chances to disagree about what a
@@ -7835,7 +7842,7 @@ class Voice{
         const oB=ac.createOscillator(); oB.setPeriodicWave(E.wtWave(ops[0]));
         const gA=ac.createGain(), gB=ac.createGain();
         gA.gain.value=1; gB.gain.value=0;
-        rootWt={a:src,b:oB,ga:gA,gb:gB,cur:'a'};
+        rootWt={a:src,b:oB,ga:gA,gb:gB,cur:'a',ka:E.wtKey(ops[0]),kb:E.wtKey(ops[0])};
         pitchParam=src.frequency;
       }
       else if(!isN&&rootW===3){
@@ -8014,8 +8021,10 @@ class Voice{
         else if(wv===14){
           /* TWO OSCILLATORS, ONE VOICE OF THE PAIR AUDIBLE. Every wt change —
              morph under an LFO, a knob under your finger — lands its new table
-             on the STANDBY oscillator and crossfades 12ms; the swap itself is
-             never heard, so a sweep is a sweep instead of a zipper. */
+             on the STANDBY oscillator and crossfades; the swap itself is never
+             heard, so a sweep is a sweep instead of a zipper. ka/kb are the
+             cache row each copy holds — see wtLive for why that memo is half
+             the reason it is silent. */
           const oA=ac.createOscillator(), oB=ac.createOscillator();
           const gA=ac.createGain(), gB=ac.createGain(), sum2=ac.createGain();
           const pw0=E.wtWave(op);
@@ -8023,7 +8032,8 @@ class Voice{
           gA.gain.value=1; gB.gain.value=0;
           oA.connect(gA); oB.connect(gB); gA.connect(sum2); gB.connect(sum2);
           setF(oA.frequency,fi); setF(oB.frequency,fi);
-          ((this.opWt=this.opWt||{})[i]=this.opWt[i]||[]).push({a:oA,b:oB,ga:gA,gb:gB,cur:'a'});
+          ((this.opWt=this.opWt||{})[i]=this.opWt[i]||[]).push(
+            {a:oA,b:oB,ga:gA,gb:gB,cur:'a',ka:E.wtKey(op),kb:E.wtKey(op)});
           for(const o2 of [oA,oB]){
             (this.opPitch[i]=this.opPitch[i]||[]).push({pm:o2.frequency,base:fi,kind:'osc'});
             (this.opDet[i]=this.opDet[i]||[]).push({pm:o2.detune,sc:200});
@@ -9813,31 +9823,58 @@ class Engine{
      the result is band-limited whatever the mangling did. Cached; the cache
      key quantizes morph and fold to 1/50, which is what makes live morphing
      affordable — a ctrl sweep is ~50 table swaps, all cached after one pass. */
+  /* THE CACHE ROW, IN ONE PLACE. wtWave keys its cache with it and wtLive
+     memos each copy of the crossfade pair with it, and two spellings of that
+     would be two answers to "does this copy already hold the table I want" —
+     the same reason smpWin exists. */
+  wtKey(op){
+    return 'wt:'+clamp(Math.round(op.wta||0),0,WTBL.length-1)+':'+
+      clamp(Math.round(op.wtb??3),0,WTBL.length-1)+':'+
+      Math.round(clamp(op.posa||0,0,1)*64)+':'+Math.round(clamp(op.posb||0,0,1)*64)+':'+
+      Math.round(clamp(op.mrph||0,0,1)*64)+':'+Math.round(clamp(op.fold||0,0,1)*64);
+  }
   wtWave(op){
     const a2=clamp(Math.round(op.wta||0),0,WTBL.length-1);
     const b2=clamp(Math.round(op.wtb??3),0,WTBL.length-1);
     const pa=clamp(op.posa||0,0,1), pb=clamp(op.posb||0,0,1);
     const m=clamp(op.mrph||0,0,1), fo=clamp(op.fold||0,0,1);
-    const key='wt:'+a2+':'+b2+':'+Math.round(pa*64)+':'+Math.round(pb*64)+':'+
-      Math.round(m*64)+':'+Math.round(fo*64);
+    const key=this.wtKey(op);
     let pw=this.waveCache.get(key);
     if(pw)return pw;
     const HA=wtHarm(a2,pa), HB=wtHarm(b2,pb), nH=Math.max(HA.length,HB.length);
-    const N=1024, y=new Float32Array(N);
-    for(let k=0;k<nH;k++){
-      const amp=(HA[k]||0)*(1-m)+(HB[k]||0)*m;
-      if(Math.abs(amp)<1e-4)continue;
-      const w2=2*Math.PI*(k+1)/N;
-      for(let n2=0;n2<N;n2++)y[n2]+=amp*Math.sin(w2*n2);
-    }
-    /* NORMALIZE, FOLD GENTLY, NORMALIZE AGAIN. Folding before normalizing was
-       why morph steps lurched: every cache entry had its own loudness. Now the
-       wave enters the folder at a known level, the folder's drive is tame
-       (0..2.2 extra), and the result leaves at a known level — a fold sweep is
-       a timbre sweep, not a volume ride. */
-    let mx=0; for(let n2=0;n2<N;n2++)mx=Math.max(mx,Math.abs(y[n2]));
-    if(mx>0)for(let n2=0;n2<N;n2++)y[n2]/=mx;
-    if(fo>0.005){
+    const N=1024, NH=64, re=new Float32Array(NH+1), im=new Float32Array(NH+1);
+    /* NOTHING BUT THE FOLDER MAKES NEW HARMONICS, so with fold off the whole
+       round trip — synthesise 1024 samples, normalise, then a 64x1024 DFT,
+       131,072 trig calls — recovers exactly the numbers it started from.
+       MEASURED at 3.28ms of MAIN THREAD per uncached table, with the control
+       tick stretching to 31.7ms while a position swept. The unfolded path just
+       hands the recipe over: verified against the DFT it replaces over 600
+       table/position/morph combinations, worst coefficient error 1.19e-7,
+       which is float32 rounding.
+       The peak normalisation goes with it, because createPeriodicWave is
+       called with normalisation ENABLED and that undoes any uniform scale on
+       the coefficients — measured: the same wave to 3e-7 with the recipe
+       scaled by 0.0137 and by 53.2. */
+    if(fo<=0.005){
+      for(let k=0;k<Math.min(nH,NH);k++){
+        const amp=(HA[k]||0)*(1-m)+(HB[k]||0)*m;
+        im[k+1]=Math.abs(amp)<1e-4?0:amp;
+      }
+    }else{
+      const y=new Float32Array(N);
+      for(let k=0;k<nH;k++){
+        const amp=(HA[k]||0)*(1-m)+(HB[k]||0)*m;
+        if(Math.abs(amp)<1e-4)continue;
+        const w2=2*Math.PI*(k+1)/N;
+        for(let n2=0;n2<N;n2++)y[n2]+=amp*Math.sin(w2*n2);
+      }
+      /* NORMALIZE, FOLD GENTLY, NORMALIZE AGAIN. Folding before normalizing was
+         why morph steps lurched: every cache entry had its own loudness. Now the
+         wave enters the folder at a known level, the folder's drive is tame
+         (0..2.2 extra), and the result leaves at a known level — a fold sweep is
+         a timbre sweep, not a volume ride. */
+      let mx=0; for(let n2=0;n2<N;n2++)mx=Math.max(mx,Math.abs(y[n2]));
+      if(mx>0)for(let n2=0;n2<N;n2++)y[n2]/=mx;
       /* the identity inside [-1,1], reflecting beyond — the first cut mapped
          +0.5 to -0.5 and "fold" was really "invert", which is why 0.3 already
          sounded mangled */
@@ -9847,13 +9884,12 @@ class Engine{
       let dc=0; for(let n2=0;n2<N;n2++)dc+=y[n2]; dc/=N;
       mx=0; for(let n2=0;n2<N;n2++){y[n2]-=dc; mx=Math.max(mx,Math.abs(y[n2]));}
       if(mx>0)for(let n2=0;n2<N;n2++)y[n2]/=mx;
-    }
-    const NH=64, re=new Float32Array(NH+1), im=new Float32Array(NH+1);
-    for(let k=1;k<=NH;k++){
-      let sr2=0, si2=0;
-      const w2=2*Math.PI*k/N;
-      for(let n2=0;n2<N;n2++){sr2+=y[n2]*Math.cos(w2*n2); si2+=y[n2]*Math.sin(w2*n2);}
-      re[k]=sr2*2/N; im[k]=si2*2/N;
+      for(let k=1;k<=NH;k++){
+        let sr2=0, si2=0;
+        const w2=2*Math.PI*k/N;
+        for(let n2=0;n2<N;n2++){sr2+=y[n2]*Math.cos(w2*n2); si2+=y[n2]*Math.sin(w2*n2);}
+        re[k]=sr2*2/N; im[k]=si2*2/N;
+      }
     }
     pw=AC.createPeriodicWave(re,im,{disableNormalization:false});
     this.waveCache.set(key,pw);
@@ -9881,21 +9917,104 @@ class Engine{
   }
   /* the live half: a ctrl mod or a knob under a sounding note reshapes what is
      already playing — setPeriodicWave is live, so it is one cached swap */
+  /* THE STANDBY HAS TO BE SILENT WHEN THE TABLE LANDS, and at a 12ms time
+     constant against an 8ms control tick it never was. MEASURED, an LFO on
+     pos a: the copy being written to was at gain 0.794 worst and 0.376 median
+     — a near-full-scale waveform flip, 125 times a second — and the junk
+     between the harmonics rose 25.7dB the moment the sweep started. That is
+     the crackle, and it is exactly the fault pwxAim already learned the
+     expensive way. The same three ingredients:
+       1  MEMO. Each copy remembers the cache row it holds. If the AUDIBLE one
+          already holds what is asked for, nothing happens at all — no wave
+          built, no swap, no fade. Most ticks of a slow modulator cost nothing.
+       2  THE GATE. A table only lands on a copy whose MEASURED gain is under
+          0.03 — not the one that ought to be silent, the one that is.
+       3  1.5ms, not 12. Five time constants inside one tick, so the standby
+          has actually arrived before the next table wants it and the gate
+          almost never has to refuse. When it does, the sound leans on the
+          table it already has for one tick, which is a coarser step and not
+          a click. */
   wtLive(pi,si,key,v){
     const sl=(S.presets[pi].osc||[])[si]; if(!sl||Math.round(sl.wav)!==14)return false;
     const eff=v===undefined?sl:Object.assign({},sl,{[key]:v});
-    const pw=this.wtWave(eff), n=AC.currentTime;
+    /* the four SHAPE dials are continuous and are what gets swept, so they
+       straddle. A table swap (wta/wtb) is one event and takes the plain
+       gated exchange below. */
+    if(WTSHAPE[key]!==undefined){
+      const t=clamp(eff[key]||0,0,1)*WTRUNG;
+      for(const vo of this.act[pi]||[])
+        for(const w of (vo.opWt&&vo.opWt[si])||[])try{this.wtAim(w,eff,key,t,0.0015);}catch(_){}
+      return true;
+    }
+    const wk=this.wtKey(eff);
+    let pw=null; const n=AC.currentTime;
     for(const vo of this.act[pi]||[]){
       for(const w of (vo.opWt&&vo.opWt[si])||[]){    // one pair per unison copy
-        /* the standby takes the new table; the pair crossfades; roles swap */
-        const on=w.cur==='a'?{o:w.b,g:w.gb,off:w.ga}:{o:w.a,g:w.ga,off:w.gb};
-        try{on.o.setPeriodicWave(pw);}catch(_){continue;}
-        on.g.gain.setTargetAtTime(1,n,0.012);
-        on.off.gain.setTargetAtTime(0,n,0.012);
+        const ck=w.cur==='a'?'ka':'kb', cg=w.cur==='a'?w.ga:w.gb;
+        if(w[ck]===wk)continue;                      // already sounding it
+        const sk=w.cur==='a'?'kb':'ka', so=w.cur==='a'?w.b:w.a,
+              sg=w.cur==='a'?w.gb:w.ga;
+        if(sg.gain.value>0.03)continue;              // still audible: next tick
+        if(!pw)pw=this.wtWave(eff);
+        try{so.setPeriodicWave(pw);}catch(_){continue;}
+        w[sk]=wk;
+        sg.gain.setTargetAtTime(1,n,0.0015);
+        cg.gain.setTargetAtTime(0,n,0.0015);
         w.cur=w.cur==='a'?'b':'a';
       }
     }
     return true;
+  }
+  /* THE POSITION BETWEEN THE RUNGS — pwxAim's trick, on the wavetable's own
+     dials, and for the same reason.
+
+     wtWave caches on a quantized position, so a swept pos only ever has a
+     grid of tables to land on and the pair was SWAPPING on every step: 103
+     swaps a second at a 2Hz LFO, each one a crossfade of the DIFFERENCE
+     between two tables, which is a 100Hz amplitude modulation of a broadband
+     signal. MEASURED: junk between the harmonics +67dB while the sweep ran,
+     and it got WORSE as the crossfade got faster — because the crossfade IS
+     the artifact. No time constant fixes that.
+
+     The pair is already two oscillators summing, so it does not have to hold
+     the SAME table on both. Straddle: the rung below the position on one copy,
+     the rung above on the other, blended by the fraction between them. The
+     blend follows the modulator CONTINUOUSLY — there is no transient — and a
+     copy is only ever re-tabled when its weight has reached zero.
+
+     WHICH COPY HOLDS WHICH RUNG is whatever it already holds. Crossing a rung
+     flips it, so the copy that has to be re-tabled is always the one whose
+     weight just went to zero, and a reload can never be heard at any rate. */
+  wtAim(w,eff,key,t,tc){
+    const N=WTRUNG, n=AC.currentTime;
+    const t2=clamp(t,0,N); let i0=Math.floor(t2); if(i0>=N)i0=N-1;
+    const x=clamp(t2-i0,0,1);
+    const kOf=r=>this.wtKey(Object.assign({},eff,{[key]:r/N}));
+    const kLo=kOf(i0), kHi=kOf(i0+1);
+    /* KEEP WHATEVER IS ALREADY RIGHT — one copy re-tabled per rung crossed,
+       and never the one you can hear */
+    let aLo;
+    if(w.ka===kLo||w.kb===kHi)aLo=true;
+    else if(w.ka===kHi||w.kb===kLo)aLo=false;
+    else aLo=true;
+    const ta=aLo?kLo:kHi, tb=aLo?kHi:kLo;
+    let okA=(w.ka===ta), okB=(w.kb===tb);
+    /* THE MEASURED GAIN DECIDES, not an argument about which copy ought to be
+       silent. A copy still carrying weight keeps its table for one more tick
+       and the sound leans on the other one — the nearest rung — which is a
+       coarser step, not a click. */
+    if(!okA&&w.ga.gain.value<0.03){
+      try{w.a.setPeriodicWave(this.wtWave(Object.assign({},eff,{[key]:(aLo?i0:i0+1)/N})));
+          w.ka=ta; okA=true;}catch(_){}}
+    if(!okB&&w.gb.gain.value<0.03){
+      try{w.b.setPeriodicWave(this.wtWave(Object.assign({},eff,{[key]:(aLo?i0+1:i0)/N})));
+          w.kb=tb; okB=true;}catch(_){}}
+    let ga=aLo?1-x:x, gb=aLo?x:1-x;
+    if(!okA){ga=0; gb=1;}                    // stale: hand it to the other for one tick
+    else if(!okB){ga=1; gb=0;}
+    w.ga.gain.setTargetAtTime(ga,n,tc);
+    w.gb.gain.setTargetAtTime(gb,n,tc);
+    w.cur=ga>=gb?'a':'b';                    // the swap path still asks who is loud
   }
   setWave(osc,w,phDeg,width){
     if(w>=9){osc.type='sine';return;}   // 'smp' handled as a buffer source elsewhere
@@ -14832,6 +14951,21 @@ function randGran(pi,w){
 }
 /* ⌥/ — the dice for the SLOT UNDER THE CURSOR: every numeric param rerolls
    inside its own range; what the slot IS (type, source, wave) stays yours. */
+/* WHAT THE DICE KEY DOES, in one place. The press calls it and so does a latch
+   key reached for after the press; two spellings of "what does / mean" is two
+   answers to what the modifiers select. */
+function rollKey(e,wantLatch){
+  const scope=HOLD.i?'sound':HOLD.v?'vel':HOLD.n?'notes':null;   // what the dice are for
+  const mode=rs(e)?(e.altKey?'wild':'fresh'):'var';
+  if(wantLatch){
+    if(AUTORND.on&&AUTORND.ch===S.curPreset){AUTORND.on=false;flash('auto-roll off');}
+    else{AUTORND.on=true; AUTORND.ch=S.curPreset; AUTORND.scope=scope||'notes';
+      AUTORND.mode=mode; AUTORND.last=-1;
+      flash('⟳ auto-roll latched — ch '+S.curPreset+' re-rolls every cycle');}
+    dirty=true; return;
+  }
+  roll(mode,scope);
+}
 function rollSlot(){
   const pi=S.editSnd, pre=S.presets[pi], M=MODULES[S.curMod];
   if(M&&M.id==='osc'&&isGranCh(pi)){
@@ -23744,8 +23878,16 @@ const onKeyDown=e=>{
      arrows at all. */
   if(c==='Backslash'&&S.layer>0&&!e.repeat&&!e.metaKey&&!altOf(e)){
     e.preventDefault(); HOLD.i=true; HOLD.iUsed=false; return;}
+  /* THE DICE FIRE ON THE PRESS (Gad, 2026-08-30: "the roll clicking should
+     activate on pressing / not on key release - also for modifiers+roll").
+     Everything the release used to read is already true at press time: the
+     scope keys (\ v n) and the mode modifiers are all DOWN before / is.
+     The one thing press time cannot know is whether an ARROW is coming — /+↑↓
+     is the wildness dial — so reaching for wildness now rolls once on the way
+     in. That is the cost of the ask, and it is the whole cost. */
   if(c==='Slash'&&!altOf(e)){e.preventDefault();
-    if(!e.repeat){HOLD.r=true; HOLD.rUsed=false; HOLD.rLatch=KM.sl; if(KM.sl)LATCH.used=true;}
+    if(!e.repeat){HOLD.r=true; HOLD.rUsed=false; HOLD.rLatch=KM.sl; if(KM.sl)LATCH.used=true;
+      HOLD.rDid=KM.sl?'latch':'roll'; rollKey(e,KM.sl);}
     return;}
   if(S.layer===0&&DJCODE[c]!==undefined){e.preventDefault();     // DJ pads: full home row
     if(e.repeat)return;
@@ -25850,21 +25992,12 @@ const onKeyUp=e=>{
   if(c==='Backslash'&&HOLD.i){
     HOLD.i=false; HOLD.iUsed=false; return;}
   if(c==='Slash'&&HOLD.r){
-    /* The roll fires HERE, not on the press — and only if the PRESS armed the
-       dice, or releasing the ⌥/ random-mod scope would roll the whole channel. */
-    const used=HOLD.rUsed, wantLatch=HOLD.rLatch;
-    HOLD.r=false; HOLD.rUsed=false; HOLD.rLatch=false;
-    if(used)return;
-    const scope=HOLD.i?'sound':HOLD.v?'vel':HOLD.n?'notes':null;   // what the dice are for
-    const mode=rs(e)?(e.altKey?'wild':'fresh'):'var';
-    if(wantLatch){
-      if(AUTORND.on&&AUTORND.ch===S.curPreset){AUTORND.on=false;flash('auto-roll off');}
-      else{AUTORND.on=true; AUTORND.ch=S.curPreset; AUTORND.scope=scope||'notes';
-        AUTORND.mode=mode; AUTORND.last=-1;
-        flash('⟳ auto-roll latched — ch '+S.curPreset+' re-rolls every cycle');}
-      dirty=true; return;
-    }
-    roll(mode,scope);
+    /* The press already rolled. The release is still live for exactly one
+       thing: a LATCH key reached for AFTER the press, which the press could
+       not have seen (latchArmHeld sets rLatch on any held hand). */
+    const used=HOLD.rUsed, late=HOLD.rLatch&&HOLD.rDid!=='latch';
+    HOLD.r=false; HOLD.rUsed=false; HOLD.rLatch=false; HOLD.rDid=null;
+    if(late&&!used)rollKey(e,true);
     return;
   }
   if(HOLD.ms&&c===HOLD.ms.c&&!HOLD.msLatched){
@@ -26290,7 +26423,7 @@ window.addEventListener('blur',()=>{
   KM.sl=false; KM.sr=false; LATCH.used=false; HOLD.tab=false; HOLD.m=false; kbHeld.clear();
   SUS.clear(); noteLatch.clear();
   HE.reset();          // analog keys too: a stroke interrupted by a blur owns nothing
-  HOLD.c=false; HOLD.n=false; HOLD.r=false; HOLD.i=false; HOLD.v=false; HOLD.q=false; HOLD.sc=false; HOLD.dig=-1;
+  HOLD.c=false; HOLD.n=false; HOLD.r=false; HOLD.rDid=null; HOLD.i=false; HOLD.v=false; HOLD.q=false; HOLD.sc=false; HOLD.dig=-1;
   HOLD.opt=null; HOLD.optUsed=false; HOLD.optLatch=false; HOLD.optLatched=false;
   HOLD.ms=null; HOLD.msLatch=false; HOLD.msLatched=false;
   KM.srLatch=false; KM.altLatch=false; KM.shlLatch=false;

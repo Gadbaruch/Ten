@@ -3071,6 +3071,11 @@ async function probePwm() {
     p.osc[0].pw = 0.5;
     engine.rebuildRack(ch); engine.refresh(ch);
     const A = await grab(450);
+    /* COLD is the honest worst case and it is what a first sweep actually is:
+       the cache has never seen these rows. It is also what a patch with two
+       shape dials moving looks like forever, because the key space is the
+       PRODUCT of the dials and it outruns 400 rows. */
+    if (Math.round(num(P.cold, 1))) engine.waveCache.clear();
     p.mod[0].off = false;
     const B = await grab(700);
     const ea = edges(A, 0), eb = edges(B, sr / f);
@@ -4633,6 +4638,396 @@ async function probePwmAll() {
   return { cols: ['hz', 'floor', 'swept', 'added', 'jfloor', 'jswept', 'worst'], rows };
 }
 
+/* ---------------- wtpos: does a MODULATED wavetable position click? ------
+ * Gad, 2026-08-30: "wt op modulating the position of a wavetable is very
+ * crackly, needs to be smooth."
+ *
+ * Same mechanism-agnostic metric as `pwmall`, because it is the same class of
+ * fault: a wt operator is a PAIR of oscillators crossfading, and every table
+ * change lands on the standby copy. If the standby is not actually silent when
+ * the table lands, the swap is a waveform discontinuity — a click — and at a
+ * control tick of ~6ms against a 12ms crossfade the standby is never silent.
+ *
+ * jswept - jfloor is the click rate. gWrite is the smoking gun: the GAIN of the
+ * copy at the moment its table was replaced. Zero is what silent looks like.
+ *
+ *     tools/probe.sh wtpos ch=8 key=posa rate=2 amt=100                       */
+async function probeWtPos() {
+  const ch = CH === 9 ? 8 : CH;
+  const KEY = String(P.key || 'posa');
+  const RATE = num(P.rate, 2), AMT = num(P.amt, 100);
+  const TA = Math.round(num(P.wta, 0)), TB = Math.round(num(P.wtb, 3));
+  const sr = AC.sampleRate;
+  const keep = stash(ch);
+  const mutes = [], rows = [], notes = [];
+  let realWt = null, realWave = null, realMod = null;
+  try {
+    if (T.playing) stop();
+    pin(ch);
+    mutes.push(...muteOthers([ch]));
+    const p = S.presets[ch];
+    /* the same junk-between-the-teeth reading pwmall uses, and the same
+       caveat: comparable BEFORE and AFTER on one wave, never to an ideal */
+    const junk = (x, f0) => {
+      const N = 16384;
+      if (x.length < N) return null;
+      const o = Math.round((x.length - N) / 2);
+      const re = new Float64Array(N), im = new Float64Array(N);
+      for (let i2 = 0; i2 < N; i2++)
+        re[i2] = x[o + i2] * (0.5 - 0.5 * Math.cos(2 * Math.PI * i2 / N));
+      fft(re, im);
+      const bhz = sr / N;
+      let j2 = 0, jn = 0, fund = 0;
+      for (let k = Math.round(60 / bhz); k < Math.round(1600 / bhz); k++) {
+        const hz = k * bhz, m = Math.sqrt(re[k] * re[k] + im[k] * im[k]);
+        if (Math.abs(hz - f0) < 3 * bhz) fund = Math.max(fund, m);
+        if (Math.abs(hz - Math.round(hz / f0) * f0) > 25) { j2 += m * m; jn++; }
+      }
+      return +(10 * Math.log10(Math.max(1e-20, j2 / Math.max(1, jn)) /
+                               Math.max(1e-20, fund * fund))).toFixed(1);
+    };
+    /* STEPPING vs SWEEPING, told apart without a calibrated threshold. The
+       note is periodic at f0, so take the SECOND difference across one period:
+
+           r[n] = x[n] - 2x[n-P] + x[n-2P]        P fractional, interpolated
+
+       A table that slides makes the waveform change smoothly period to period
+       and a second difference cancels anything moving at a constant rate — r
+       stays small and NOISE-SHAPED. A table that STEPS puts one whole period
+       out of line with its neighbours and r gets an isolated spike. So CREST
+       (max/rms) is the answer, and it does not care how far the timbre moved,
+       which is exactly what `added` cannot say. */
+    const at = (x, t) => { const i = Math.floor(t), f = t - i;
+      return (i < 0 || i + 1 >= x.length) ? 0 : x[i] * (1 - f) + x[i + 1] * f; };
+    const resid = (x, f0) => {
+      const P = sr / f0, o = Math.ceil(2 * P) + 2, n = x.length;
+      if (n < o + 4096) return null;
+      let s2 = 0, mx = 0; const m = n - o;
+      const r = new Float64Array(m);
+      for (let i = 0; i < m; i++) {
+        const t = o + i;
+        const v = x[t] - 2 * at(x, t - P) + at(x, t - 2 * P);
+        r[i] = v; s2 += v * v; if (Math.abs(v) > mx) mx = Math.abs(v);
+      }
+      const rms = Math.sqrt(s2 / m);
+      /* how much of the energy sits in the loudest 0.1% of samples — a spike
+         train puts it all there, a noise floor spreads it evenly (0.001) */
+      const srt = Array.from(r, Math.abs).sort((a, b) => b - a);
+      const top = Math.max(1, Math.round(m * 0.001));
+      let te = 0; for (let i = 0; i < top; i++) te += srt[i] * srt[i];
+      return { rms: +rms.toFixed(5), crest: +(mx / Math.max(1e-12, rms)).toFixed(1),
+               top01: +(te / Math.max(1e-20, s2)).toFixed(3) };
+    };
+    const jumps = x => {
+      const n = x.length, d = new Float64Array(n - 1);
+      for (let i = 1; i < n; i++) d[i - 1] = Math.abs(x[i] - x[i - 1]);
+      const srt = Array.from(d).sort((a, b) => a - b);
+      const med = srt[srt.length >> 1] || 1e-12;
+      let big = 0, mx = 0;
+      for (let i = 0; i < d.length; i++) { if (d[i] > 8 * med) big++; if (d[i] > mx) mx = d[i]; }
+      return { per_s: +(big / (n / sr)).toFixed(1), worst: +(mx / med).toFixed(0) };
+    };
+    p.cat = 'keys';
+    p.osc = rack(mkOsc);
+    p.osc[0] = { wav: 14, mode: 0, dst: 0, rat: 1, amt: 1, fine: 0, ph: 0, phm: 0, pw: 0.5,
+                 wta: TA, wtb: TB, posa: 0.5, posb: 0.5, mrph: 0, fold: 0 };
+    p.flt = rack(mkFlt); p.flt[0].typ = 0;      // nothing between the operator and the bus
+    p.fx = rack(mkFx);
+    p.env = rack(mkEnv);
+    p.env[0] = { dst: 1, idx: 0, amt: 100, a: 0.004, d: 0.02, s: 1, r: 0.05, crv: 0 };
+    p.mod = rack(mkMod);
+    p.mix.lvl = 1; p.mix.pan = 0;
+    /* ONE VOICE, NO SPREAD — unison detune makes the sum inharmonic and fills
+       the gaps with energy that is not an artifact (pwmall's own lesson) */
+    Object.assign(modHolder(p, 'vox').vox || (p.vox = {}),
+      { mode: 0, glide: 0, uni: 1, sprd: 0, wide: 0, slop: 0, fmw: 0 });
+    p.mod[0] = Object.assign(mkMod(0), {
+      src: 2, wav: 0, rate: RATE, syn: 0, ltr: 0, ph: 0, off: true,
+      routes: [{ dst: 0, idx: 0, amt: AMT, tgt: null,
+                 /* resolveDest matches on key AND LABEL, and the wt dials are
+                    labelled 'pos a' not 'posa' — ask the spec, do not guess */
+                 addr: { rack: 'osc', slot: 0, key: KEY,
+                         lbl: (WTF.find(x => x.key === KEY) || { lbl: KEY }).lbl } }] });
+    S.editSnd = ch; S.curSlot = 0;
+    engine.rebuildRack(ch); engine.refresh(ch);
+    if (!resolveDest(p, p.mod[0].routes[0].addr).length)
+      return { cols: [], rows: [], err: 'the ' + KEY + ' route does not resolve on this build' };
+
+    /* WITNESS THE SWAP. Wrap wtLive and read, for every table that lands, the
+       gain of the copy it landed on. A silent-standby design reads ~0. */
+    const seen = [];
+    realWt = engine.wtLive.bind(engine);
+    /* the gain BEFORE and whether the swap actually happened — wtLive refuses
+       a write onto a loud copy now, and counting refusals as writes reads the
+       gate's worst case as the mechanism's */
+    engine.wtLive = function (pi2, si2, k2, v2) {
+      const pre = [];
+      if (pi2 === ch && si2 === 0)
+        for (const vo of engine.act[pi2] || [])
+          for (const w of (vo.opWt && vo.opWt[si2]) || [])
+            pre.push({ w, ka: w.ka, kb: w.kb, ga: w.ga.gain.value, gb: w.gb.gain.value });
+      const r = realWt(pi2, si2, k2, v2);
+      /* A WRITE IS A COPY WHOSE TABLE CHANGED, not a call — wtLive refuses a
+         write onto a loud copy now, and counting refusals reads the gate's
+         worst case as the mechanism's. The gain recorded is the one the copy
+         had at the moment the table landed ON it. */
+      for (const q of pre) {
+        let wrote = false, g = 0;
+        if (q.w.ka !== q.ka) { wrote = true; g = Math.max(g, q.ga); }
+        if (q.w.kb !== q.kb) { wrote = true; g = Math.max(g, q.gb); }
+        seen.push({ v: v2, g, wrote });
+      }
+      return r;
+    };
+    const grab = async ms => {
+      engine.allOff(); await sleep(80);
+      const bus = busOf(ch); if (!bus) return null;
+      engine.noteOn(AC.currentTime + 0.02, ch, NOTE, VEL);
+      await sleep(140);                       // past the attack and the first ticks
+      const v = (engine.act[ch] || [])[0];
+      const pp = v && v.opPitch && v.opPitch[0] && v.opPitch[0][0];
+      seen.length = 0;
+      const t = tap(bus);
+      await sleep(ms);
+      const [L] = t.stop();
+      L._f0 = (pp && pp.base > 20) ? pp.base : 0;
+      L._n = seen.length;
+      const wr = seen.filter(s => s.wrote).map(s => s.g);
+      L._w = wr.length;
+      L._gmax = wr.length ? +Math.max.apply(null, wr).toFixed(3) : null;
+      L._gmed = wr.length
+        ? +wr.slice().sort((a, b) => a - b)[wr.length >> 1].toFixed(3) : null;
+      L._span = seen.length && seen[0].v != null
+        ? +(Math.max.apply(null, seen.map(s => s.v)) -
+            Math.min.apply(null, seen.map(s => s.v))).toFixed(3) : null;
+      L._ms = +(ms / Math.max(1, seen.length)).toFixed(1);
+      engine.allOff(); await sleep(50);
+      return L;
+    };
+    /* WHAT IT COSTS THE MAIN THREAD. wtWave synthesises 1024 samples, folds
+       them, runs a 64-harmonic DFT over all 1024 and then calls
+       createPeriodicWave — which builds a band-limited table per octave. All
+       of that on the main thread, inside the 8ms control tick. If the miss
+       rate is anywhere near the tick rate the crackle is not a waveform step
+       at all, it is the audio thread being starved, and no crossfade fixes
+       that. (The pulse-width work hit exactly this once: "createPeriodicWave
+       runs on the MAIN thread. It drained memory and starved modTick.") */
+    const cpu = { calls: 0, miss: 0, ms: 0 };
+    realWave = engine.wtWave.bind(engine);
+    engine.wtWave = function (op) {
+      const k = engine.wtKey ? engine.wtKey(op) : null;
+      const hit = k != null && engine.waveCache.has(k);
+      const t0 = performance.now();
+      const r = realWave(op);
+      cpu.calls++; if (!hit) cpu.miss++; cpu.ms += performance.now() - t0;
+      return r;
+    };
+    /* and the tick itself: a starved main thread shows up as LATE ticks */
+    const ticks = []; let tPrev = 0;
+    realMod = engine.modTick.bind(engine);
+    engine.modTick = function () { const n0 = performance.now();
+      if (tPrev) ticks.push(n0 - tPrev); tPrev = n0; return realMod(); };
+    /* THE BLEND MUST NOT DIP. The straddle holds BOTH copies at once — rung
+       below at 1-x, rung above at x — so if the two oscillators are not
+       phase-locked a half-way position partially cancels, and a 64-per-sweep
+       amplitude ripple is itself a crackle. Static note, on a rung and
+       half-way between two: the levels have to match. */
+    /* DRIVEN THROUGH wtLive, not through the preset: a static note never calls
+       it, so setting posa and rebuilding measures the BUILD-TIME table and says
+       nothing about the blend. This is the live path a modulator uses. */
+    const lvlAt = async pos => {
+      engine.allOff(); await sleep(80);
+      const bus = busOf(ch); if (!bus) return null;
+      engine.noteOn(AC.currentTime + 0.02, ch, NOTE, VEL);
+      await sleep(140);
+      for (let i = 0; i < 12; i++) { engine.wtLive(ch, 0, 'posa', pos); await sleep(10); }
+      const t = tap(bus);
+      await sleep(300);
+      const [L] = t.stop();
+      engine.allOff(); await sleep(50);
+      let s2 = 0; for (let i = 0; i < L.length; i++) s2 += L[i] * L[i];
+      return +Math.sqrt(s2 / L.length).toFixed(5);
+    };
+    const r32 = await lvlAt(32 / 64), r33 = await lvlAt(33 / 64),
+          between = await lvlAt(32.5 / 64);
+    /* the two PURE rungs bracket it. Each table is peak-normalised on its own,
+       so they need not have the same rms — the question is only whether the
+       BLEND sits between them (phase-locked, no loss) or below both
+       (cancelling). */
+    const onRung = +((r32 + r33) / 2).toFixed(5);
+    const A = await grab(700);
+    if (!A) return { cols: [], rows: [], err: 'no bus on ch ' + ch };
+    const f = A._f0 || 130.8;
+    const jA = jumps(A), fl = junk(A, f), rA = resid(A, f);
+    /* COLD is the honest worst case and it is what a first sweep actually is:
+       the cache has never seen these rows. It is also what a patch with two
+       shape dials moving looks like forever, because the key space is the
+       PRODUCT of the dials and it outruns 400 rows. */
+    if (Math.round(num(P.cold, 1))) engine.waveCache.clear();
+    p.mod[0].off = false;
+    const B = await grab(700);
+    p.mod[0].off = true;
+    const jB = jumps(B), sw = junk(B, f), rB = resid(B, f);
+    const tk = ticks.slice().sort((a, b) => a - b);
+    const tkMed = tk.length ? +tk[tk.length >> 1].toFixed(1) : null;
+    const tkMax = tk.length ? +tk[tk.length - 1].toFixed(1) : null;
+    rows.push({ k: KEY + ' ' + WTNAMES[TA] + '/' + WTNAMES[TB], hz: r3(f),
+                floor: fl, swept: sw,
+                added: (fl != null && sw != null) ? +(sw - fl).toFixed(1) : '?',
+                rF: rA && rA.rms, rS: rB && rB.rms,
+                crF: rA && rA.crest, crS: rB && rB.crest,
+                topF: rA && rA.top01, topS: rB && rB.top01,
+                r32, r33, between,
+                below: +(between - Math.min(r32, r33)).toFixed(5),
+                dipDb: (onRung && between)
+                  ? +(20 * Math.log10(between / onRung)).toFixed(2) : null,
+                writes: B._w, gWrite: B._gmax, span: B._span,
+                wCall: cpu.calls, wMiss: cpu.miss,
+                wMs: +cpu.ms.toFixed(1), perMs: +(cpu.ms / Math.max(1, cpu.miss)).toFixed(2),
+                tkMed, tkMax });
+  } finally {
+    try { if (realWt) engine.wtLive = realWt; } catch (_) {}
+    try { if (realWave) engine.wtWave = realWave; } catch (_) {}
+    try { if (realMod) engine.modTick = realMod; } catch (_) {}
+    for (const m of mutes) try { m(); } catch (_) {}
+    unstash(ch, keep);
+  }
+  notes.push('clicks = jswept - jfloor, sample-to-sample jumps over 8x the median step, per ' +
+             'second. The wt table is band-limited and static at the floor, so anything ' +
+             'the sweep ADDS got there by a discontinuity.');
+  notes.push('calls = wtLive calls in the window · writes = the ones that actually put a ' +
+             'table on an oscillator · gWrite = the WORST gain a copy had when a table ' +
+             'landed ON it. 0 is silent and inaudible, near 1 is a full-scale flip.');
+  notes.push('span = how far the modulator actually moved ' + KEY + '. A perfectly smooth ' +
+             'reading on a span of 0 means nothing arrived.');
+  notes.push('rF/rS = rms of the one-period second difference, floor and swept. crF/crS = ' +
+             'its CREST (max/rms) and topS = the share of its energy in the loudest 0.1% of ' +
+             'samples. A smooth sweep raises rms and leaves crest near the floor; a STEPPING ' +
+             'one puts isolated spikes in and crest/top climb. That pair is the answer — ' +
+             '`added` cannot tell a big smooth sweep from a small steppy one.');
+  notes.push('wCall/wMiss = wtWave calls and CACHE MISSES in the swept window · wMs = total ' +
+             'main-thread ms inside wtWave · perMs = ms per miss · tkMed/tkMax = the control ' +
+             'tick interval while it ran. A miss rate near the tick rate with a fat perMs is ' +
+             'a starved audio thread, which is crackle no crossfade can fix.');
+  notes.push('r32/r33 = rms of a STATIC note on each of two neighbouring cache rungs; ' +
+             'between = half-way, where the straddle sounds BOTH. dipDb is between against ' +
+             'their mean and `below` is between minus the quieter rung. The two tables are ' +
+             'each peak-normalised so they need not match, but the blend must land BETWEEN ' +
+             'them: below < 0 is the pair cancelling, which would ripple once per rung.');
+  return { cols: ['hz', 'floor', 'swept', 'added', 'rF', 'rS', 'crF', 'crS', 'topF', 'topS',
+                  'r32', 'r33', 'between', 'below', 'dipDb',
+                  'writes', 'gWrite', 'span', 'wCall', 'wMiss', 'wMs', 'perMs',
+                  'tkMed', 'tkMax'], rows, notes };
+}
+
+/* ---------------- rollkey: does the dice key fire on the PRESS? ----------
+ * Gad, 2026-08-30: "the roll clicking should activate on pressing / not on key
+ * release - also for modifiers+roll".
+ *
+ * Wrap roll() and the auto-roll latch, then play each gesture and record WHEN
+ * it landed — after the keydown, or only after the keyup. Every modifier
+ * combination the key understands is in the table, because "also for
+ * modifiers" is the half that is easy to fix for the bare key and miss for the
+ * rest.
+ *
+ *     tools/probe.sh rollkey                                                  */
+async function probeRollKey() {
+  const rows = [], notes = [];
+  const realRoll = roll, realKM = { sl: KM.sl, sr: KM.sr, shl: KM.shl };
+  const seen = [];
+  window.roll = function (mode, scope) { seen.push({ mode, scope: scope || '-' }); };
+  const ev = (t, code, o) => document.dispatchEvent(new KeyboardEvent(t,
+    Object.assign({ code, key: code, bubbles: true, cancelable: true }, o || {})));
+  const auto0 = { on: AUTORND.on, ch: AUTORND.ch };
+  try {
+    pin(CH);
+    const cases = [
+      { k: '/',        pre: [], mods: {},                km: {} },
+      { k: '⇧/ fresh', pre: [], mods: { shiftKey: true }, km: { sr: 1 } },
+      { k: '⇧⌥/ wild', pre: [], mods: { shiftKey: true, altKey: true }, km: { sr: 1 } },
+      { k: '\\+/ sound', pre: ['Backslash'], mods: {},    km: {} },
+      /* v and n only become scope holds under the SCOPE key (ctlOf), and / is
+         guarded by !altOf — so the real gesture arms them with ctrl down and
+         then lets ctrl go, keeping the letter held */
+      { k: 'v+/ vel',  pre: ['KeyV'], scp: 1, mods: {},   km: {} },
+      { k: 'n+/ notes', pre: ['KeyN'], scp: 1, mods: {},  km: {} },
+      { k: 'win+/ latch', pre: [], mods: {},             km: { sl: 1 }, latch: true },
+    ];
+    for (const c of cases) {
+      /* the modifier FLAGS the code reads live, not the event's — KM is where
+         a left/right shift and the win key are told apart */
+      KM.sl = !!c.km.sl; KM.sr = !!c.km.sr; KM.shl = false;
+      AUTORND.on = false; AUTORND.ch = -1;
+      if (c.scp) KM.scp = true;
+      for (const k of c.pre) ev('keydown', k);
+      await sleep(20);
+      KM.scp = false;                       // ctrl let go, the letter still held
+      seen.length = 0;
+      ev('keydown', 'Slash', c.mods);
+      await sleep(30);
+      const onDown = seen.slice(), latchDown = AUTORND.on;
+      ev('keyup', 'Slash', c.mods);
+      await sleep(30);
+      const onUp = seen.slice(), latchUp = AUTORND.on;
+      for (const k of c.pre.slice().reverse()) ev('keyup', k);
+      await sleep(20);
+      KM.sl = KM.sr = false;
+      rows.push({ k: c.k,
+                  when: c.latch ? (latchDown ? 'PRESS' : latchUp ? 'release' : 'never')
+                                : (onDown.length ? 'PRESS' : onUp.length ? 'release' : 'never'),
+                  n: c.latch ? (latchUp ? 1 : 0) : onUp.length,
+                  mode: c.latch ? (AUTORND.mode || '-') : (onUp[0] ? onUp[0].mode : '-'),
+                  scope: c.latch ? (AUTORND.scope || '-') : (onUp[0] ? onUp[0].scope : '-') });
+    }
+    /* AND THE LATCH REACHED FOR AFTER THE PRESS. The press cannot see it, so
+       the release has to still be live for exactly this one case. */
+    KM.sl = false; AUTORND.on = false; AUTORND.ch = -1;
+    seen.length = 0;
+    ev('keydown', 'Slash');
+    await sleep(20);
+    const rolledFirst = seen.length;
+    KM.sl = true; latchArmHeld();
+    await sleep(10);
+    ev('keyup', 'Slash');
+    await sleep(30);
+    KM.sl = false;
+    rows.push({ k: '/ then win', when: rolledFirst ? 'PRESS' : 'never',
+                n: seen.length, mode: AUTORND.mode || '-',
+                scope: AUTORND.on ? (AUTORND.scope || '-') : 'NOT LATCHED' });
+    /* THE COST OF THE ASK, measured rather than asserted: /+↑↓ is the wildness
+       dial and the press cannot know an arrow is coming, so reaching for
+       wildness now rolls once on the way in. The dial itself must still work. */
+    const w0 = CFG.wild ?? 35;
+    seen.length = 0;
+    ev('keydown', 'Slash');
+    await sleep(20);
+    const rollBeforeArrow = seen.length;
+    ev('keydown', 'ArrowUp');
+    await sleep(20);
+    ev('keyup', 'ArrowUp');
+    ev('keyup', 'Slash');
+    await sleep(30);
+    const w1 = CFG.wild ?? 35;
+    CFG.wild = w0; try { saveCfg(); } catch (_) {}
+    rows.push({ k: '/ then ↑ (wild)', when: rollBeforeArrow ? 'PRESS' : 'never',
+                n: seen.length, mode: 'wild ' + w0 + '→' + w1,
+                scope: w1 !== w0 ? 'dial ok' : 'DIAL DEAD' });
+  } finally {
+    window.roll = realRoll;
+    KM.sl = realKM.sl; KM.sr = realKM.sr; KM.shl = realKM.shl; KM.scp = realKM.scp;
+    AUTORND.on = auto0.on; AUTORND.ch = auto0.ch;
+    HOLD.r = false; HOLD.rDid = null; HOLD.i = false; HOLD.v = false; HOLD.n = false;
+  }
+  notes.push('when = did the dice land on the keydown or only on the keyup. PRESS on every ' +
+             'row is the ask. n = how many rolls the whole press-and-release produced: 1, ' +
+             'never 2 — a press that rolls and a release that rolls again is a double.');
+  notes.push('"/ then win" is the latch reached for AFTER the press: it must roll on the ' +
+             'press AND still latch on the release, because the press could not have seen it. ' +
+             '"/ then ↑" is the COST — the wildness dial now rolls once on the way in, and ' +
+             'the dial itself still has to move.');
+  return { cols: ['when', 'n', 'mode', 'scope'], rows, notes };
+}
+
 const HELP = {
   cols: ['args'],
   rows: [
@@ -4677,6 +5072,8 @@ const HELP = {
     { k: 'smplib',   args: 'ch=8 names=tr808-kick-01,linn-snare-01 \u2014 point a synth op at named library one-shots and hear whether they sound' },
     { k: 'spread',   args: "ch=8 ty=rake \u2014 can a bank filter's spread be modulated, and does a tweak reach a held note" },
     { k: 'pwmall',   args: 'ch=8 rate=2 amt=70 wavs=0,1,2,3 \u2014 which waves still STEP their width, for waves a pulse metric cannot see' },
+    { k: 'rollkey',  args: '\u2014 does the dice key fire on the PRESS, for every modifier combination' },
+    { k: 'wtpos',    args: 'ch=8 key=posa rate=2 amt=100 \u2014 does a modulated wavetable position click? clicks/s + the standby gain at the swap' },
     { k: 'pwm',      args: 'ch=8 wav=3 rate=2 amt=70 \u2014 is a width sweep smooth? excess edges per second = clicks' },
     { k: 'recpitch', args: 'ch=8 \u2014 played vs recorded vs replayed pitch: does the scale snap the finger and not the lane' },
     { k: 'master',   args: '\u2014 with the master selected: which lane do the loop-length and clear gestures actually move' },
@@ -5791,7 +6188,9 @@ const PROBES = { level: probeLevel, spectrum: probeSpectrum, cursor: probeCursor
                    padpred: probePadPred,
                    mixbus: probeMixBus,
                    synthlvl: probeSynthLvl,
-                   kitcal: probeKitCal };
+                   kitcal: probeKitCal,
+                   wtpos: probeWtPos,
+                   rollkey: probeRollKey };
   const fn = PROBES[NAME];
   out = fn ? await fn() : (NAME === 'help' ? HELP : { cols: [], rows: [], err: 'no probe named ' + NAME });
 } catch (e) {
