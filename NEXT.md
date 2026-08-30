@@ -1,4 +1,4 @@
-# AN LFO ON AMP IS SUMMED, NOT IN SERIES — 2026-08-30 (DIAGNOSED, NOT FIXED)
+# AN LFO ON AMP WAS SUMMED, NOT IN SERIES — 2026-08-30 (FIXED, branch lfo-amp-series)
 
 Gad: *"when there are several different mod types aiming at same destination
 you need to make sure its sane - the one unsane thing i found is having env>amp
@@ -51,11 +51,45 @@ level.
 **CHECK FIRST that `t.amp` means the voice VCA and not an operator's gain** —
 `_destOf` sets it and an op-level target must keep the summed path.
 
-**NOT DONE ON PURPOSE.** It touches the audio chain of every voice, and two
-mistakes today came from moving fast in this file (ten probe functions sliced
-out of probe.js by a bad slice bound, and genDyn called before foldMod where
-foldMod REBUILDS the rack). This wants a fresh pass. `tools/probe.sh ampstack`
-is the regression test and already fails.
+## DONE — and what it measures now
+
+Built on branch `lfo-amp-series` (Gad: "do on branch so not to break main").
+
+                              BEFORE              AFTER
+      sustain 1.00      level 0.544 swing 0.453   level 0.545 swing 0.533
+      sustain 0.25      level 0.200 swing 0.330   level 0.136 swing 0.133
+      swing ratio             0.73                     0.25
+
+0.1336/0.5332 = 0.25, which IS the sustain ratio — the tremolo now tracks the
+envelope exactly. The old level of 0.200 at sustain 0.25 was itself inflated:
+the LFO was adding DC into the vca on top of the swing.
+
+**DEPTH AT THE PEAK IS DELIBERATELY UNCHANGED.** Old depth was
+`amt x amp x amp x 0.5`, which against a base of `amp` is a fraction
+`amt x amp x 0.5` of the note; new is a flat `amt x 0.5` of whatever the
+envelope is putting out. At full level those are the same number, so existing
+patches keep their character and only the tracking changes. It also makes
+tremolo depth independent of velocity, which is what a tremolo is.
+
+⚠ **THE `span` A modN HANDLE CARRIES HAD TO CHANGE TOO**, and this is the part
+that would not have failed loudly. `modReaim` and `modLive` BOTH recompute a
+live depth as `MODTAPER(amt) x h.span`; a post-vca gain's span is 1, not the
+target's own span, so the handle carries a flat 0.5. Wrong there and the note
+still sounds and the dial just quietly stops matching. `ampstack` checks it
+against the arithmetic now rather than a remembered number:
+
+      live amt 100 -> handle 0.5000   want 0.5000  OK
+      live amt  50 -> handle 0.1256   want 0.1250  OK
+
+**NOT REGRESSED:** the non-amp branch is provably identical — `t.amp` is falsy
+there so the old `(t.amp?this.amp:1)` was always 1 — and `modmatrix only=filt`
+reads row-for-row the same as live (env yes/ok/tracks x2/yes, lfo blind/ok/
+tracks x2/yes). The decay-to-silence tail is still -174dB.
+
+`t.amp` is set in exactly ONE place (`_destOf`, `d===1 && ix<1`) and means the
+voice VCA and nothing else; operator gains (`ix>=1`, and `d===5`) carry no flag
+and keep the summed path, which is right — an operator level is a modulation,
+not the note.
 
 # THE DAY, IN ONE PLACE — 2026-08-30
 

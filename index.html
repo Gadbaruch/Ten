@@ -1518,7 +1518,7 @@ const recPlayed=(pi,tBeat,midi,vel,durBeats)=>recPlayNote(pi,tBeat,sndOut(pi,mid
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-30.1421';
+const BUILD='2026-08-30.1436';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -8807,7 +8807,37 @@ class Voice{
       const tg=this._destOf(lf.rt,p);
       if(!tg.length){continue;}                  // nothing there: never start it
       for(const t of tg){
-        const span=t.span*(t.amp?this.amp:1)*0.5;
+        /* THE AMP IS A SERIES STAGE, NOT A SUMMING JUNCTION (Gad, 2026-08-30:
+           "having env>amp and lfo>amp the lfo overrides the env in a way,
+           doesnt sound reasonable"). He is right, and it is structural: a Web
+           Audio AudioParam connection SUMS, so connecting a bipolar LFO onto
+           vca.gain ADDS a swing that the envelope has no say in. Measured at
+           sustain 0.25 the swing was 0.33 against a level of 0.20 — the LFO
+           was running the amp.
+
+           Every other amp source already dodges this. vel/key/rnd scale the
+           envelope's PEAK through ampBias; press rides pGain, a gain AFTER the
+           vca. So does this now: the LFO drives pGain.gain around a base of 1,
+           which makes it vca_out x (1 + lfo*depth) — a tremolo VCA after an
+           envelope VCA, the way a synth has always stacked the two. Silence
+           stays silence and depth tracks the note's level.
+
+           DEPTH IS UNCHANGED AT THE PEAK. The old depth was amt x amp x amp x
+           0.5, which against a base of amp is a fraction amt x amp x 0.5 of
+           the note; the new one is a flat amt x 0.5 of whatever the envelope
+           is putting out. At full level they are the same number, so existing
+           patches keep their character and only the tracking changes. It also
+           makes tremolo depth independent of velocity, which is what a tremolo
+           is. span is the coefficient modReaim and modLive multiply by
+           MODTAPER, so 0.5 there is what keeps a live amt dial in step. */
+        if(t.amp){
+          if(!this.pGain){this.pGain=ac.createGain(); this.pGain.gain.value=1;}
+          const g3=ac.createGain(); g3.gain.value=MODTAPER(lf.amt)*0.5;
+          lo.connect(g3); g3.connect(this.pGain.gain);
+          this.modN.push({p:g3.gain,span:0.5,mi:lf.mi,ri:lf.ri,kind:'lfo'});
+          continue;
+        }
+        const span=t.span*0.5;
         const g3=ac.createGain(); g3.gain.value=MODTAPER(lf.amt)*span;
         lo.connect(g3); g3.connect(t.p);
         this.modN.push({p:g3.gain,span,mi:lf.mi,ri:lf.ri,kind:'lfo'});

@@ -6824,6 +6824,44 @@ async function probeAmpStack() {
       return { hi, lo, swing: hi - lo, mid: (hi + lo) / 2 };
     };
     const s10 = await held(1.0), s25 = await held(0.25);
+    /* AND DOES THE LIVE AMT DIAL STILL REACH IT. The series fix changed the
+       `span` a modN 'lfo' handle carries (the target's own span -> a flat 0.5,
+       because a post-vca gain's span IS 1 and an LFO takes half of it each
+       way). modLive and modReaim both recompute the depth as MODTAPER(amt) x
+       span, so a wrong constant here does not fail loudly — the note still
+       sounds, the dial just stops matching. Checked against the arithmetic
+       rather than against a remembered number. */
+    {
+      const taper = a => { const x = Math.max(-1, Math.min(1, a / 100));
+                           return Math.sign(x) * x * x; };
+      engine.allOff(); await sleep(80);
+      engine.noteOn(AC.currentTime + 0.02, ch, KBBASE, 1.0);
+      await sleep(140);
+      const vo = (engine.act[ch] || []).find(v => v && !v.killed && v.modN);
+      const hOf = () => { if (!vo) return null;
+        const h = (vo.modN || []).find(x => x && x.kind === 'lfo' && x.mi === 1);
+        return h ? { v: h.p.value, span: h.span } : null; };
+      const at100 = hOf();
+      engine.modLive(ch, 1, 'amt', 50); await sleep(120);
+      const at50 = hOf();
+      engine.allOff();
+      if (at100 && at50) {
+        const want100 = taper(amt) * 0.5, want50 = taper(50) * 0.5;
+        rows.push({ k: 'live amt ' + amt + ' -> handle', peak: +at100.v.toFixed(4),
+                    'tail rms': +want100.toFixed(4),
+                    'tail dB below peak': 'want ' + want100.toFixed(4)
+                      + (Math.abs(at100.v - want100) < 0.02 ? '  OK' : '  MISMATCH') });
+        rows.push({ k: 'live amt 50 -> handle', peak: +at50.v.toFixed(4),
+                    'tail rms': +want50.toFixed(4),
+                    'tail dB below peak': 'want ' + want50.toFixed(4)
+                      + (Math.abs(at50.v - want50) < 0.02 ? '  OK' : '  MISMATCH') });
+        rows.push({ k: 'handle span', peak: at100.span,
+                    'tail rms': 0.5, 'tail dB below peak': 'post-vca gain: span is 1, x0.5 bipolar' });
+      } else {
+        rows.push({ k: 'live amt', peak: '', 'tail rms': '',
+                    'tail dB below peak': 'no lfo handle on the sounding voice' });
+      }
+    }
     if (s10 && s25) {
       rows.push({ k: 'held, sustain 1.00', peak: +s10.mid.toFixed(4),
                   'tail rms': +s10.swing.toFixed(4), 'tail dB below peak': 'swing' });
@@ -6835,7 +6873,7 @@ async function probeAmpStack() {
     }
   } finally { unstash(ch, keep); }
   return { cols: ['peak', 'tail rms', 'tail dB below peak'], rows,
-           notes: 'amp env decays to SILENCE in 120ms; the tail is the last 400ms of a 1.2s window' };
+           notes: ['amp env decays to SILENCE in 120ms; the tail is the last 400ms of a 1.2s window'] };
 }
 
 const PROBES = { level: probeLevel, spectrum: probeSpectrum, cursor: probeCursor,
