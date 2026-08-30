@@ -5465,6 +5465,107 @@ async function probeLfoSync() {
   return { cols: ['want', 'got', 'err', 'verdict'], rows, notes };
 }
 
+/* ---------------- lforate: does a live rate change reach the LFO? --------
+ * Gad, 2026-08-30: "i dont have live rate manipulation its not audible and we
+ * need it - regression", from a held scope, from a mod route and from the
+ * mouse alike.
+ *
+ * The write path was never the problem. Only the four plain shapes at zero
+ * SKEW are OscillatorNodes; s&h, drift and any skewed wave are a
+ * ConstantSource with sixteen seconds of ramps already written into it, so
+ * there is no `frequency` to turn and every live path skipped them.
+ *
+ * So this measures the LFO's OWN OUTPUT — a ConstantSource has no waveform to
+ * analyse in the audio, but its offset can be sampled from the main thread
+ * fast enough to count cycles at LFO rates. Rate is set, sampled, changed
+ * live, sampled again.
+ *
+ *     tools/probe.sh lforate ch=8                                             */
+async function probeLfoRate() {
+  const ch = CH === 9 ? 8 : CH;
+  const keep = stash(ch);
+  const mutes = [], rows = [], notes = [];
+  try {
+    if (T.playing) stop();
+    pin(ch);
+    mutes.push(...muteOthers([ch]));
+    const p = S.presets[ch];
+    p.cat = 'keys';
+    p.osc = rack(mkOsc);
+    p.osc[0] = { wav: 0, mode: 0, dst: 0, rat: 1, amt: 1, fine: 0, ph: 0, phm: 0, pw: 0.5 };
+    p.flt = rack(mkFlt); p.flt[0] = Object.assign(mkFlt(0), { typ: 1, frq: 1200, q: 3 });
+    p.fx = rack(mkFx); p.env = rack(mkEnv);
+    p.env[0] = { dst: 1, idx: 0, amt: 100, a: 0.004, d: 0.02, s: 1, r: 0.05, crv: 0 };
+    p.mix.lvl = 1; p.mix.pan = 0;
+
+    /* how fast the LFO's own signal is moving, by sampling its node. An
+       oscillator hands its rate back on .frequency; a ConstantSource has to be
+       watched, so count the turning points of its offset. */
+    /* ⚠ NOT a crossing count. On s&h the sequence is RANDOM, so consecutive
+       steps change sign only about half the time and the count undercounts by
+       a factor that has nothing to do with the rate — it read 0.94 for a 2Hz
+       s&h and 2.5 for an 8Hz one, which is neither right nor a clean ratio.
+       TOTAL VARIATION per second is exact for every shape here: however the
+       wave is drawn, going four times as fast covers four times the distance
+       in the same second. */
+    const speedOf = async (L, ms) => {
+      const xs = [], t0 = performance.now();
+      while (performance.now() - t0 < ms) {
+        xs.push(L.osc !== false && L.lo.frequency
+          ? Math.sin(2 * Math.PI * L.lo.frequency.value * AC.currentTime)
+          : L.lo.offset.value);
+        await new Promise(r => setTimeout(r, 4));
+      }
+      const secs = (performance.now() - t0) / 1000;
+      let tv = 0; for (let i = 1; i < xs.length; i++) tv += Math.abs(xs[i] - xs[i - 1]);
+      return +(tv / secs).toFixed(2);
+    };
+
+    const WAVES2 = [{ w: 0, skw: 0, n: 'sine' }, { w: 0, skw: 60, n: 'sine skewed' },
+                    { w: 1, skw: 0, n: 'tri' }, { w: 4, skw: 0, n: 's&h' },
+                    { w: 5, skw: 0, n: 'drift' }];
+    const mi = MODULES.findIndex(M => M && M.id === 'mod');
+    for (const W of WAVES2) {
+      p.mod = rack(mkMod);
+      p.mod[0] = Object.assign(mkMod(0), {
+        src: 2, wav: W.w, skw: W.skw, rate: 2, syn: 0, ltr: 0, ph: 0, off: false,
+        routes: [{ dst: 0, idx: 0, amt: 120, tgt: null,
+                   addr: { rack: 'flt', slot: 0, key: 'frq', lbl: 'freq', sid: 0 } }] });
+      engine.rebuildRack(ch); engine.refresh(ch);
+      engine.allOff(); await sleep(70);
+      engine.noteOn(AC.currentTime + 0.02, ch, NOTE, VEL);
+      await sleep(220);
+      const v = (engine.act[ch] || [])[0];
+      const L = v && v.lfoN && v.lfoN[0];
+      if (!L) { rows.push({ k: W.n, kind: 'no lfo' }); continue; }
+      const before = await speedOf(L, 1600);
+      /* the live edit, through the same applyParam the scope, the page and the
+         mouse all end up in */
+      const px = paramsFor(mi, p.mod[0]).findIndex(sp => sp.key === 'rate');
+      applyParam(ch, mi, 0, px, 8);
+      await sleep(200);
+      const after = await speedOf(L, 1600);
+      engine.allOff(); await sleep(40);
+      const hz = (L.osc !== false && L.lo.frequency) ? +L.lo.frequency.value.toFixed(2) : null;
+      const ratio = before > 0.01 ? after / before : 0;
+      rows.push({ k: W.n, kind: L.osc === false ? 'scheduled' : 'oscillator',
+                  hz, tv2: before, tv8: after,
+                  ratio: +ratio.toFixed(2), want: 4,
+                  verdict: ratio > 3 ? 'LIVE' : ratio < 1.4 ? 'STUCK' : 'partial' });
+    }
+  } finally {
+    for (const m of mutes) try { m(); } catch (_) {}
+    unstash(ch, keep);
+  }
+  notes.push('rate is set to 2Hz, the LFO signal is watched, the rate is changed to 8Hz ' +
+             'UNDER THE HELD NOTE and it is watched again. tv is total variation per second — ' +
+             'how much ground the wave covers — so four times the rate is four times the tv, ' +
+             'whatever shape it is. ratio is the answer and it should be 4.');
+  notes.push('kind says which it is, and that is the whole bug: only the four plain shapes at ' +
+             'zero SKEW are oscillators. Everything else was a schedule with no frequency.');
+  return { cols: ['kind', 'hz', 'tv2', 'tv8', 'ratio', 'want', 'verdict'], rows, notes };
+}
+
 const HELP = {
   cols: ['args'],
   rows: [
@@ -5509,6 +5610,7 @@ const HELP = {
     { k: 'smplib',   args: 'ch=8 names=tr808-kick-01,linn-snare-01 \u2014 point a synth op at named library one-shots and hear whether they sound' },
     { k: 'spread',   args: "ch=8 ty=rake \u2014 can a bank filter's spread be modulated, and does a tweak reach a held note" },
     { k: 'pwmall',   args: 'ch=8 rate=2 amt=70 wavs=0,1,2,3 \u2014 which waves still STEP their width, for waves a pulse metric cannot see' },
+    { k: 'lforate',  args: 'ch=8 \u2014 does a live rate change reach the LFO, for every wave shape' },
     { k: 'lfosync',  args: 'ch=8 bpm=120 rdiv=6 \u2014 does a synced LFO lock its RATE, its PHASE and follow the tempo' },
     { k: 'wtalias',  args: 'ch=8 lfo=40 \u2014 is the MODULATOR aliasing? true sideband vs the control-tick fold' },
     { k: 'wtshelf',  args: 'ch=8 \u2014 every wavetable at pos 0 and pos 1: harmonics, centroid, level' },
@@ -6633,7 +6735,8 @@ const PROBES = { level: probeLevel, spectrum: probeSpectrum, cursor: probeCursor
                    rollkey: probeRollKey,
                    wtshelf: probeWtShelf,
                    wtalias: probeWtAlias,
-                   lfosync: probeLfoSync };
+                   lfosync: probeLfoSync,
+                   lforate: probeLfoRate };
   const fn = PROBES[NAME];
   out = fn ? await fn() : (NAME === 'help' ? HELP : { cols: [], rows: [], err: 'no probe named ' + NAME });
 } catch (e) {

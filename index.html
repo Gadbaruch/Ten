@@ -620,32 +620,52 @@ const lfoWarp=(ph,skw)=>{
 };
 const lfoShapeVal=(w,ph)=>w===1?(1-4*Math.abs(ph-0.5))
   :w===2?(ph<0.5?1:-1):w===3?(2*ph-1):Math.sin(2*Math.PI*ph);
+/* THE SCHEDULE A NON-OSCILLATOR LFO RUNS ON, in one place, because it is
+   written TWICE: once when the note is built and again every time the rate
+   moves under it. `ph` is the phase in cycles at time `at` — 0 at note-on, and
+   wherever the wave has got to on a re-lay — so a rate change continues the
+   shape instead of restarting it. */
+function lfoSched(cs,w,rate,skw,s0,at,ph,writeFirst){
+  const P=1/Math.max(0.05,rate);
+  if(w<4){                                    // a skewed shape: 32 points a cycle
+    const NP=32;
+    if(writeFirst)cs.offset.setValueAtTime(lfoShapeVal(w,lfoWarp(fmod(ph,1),skw)),at);
+    const j0=Math.floor(ph*NP)+1;
+    for(let k=0;k<640;k++){
+      const t=at+((j0+k)/NP-ph)*P;
+      if(t-at>16)break;
+      cs.offset.linearRampToValueAtTime(lfoShapeVal(w,lfoWarp(fmod((j0+k)/NP,1),skw)),t);
+    }
+    return;
+  }
+  const drift=w===5, k0=Math.floor(ph);
+  const h=k=>{const x=Math.sin((k+2)*127.1+s0*311.7)*43758.5453; return (x-Math.floor(x))*2-1;};
+  if(writeFirst)cs.offset.setValueAtTime(drift?h(k0-1):h(k0),at);
+  for(let k=(drift?0:1);k<640;k++){
+    const t=at+((k0+k+(drift?1:0))-ph)*P;
+    if(t-at>16)break;
+    if(t<=at)continue;
+    const v=h(k0+k);
+    if(drift)cs.offset.linearRampToValueAtTime(v,t);
+    else cs.offset.setValueAtTime(v,t);
+  }
+}
 function lfoSrcNode(ac,wav,rate,free,seed,at,skw){
   const w=Math.round(wav||0);
+  /* ⚠ ONLY THE FOUR PLAIN SHAPES AT ZERO SKEW ARE OSCILLATORS. s&h, drift and
+     any skewed wave are a ConstantSource with sixteen seconds of ramps already
+     written into it — so there is no `frequency` to turn, and a live rate
+     change had nothing to write to. See lfoRelay. */
   if(w<4&&Math.abs(skw||0)>1){
-    /* a skewed wave has no OscillatorNode shape — schedule it as ramps,
-       32 points a cycle over a 16s horizon */
     const cs=ac.createConstantSource();
-    const P=1/Math.max(0.05,rate), NP=32;
-    cs.offset.setValueAtTime(lfoShapeVal(w,lfoWarp(0,skw)),at);
-    for(let k=1;k*P/NP<=16&&k<640*NP/32;k++){
-      const ph=fmod(k/NP,1);
-      cs.offset.linearRampToValueAtTime(lfoShapeVal(w,lfoWarp(ph,skw)),at+k*(P/NP));
-    }
-    return {node:cs,osc:null};
+    lfoSched(cs,w,rate,skw,0,at,0,true);
+    return {node:cs,osc:null,sched:{w,skw,s0:0},t0:at,rate};
   }
   if(w<4){const lo=ac.createOscillator(); lo.type=LFOW_W[w]; lo.frequency.value=rate; return {node:lo,osc:lo};}
   const cs=ac.createConstantSource();
-  const drift=w===5, P=1/Math.max(0.05,rate);
   const s0=free?Math.floor(Math.random()*1e6):(seed||0)+1;
-  const h=k=>{const x=Math.sin((k+2)*127.1+s0*311.7)*43758.5453; return (x-Math.floor(x))*2-1;};
-  cs.offset.setValueAtTime(h(-1),at);
-  for(let k=0;k*P<=16&&k<640;k++){
-    const v=h(k);
-    if(drift)cs.offset.linearRampToValueAtTime(v,at+(k+1)*P);
-    else cs.offset.setValueAtTime(v,at+k*P);
-  }
-  return {node:cs,osc:null};
+  lfoSched(cs,w,rate,0,s0,at,0,true);
+  return {node:cs,osc:null,sched:{w,skw:0,s0},t0:at,rate};
 }
 /* the LFO wave list in WAVES' numbering, so setWave can build a phase-shifted
    PeriodicWave for a free-running one */
@@ -1498,7 +1518,7 @@ const recPlayed=(pi,tBeat,midi,vel,durBeats)=>recPlayNote(pi,tBeat,sndOut(pi,mid
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-30.1321';
+const BUILD='2026-08-30.1338';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -2057,6 +2077,12 @@ function fftr(re,im,inv){
    away, which is exactly what "sounds cheap on the lower octaves" is. Half
    octave steps all the way to 512. */
 const WTHL=[1,2,3,4,6,8,11,16,22,32,45,64,90,128,181,256,362,512];
+/* the loudness every wavetable frame is scaled toward, and the ceiling on the
+   gain that does it — see wtFrames. 0.3 sits below a peak-normalised sine's
+   0.707, so the tame tables come DOWN rather than the wild ones going up, and
+   nothing on the shelf gets hotter than it already was except where the cap
+   is doing real work. */
+const WTRMS=0.65, WTCAP=4.0;
 const WTBUCKET=f0=>{
   const h=Math.max(1,Math.floor((AC.sampleRate*0.5)/Math.max(1,f0)));
   let b=WTHL[0]; for(const v of WTHL)if(v<=h)b=v;
@@ -8671,7 +8697,11 @@ class Voice{
       const lo=src2.node, lg=ac.createGain();
       /* remembered so a rate or depth edit can be heard on the note that is
          already sounding, rather than only on the next one */
-      (this.lfoN=this.lfoN||[]).push({lo,lg,mi:lf.mi,base:lf.amt,osc:!!src2.osc});
+      (this.lfoN=this.lfoN||[]).push({lo,lg,mi:lf.mi,base:lf.amt,osc:!!src2.osc,
+        /* what a re-lay needs: a scheduled LFO has no frequency to turn, so a
+           live rate change has to write the whole shape again from where it
+           has got to — see lfoRelay */
+        sched:src2.sched||null,t0:src2.t0,rate:src2.rate||lf.rate});
       /* FREE: start the wave where a continuously-running one would be by now,
          so two notes a beat apart do not both begin at the top of the cycle.
          setWave takes a phase in degrees and bakes it into a PeriodicWave —
@@ -9942,6 +9972,30 @@ class Engine{
       if(v.setPressure)try{v.setPressure(v.press||0);}catch(_){}
     }
   }
+  /* A SCHEDULED LFO'S RATE, CHANGED UNDER THE NOTE. s&h, drift and any skewed
+     shape are not oscillators — lfoSrcNode writes sixteen seconds of ramps
+     into a ConstantSource — so `frequency` does not exist and every live rate
+     path skipped them silently. Gad: "i dont have live rate manipulation its
+     not audible and we need it". It was only ever audible on the four plain
+     shapes at zero skew, from a scope, from a mod route and from the mouse
+     alike, because none of them was the problem.
+     Re-laying is the only way: cancel from now, pin the value it is at, and
+     write the shape again at the new rate CONTINUING FROM ITS PHASE — so the
+     wave speeds up rather than restarting. */
+  lfoRelay(L,m){
+    const cs=L.lo;
+    if(!cs||!cs.offset||!L.sched)return false;
+    const n=AC.currentTime, rate=clamp(lfoHz(m),0.02,80);
+    const ph=Math.max(0,(n-(L.t0??n))*(L.rate||rate));
+    try{
+      const cur=cs.offset.value;
+      cs.offset.cancelScheduledValues(n);
+      cs.offset.setValueAtTime(cur,n);
+      lfoSched(cs,L.sched.w,rate,L.sched.skw,L.sched.s0,n,ph,false);
+    }catch(_){return false;}
+    L.t0=n-ph/Math.max(0.02,rate); L.rate=rate;
+    return true;
+  }
   lfoLive(pi){
     const p=S.presets[pi], md=p.mod||[];
     for(const v of this.act[pi]){
@@ -9954,6 +10008,7 @@ class Engine{
           const w9=Math.round(m.wav||0);   // wave swaps live too (osc shapes only)
           if(w9<4&&L.lo.type!==LFOW_W[w9])try{L.lo.type=LFOW_W[w9];}catch(_){}
         }
+        else if(L.sched)this.lfoRelay(L,m);
         if(L.base)L.lg.gain.setTargetAtTime(
           L.lg.gain.value/L.base*rt.amt,AC.currentTime,0.02);
       }
@@ -10200,6 +10255,20 @@ class Engine{
       let pk=0;
       for(let k=0;k<N;k++){const v=re[k]; t[k]=v; const av=v<0?-v:v; if(av>pk)pk=av;}
       if(pk>0)for(let k=0;k<N;k++)t[k]/=pk;
+      /* EVEN THE LOUDNESS, NOT THE PEAK (Gad, 2026-08-30: "even it out").
+         Peak normalisation is what Serum and Vital do and it left this shelf
+         23.3dB wide, because a spiky wave normalised to peak 1 has a fraction
+         of a sine's RMS — so the BRIGHTEST tables, which are the spikiest, are
+         the quietest, and changing table meant reaching for the fader. Each
+         frame is scaled toward a common RMS instead.
+         THE CAP IS A HEADROOM PROMISE. Peak is 1 coming in, so the gain is
+         also the peak going out. A frame too spiky to reach the target stays
+         under it — a few dB of spread, not twenty — and the cap is what stops
+         the very spikiest asking for a gain of ten. */
+      let s2=0; for(let k=0;k<N;k++)s2+=t[k]*t[k];
+      const rms=Math.sqrt(s2/N);
+      const g=rms>1e-6?Math.min(WTCAP,WTRMS/rms):1;
+      if(g<0.999||g>1.001)for(let k=0;k<N;k++)t[k]*=g;
       return t;
     });
     this.wtF.set(key,out);
@@ -10999,8 +11068,14 @@ class Engine{
       if(!vo.lfoN)continue;
       for(const L of vo.lfoN){
         if(L.mi!==si||!L.lo)continue;
-        if(key==='rate')L.lo.frequency.setTargetAtTime(
-          clamp(v===undefined?lfoHz(m):v,0.02,80),n,0.02);
+        if(key==='rate'){
+          if(L.osc===false||!L.lo.frequency){          // scheduled: write it again
+            this.lfoRelay(L,v===undefined?m:Object.assign({},m,{syn:0,rate:v}));
+            continue;
+          }
+          L.lo.frequency.setTargetAtTime(
+            clamp(v===undefined?lfoHz(m):v,0.02,80),n,0.02);
+        }
         /* a division INDEX, not a frequency — so it is turned into one against
            the current tempo before it reaches the oscillator */
         else if(key==='rdiv')L.lo.frequency.setTargetAtTime(
