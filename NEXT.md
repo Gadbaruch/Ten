@@ -1,3 +1,80 @@
+# THE REPEAT KEPT TICKING AFTER THE FINGER LEFT — 2026-08-30 (on main)
+
+Gad, straight after the `nopress` fix landed: *"there is actually another issue
+with the dial, is that when i tap it quickly with shift on there is like
+inertia, the params keep moving after i remove the finger for a tiny bit."*
+
+**MEASURED, and it is three steps.** `tools/probe.sh arepinertia`, new probe,
+against the shipped build:
+
+                          held   after release
+      before (build 1126)   5          3          ← the inertia
+      after                 5          0
+      bounce, before        6          4          ← must NOT go to 0
+      bounce, after         5          4
+
+Three ticks land with the key already up, and with ⇧ down every one of them is
+a COARSE step — which is why he found it there and not on a plain tap.
+
+## THE CAUSE, and the half of it that was right
+
+TEN drives its own arrow repeat (`AREP`): 260ms a tick at a feather touch down
+to 30ms bottomed out. The key-up does not stop it — it arms a stop **90ms
+ahead**, and the comment says exactly why:
+
+> A BOUNCE IS NOT A RELEASE — but a release must still stop the repeat, and
+> asking whether ANY key is down cannot tell them apart while the other hand is
+> holding a note.
+
+That reasoning is sound and it stays. Rapid trigger re-fires a key on any
+upward wobble, and the bounce's own key-DOWN is swallowed by `arrowRefire`
+before it ever reaches `arepStart` — so the pending stop being cancelled is the
+only thing that keeps a held key from stuttering.
+
+**WHAT WAS WRONG IS THAT THE REPEAT WENT ON RUNNING THROUGH THAT WINDOW.**
+90ms of grace at 30ms a tick is three more steps. The grace was never supposed
+to be a grace on the TICKING — only on the deciding.
+
+## THE FIX — the tick stops now, only the STOP waits
+
+    key-up    arepPause()   clear the timer, keep AREP.code   ← new
+              arm the 90ms stop as before
+    bounce    cancel the stop AND arepResume()                ← new
+
+`AREP` now carries its own `step` so the chain can be picked back up, and the
+tick interval moved into `arepGap()` so the start and the resume cannot drift
+apart. Nothing else changed: the 90ms window, `arrowRefire`, and the stepped/
+menu rules are all untouched.
+
+⚠ **THE RESUME CANNOT BE LEFT TO A RESTART.** `arepStart` is never reached on a
+bounce — `if(e.isTrusted&&arrowRefire(e.code)){e.preventDefault(); return;}`
+returns first. So the resume has to happen at the one line where the stop is
+cancelled, and a fix that only paused would have made every held key stutter.
+That is why the probe measures the bounce case in the same pass.
+
+⚠ **AND THE PROBE LIED TWICE BEFORE IT TOLD THE TRUTH** — same shape as the
+`ratstep` probe the day before, and worth reading as a pair:
+  · it overrode `HE.driver()` but not `HE.pressure()`. `arepStart` opens with
+    `if(!HE.on||HE.pressure()==null)return`, and pressure() walks `HE.keys`,
+    which is EMPTY with no MonsGeek attached. The repeat never started, so
+    "0 ticks after release" was true for the wrong reason and the row PASSED.
+  · it counted its own dispatched key-down as a repeat tick, because both are
+    untrusted. The bounce row read "1 tick, pass" on a run where nothing ran.
+  **`held` is in the output for exactly this reason: a row with held 0 proves
+  nothing, and the number is on screen so it cannot be missed.**
+
+## QA
+
+1. **Tap ↑ quickly with ⇧ held, MonsGeek connected, on any value.** Right: it
+   moves once and stops dead the moment you lift. Wrong (what you found): it
+   carries on a beat after your finger is off. **Measured: 3 ticks after
+   release before, 0 after.**
+2. **Now HOLD ↑ with ⇧.** Right: it still runs smoothly and does not stutter or
+   hiccup — the bounce absorption is what could have broken here. **Measured:
+   the bounce row still resumes, 4 ticks both before and after.**
+3. **Press gently vs bottomed.** Right: gentle creeps, buried runs — the depth
+   still paces the repeat. **Measured: gap 30ms at depth 1, unchanged.**
+
 # THE HALL DIAL COMES OFF THE RATIO, AND A NEW BASS — 2026-08-30 (on main)
 
 Two asks. The first was got WRONG the first time in a way worth keeping,

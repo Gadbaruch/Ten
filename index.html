@@ -1518,7 +1518,7 @@ const recPlayed=(pi,tBeat,midi,vel,durBeats)=>recPlayNote(pi,tBeat,sndOut(pi,mid
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-30.1523';
+const BUILD='2026-08-30.1536';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -3195,7 +3195,7 @@ function dialScale(){
    whatever the sensor's depth says. A MENU NEVER REPEATS — one press, one
    option — and the first press tells us which kind of parameter is under the
    cursor, so the answer is known before the second tick can happen. */
-const AREP={code:null,timer:null,stopT:null};
+const AREP={code:null,timer:null,stopT:null,step:null};
 /* ONE PUSH IS ONE STEP, AND THE KEY MUST COME HOME FOR THE NEXT ONE. Rapid
    trigger re-fires a key whenever it wobbles back across the actuation point,
    so one deep press on a remapped arrow sends three or four real key-downs —
@@ -3326,7 +3326,28 @@ function focusIsStepped(){
    is the opposite of that. One press, one step, in all of them. */
 const scopeStepped=()=>!!(HOLD.n||HOLD.i||HOLD.sc||HOLD.v||HOLD.m);
 function arepStop(){if(AREP.timer){clearTimeout(AREP.timer);AREP.timer=null;}
-  if(AREP.stopT){clearTimeout(AREP.stopT);AREP.stopT=null;} AREP.code=null;}
+  if(AREP.stopT){clearTimeout(AREP.stopT);AREP.stopT=null;} AREP.code=null; AREP.step=null;}
+/* THE GAP BETWEEN TICKS, asked fresh every time: the WHOLE travel is the dial,
+   260ms at a feather touch down to 30ms bottomed out, geometric so the middle
+   is not bunched at one end. */
+const arepGap=()=>Math.round(260*Math.pow(30/260,
+  clamp((HE.on?HE.driver():null)||0,0,1)));
+/* ⚠ THE GRACE MAY NOT TICK — and that it did is the inertia (Gad, 2026-08-30:
+   "when i tap it quickly with shift on there is like inertia, the params keep
+   moving after i remove the finger for a tiny bit").
+   A key-up arms a stop 90ms AHEAD rather than stopping, so a rapid-trigger
+   bounce can cancel it and a held key does not stutter — that part is right
+   and stays. What was wrong is that the repeat went on RUNNING through the
+   window: at 30ms a tick a bottomed key got three more steps after the finger
+   had left, and with ⇧ down every one of them is a COARSE step, which is why
+   he found it there and not on a plain tap.
+   So the TICK stops on the key-up and only the STOP waits. A bounce resumes it
+   a few milliseconds later — the arrow's own key-DOWN is swallowed by
+   arrowRefire and never reaches arepStart, which is why the resume has to
+   happen where the stop is cancelled and cannot be left to a restart. */
+function arepPause(){if(AREP.timer){clearTimeout(AREP.timer);AREP.timer=null;}}
+function arepResume(){if(!AREP.code||!AREP.step||AREP.timer)return;
+  AREP.timer=setTimeout(AREP.step,arepGap());}
 /* WHICH QUESTION THE REPEAT SHOULD ASK. focusIsStepped() answers for the ↑↓
    field, and under a magnetized scope ←→ is a DIFFERENT param with its own
    answer — a filter's reso dials, an lfo's shape is a menu. Asking the wrong
@@ -3361,13 +3382,11 @@ function arepStart(code){
     for(const kind of ['keydown','keyup'])
       document.dispatchEvent(new KeyboardEvent(kind,
         Object.assign({code:AREP.code,key:AREP.code,bubbles:true},modsOf())));
-    /* the WHOLE travel is the dial: 260ms between steps at a feather touch
-       down to 30ms bottomed out, geometric so the middle is not bunched at one
-       end. With the step size scaling too, a light press creeps and a buried
-       key runs. */
-    const d=clamp((HE.on?HE.driver():null)||0,0,1);
-    AREP.timer=setTimeout(step,Math.round(260*Math.pow(30/260,d)));
+    /* with the step size scaling too, a light press creeps and a buried key
+       runs — see arepGap for the travel itself */
+    AREP.timer=setTimeout(step,arepGap());
   };
+  AREP.step=step;                              // …so a bounce can pick it up again
   AREP.timer=setTimeout(step,110);             // no half-second wait to get going
 }
 function adjust(spec,v,dir,m=1){
@@ -23710,7 +23729,10 @@ const onKeyDown=e=>{
   const fingerArrow=(e.isTrusted||ARROWSYN)&&e.code.indexOf('Arrow')===0;
   if(fingerArrow&&e.repeat&&(AREP.code||arepStepped(e.code)))return;
   if(fingerArrow&&!e.repeat){
-    if(AREP.stopT&&AREP.code===e.code){clearTimeout(AREP.stopT); AREP.stopT=null;}  // that was a bounce
+    // that was a bounce: cancel the pending stop AND start ticking again, since
+    // arrowRefire is about to swallow this key-down before it reaches arepStart
+    if(AREP.stopT&&AREP.code===e.code){clearTimeout(AREP.stopT); AREP.stopT=null;
+      arepResume();}
     /* THE WOBBLE GUARD IS FOR HALL KEYS ONLY, and ARROWSYN dragged the whole
        right cluster into it (Gad, 2026-08-26: "a lot of my mappings … don't
        work", "the dial behavior on the menu and control"). arrowRefire exists
@@ -26808,6 +26830,7 @@ const onKeyUp=e=>{
      sends its next key-down within a few milliseconds and cancels it, a
      finger that has actually left does not. */
   if((e.isTrusted||ARROWSYN)&&c.indexOf('Arrow')===0&&AREP.code===c){
+    arepPause();                        // …but the TICK stops NOW — see arepPause
     if(AREP.stopT)clearTimeout(AREP.stopT);
     AREP.stopT=setTimeout(()=>{AREP.stopT=null; arepStop();},90);
   }

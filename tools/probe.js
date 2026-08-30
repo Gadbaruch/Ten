@@ -5580,6 +5580,7 @@ const HELP = {
     { k: 'padpred',  args: 'kit=KT808 — offline buffer+envelope loudness vs the measured bus, to prove the model' },
     { k: 'kitmix',   args: 'kit=KT808,KTLIN|ROLL|ROLL80 ms=400 real=1 — BS.1770 loudness + 8-band balance of every pad in a kit, against the role target' },
     { k: 'ampstack', args: 'ch=4 rate=6 amt=100 — does an lfo on amp defeat the amp envelope' },
+    { k: 'arepinertia', args: 'ch=4 depth=1 shift=1 — how many repeat ticks land AFTER the key is released, and that a bounce still resumes' },
     { k: 'ratstep',  args: '— the hall dial is OFF the ratio: same 0.125 step at every key depth, with op level as the control that must still scale' },
     { k: 'dyn',      args: 'cat=kik n=4 ch=4 — the dynamics layer: same roll at vel 1.0 vs 0.3' },
     { k: 'smploud',  args: 'ch=4 ms=200 names=a,b,c — perceptual loudness of samples vs a synth op, and the median deficit' },
@@ -6964,6 +6965,98 @@ function probeRatStep() {
   return { cols: ['lo', 'hi', 'noboard', 'seq', 'same', 'step', 'stepped', 'ok', 'note'], rows };
 }
 
+/* HOW MANY STEPS LAND AFTER THE FINGER HAS LEFT. The repeat is TEN's own —
+ * a self-driven setTimeout chain, 260ms a tick at a feather touch down to 30ms
+ * bottomed out — and the key-up arms its stop 90ms AHEAD so a rapid-trigger
+ * bounce can cancel it. Three ticks fit in that window, and with ⇧ down each
+ * one is a coarse step: "when i tap it quickly with shift on there is like
+ * inertia" (Gad, 2026-08-30).
+ * Counted as TICKS, not as a param value, because a value clamps at its end
+ * and would report zero inertia for the wrong reason. The bounce case is
+ * measured in the same pass — a fix that kills the inertia by killing the
+ * bounce resume is not a fix, it makes a held key stutter. */
+async function probeArepInertia() {
+  const deep = num(P.depth, 1), shift = num(P.shift, 1) ? true : false;
+  /* ⚠ BOTH SENSOR DOORS, or the probe measures nothing and says it passed.
+   * arepStart opens with `if(!HE.on||HE.pressure()==null)return` — and
+   * pressure() walks HE.keys, which is EMPTY on a machine with no MonsGeek.
+   * Overriding driver() alone left the repeat never starting, so "0 ticks
+   * after release" was true because there were no ticks at all. `held` is in
+   * the output for exactly that reason: a run with held 0 proves nothing. */
+  const keepDrv = HE.driver, keepPrs = HE.pressure, keepOn = HE.on, keepDial = CFG.dial;
+  const keepShift = MODS.shift, keepSyn = typeof ARROWSYN === 'undefined' ? null : ARROWSYN;
+  const rows = [];
+
+  /* count only the repeat's OWN keydowns: untrusted, and its code */
+  let ticks = 0;
+  /* …and NOT the ones this probe dispatches itself. The bounce test sends its
+     own ArrowUp key-down, which is untrusted exactly like a repeat tick — it
+     read as one and turned a dead run into a passing row. */
+  const count = e => { if (!e.isTrusted && !e.__probe && e.code === 'ArrowUp') ticks++; };
+  document.addEventListener('keydown', count, true);
+  const fire = kind => { const ev = new KeyboardEvent(kind,
+      { code: 'ArrowUp', key: 'ArrowUp', bubbles: true });
+    ev.__probe = true;
+    ARROWSYN = true;
+    try { document.dispatchEvent(ev); } finally { ARROWSYN = false; } };
+
+  /* the desk must be on a VALUE, or arepStart refuses to run at all */
+  const keepLayer = S.layer, keepMod = S.curMod, keepSlot = S.curSlot,
+        keepPx = S.slotParam, keepSnd = S.editSnd, keepMSel = S.mSel;
+  const ch = num(P.ch, 4), oi = MODULES.findIndex(x => x && x.id === 'osc');
+  try {
+    S.editSnd = ch; S.layer = 2; S.curMod = oi; S.curSlot = 0; S.mSel = 0;
+    const specs = paramsFor(oi, S.presets[ch].osc[0]);
+    S.slotParam = S.curParam = specs.findIndex(x => x.key === 'amt');
+
+    HE.driver = () => deep; HE.pressure = () => deep;
+    HE.on = true; CFG.dial = 1; MODS.shift = shift;
+    rows.push({ k: 'setup', depth: deep, shift: String(shift),
+                gap: (typeof arepGap === 'function' ? arepGap() + 'ms' : '(pre-fix build)'),
+                stepped: String(focusIsStepped()),
+                note: 'a stepped focus never repeats — this row must read false or the rest is vacuous' });
+
+    /* a real key-up, through the real handler: untrusted events only reach it
+       while ARROWSYN says the arrow cluster is speaking */
+    const release = () => fire('keyup');
+
+    /* ---- THE INERTIA ---- hold, let go, and count what still arrives */
+    arepStart('ArrowUp');
+    await sleep(260);
+    const held = ticks;
+    release();
+    await sleep(220);                       // well past the 90ms stop window
+    const after = ticks - held;
+    arepStop();
+    rows.push({ k: 'after release', held, after, want: 0, ok: String(after === 0),
+                note: 'ticks that landed with the finger off the key' });
+
+    /* ---- THE BOUNCE ---- a rapid-trigger re-fire must NOT stop the repeat */
+    ticks = 0;
+    arepStart('ArrowUp');
+    await sleep(260);
+    const b1 = ticks;
+    release();
+    await sleep(8);                         // a wobble is a few milliseconds
+    fire('keydown');
+    await sleep(220);
+    const b2 = ticks - b1;
+    arepStop();
+    rows.push({ k: 'after bounce', held: b1, after: b2, want: '>0',
+                ok: String(b2 > 0),
+                note: 'a wobble must pick the repeat back up, not end it' });
+  } finally {
+    document.removeEventListener('keydown', count, true);
+    arepStop();
+    HE.driver = keepDrv; HE.pressure = keepPrs;
+    HE.on = keepOn; CFG.dial = keepDial; MODS.shift = keepShift;
+    if (keepSyn !== null) ARROWSYN = keepSyn;
+    S.layer = keepLayer; S.curMod = keepMod; S.curSlot = keepSlot;
+    S.slotParam = keepPx; S.editSnd = keepSnd; S.mSel = keepMSel;
+  }
+  return { cols: ['depth', 'shift', 'gap', 'stepped', 'held', 'after', 'want', 'ok', 'note'], rows };
+}
+
 const PROBES = { level: probeLevel, spectrum: probeSpectrum, cursor: probeCursor,
                    preset: probePreset, key: probeKey, keypath: probeKeyPath,
                    roundtrip: probeRoundTrip,
@@ -7021,7 +7114,8 @@ const PROBES = { level: probeLevel, spectrum: probeSpectrum, cursor: probeCursor
                    lforate: probeLfoRate,
                    dyn: probeDyn,
                    ampstack: probeAmpStack,
-                   ratstep: probeRatStep };
+                   ratstep: probeRatStep,
+                   arepinertia: probeArepInertia };
   const fn = PROBES[NAME];
   out = fn ? await fn() : (NAME === 'help' ? HELP : { cols: [], rows: [], err: 'no probe named ' + NAME });
 } catch (e) {
