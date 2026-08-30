@@ -83,6 +83,81 @@ probe in probe.js for *"wt op modulating the position of a wavetable is very
 crackly"*. Left alone; only NEXT.md was committed from here. **Check `git
 status` before staging anything in this repo — this is the second time today.**
 
+# THE SCOPE KEY WAS ALSO THE FINE STEP — 2026-08-30 (night)
+
+Gad: *"lfo still not live tweakable"*, after the previous round had already
+made every LFO shape's rate reach the running node.
+
+**Both things were true.** The value WAS arriving — 2.4% at a time, which is
+inaudible.
+
+## THE BUG, AND IT IS THIS FILE'S OWN RULE
+
+    const magMult=(e,H)=>{
+      const riding=...;
+      if(!riding&&altOf(e))return 0.1;      // <- FINE
+      ...
+
+⚠ **`altOf()` means "the scope key is down"** since the 2026-08-15 swap put
+scopes on left ctrl. The scope key is down for the whole of the gesture that
+HOLDS a scope open — so every arrow inside one was a FINE step, and plain and
+coarse were unreachable, because letting go of ctrl to reach them CLOSES THE
+SCOPE.
+
+    MEASURED, six presses of ↑ inside a held lfo scope:
+      before   2.00Hz -> 2.29Hz     (the fine column, exactly)
+      after    2.00Hz -> 7.63Hz     (plain: x1.25 a press, seven reach 8Hz)
+    the node followed to 7.628 in both cases — it was live the whole time.
+
+**The rule broken is the one CLAUDE.md states in the PARAM FOCUS section: a key
+that is holding something open is not also a modifier of it.** That rule was
+written about ⌥ back when ⌥ *was* the scope key. ⌥ is TOOLS now and ctrl is
+SCOPES, and `magMult` was never re-asked the question.
+
+Fine moves to the TOOLS key, which holds nothing here — `toolsOf()` already
+excludes itself while a scope key is down, so ⌥ is free inside a scope.
+
+    MEASURED, all three sizes reachable, riding exemption intact:
+      scope held, plain             x1      lfo rate 2Hz -> 2.5
+      scope held + right shift      x10                  -> 18.6
+      scope held + ⌥                x0.1                 -> 2.045
+      RIDING + ⌥  (must stay plain) x1
+      filter frq 2k: 2240 / 6212 / 2023     filter q 1: 1.1 / 2 / 1.01
+
+⚠ **THIS AFFECTS EVERY SCOPE DIAL** — cutoff, resonance, envelope stages, all
+of them have been stepping at a TENTH of their intended size since the swap.
+
+## ⚠ THE SHAPE, BECAUSE IT COST THREE ROUNDS
+
+"Not live tweakable" was reported three times and I fixed a different real bug
+each time before finding this one:
+
+1. A synced LFO's phase came off the audio clock, not the bar.
+2. s&h / drift / any skewed shape are not oscillators at all — no `frequency`
+   to turn, so the live rate paths skipped them in silence.
+3. **And the dial itself was moving at a tenth speed the whole time.**
+
+All three were genuinely broken. **The lesson is that "it does not respond"
+and "it responds too little to hear" are the same report**, and the second one
+is invisible to any test that asks whether the value CHANGED. Every probe I
+wrote for (1) and (2) passed on the build he was calling broken, because they
+all asked "did it move" rather than "did it move ENOUGH". Measure the SIZE.
+
+## QA CHECKLIST — 2026-08-30 night
+
+1. **⚠ HOLD A SCOPE AND TURN ANYTHING.** ⌃+f cutoff, ⌃+l lfo rate, ⌃+e envelope
+   stages. Everything now moves ten times further per press than it did
+   yesterday. This is the whole fix and it touches every dial you reach through
+   a scope. MEASURED: lfo rate 2.00 -> 7.63Hz in six presses, was 2.29.
+2. **⌥ inside a held scope is the FINE step now** (it used to be unreachable,
+   and ctrl was doing it by accident). Right shift is still coarse.
+3. **⌃+tap a letter, then arrows (a RIDING scope).** ⌥ must NOT be fine there —
+   the letter is up and ctrl is structure. MEASURED: stays x1.
+4. **The LFO rate on s&h, drift and a skewed shape** (last round's fix) should
+   now be both live AND reach a useful range in a few presses.
+5. **Anything that felt "sticky" before** — it was all the same tenth-speed
+   step. Worth a sweep through the scopes you use most.
+
 # THIRTY TABLES, AND THE LFO SHAPES THAT WERE NEVER OSCILLATORS — 2026-08-30 (late evening)
 
 Gad: *"yo the new ones some dope now! do you want to redo the original tables
