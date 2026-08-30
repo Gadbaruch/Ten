@@ -21,12 +21,13 @@ thing everywhere is the whole point of a dial you can find without looking.
 
     tools/gen_wavetables.py            # prints the WTBL rows to paste
 """
-import io, json, sys, urllib.request
+import io, json, re, sys, urllib.request
 import numpy as np
 import soundfile as sf
 
 RAW = "https://raw.githubusercontent.com/KristofferKarlAxelEkstrand/AKWF-FREE/master/AKWF"
 API = "https://api.github.com/repos/KristofferKarlAxelEkstrand/AKWF-FREE/contents/AKWF"
+TREE = "https://github.com/KristofferKarlAxelEkstrand/AKWF-FREE/tree/master/AKWF/%s"
 
 HARM = 256         # a C2 carries 337 harmonics under Nyquist; 48 was throwing
                    # away two and a half octaves of every one of these waves,
@@ -38,19 +39,29 @@ FLOOR = 0.006      # drop a harmonic under this — inaudible, and it is bytes.
 FRAMES = 5         # per table, evenly spread across the folder's brightness range
 POOL = 24          # how many of the folder's waves to audition
 
-# name, folder — chosen for the digital end of the shelf
+# name, folder. The first ten REPLACE the hand-written originals in place —
+# same names, same indices, so nothing that stored one moves — and the rest are
+# appended. `sub` is deliberately absent: it is a sub bass and having almost no
+# harmonics is the whole point of it, so a high-resolution `sub` would just be
+# a different table wearing the name.
 TABLES = [
-    ("crush",  "AKWF_bitreduced"),
-    ("chip",   "AKWF_oscchip"),
-    ("vgame",  "AKWF_vgame"),
-    ("fm",     "AKWF_fmsynth"),
-    ("dist",   "AKWF_distorted"),
-    ("gap",    "AKWF_bw_sawgap"),
-    ("raw",    "AKWF_raw"),
-    ("drawn",  "AKWF_hdrawn"),
-    ("grain",  "AKWF_granular"),
-    ("sym",    "AKWF_symetric"),
+    # ⚠ PICKED ON THE SCAN, NOT ON THE NAME. `--scan` rates every folder by how
+    # far its five frames' brightness actually travels, and guessing by name
+    # produced four duds: sawbright's position went BACKWARDS, and theremin,
+    # stringbox and pluckalgo barely moved at all. AKWF's numbered miscellany
+    # rates far above every named folder — 0004 sweeps centroid 1.2 to 120.5 —
+    # so that is where the wild ones come from. Their names say only where they
+    # came from, because nobody has heard them yet and an evocative name for a
+    # sound you have not heard is a lie.
+    ("ak04",   "AKWF_0004"),
+    ("ak08",   "AKWF_0008"),
+    ("ak11",   "AKWF_0011"),
+    ("ak01",   "AKWF_0001"),
+    ("ak17",   "AKWF_0017"),
+    ("ak13",   "AKWF_0013"),
+    ("ak14",   "AKWF_0014"),
 ]
+
 
 
 def get(url):
@@ -59,6 +70,19 @@ def get(url):
 
 
 def listing(folder):
+    """The contents API is capped at 60 requests an hour unauthenticated and a
+    single --scan spends the lot. The TREE PAGE is ordinary HTML off the CDN's
+    side and is not capped, so it is the primary and the API is the fallback.
+    (It also settled the filenames: AKWF_0004 holds AKWF_0301.wav upward, not
+    AKWF_0004_0001.wav — the numbering runs across folders, and no amount of
+    guessing at raw URLs was going to find that.)"""
+    try:
+        html = get(TREE % folder).decode("utf-8", "replace")
+        names = sorted(set(re.findall(r"AKWF_[^\"<>/]*?\.wav", html)))
+        if len(names) >= FRAMES:
+            return names
+    except Exception:
+        pass
     d = json.loads(get("%s/%s" % (API, folder)))
     return sorted(t["name"] for t in d if t["name"].endswith(".wav"))
 
@@ -84,6 +108,46 @@ def trim(m):
 
 def js(vals):
     return "[" + ",".join(("%g" % v) for v in vals) + "]"
+
+
+def scan():
+    """Every folder, rated by what it would make: how far the five frames'
+    brightness actually travels. A wavetable whose frames all sound alike is
+    not a wavetable, and guessing folders by NAME produced four of those
+    (sawbr's position went backwards; therm, sbox and pluck barely moved).
+    Pick on the spread, not on the word."""
+    import concurrent.futures as cf
+    names = [t["name"] for t in json.loads(get(API)) if t["type"] == "dir"]
+
+    def rate(folder):
+        try:
+            fs = listing(folder)
+        except Exception as e:
+            return (folder, None, str(e))
+        step = max(1, len(fs) // 12)
+        got = []
+        for fn in fs[::step][:12]:
+            try:
+                m, c = spectrum(get("%s/%s/%s" % (RAW, folder, fn)))
+            except Exception:
+                continue
+            if m is not None:
+                got.append((c, m))
+        if len(got) < FRAMES:
+            return (folder, None, "only %d" % len(got))
+        got.sort(key=lambda t: t[0])
+        idx = np.linspace(0, len(got) - 1, FRAMES).round().astype(int)
+        cen = [got[i][0] for i in idx]
+        harm = [int((got[i][1] > FLOOR).sum()) for i in idx]
+        return (folder, (cen[0], cen[-1], cen[-1] - cen[0], max(harm)), None)
+
+    with cf.ThreadPoolExecutor(max_workers=8) as ex:
+        out = list(ex.map(rate, names))
+    out = [o for o in out if o[1]]
+    out.sort(key=lambda o: -o[1][2])
+    print("%-26s %7s %7s %8s %6s" % ("folder", "dark", "bright", "SPREAD", "harm"))
+    for f, r, _ in out:
+        print("%-26s %7.1f %7.1f %8.1f %6d" % (f, r[0], r[1], r[2], r[3]))
 
 
 def main():
@@ -119,4 +183,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    (scan if "--scan" in sys.argv else main)()
