@@ -1518,7 +1518,7 @@ const recPlayed=(pi,tBeat,midi,vel,durBeats)=>recPlayNote(pi,tBeat,sndOut(pi,mid
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-30.1341';
+const BUILD='2026-08-30.1348';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -3849,7 +3849,21 @@ function magRead(H,C,head){
    (⌥ free) and ⌥ is the fine step again, as it always was. */
 const magMult=(e,H)=>{
   const riding=!!(H&&H.c&&ALTSUS.has(H.c));
-  if(!riding&&altOf(e))return 0.1;
+  /* ⚠ THE SCOPE KEY IS NOT ALSO THE FINE STEP, and it had become both. altOf()
+     means "the scope key is down" since the 2026-08-15 swap moved scopes onto
+     left ctrl — and the scope key is down for the whole of the gesture that
+     HOLDS a scope open. So every arrow inside a held scope was a FINE step and
+     the plain and coarse ones were unreachable without letting go of ctrl,
+     which closes the scope.
+     MEASURED on the lfo rate, six presses of ↑ inside a held scope: 2.00Hz to
+     2.29Hz. That is the fine column exactly — where a plain press is x1.25 and
+     seven of them reach 8Hz. Gad: "lfo still not live tweakable". It was
+     reaching the running oscillator the whole time, 2.4% at a go.
+     This is the rule THIS FILE already states, broken by the swap: a key that
+     is holding something open is not also a modifier of it. Fine moves to the
+     TOOLS key, which holds nothing here — toolsOf() already excludes itself
+     while a scope key is down, so ⌥ is free inside a scope. */
+  if(!riding&&(HOLD.t||!!e.altKey))return 0.1;
   /* rs(), not e.shiftKey: the coarse step is navigation, which is the RIGHT
      shift's whole job now. Left shift is the global modifier and must not
      quietly multiply a param by ten on its way to something else. */
