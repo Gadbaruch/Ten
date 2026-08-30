@@ -5579,6 +5579,7 @@ const HELP = {
     { k: 'mixbus',   args: 'kit=KT808 bars=2 bpm=120 at=ch|master ref=brushkit — the whole kit playing, gated LUFS + PLR + band balance, against a real drum record' },
     { k: 'padpred',  args: 'kit=KT808 — offline buffer+envelope loudness vs the measured bus, to prove the model' },
     { k: 'kitmix',   args: 'kit=KT808,KTLIN|ROLL|ROLL80 ms=400 real=1 — BS.1770 loudness + 8-band balance of every pad in a kit, against the role target' },
+    { k: 'ampstack', args: 'ch=4 rate=6 amt=100 — does an lfo on amp defeat the amp envelope' },
     { k: 'dyn',      args: 'cat=kik n=4 ch=4 — the dynamics layer: same roll at vel 1.0 vs 0.3' },
     { k: 'smploud',  args: 'ch=4 ms=200 names=a,b,c — perceptual loudness of samples vs a synth op, and the median deficit' },
     { k: 'smprate',  args: 'ch=4 notes=36,48,60,72 — which note plays a sample at its own speed' },
@@ -6728,6 +6729,115 @@ async function probeDyn() {
            notes: 'a NEGATIVE darker-dB means the soft hit is duller, which is the point' };
 }
 
+/* DO TWO MODULATORS ON ONE DESTINATION COMBINE SANELY? (Gad, 2026-08-30:
+   "having env>amp and lfo>amp the lfo overrides the env in a way, doesnt sound
+   reasonable".)
+
+   The test that settles it: an amp envelope with a 120ms decay to SILENCE, and
+   then the same patch with an LFO added on amp. If the two combine the way a
+   synth's VCA chain does — in SERIES, one gain after another — the note is
+   still silent after 400ms, because anything multiplied by a closed envelope
+   is zero. If they are SUMMED, the LFO keeps opening the gain after the
+   envelope has shut and the note never stops: sound in the tail is the fault. */
+async function probeAmpStack() {
+  const ch = num(P.ch, 4), rate = num(P.rate, 6), amt = num(P.amt, 100);
+  const keep = stash(ch);
+  const rows = [];
+  try {
+    const p = S.presets[ch];
+    for (const k of Object.keys(p)) if (k !== 'modLoop') delete p[k];
+    Object.assign(p, JSON.parse(JSON.stringify(presetData(basePreset('AMPT')))));
+    p.cat = 'keys';
+    p.osc[0] = { wav: 0, mode: 0, dst: 0, rat: 1, amt: 1, fine: 0, ph: 0, phm: 0, pw: 0.5 };
+    for (let i = 1; i < p.osc.length; i++) if (p.osc[i]) p.osc[i].amt = 0;
+    for (const x of p.flt) if (x) x.typ = 0;
+    for (const x of p.fx) if (x) x.typ = 0;
+    for (const x of p.amp) if (x) x.typ = 0;
+    for (const e of p.env) if (e) e.dst = 0;
+    for (const m of p.mod) if (m) { m.src = 0; m.routes = [{ dst: 0, idx: 0, amt: 100, ctr: 0, tgt: null }]; }
+    p.mod[0] = { src: 1, rsel: 0, mac: 0, a: 0.001, d: 0.12, s: 0, r: 0.02, crv: 0, tmul: 1,
+      routes: [{ dst: 1, idx: 0, amt: 100, ctr: 0, tgt: null,
+                 addr: { rack: 'voice', slot: 0, key: 'amp', lbl: 'amp' } }] };
+    p.mix.lvl = 0.9; p._folded = true; p._addr = true;
+    const run = async lfo => {
+      p.mod[1] = lfo
+        ? { src: 2, rsel: 0, mac: 0, a: 0.005, d: 0.15, s: 0, r: 0.2, crv: 0, wav: 0,
+            rate, ph: 0, syn: 0, rdiv: 4, ltr: 0, fch: 1, fa: 0.01, fr: 0.15, fg: 4,
+            routes: [{ dst: 1, idx: 0, amt, ctr: 0, tgt: null,
+                       addr: { rack: 'voice', slot: 0, key: 'amp', lbl: 'amp' } }] }
+        : { src: 0, rsel: 0, mac: 0, routes: [{ dst: 0, idx: 0, amt: 100, ctr: 0, tgt: null }],
+            a: 0.005, d: 0.15, s: 0, r: 0.2, crv: 0, wav: 0, rate: 5, ph: 0, syn: 0,
+            rdiv: 4, ltr: 0, fch: 1, fa: 0.01, fr: 0.15, fg: 4 };
+      engine.rebuildRack(ch); engine.refresh(ch);
+      engine.allOff(); await sleep(120);
+      const bus = busOf(ch); if (!bus) return null;
+      const t = tap(bus); await sleep(25);
+      engine.noteOn(AC.currentTime + 0.02, ch, KBBASE, 1.0);
+      await sleep(1200);
+      engine.allOff();
+      const w = t.stop()[0], n = w.length;
+      let pk = 0;
+      for (let i = 0; i < n; i++) { const a2 = Math.abs(w[i]); if (a2 > pk) pk = a2; }
+      const st = Math.max(0, n - Math.round(0.4 * AC.sampleRate));
+      let sq = 0, c = 0;
+      for (let i = st; i < n; i++) { sq += w[i] * w[i]; c++; }
+      const tail = Math.sqrt(sq / Math.max(c, 1));
+      return { pk, tail, db: 20 * Math.log10(Math.max(tail, 1e-9) / Math.max(pk, 1e-9)) };
+    };
+    const a = await run(false), b = await run(true);
+    if (a) rows.push({ k: 'decay-to-silence, env only', peak: +a.pk.toFixed(4),
+                       'tail rms': +a.tail.toFixed(5), 'tail dB below peak': +a.db.toFixed(1) });
+    if (b) rows.push({ k: 'decay-to-silence, + lfo', peak: +b.pk.toFixed(4),
+                       'tail rms': +b.tail.toFixed(5), 'tail dB below peak': +b.db.toFixed(1) });
+
+    /* ADDITIVE OR MULTIPLICATIVE — the question a decaying note cannot answer.
+       Hold the note at two different SUSTAIN levels with the same lfo depth.
+       If the two gains are in series the tremolo SCALES with the level, so the
+       swing at sustain 0.25 is about a quarter of the swing at 1.0. If the lfo
+       is summed onto the gain instead, the swing is the SAME absolute size at
+       both — which at a quiet sustain means the lfo is running the amp and the
+       envelope has stopped mattering. That is "the lfo overrides the env". */
+    const held = async sus => {
+      p.mod[0].d = 0.02; p.mod[0].s = sus; p.mod[0].r = 0.02;
+      p.mod[1] = { src: 2, rsel: 0, mac: 0, a: 0.005, d: 0.15, s: 0, r: 0.2, crv: 0, wav: 0,
+        rate: 8, ph: 0, syn: 0, rdiv: 4, ltr: 0, fch: 1, fa: 0.01, fr: 0.15, fg: 4,
+        routes: [{ dst: 1, idx: 0, amt, ctr: 0, tgt: null,
+                   addr: { rack: 'voice', slot: 0, key: 'amp', lbl: 'amp' } }] };
+      engine.rebuildRack(ch); engine.refresh(ch);
+      engine.allOff(); await sleep(120);
+      const bus = busOf(ch); if (!bus) return null;
+      const t = tap(bus); await sleep(25);
+      engine.noteOn(AC.currentTime + 0.02, ch, KBBASE, 1.0);
+      await sleep(1100);
+      engine.allOff();
+      const w = t.stop()[0];
+      /* the envelope of the held section: peak per 10ms block, 300..900ms */
+      const sr = AC.sampleRate, h = Math.round(0.01 * sr);
+      const from = Math.round(0.30 * sr), to = Math.min(w.length, Math.round(0.90 * sr));
+      const env = [];
+      for (let i = from; i + h < to; i += h) {
+        let m2 = 0; for (let j = i; j < i + h; j++) { const q = Math.abs(w[j]); if (q > m2) m2 = q; }
+        env.push(m2);
+      }
+      if (!env.length) return null;
+      const hi = Math.max(...env), lo = Math.min(...env);
+      return { hi, lo, swing: hi - lo, mid: (hi + lo) / 2 };
+    };
+    const s10 = await held(1.0), s25 = await held(0.25);
+    if (s10 && s25) {
+      rows.push({ k: 'held, sustain 1.00', peak: +s10.mid.toFixed(4),
+                  'tail rms': +s10.swing.toFixed(4), 'tail dB below peak': 'swing' });
+      rows.push({ k: 'held, sustain 0.25', peak: +s25.mid.toFixed(4),
+                  'tail rms': +s25.swing.toFixed(4), 'tail dB below peak': 'swing' });
+      rows.push({ k: 'swing ratio (0.25 vs 1.0)', peak: '',
+                  'tail rms': +(s25.swing / Math.max(s10.swing, 1e-9)).toFixed(2),
+                  'tail dB below peak': '~0.25 = series, ~1.0 = summed' });
+    }
+  } finally { unstash(ch, keep); }
+  return { cols: ['peak', 'tail rms', 'tail dB below peak'], rows,
+           notes: 'amp env decays to SILENCE in 120ms; the tail is the last 400ms of a 1.2s window' };
+}
+
 const PROBES = { level: probeLevel, spectrum: probeSpectrum, cursor: probeCursor,
                    preset: probePreset, key: probeKey, keypath: probeKeyPath,
                    roundtrip: probeRoundTrip,
@@ -6783,7 +6893,8 @@ const PROBES = { level: probeLevel, spectrum: probeSpectrum, cursor: probeCursor
                    wtalias: probeWtAlias,
                    lfosync: probeLfoSync,
                    lforate: probeLfoRate,
-                   dyn: probeDyn };
+                   dyn: probeDyn,
+                   ampstack: probeAmpStack };
   const fn = PROBES[NAME];
   out = fn ? await fn() : (NAME === 'help' ? HELP : { cols: [], rows: [], err: 'no probe named ' + NAME });
 } catch (e) {

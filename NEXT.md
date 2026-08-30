@@ -1,3 +1,62 @@
+# AN LFO ON AMP IS SUMMED, NOT IN SERIES — 2026-08-30 (DIAGNOSED, NOT FIXED)
+
+Gad: *"when there are several different mod types aiming at same destination
+you need to make sure its sane - the one unsane thing i found is having env>amp
+and lfo>amp the lfo overrides the env."*
+
+**He is right, and `tools/probe.sh ampstack` puts a number on it.** Hold a note
+at two sustain levels with the same lfo depth on amp:
+
+      sustain 1.00   level 0.544   tremolo swing 0.453
+      sustain 0.25   level 0.200   tremolo swing 0.330
+      swing ratio    0.73          (series would be ~0.25, summed ~1.0)
+
+At sustain 0.25 the swing is LARGER THAN THE LEVEL — the lfo is running the amp
+and the envelope has stopped mattering.
+
+**THE CAUSE IS STRUCTURAL: a Web Audio AudioParam connection SUMS.** TEN
+already works around this everywhere else and only this one path was missed —
+press rides a POST-VCA gain (`pGain`), and vel/key/rnd scale the envelope PEAK
+through `ampBias` precisely so "a note must still be able to reach silence".
+The lfo connects straight onto `vca.gain`:
+
+    const span=t.span*(t.amp?this.amp:1)*0.5;      // ~line 8807
+    const g3=ac.createGain(); g3.gain.value=MODTAPER(lf.amt)*span;
+    lo.connect(g3); g3.connect(t.p);               // t.p IS vca.gain
+
+`this.amp` is the envelope's PEAK, so the depth scales with velocity but never
+with where the envelope currently sits. That is exactly the 0.73.
+
+⚠ **It does NOT leak past the envelope** — a decay-to-silence patch measured a
+tail at -174dB with and without the lfo. So this is a depth-tracking fault, not
+a stuck-note one.
+
+## THE FIX, specified to the line
+
+`pGain` is created for press and inserted after the vca at ~8969:
+`if(this.pGain){vca.connect(this.pGain); vTail=this.pGain;}` — and the lfo
+block runs BEFORE that, so creating it there is picked up for free.
+
+For an lfo route whose target is the voice amp (`t.amp`), drive `pGain.gain`
+with a base of 1 instead of `vca.gain`:
+
+    if(!this.pGain){this.pGain=ac.createGain(); this.pGain.gain.value=1;}
+    const g4=ac.createGain(); g4.gain.value=MODTAPER(lf.amt)*0.5;
+    lo.connect(g4); g4.connect(this.pGain.gain);
+
+That makes it `vca_out * (1 + lfo*depth)` — series, the way a tremolo VCA sits
+after an envelope VCA in any synth. Silence stays silence and depth tracks
+level.
+
+**CHECK FIRST that `t.amp` means the voice VCA and not an operator's gain** —
+`_destOf` sets it and an op-level target must keep the summed path.
+
+**NOT DONE ON PURPOSE.** It touches the audio chain of every voice, and two
+mistakes today came from moving fast in this file (ten probe functions sliced
+out of probe.js by a bad slice bound, and genDyn called before foldMod where
+foldMod REBUILDS the rack). This wants a fresh pass. `tools/probe.sh ampstack`
+is the regression test and already fails.
+
 # THE DAY, IN ONE PLACE — 2026-08-30
 
 Seven entries below cover this session in detail. This is the map, the numbers
