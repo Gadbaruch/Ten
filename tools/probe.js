@@ -5090,6 +5090,96 @@ async function probeRollKey() {
   return { cols: ['when', 'n', 'mode', 'scope'], rows, notes };
 }
 
+/* ---------------- wtshelf: what is on the wavetable shelf ----------------
+ * Every table, at the dark end and the bright end of its position, through the
+ * REAL path — createPeriodicWave normalises to peak 1, so a bright recipe with
+ * fifty harmonics lands quieter in RMS than a sine no matter what the numbers
+ * say, and only the audio answers that.
+ *
+ * Run it whenever WTBL changes: it says whether a new table is actually
+ * brighter than the old ones, whether `pos` sweeps the same direction in all of
+ * them, and whether any of them is a level outlier on the shelf.
+ *
+ *     tools/probe.sh wtshelf ch=8                                             */
+async function probeWtShelf() {
+  const ch = CH === 9 ? 8 : CH;
+  const sr = AC.sampleRate;
+  const keep = stash(ch);
+  const mutes = [], rows = [], notes = [];
+  try {
+    if (T.playing) stop();
+    pin(ch);
+    mutes.push(...muteOthers([ch]));
+    const p = S.presets[ch];
+    p.cat = 'keys';
+    p.flt = rack(mkFlt); p.flt[0].typ = 0;      // nothing between the operator and the bus
+    p.fx = rack(mkFx); p.env = rack(mkEnv); p.mod = rack(mkMod);
+    p.env[0] = { dst: 1, idx: 0, amt: 100, a: 0.004, d: 0.02, s: 1, r: 0.05, crv: 0 };
+    p.mix.lvl = 1; p.mix.pan = 0;
+    Object.assign(modHolder(p, 'vox').vox || (p.vox = {}),
+      { mode: 0, glide: 0, uni: 1, sprd: 0, wide: 0, slop: 0, fmw: 0 });
+    const take = async (ti, pos) => {
+      p.osc = rack(mkOsc);
+      p.osc[0] = { wav: 14, mode: 0, dst: 0, rat: 1, amt: 1, fine: 0, ph: 0, phm: 0, pw: 0.5,
+                   wta: ti, wtb: ti, posa: pos, posb: pos, mrph: 0, fold: 0 };
+      engine.rebuildRack(ch); engine.refresh(ch);
+      engine.allOff(); await sleep(50);
+      const bus = busOf(ch); if (!bus) return null;
+      engine.noteOn(AC.currentTime + 0.02, ch, NOTE, VEL);
+      await sleep(120);
+      const t = tap(bus);
+      await sleep(200);
+      const [L] = t.stop();
+      engine.allOff(); await sleep(30);
+      let s2 = 0; for (let i = 0; i < L.length; i++) s2 += L[i] * L[i];
+      return { rms: Math.sqrt(s2 / L.length) };
+    };
+    for (let ti = 0; ti < WTBL.length; ti++) {
+      const lo = await take(ti, 0), hi = await take(ti, 1);
+      /* harmonics in the recipe at each end — what the table is MADE of, next
+         to what came out, so a table that is rich on paper and dull in the air
+         shows up */
+      const nLo = wtHarm(ti, 0).filter(v => Math.abs(v) > 0.012).length;
+      const nHi = wtHarm(ti, 1).filter(v => Math.abs(v) > 0.012).length;
+      /* ⚠ BRIGHTNESS FROM THE RECIPE, NOT FROM THE AUDIO. A measured spectral
+         centroid is dominated by the NOISE FLOOR — 8000 bins of it outweigh
+         one loud harmonic — and read ~1500Hz for every table including a pure
+         sine, which is the third metric today to say something confident and
+         wrong. The recipe IS the spectrum: power-weighted mean harmonic
+         number, exact, no audio needed. */
+      const cen = pos => { const h = wtHarm(ti, pos);
+        let num = 0, den = 0;
+        for (let k = 0; k < h.length; k++) { const p2 = h[k] * h[k]; num += (k + 1) * p2; den += p2; }
+        return +(num / Math.max(1e-12, den)).toFixed(2); };
+      const cLo = cen(0), cHi = cen(1);
+      rows.push({ k: ti + ' ' + WTNAMES[ti],
+                  frames: WTBL[ti][1].length, hLo: nLo, hHi: nHi,
+                  cenLo: cLo, cenHi: cHi,
+                  rmsLo: lo && +lo.rms.toFixed(4), rmsHi: hi && +hi.rms.toFixed(4),
+                  dbLo: lo && +(20 * Math.log10(Math.max(1e-9, lo.rms))).toFixed(1),
+                  dbHi: hi && +(20 * Math.log10(Math.max(1e-9, hi.rms))).toFixed(1) });
+    }
+  } finally {
+    for (const m of mutes) try { m(); } catch (_) {}
+    unstash(ch, keep);
+  }
+  const db = rows.flatMap(r => [r.dbLo, r.dbHi]).filter(v => typeof v === 'number');
+  if (db.length)
+    notes.push('level spread across the whole shelf: ' + Math.min.apply(null, db).toFixed(1) +
+               ' to ' + Math.max.apply(null, db).toFixed(1) + ' dB, ' +
+               (Math.max.apply(null, db) - Math.min.apply(null, db)).toFixed(1) + ' dB wide.');
+  notes.push('hLo/hHi = harmonics above -38dB in the recipe at pos 0 and pos 1. cenLo/cenHi = ' +
+             'the power-weighted mean HARMONIC NUMBER of the recipe there — 1 is a pure sine. ' +
+             'cenHi should be the HIGHER of the two in every row: pos means brighter, ' +
+             'everywhere, which is what makes the dial findable without looking.');
+  notes.push('rms is what createPeriodicWave leaves after normalising to peak 1, so a rich ' +
+             'table is quieter than a sine by construction. It is the SPREAD that matters.');
+  const bad = rows.filter(r => r.cenHi != null && r.cenLo != null && r.cenHi < r.cenLo);
+  if (bad.length) notes.push('!! pos gets DARKER in: ' + bad.map(r => r.k).join(', '));
+  return { cols: ['frames', 'hLo', 'hHi', 'cenLo', 'cenHi', 'rmsLo', 'rmsHi', 'dbLo', 'dbHi'],
+           rows, notes };
+}
+
 const HELP = {
   cols: ['args'],
   rows: [
@@ -5134,6 +5224,7 @@ const HELP = {
     { k: 'smplib',   args: 'ch=8 names=tr808-kick-01,linn-snare-01 \u2014 point a synth op at named library one-shots and hear whether they sound' },
     { k: 'spread',   args: "ch=8 ty=rake \u2014 can a bank filter's spread be modulated, and does a tweak reach a held note" },
     { k: 'pwmall',   args: 'ch=8 rate=2 amt=70 wavs=0,1,2,3 \u2014 which waves still STEP their width, for waves a pulse metric cannot see' },
+    { k: 'wtshelf',  args: 'ch=8 \u2014 every wavetable at pos 0 and pos 1: harmonics, centroid, level' },
     { k: 'rollkey',  args: '\u2014 does the dice key fire on the PRESS, for every modifier combination' },
     { k: 'wtpos',    args: 'ch=8 rungs=0.5 \u2014 drive a wavetable position at a constant rate: junk added, spike share, and the standby gain at each write' },
     { k: 'pwm',      args: 'ch=8 wav=3 rate=2 amt=70 \u2014 is a width sweep smooth? excess edges per second = clicks' },
@@ -6252,7 +6343,8 @@ const PROBES = { level: probeLevel, spectrum: probeSpectrum, cursor: probeCursor
                    synthlvl: probeSynthLvl,
                    kitcal: probeKitCal,
                    wtpos: probeWtPos,
-                   rollkey: probeRollKey };
+                   rollkey: probeRollKey,
+                   wtshelf: probeWtShelf };
   const fn = PROBES[NAME];
   out = fn ? await fn() : (NAME === 'help' ? HELP : { cols: [], rows: [], err: 'no probe named ' + NAME });
 } catch (e) {
