@@ -1518,7 +1518,7 @@ const recPlayed=(pi,tBeat,midi,vel,durBeats)=>recPlayNote(pi,tBeat,sndOut(pi,mid
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-30.1408';
+const BUILD='2026-08-30.1414';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -14632,6 +14632,114 @@ function saveToLib(pi){
   dirty=true; dirtySave=true;
 }
 /* post-fold generation spice: exploit routes + expressive sources + stacking */
+/* ---- THE DYNAMICS LAYER, and it is REQUIRED rather than spice ----------
+   Gad, 2026-08-29: "IMPORTANT to have an expressive dynamics layer - setting
+   up mods like velocity, press, and keyboard to make each roll sound
+   expressive alive and fun to play."
+
+   THE STRUCTURAL POINT, which is why this is its own function and not four
+   more lines in genSpice: genSpice writes vel->filt and key->filt behind
+   P(0.4) and P(0.5), so a large share of every batch came out with NO dynamics
+   at all. Expressivity cannot be a coin flip. Everything here is
+   unconditional; only the AMOUNTS are rolled.
+
+   WHAT GAD SPECIFIED, per family, in his words:
+     kicks     "less bassy and less bright in low vel"
+     snares    "less bright, shorter, a bit pitched down in lower vel"
+     pads/keys "a lot of modulation and movement around press mod then vel"
+     plucks    "vel to shape the timbre and freq responce, press to add an
+                audio effect dimension"
+     keys      "change in volume and color spread on the keyboard so high
+                notes dont bite"
+
+   AND ONE OF THOSE IS NOT BUILT: "shorter at low vel" wants vel -> an envelope
+   TIME, and env times are a `next` kind destination — read once when a note
+   starts, so the value parked by the control tick belongs to the PREVIOUS
+   note. A vel route there is off by one and would make every hit the length of
+   the one before it, which is worse than not having it. Everything below
+   targets destinations that answer per-note. See NEXT.md for the fix.
+
+   KEY IS BIPOLAR AND CENTRED AT MIDDLE C — `clamp((midi-60)/24,-2,2)` — so a
+   NEGATIVE key->amp is "high notes get quieter", which is the whole of "so
+   high notes dont bite". */
+function genDyn(p,cat,wild,H){
+  const {R,RI}=H;
+  const spare=()=>p.mod.find(m2=>!m2.src);
+  const add=o=>{const m2=spare(); if(m2){Object.assign(m2,o);return m2;}return null;};
+  const route=(src,dst,idx,amt)=>add({src,rsel:0,routes:[{dst,idx,amt,ctr:0,tgt:null}]});
+  /* the filter the patch actually has — routing at flt[0] when flt[0] is off
+     moves a control nobody can hear */
+  const fi=p.flt.findIndex(f=>f&&f.typ);
+  const F=fi<0?1:fi+1;                         // legacy idx is 1-based
+  /* the loudest partial ABOVE the root, which is what "less bassy" thins: op 0
+     is the body on a drum and the carrier on a synth, so biasing it is a level
+     change rather than a timbre one. */
+  const ops=p.osc.map((o,i)=>[i,o]).filter(([i,o])=>i>0&&o&&o.amt>0.02);
+  const topOp=ops.length?ops[0][0]+1:0;         // legacy idx is 1-based here too
+  const drum=isDrumCat(cat);
+
+  if(drum){
+    /* A SAMPLED DRUM USUALLY HAS NO FILTER, and "less bright at low vel" needs
+       one to move. Half of every drum roll takes the sample path, so without
+       this the layer reached only the synthesised half — measured 5/12 before.
+       Installed only when the rack is empty, and the base is chosen so a HARD
+       hit is transparent: vel is UNIPOLAR 0..1, so the filter's own frequency
+       is the value at zero velocity and force opens it. At amt 90 a hit past
+       about half velocity is already wide open, which is why 5kHz here is a
+       softening of quiet hits rather than a lid on the drum. */
+    let f2=fi;
+    if(f2<0){
+      p.flt[0]={typ:1,frq:RI(40,62)*100,q:+R(0.6,0.9).toFixed(1),gn:0,
+                par:0,pol:0,spr:0.4,lvl:1};
+      f2=0;
+    }
+    const FD=f2+1;
+    route(3,3,FD,fi<0?RI(70,110):RI(30,55));
+    if(cat==='kik'){
+      /* "less bassy in low vel" — the SUB is op 0 on a kick, so this is the
+         one place biasing op 0's own level is the right move. dst 1 with an
+         idx>=1 is that operator's level; see the amp branch in the voice. */
+      route(3,1,1,RI(20,35));
+    }else if(cat==='snr'){
+      /* "a bit pitched down in lower vel" — small, because a snare that swings
+         a semitone with velocity reads as broken rather than expressive. */
+      route(3,2,1,RI(4,9));
+      if(topOp)route(3,1,topOp,RI(25,45));      // the wires thin out when soft
+    }else if(topOp){
+      route(3,1,topOp,RI(15,30));
+    }
+    return;
+  }
+
+  /* ---- tonal ---------------------------------------------------------- */
+  if(fi>=0){
+    route(3,3,F,RI(25,50));                     // vel -> colour
+    route(4,3,F,RI(20,45));                     // key -> colour spread
+  }
+  /* "so high notes dont bite" — NEGATIVE, and on every tonal patch, not only
+     keys: a supersaw two octaves up is the same problem. */
+  route(4,1,0,-RI(6,16));
+  if(cat==='keys'||cat==='pad'||cat==='chord'){
+    /* "a lot of modulation and movement around press mod then vel" — press
+       first and deeper than velocity, which is the order he put them in. */
+    if(fi>=0)route(6,3,F,RI(45,80));
+    if(topOp)route(6,1,topOp,RI(20,40));
+  }else if(cat==='plk'||cat==='lead'){
+    /* "vel to shape the timbre" — the partial, not the level */
+    if(topOp)route(3,1,topOp,RI(30,55));
+    /* "press to add an audio effect dimension": the send is the one fx every
+       patch can reach without knowing what is in its own rack. */
+    const fx=p.fx.findIndex(x=>x&&!x.typ);
+    if(fx>=0){
+      p.fx[fx]={typ:XTYPES.indexOf('send'),p1:+R(0.4,0.7).toFixed(2),p2:0.1,p3:0.25,
+        p4:0.35,p5:0.5,p6:0.5,p7:0.7,p8:0.45,mix:0,rv:0};
+      add({src:6,rsel:0,routes:[{dst:0,idx:0,amt:RI(60,110),ctr:0,tgt:null,
+        addr:{rack:'fx',slot:fx,key:'mix',lbl:'mix',sid:fx}}]});
+    }
+  }else if(cat==='bass'){
+    if(topOp)route(3,1,topOp,RI(25,45));
+  }
+}
 function genSpice(p,cat,wild,H){
   const {R,RI,P,pick}=H;
   const spare=()=>p.mod.find(m2=>!m2.src);
@@ -15077,6 +15185,7 @@ function genTonal(p, cat, wild, H, force) {
   p.mix.lvl = +clamp(R(0.25, 0.38) * (TRIM[an] || 1), 0.06, 0.95).toFixed(2);
   foldMod(p);
   genSpice(p, cat, wild, H);
+  genDyn(p, cat, wild, H);        // required, not spice — see genDyn
   return { rung, arch: an, from: use, g: +g.toFixed(2) };
 }
 function genPreset(cat,rnd,wild=0.5,force){
@@ -15315,6 +15424,14 @@ function genPreset(cat,rnd,wild=0.5,force){
     if(useSmp){
       p.vox.mode=1;
       foldMod(p);
+      /* AFTER the fold, and the first attempt had this backwards. foldMod does
+         not augment the mod rack, it REBUILDS it from the env and lfo racks —
+         so routes written before it are simply gone. Measured: six sampled
+         kicks came back with only their amp env and no velocity at all, which
+         read as the layer not running when in fact it ran and was overwritten.
+         A sampled drum returns early from here, so this call is the only thing
+         giving half of every drum batch its dynamics. */
+      genDyn(p,cat,wild,{R,RI,P,pick});
       p._addr=false; addrMod(p);
       p._gen={smp:p._smp};
       if(DRUMCATS.includes(cat))drumUp(p);
@@ -15331,6 +15448,7 @@ function genPreset(cat,rnd,wild=0.5,force){
     foldMod(p);
     /* new architecture: velocity shapes drum level (and sometimes tone) */
     genSpice(p,cat,wild,{R,RI,P,pick});
+    genDyn(p,cat,wild,{R,RI,P,pick});
     return p;
   }
   /* the tonal half is archetypes now — see genTonal, which also carries the

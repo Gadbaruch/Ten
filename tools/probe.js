@@ -5579,6 +5579,7 @@ const HELP = {
     { k: 'mixbus',   args: 'kit=KT808 bars=2 bpm=120 at=ch|master ref=brushkit — the whole kit playing, gated LUFS + PLR + band balance, against a real drum record' },
     { k: 'padpred',  args: 'kit=KT808 — offline buffer+envelope loudness vs the measured bus, to prove the model' },
     { k: 'kitmix',   args: 'kit=KT808,KTLIN|ROLL|ROLL80 ms=400 real=1 — BS.1770 loudness + 8-band balance of every pad in a kit, against the role target' },
+    { k: 'dyn',      args: 'cat=kik n=4 ch=4 — the dynamics layer: same roll at vel 1.0 vs 0.3' },
     { k: 'smploud',  args: 'ch=4 ms=200 names=a,b,c — perceptual loudness of samples vs a synth op, and the median deficit' },
     { k: 'smprate',  args: 'ch=4 notes=36,48,60,72 — which note plays a sample at its own speed' },
     { k: 'smpdiag',  args: 'ch=4 file=oneshots/snare/linn-snare-03.flac note=48 — the file vs the op: level, band balance, stereo' },
@@ -6682,6 +6683,56 @@ async function probeKitCal() {
                 + 'wall-clock milliseconds for the whole kit' };
 }
 
+/* DOES THE DYNAMICS LAYER ACTUALLY MOVE ANYTHING? (Gad, 2026-08-29: "IMPORTANT
+   to have an expressive dynamics layer ... to make each roll sound expressive
+   alive and fun to play".) Counting routes proves they were written; this
+   plays the SAME rolled patch at two velocities and reports what changed. */
+async function probeDyn() {
+  const ch = num(P.ch, 4), cat = str(P.cat, 'kik');
+  const keep = stash(ch);
+  const rows = [];
+  try {
+    for (let i = 0; i < num(P.n, 4); i++) {
+      const g = genPreset(cat, mulberry32(2000 + i * 53), 0.5);
+      const p = S.presets[ch];
+      for (const k of Object.keys(p)) if (k !== 'modLoop') delete p[k];
+      Object.assign(p, JSON.parse(JSON.stringify(presetData(g))));
+      engine.rebuildRack(ch); engine.refresh(ch);
+      const at = async vel => {
+        engine.allOff(); await sleep(70);
+        const bus = busOf(ch); if (!bus) return null;
+        const t = tap(bus); await sleep(25);
+        engine.noteOn(AC.currentTime + 0.02, ch, KBBASE, vel);
+        await sleep(420);
+        engine.allOff();
+        const w = t.stop()[0];
+        const N = 8192; let pk = 0, on = 0;
+        for (let j = 0; j < w.length; j++) { const a = Math.abs(w[j]); if (a > pk) pk = a; }
+        for (let j = 0; j < w.length; j++) if (Math.abs(w[j]) > pk * 0.02) { on = j; break; }
+        const m = new Float32Array(N);
+        for (let j = 0; j < N && on + j < w.length; j++)
+          m[j] = w[on + j] * (0.5 - 0.5 * Math.cos(2 * Math.PI * j / N));
+        let tot = 0, cen = 0;
+        for (let b = 1; b < N / 2; b++) {
+          let re = 0, im = 0, ww = 2 * Math.PI * b / N;
+          for (let j = 0; j < N; j++) { re += m[j] * Math.cos(ww * j); im -= m[j] * Math.sin(ww * j); }
+          const mag = Math.sqrt(re * re + im * im) / N, f = b * AC.sampleRate / N;
+          tot += mag; cen += mag * f;
+        }
+        return { pk, cen: tot > 0 ? cen / tot : 0 };
+      };
+      const hi = await at(1.0), lo = await at(0.3);
+      if (!hi || !lo) continue;
+      rows.push({ k: cat + ' roll ' + i,
+                  'cen@1.0': Math.round(hi.cen), 'cen@0.3': Math.round(lo.cen),
+                  'darker dB': +(20 * Math.log10(Math.max(lo.cen, 1) / Math.max(hi.cen, 1))).toFixed(1),
+                  'pk@1.0': +hi.pk.toFixed(3), 'pk@0.3': +lo.pk.toFixed(3) });
+    }
+  } finally { unstash(ch, keep); }
+  return { cols: ['cen@1.0', 'cen@0.3', 'darker dB', 'pk@1.0', 'pk@0.3'], rows,
+           notes: 'a NEGATIVE darker-dB means the soft hit is duller, which is the point' };
+}
+
 const PROBES = { level: probeLevel, spectrum: probeSpectrum, cursor: probeCursor,
                    preset: probePreset, key: probeKey, keypath: probeKeyPath,
                    roundtrip: probeRoundTrip,
@@ -6736,7 +6787,8 @@ const PROBES = { level: probeLevel, spectrum: probeSpectrum, cursor: probeCursor
                    wtshelf: probeWtShelf,
                    wtalias: probeWtAlias,
                    lfosync: probeLfoSync,
-                   lforate: probeLfoRate };
+                   lforate: probeLfoRate,
+                   dyn: probeDyn };
   const fn = PROBES[NAME];
   out = fn ? await fn() : (NAME === 'help' ? HELP : { cols: [], rows: [], err: 'no probe named ' + NAME });
 } catch (e) {
