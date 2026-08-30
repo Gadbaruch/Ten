@@ -1,3 +1,33 @@
+# THE ACOUSTIC KITS LOADED SILENT — 2026-08-30
+
+Gad: *"all the new drum sounds i dont hear them when scrolling through the
+presets, i see the preset names but the sounds dont load."*
+
+**`smpPath` was rewriting the new tree out of existence.** It exists to migrate
+sets saved under the RETIRED machine layout — `oneshots/<machine>/<inst>/<file>`
+down to `oneshots/<inst>/<file>` — and its rule is "four segments means old".
+`oneshots/acoustic/<kit>/<file>` is four segments too, so every acoustic pad
+was normalised to `oneshots/<kit>/<file>`, missed `POOLBYF`, and came back as a
+NAMED HOLE: the kit loads, the names show, nothing sounds. Its own comment
+already had the phrase for it — *"the quietest kind of wrong."*
+
+MEASURED before: all twelve KTJAZ pads `pool:n`, SMPWAIT true, with
+`oneshots/acoustic/jazz/kick.flac` normalising to `oneshots/jazz/kick.flac`.
+After: **KTJAZ 12/12, KTBIG 12/12, KT808 12/12** — and they play, 113Hz / 288Hz
+/ 53.8Hz. The old path still migrates: `oneshots/tr808/kick/tr808-kick-08.flac`
+-> `oneshots/kick/tr808-kick-08.flac`.
+
+**THE FIX IS A LIST, `SMPTREES`, AND THAT IS THE POINT.** Anything added under
+`samples/oneshots/` that is a TREE rather than an instrument folder has to go
+in it, or its takes get migrated out of existence in exactly this way. This
+cost a whole kit bank being silently mute; the next tree should cost nothing.
+
+⚠ **NOT COMMITTED YET.** Gad's other window has uncommitted work in
+`index.html` and `tools/probe.js` (wavetable crossfade cache keys, a `wtpos`
+probe), and staging index.html from here would sweep it up. The fix is in the
+WORKING TREE, so localhost:3033 already has it; it needs committing from
+whichever session finishes last.
+
 # PER-PAD LOUDNESS WAS ALREADY BUILT — 2026-08-30
 
 ## THE ANSWER TO "check they are normalized"
