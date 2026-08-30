@@ -1518,7 +1518,7 @@ const recPlayed=(pi,tBeat,midi,vel,durBeats)=>recPlayNote(pi,tBeat,sndOut(pi,mid
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-30.1436';
+const BUILD='2026-08-30.1502';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -2118,6 +2118,13 @@ const smpWin=o=>{
      0.25 → 0.3%    0.5 → 2.2%    0.75 → 15%    1 → all of it
    Zero still means nothing at all, which no exponential gives you for free. */
 const SCANW=a=>{const x=clamp(a,0,1); return x<=0?0:0.0005*Math.pow(2000,x);};
+/* THE RATIOS A HARMONIC DIAL MAY HOLD. Below 1 they are the SUBHARMONICS —
+   1/8 1/6 1/5 1/4 1/3 1/2 2/3 3/4 — which is where a bass body and a kick
+   live; above it the harmonics, thinning out at the top where a whole number
+   of partials stops being a distinction you can hear. Twenty-four entries, so
+   the whole range is 23 presses and ×1 to ×2 is two. */
+const RATSTEPS=[0.125,0.1667,0.2,0.25,0.3333,0.5,0.6667,0.75,
+                1,1.5,2,2.5,3,4,5,6,7,8,9,10,11,12,14,16];
 const OSC_P=sl=>[
   SP('wave','wav','enum',{opts:['none'].concat(WAVES),
      get:o=>(o.amt<=0.001?0:(o.wav|0)+1),
@@ -2193,9 +2200,18 @@ const OSC_P=sl=>[
     return [SP('width','pw','lin',{min:0.05,max:0.95,step:0.025,
       fmt:v=>Math.round(v*100)+'%'})];
   })(Math.round((sl&&sl.wav)||0))),
-  /* whole numbers on ⇧: the harmonics are the integers, and stepping 0.125 at
-     a time to get from 1 to 3 is eight presses of a key that should take two */
-  SP('ratio','rat','lin',{min:0.125,max:16,step:0.125,mul:2,fmt:v=>'×'+v}),
+  /* A RATIO IS A LIST, NOT A DIAL (Gad, 2026-08-30: "ratio param should be
+     stepped not dial"). At step 0.125 it took SIXTEEN presses to get from ×1
+     to ×3, and the values in between are not ratios anybody reaches for — the
+     old comment's "eight presses" was itself counting a step that had since
+     halved, which is the tell that a continuum was the wrong shape here.
+     `vals` walks RATSTEPS one entry per press and ⇧ still multiplies.
+     min/max/step STAY, and they are not vestigial: destSpan draws the
+     automation lane from them, the dice roll inside them, and the mod matrix
+     needs a range to aim a sweep at. `fine` is still the way to sit just off a
+     ratio — DORAC's 2.01 is 8.6 cents, well inside its ±100. */
+  SP('ratio','rat','lin',{min:0.125,max:16,step:0.125,mul:2,vals:RATSTEPS,
+     fmt:v=>'×'+v}),
   SP('fine','fine','lin',{min:-100,max:100,step:5,fmt:v=>v+'c'}),
   /* NOT ON A SAMPLE (Gad, 2026-08-29: "on smp op you can remove phase and trig
      slots - they arent used"). He is right and the audio path says so: wav 9
@@ -2911,6 +2927,11 @@ const specRaw=(sp,v)=>{
   const out=t[sp.key];
   return out===undefined?v:out;
 };
+/* IS THIS FIELD A STEP OR A DIAL — the two words the HUD prints, and the one
+   question four cursors used to ask in four copies. A menu is one press one
+   option; a `vals` list is one press one ENTRY, on a param that is still a
+   number; everything else is a dial that runs while you lean on it. */
+const stepSpec=sp=>!!sp&&(sp.type==='enum'||!!sp.opts||!!sp.vals);
 function destSpan(sp){
   /* a menu's range is its options — without this every enum reported 0..1 and
      an automation point at option 7 drew pinned to the right-hand edge */
@@ -3262,7 +3283,7 @@ function focusIsStepped(){
       if(sl){
         const specs=[{type:'enum'}].concat(FX_P(sl));
         const sp=specs[S.mParam|0];
-        if(sp)return sp.type==='enum'||!!sp.opts;
+        if(sp)return stepSpec(sp);
       }
     }catch(_){}
     return false;
@@ -3278,7 +3299,7 @@ function focusIsStepped(){
       try{
         const F=(instFields()||[])[S.curParam|0];
         if(F){
-          if(F.spec)return F.spec.type==='enum'||!!F.spec.opts;
+          if(F.spec)return stepSpec(F.spec);
           const t=String(F.v?F.v():'');
           if(/\d/.test(t))return false;
           return !/^(level|pan|gain|tune|vel|vol)$/.test(F.k||'');
@@ -3290,7 +3311,7 @@ function focusIsStepped(){
       const pre=S.presets[S.editSnd];
       const specs=paramsFor(S.curMod,M.flat?null:modHolder(pre,M.id)[M.id][S.curSlot]);
       const sp=specs[flatView(S.curMod)?S.curParam:S.slotParam];
-      if(sp)return sp.type==='enum'||!!sp.opts;
+      if(sp)return stepSpec(sp);
     }catch(_){}
   }
   /* AND WHEN WE CANNOT TELL, IT IS A VALUE. Defaulting to "stepped" meant
@@ -3363,7 +3384,7 @@ function adjust(spec,v,dir,m=1){
   /* A MENU IS NOT A DIAL. Pressing an enum harder should not skip nine entries
      to reach the tenth — one press, one option, always. Depth only means
      something where the values are a continuum. */
-  if(spec.type!=='enum'&&!spec.opts)m*=dialScale();
+  if(!stepSpec(spec))m*=dialScale();
   /* ⚠ ONE PRESS MAY NOT CROSS THE DIAL. Nothing bounded `m`: the coarse step
      is 10, and dialScale multiplies it AGAIN by up to ten on a bottomed
      hall-effect key. Gad: "the rate and div param sensitivity is extreme ...
@@ -3392,6 +3413,32 @@ function adjust(spec,v,dir,m=1){
     const n2=spec.opts.length; let nv=fmod(Math.round(v)+dir,n2);
     if(spec.skip)for(let i=0;i<n2&&spec.skip.has(nv);i++)nv=fmod(nv+(dir||1),n2);   // step over hidden entries
     return nv;
+  }
+  /* A LIST, NOT A RANGE. `vals` names the values this param may hold and the
+     arrow walks it — but the value STAYS A NUMBER, which is the whole reason
+     it is not an enum: a mod route has to be able to sweep it (ZIPPL's wonk is
+     an envelope on the FM ratio) and an enum is refused a modulator by name.
+     It does NOT wrap: a ratio list ending at ×16 must not roll round to ×0.125
+     the way a wave list rolls round to the first wave.
+     WHERE IT LANDS IS ASKED DIRECTIONALLY rather than by snapping to the
+     nearest entry first, so an off-list value — a preset's 2.01, a rolled
+     3.755, a hand-typed anything — steps to the next entry ABOVE it going up
+     and the next BELOW going down, and never jumps the entry it is sitting
+     next to. Nothing already saved moves until the dial is touched. */
+  if(spec.vals&&dir){
+    const L=spec.vals, eps=1e-9;
+    let i;
+    if(dir>0){i=L.findIndex(x=>x>v+eps); if(i<0)i=L.length-1;}
+    else{i=0; for(let j=L.length-1;j>=0;j--)if(L[j]<v-eps){i=j;break;}}
+    /* ⇧ MULTIPLIES rather than counting entries — coming down from ×1 the next
+       thing you want is the octave below, not the next name on the list — and
+       it may never move LESS than the plain step does. */
+    if(spec.mul&&m>1){
+      const t=v*Math.pow(spec.mul,dir);
+      let k=0; for(let j=1;j<L.length;j++)if(Math.abs(L[j]-t)<Math.abs(L[k]-t))k=j;
+      return dir>0?L[Math.max(k,i)]:L[Math.min(k,i)];
+    }
+    return L[i];
   }
   /* 16k was an arbitrary stop short of anything: the graph already clamps at
      18k and the sample rate allows ~20k, so a lowpass could not be opened far
@@ -3838,7 +3885,7 @@ const magLbl=(C,f)=>{const F=magSpec(C,f);
 const magVal=(C,F)=>fmtVal(F.spec,getV(C.holder,C.mi,C.si,F.spec));
 /* a menu is one press one option; everything else is a dial that runs while
    you lean on it — the same question focusIsStepped asks of the page */
-const magStp=spec=>spec.type==='enum'||!!spec.opts;
+const magStp=stepSpec;
 /* …and the same question about the ←→ field. Asked FRESH rather than stamped:
    the slot changes under a held scope (a digit jumps between instances) and
    the second dial can change shape with it, so a stored answer goes stale in
@@ -4626,7 +4673,59 @@ const GIVEN=()=>[
                                          anywhere in the archetype table.
      Plus TWO `filt` fx in series at mix 1, and a duck at fx[9] — the generator
      writes at most one fx and only ever ducks a bass at a fixed 0.4-0.65. */
-  {"name":"ZIPPL","cat":"bass","tr":0,"trs":0,"prep":null,"au":{"gain":0.9,"semis":0,"rate":1,"st":0,"en":1,"fit":1,"src":0,"pmode":0,"chan":0,"kmode":0,"auto":1,"start":0,"kvol":1,"lvol":1,"wnd":50,"cues":{},"cmode":0},"osc":[{"wav":0,"mode":0,"dst":0,"rat":0.25,"amt":1,"fine":0,"ph":0,"phm":1,"pw":0.5,"id":0},{"wav":0,"mode":1,"dst":0,"rat":8,"amt":1,"fine":0,"ph":0,"phm":1,"pw":0.5,"id":1},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":1,"pw":0.5},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":1,"pw":0.5},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":1,"pw":0.5},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":1,"pw":0.5},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":1,"pw":0.5},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":1,"pw":0.5},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":1,"pw":0.5},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":1,"pw":0.5}],"amp":[{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0}],"flt":[{"typ":0,"frq":523,"q":1.2,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1,"id":0},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1}],"env":[{"dst":1,"idx":0,"amt":100,"a":0.005,"d":0.15,"s":0.7,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0}],"lfo":[{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30}],"mod":[{"src":1,"rsel":0,"mac":0,"routes":[{"dst":1,"idx":0,"amt":100,"tgt":null,"addr":{"rack":"voice","slot":0,"key":"amp","lbl":"amp"}}],"a":0.01862645149230957,"d":0.2941564390332684,"s":0,"r":0.07256390652849964,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":1,"fch":1,"fa":0.01,"fr":0.15,"fg":4,"id":0},{"src":1,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":1,"amt":90,"tgt":null,"addr":{"rack":"osc","slot":1,"key":"amt","lbl":"level","sid":1}}],"a":0.1734723475976807,"d":0.3182597297873518,"s":0,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":1,"fch":1,"fa":0.01,"fr":0.15,"fg":4,"id":1},{"src":1,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":-5,"tgt":null,"addr":{"rack":"osc","slot":1,"key":"rat","lbl":"ratio","sid":1}}],"a":0.005,"d":0.15,"s":0,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":1,"fch":1,"fa":0.01,"fr":0.15,"fg":4,"off":false,"id":2,"tmul":0.9},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"tgt":null}],"a":0.005,"d":0.15,"s":0,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":1,"fch":1,"fa":0.01,"fr":0.15,"fg":4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"tgt":null}],"a":0.005,"d":0.15,"s":0,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":1,"fch":1,"fa":0.01,"fr":0.15,"fg":4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"tgt":null}],"a":0.005,"d":0.15,"s":0,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":1,"fch":1,"fa":0.01,"fr":0.15,"fg":4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"tgt":null}],"a":0.005,"d":0.15,"s":0,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":1,"fch":1,"fa":0.01,"fr":0.15,"fg":4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"tgt":null}],"a":0.005,"d":0.15,"s":0,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":1,"fch":1,"fa":0.01,"fr":0.15,"fg":4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"tgt":null}],"a":0.005,"d":0.15,"s":0,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":1,"fch":1,"fa":0.01,"fr":0.15,"fg":4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"tgt":null}],"a":0.005,"d":0.15,"s":0,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":1,"fch":1,"fa":0.01,"fr":0.15,"fg":4}],"fx":[{"typ":21,"p1":1,"p2":1,"p3":0,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.0889,"rv":0},{"typ":23,"p1":0.8,"p2":0.3,"p3":6,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":1,"rv":0},{"typ":23,"p1":0.18,"p2":0.3,"p3":5,"p4":0.84,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":1,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":16,"p1":1,"p2":0.61,"p3":0.3,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":1,"rv":0,"id":0}],"ply":[{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0}],"vox":{"mode":1,"glide":0,"uni":1,"sprd":12,"wide":0.6,"slop":0.008},"macro":[0,0,0,0],"mix":{"lvl":0.4248,"pan":0},"code":null,"pmodel":null,"psel":0,"cp":[1,1,1,0.5,0,0,0.5,0.3],"kit":null,"_folded":true,"_addr":true}
+  {"name":"ZIPPL","cat":"bass","tr":0,"trs":0,"prep":null,"au":{"gain":0.9,"semis":0,"rate":1,"st":0,"en":1,"fit":1,"src":0,"pmode":0,"chan":0,"kmode":0,"auto":1,"start":0,"kvol":1,"lvol":1,"wnd":50,"cues":{},"cmode":0},"osc":[{"wav":0,"mode":0,"dst":0,"rat":0.25,"amt":1,"fine":0,"ph":0,"phm":1,"pw":0.5,"id":0},{"wav":0,"mode":1,"dst":0,"rat":8,"amt":1,"fine":0,"ph":0,"phm":1,"pw":0.5,"id":1},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":1,"pw":0.5},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":1,"pw":0.5},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":1,"pw":0.5},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":1,"pw":0.5},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":1,"pw":0.5},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":1,"pw":0.5},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":1,"pw":0.5},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":1,"pw":0.5}],"amp":[{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0}],"flt":[{"typ":0,"frq":523,"q":1.2,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1,"id":0},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1}],"env":[{"dst":1,"idx":0,"amt":100,"a":0.005,"d":0.15,"s":0.7,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0}],"lfo":[{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30}],"mod":[{"src":1,"rsel":0,"mac":0,"routes":[{"dst":1,"idx":0,"amt":100,"tgt":null,"addr":{"rack":"voice","slot":0,"key":"amp","lbl":"amp"}}],"a":0.01862645149230957,"d":0.2941564390332684,"s":0,"r":0.07256390652849964,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":1,"fch":1,"fa":0.01,"fr":0.15,"fg":4,"id":0},{"src":1,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":1,"amt":90,"tgt":null,"addr":{"rack":"osc","slot":1,"key":"amt","lbl":"level","sid":1}}],"a":0.1734723475976807,"d":0.3182597297873518,"s":0,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":1,"fch":1,"fa":0.01,"fr":0.15,"fg":4,"id":1},{"src":1,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":-5,"tgt":null,"addr":{"rack":"osc","slot":1,"key":"rat","lbl":"ratio","sid":1}}],"a":0.005,"d":0.15,"s":0,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":1,"fch":1,"fa":0.01,"fr":0.15,"fg":4,"off":false,"id":2,"tmul":0.9},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"tgt":null}],"a":0.005,"d":0.15,"s":0,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":1,"fch":1,"fa":0.01,"fr":0.15,"fg":4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"tgt":null}],"a":0.005,"d":0.15,"s":0,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":1,"fch":1,"fa":0.01,"fr":0.15,"fg":4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"tgt":null}],"a":0.005,"d":0.15,"s":0,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":1,"fch":1,"fa":0.01,"fr":0.15,"fg":4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"tgt":null}],"a":0.005,"d":0.15,"s":0,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":1,"fch":1,"fa":0.01,"fr":0.15,"fg":4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"tgt":null}],"a":0.005,"d":0.15,"s":0,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":1,"fch":1,"fa":0.01,"fr":0.15,"fg":4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"tgt":null}],"a":0.005,"d":0.15,"s":0,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":1,"fch":1,"fa":0.01,"fr":0.15,"fg":4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"tgt":null}],"a":0.005,"d":0.15,"s":0,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":1,"fch":1,"fa":0.01,"fr":0.15,"fg":4}],"fx":[{"typ":21,"p1":1,"p2":1,"p3":0,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.0889,"rv":0},{"typ":23,"p1":0.8,"p2":0.3,"p3":6,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":1,"rv":0},{"typ":23,"p1":0.18,"p2":0.3,"p3":5,"p4":0.84,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":1,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":16,"p1":1,"p2":0.61,"p3":0.3,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":1,"rv":0,"id":0}],"ply":[{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0}],"vox":{"mode":1,"glide":0,"uni":1,"sprd":12,"wide":0.6,"slop":0.008},"macro":[0,0,0,0],"mix":{"lvl":0.4248,"pan":0},"code":null,"pmodel":null,"psel":0,"cp":[1,1,1,0.5,0,0,0.5,0.3],"kit":null,"_folded":true,"_addr":true},
+  /* SAGAC — bass. GAD'S, 2026-08-30, ch4 of his own set, played in C DORIAN.
+     His words: "kinda techno funky."
+
+     A THREE-DEEP FM CASCADE into a resonant lowpass, gated and sidechained.
+     All three operators are SINES and every one of them aims at `prev`, so
+     this is a stack and not a pair of parallel modulators:
+
+       op2  ×1    amt 0.30   fm ─┐
+       op1  ×4    amt 0.64   fm ─┴─> op0  ×0.5  add   the carrier, an octave down
+
+     Under it: flt[0] lp at 1318Hz / q 5.5, an amp env with NO SUSTAIN
+     (2ms / 512ms / 0 / 313ms) on a MONO voice with 30ms of glide, a 150ms
+     filter env at amt 50, and a duck at fx[9] following ch1. The gesture is
+     the whole point — a plucked note that slides into the next one and gets
+     out of the kick's way — and it is what "techno funky" means here.
+
+     WHAT IT REACHES THAT NO ROLL DOES, and all three are grep-checkable
+     against the archetype block (index.html 14922-15460):
+       · TWO fm operators STACKED. `bass.fm` writes exactly one, at rat 1/2/3.
+         Nothing in the table ever chains a second modulator onto the first.
+       · vox.fmw 1 — THE PHASE FM ENGINE. The generator writes `fmw` ZERO
+         times, so every rolled preset in the library is on the native one.
+         A cascade is the case where the two engines differ most.
+       · crv 70 AND tmul 1.4 on the FM-INDEX envelope (mod[4] -> osc[1].amt at
+         amt 200 over 859ms). Neither `crv` nor `tmul` appears anywhere in the
+         generator's tonal half: a rolled envelope is always linear and always
+         on the voice's own clock.
+     The duck is NOT on that list: at p2 0.5 it sits inside the 0.4-0.65 the
+     generator already writes for a bass, and ZIPPL has the same one.
+
+     MEASURED at midi 36 on ch4 — energy above 200Hz, which on a 32.7Hz
+     fundamental is the FM SIDEBAND CONTENT and nothing else. Level is the
+     wrong meter here and said so: killing the ×4 modulator outright moved the
+     peak by 0.9%. The spectrum is where the instrument is.
+
+                        80ms     400ms    800ms
+       as shipped      -53.4    -46.3    -77.8     rises 7.1dB, then falls 31.5
+       mod[4] off      -52.0      —      -49.0     flat: 3dB across the note
+
+     THAT IS THE WHOLE SOUND. The amp env has peaked by 2ms and is decaying
+     from there, and the timbre goes on OPENING until 400ms before it shuts —
+     brightness and loudness pulling opposite ways is what the curve and the
+     1.4x clock buy, and with mod[4] off the note is a static timbre that
+     merely gets quieter.
+     The cascade earns its second stage too, both at 400ms:
+       op1 (×4) killed   -78.4   →  32.1dB of the sidebands are its
+       op2 (×1) killed   -64.4   →  18.1dB come from the SECOND stage alone
+
+     ⚠ mod[2] AND mod[3] ARE PARKED, NOT LIVE. Both are src 0 (off) and both
+     carry a route to flt[0] freq — amt 200 and amt 22 — settings he left
+     ready to switch on. Read them as spares; nothing in the sound is theirs. */
+  {"name":"SAGAC","cat":"bass","tr":0,"trs":0,"prep":null,"au":{"gain":0.9,"semis":0,"rate":1,"st":0,"en":1,"fit":1,"src":0,"pmode":0,"chan":0,"kmode":0,"auto":1,"start":0,"kvol":1,"lvol":1,"wnd":50,"cues":{},"cmode":0},"osc":[{"wav":0,"mode":0,"dst":0,"rat":0.5,"amt":1,"fine":0,"ph":0,"phm":1,"pw":0.5,"id":0},{"wav":0,"mode":1,"dst":0,"rat":4,"amt":0.64,"fine":0,"ph":0,"phm":1,"pw":0.5,"id":1},{"wav":0,"mode":1,"dst":0,"rat":1,"amt":0.3,"fine":0,"ph":0,"phm":1,"pw":0.5,"id":2},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":1,"pw":0.5},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":1,"pw":0.5},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":1,"pw":0.5},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":1,"pw":0.5},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":1,"pw":0.5},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":1,"pw":0.5},{"wav":0,"mode":0,"dst":0,"rat":1,"amt":0,"fine":0,"ph":0,"phm":1,"pw":0.5}],"amp":[{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0},{"typ":0,"drv":0.3,"mix":1,"par":0}],"flt":[{"typ":1,"frq":1317.6420667704822,"q":5.5,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1,"id":0},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1},{"typ":0,"frq":2000,"q":1,"gn":0,"par":0,"pol":0,"spr":0.4,"lvl":1}],"env":[{"dst":1,"idx":0,"amt":100,"a":0.005,"d":0.15,"s":0.7,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0},{"dst":0,"idx":0,"amt":100,"a":0.003,"d":0.2,"s":0,"r":0.2,"crv":0}],"lfo":[{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30},{"dst":0,"idx":0,"wav":0,"rate":5,"amt":30}],"mod":[{"src":1,"rsel":0,"mac":0,"routes":[{"dst":1,"idx":0,"amt":100,"tgt":null,"addr":{"rack":"voice","slot":0,"key":"amp","lbl":"amp"}}],"a":0.002,"d":0.5124054265311073,"s":0,"r":0.3128112328229944,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":1,"fch":1,"fa":0.01,"fr":0.15,"fg":4,"id":0},{"src":1,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":50,"tgt":null,"addr":{"rack":"flt","slot":0,"key":"frq","lbl":"freq","sid":0}}],"a":0.005,"d":0.15,"s":0,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":1,"fch":1,"fa":0.01,"fr":0.15,"fg":4,"id":1,"off":false},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":3,"idx":1,"amt":200,"tgt":null,"addr":{"rack":"flt","slot":0,"key":"frq","lbl":"freq","sid":0}}],"a":0.005,"d":0.15,"s":0,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":1,"fch":1,"fa":0.01,"fr":0.15,"fg":4,"id":2},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":3,"idx":1,"amt":22,"tgt":null,"addr":{"rack":"flt","slot":0,"key":"frq","lbl":"freq","sid":0}}],"a":0.005,"d":0.15,"s":0,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":1,"fch":1,"fa":0.01,"fr":0.15,"fg":4,"id":3},{"src":1,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":200,"tgt":null,"addr":{"rack":"osc","slot":1,"key":"amt","lbl":"level","sid":1}}],"a":0.001,"d":0.8589934592000005,"s":0,"r":0.2,"crv":70,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":1,"fch":1,"fa":0.01,"fr":0.15,"fg":4,"off":false,"id":4,"tmul":1.4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"tgt":null}],"a":0.005,"d":0.15,"s":0,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":1,"fch":1,"fa":0.01,"fr":0.15,"fg":4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"tgt":null}],"a":0.005,"d":0.15,"s":0,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":1,"fch":1,"fa":0.01,"fr":0.15,"fg":4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"tgt":null}],"a":0.005,"d":0.15,"s":0,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":1,"fch":1,"fa":0.01,"fr":0.15,"fg":4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"tgt":null}],"a":0.005,"d":0.15,"s":0,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":1,"fch":1,"fa":0.01,"fr":0.15,"fg":4},{"src":0,"rsel":0,"mac":0,"routes":[{"dst":0,"idx":0,"amt":100,"tgt":null}],"a":0.005,"d":0.15,"s":0,"r":0.2,"crv":0,"wav":0,"rate":5,"ph":0,"syn":0,"rdiv":4,"ltr":1,"fch":1,"fa":0.01,"fr":0.15,"fg":4}],"fx":[{"typ":0,"p1":0.38,"p2":0.45,"p3":0.42,"p4":0.35,"p5":0.69,"p6":0.5,"p7":0.06,"p8":0.45,"mix":0.0448,"rv":0,"id":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":0,"p1":0.3,"p2":0.3,"p3":0.5,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":0.3,"rv":0},{"typ":16,"p1":1,"p2":0.5,"p3":0.3,"p4":0.3,"p5":0,"p6":0.5,"p7":0.7,"p8":0.45,"mix":1,"rv":0,"id":1}],"ply":[{"typ":0,"p1":2,"p2":5,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0,"off":false},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0},{"typ":0,"p1":2,"p2":0,"p3":1,"p4":60,"p5":0,"p6":0,"p7":0,"p8":0}],"vox":{"mode":1,"glide":0.03,"uni":1,"sprd":12,"wide":0.6,"slop":0.008,"fmw":1},"macro":[0,0,0,0],"mix":{"lvl":0.5719,"pan":0},"code":null,"pmodel":null,"psel":0,"cp":[1,1,1,0.5,0,0,0.5,0.3],"kit":null,"_folded":true,"_addr":true,"_sid":{"osc":3,"flt":1,"mod":5,"fx":2}}
 ];
 const PRESETS0=()=>[
  mkP('KCK','kik',p=>{Object.assign(p.osc[0],{wav:0,rat:0.25,ph:90});

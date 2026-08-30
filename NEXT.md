@@ -1,3 +1,131 @@
+# THE RATIO DIAL IS A LIST, AND A NEW BASS — 2026-08-30 (branch lfo-amp-series)
+
+Two asks, both done, both on the same branch as the lfo work because that is
+where the tree was. Neither is on main yet.
+
+## 1. "ratio param should be stepped not dial"
+
+`step` was 0.125, so ×1 to ×3 was SIXTEEN presses of a key that should take
+four, and the values in between are not ratios anybody reaches for. It walks a
+table now — `RATSTEPS`, 24 entries — one press one entry, the same
+one-press-one-place a menu gets.
+
+      0.125  0.1667  0.2  0.25  0.3333  0.5  0.6667  0.75
+      1  1.5  2  2.5  3  4  5  6  7  8  9  10  11  12  14  16
+
+Below 1 they are the SUBHARMONICS (1/8 1/6 1/5 1/4 1/3 1/2 2/3 3/4), which is
+where a bass body and a kick live; above it the harmonics, thinning at the top.
+
+**IT IS NOT AN ENUM, AND THAT IS THE DESIGN.** `rat` is a modulation
+destination — ZIPPL's whole wonk is an envelope on the FM ratio — and the mod
+matrix refuses an enum by name ("that is a menu — modulation needs a range").
+So the value stays a NUMBER with its min/max/step intact for destSpan, the
+dice and the matrix, and a new `vals` field is what the arrow walks. The four
+cursors that each carried their own copy of "is this a step or a dial" now ask
+one function, `stepSpec`, and it is the third term in it.
+
+**MEASURED — `tools/probe.sh ratstep`, a new probe, all rows pass:**
+
+      stepped        true                 the HUD says "step", the held arrow
+                                          stops repeating, pressure stops
+                                          scaling it
+      walk up/down   24 entries, 0 off    ends STICK at 0.125 and 16 — a ratio
+                                          list must not wrap the way a wave
+                                          list does
+      off-list 2.01  up 2.5  dn 2         directional, never skips the entry it
+      off-list 3.755 up 4    dn 3         is standing beside. Nothing already
+      off-list 0.175 up 0.2  dn 0.1667    saved moves until the dial is touched
+      coarse ×1      up ×2   dn ×0.5      ⇧ still MULTIPLIES, and may never
+      coarse ×7      up ×14  dn ×3        move less than the plain step does
+
+End to end with the cursor actually on the field: `focusIsStepped()` true,
+1 → 1.5 → 2 → 2.5 → 3 on four presses, two coarse presses back to 0.75.
+
+⚠ **THE DICE STILL ROLL OFF-LIST** — `randomizeSlot` writes `Math.round(v/step)
+*step` at step 0.125, so a rolled ratio can be ×5.375. It self-heals (the first
+press snaps it) and snapping the roll was NOT asked for, so it was left alone.
+Raise it if the rolls start feeling wrong.
+
+⚠ **A DELIBERATELY JUST-OFF RATIO IS NOW `fine`'S JOB.** DORAC's 2.01 is 8.6
+cents off ×2, well inside fine's ±100. Anything further than a semitone from a
+list entry can no longer be dialled by hand.
+
+## 2. SAGAC — Gad's bass, "kinda techno funky"
+
+Shelved in `GIVEN()`, which needs nothing else: libAll appends those derived
+every boot, so **no LIBV bump and no migration**. It reads back on the shelf as
+`cat bass, factory, 3 ops, fmw 1`, one of twelve basses.
+
+A THREE-DEEP FM CASCADE of sines, all aiming at `prev` — op2 ×1 into op1 ×4
+into op0 ×0.5, the carrier an octave down — through an lp at 1318Hz / q 5.5,
+with no sustain on the amp env, 30ms of glide on a mono voice, and a duck
+following ch1.
+
+**MEASURED at midi 36, energy above 200Hz — the FM sidebands and nothing
+else.** Level is the wrong meter and said so: killing the ×4 modulator outright
+moved the peak by 0.9%.
+
+                        80ms     400ms    800ms
+      as shipped       -53.4    -46.3    -77.8    rises 7.1dB, then falls 31.5
+      mod[4] off       -52.0      —      -49.0    flat: 3dB across the note
+
+The amp has peaked by 2ms and decays from there while the timbre goes on
+OPENING until 400ms. Brightness and loudness pulling opposite ways is what
+`crv 70` and `tmul 1.4` on the FM-index envelope buy; with mod[4] off the note
+is a static timbre that merely gets quieter. The cascade earns its second stage
+too, both at 400ms: op1 killed −78.4 (32.1dB of the sidebands are its),
+op2 killed −64.4 (18.1dB come from the second stage alone).
+
+Three things in it no roll reaches, all grep-checked against the archetype
+block (index.html 14922-15460): two fm operators STACKED (`bass.fm` writes
+exactly one); `vox.fmw 1`, the PHASE fm engine, which the generator writes zero
+times; and `crv`/`tmul` on a modulator, neither of which appears in the
+generator's tonal half at all.
+
+⚠ **mod[2] AND mod[3] ARE PARKED, NOT LIVE** — both src 0 (off), both carrying
+a route to flt[0] freq at amt 200 and 22. Spares he left ready. Nothing in the
+sound is theirs, and a future reader must not "fix" them.
+
+## QA — play these, in this order
+
+1. **The ratio dial.** Open an osc scope and walk `ratio` with ↑↓. Right: one
+   entry per press — ×1 → ×1.5 → ×2 → ×2.5 → ×3 — and HOLDING the arrow moves
+   it ONCE, not continuously. Wrong (the old behaviour): it crawls in 0.125s
+   and runs away while held. **Measured: all 24 entries, 0 off-list.**
+2. **⇧ on ratio.** Right: ×1 → ×2 up, ×1 → ×0.5 down. It must never move LESS
+   than a plain press does. **Measured on five starts, all pass.**
+3. **The ends.** Walk to ×16 and keep pressing ↑; then to ×0.125 and keep
+   pressing ↓. Right: it STICKS. Wrong: it wraps round to the other end.
+   **Measured: sticks both ways.**
+4. **An old preset's ratio.** Load DORAC (2.01) or any BA0x and nudge ratio
+   once. Right: it steps to the neighbour ABOVE going up and BELOW going down,
+   and the value did NOT move until you touched it. **Measured on 2.01, 3.755,
+   0.175, 0.6, 15.2 — all directional.**
+5. **SAGAC on the shelf.** Library → bass. Right: it is there, twelfth in the
+   category, and loads. **Measured: on the shelf, 3 ops, fmw 1.**
+6. **SAGAC's timbre.** Hold a low note for a full second. Right: it gets
+   BRIGHTER for the first ~400ms while getting quieter, then shuts. Wrong: a
+   static tone that only fades. **Measured: +7.1dB of sideband to 400ms, −31.5
+   by 800ms.**
+7. **ZIPPL still wonks.** Its envelope on the FM RATIO is the one thing the
+   ratio change could have broken — a mod aimed at ratio must still SWEEP, not
+   step. **PROVED BY GREP, NOT BY EAR, and the grep is the better proof:
+   `vals` appears FOUR times in the whole file — the spec, `stepSpec`, and two
+   lines inside `adjust()`. `adjust()` runs on a keypress and nowhere else, so
+   no audio or mod-engine path can see the list.** An audio A/B was attempted
+   and thrown away: total high-band energy is the wrong meter for a ratio
+   sweep, which moves where the sidebands SIT rather than how much of them
+   there is — the same trap that had already caught the level measurement one
+   step earlier. Still worth playing, but nothing is riding on it.
+
+**AND THE A/B AGAINST LIVE IS CLEAN.** `tools/probe.sh preset
+names=ZIPPL,DORAC,K909,BES1 note=36 ch=4 --ab https://gadbaruch.github.io/Ten/`
+— K909 identical (hz +0, peak −0.005), BES1 identical (hz +0, peak +0.018).
+DORAC differs (+164Hz, peak −0.225) and it is NOT this branch: live is build
+2026-08-30.1126 and does not have ZIPPL on its shelf at all, so it predates
+several of today's commits. DORAC also has no lfo and no ratio modulation —
+its whole mod rack is `env → voice.amp` and `key → flt.frq`.
+
 # AN LFO ON AMP WAS SUMMED, NOT IN SERIES — 2026-08-30 (FIXED, branch lfo-amp-series)
 
 Gad: *"when there are several different mod types aiming at same destination

@@ -5580,6 +5580,7 @@ const HELP = {
     { k: 'padpred',  args: 'kit=KT808 — offline buffer+envelope loudness vs the measured bus, to prove the model' },
     { k: 'kitmix',   args: 'kit=KT808,KTLIN|ROLL|ROLL80 ms=400 real=1 — BS.1770 loudness + 8-band balance of every pad in a kit, against the role target' },
     { k: 'ampstack', args: 'ch=4 rate=6 amt=100 — does an lfo on amp defeat the amp envelope' },
+    { k: 'ratstep',  args: 'm=10 — the ratio dial is a LIST: walks it, lands on it, sticks at the ends, and reads as a step' },
     { k: 'dyn',      args: 'cat=kik n=4 ch=4 — the dynamics layer: same roll at vel 1.0 vs 0.3' },
     { k: 'smploud',  args: 'ch=4 ms=200 names=a,b,c — perceptual loudness of samples vs a synth op, and the median deficit' },
     { k: 'smprate',  args: 'ch=4 notes=36,48,60,72 — which note plays a sample at its own speed' },
@@ -6876,6 +6877,65 @@ async function probeAmpStack() {
            notes: ['amp env decays to SILENCE in 120ms; the tail is the last 400ms of a 1.2s window'] };
 }
 
+/* THE RATIO DIAL IS A LIST NOW — does it walk it, and does the page AGREE that
+ * it is a step rather than a dial? Three things go wrong here and only the
+ * first is audible: the list is walked but the HUD still calls it a dial (so a
+ * held arrow runs away and a hard press multiplies it), the step lands off the
+ * list, or an off-list start jumps the entry it is standing next to.
+ * PURE ARITHMETIC — it touches no channel and makes no sound. */
+function probeRatStep() {
+  const spec = OSC_P({ wav: 0 }).find(x => x.key === 'rat');
+  if (!spec) return { cols: [], rows: [], err: 'no ratio spec in OSC_P' };
+  const L = spec.vals || [];
+  const on = v => L.some(x => Math.abs(x - v) < 1e-9);
+  const coarse = num(P.m, 10);
+  const rows = [];
+
+  rows.push({ k: 'spec', stepped: String(magStp(spec)), n: L.length,
+              lo: L[0], hi: L[L.length - 1],
+              note: 'stepped must be true — it is what the HUD prints and what stops a held arrow repeating' });
+
+  /* walk the whole list up and back down: every landing on the list, no stall
+     in the middle, and the two ends STICK rather than wrapping */
+  for (const dir of [1, -1]) {
+    let v = dir > 0 ? L[0] : L[L.length - 1], seq = [v], stall = 0, off = 0;
+    for (let i = 0; i < L.length + 4; i++) {
+      const nv = adjust(spec, v, dir, 1);
+      if (!on(nv)) off++;
+      if (nv === v) { stall++; break; }
+      v = nv; seq.push(v);
+    }
+    rows.push({ k: dir > 0 ? 'walk up' : 'walk down', n: seq.length, off,
+                end: v, endstuck: String(stall > 0), seq: seq.join(' ') });
+  }
+
+  /* an OFF-LIST value — a preset's 2.01, a rolled 3.755, anything a mod wrote
+     back — must step to the neighbour in the direction asked and never skip
+     the entry it is sitting beside */
+  for (const v of [2.01, 3.755, 0.175, 0.6, 15.2]) {
+    const up = adjust(spec, v, 1, 1), dn = adjust(spec, v, -1, 1);
+    rows.push({ k: 'off-list ' + v, up, dn,
+                ok: String(on(up) && on(dn) && up > v && dn < v) });
+  }
+
+  /* coarse MULTIPLIES and may never move less than the plain step does */
+  for (const v of [0.25, 1, 3, 7, 16]) {
+    const cu = adjust(spec, v, 1, coarse), cd = adjust(spec, v, -1, coarse);
+    const fu = adjust(spec, v, 1, 1), fd = adjust(spec, v, -1, 1);
+    rows.push({ k: 'coarse ' + v, up: cu, dn: cd, fineup: fu, finedn: fd,
+                ok: String(on(cu) && on(cd) && cu >= fu && cd <= fd) });
+  }
+
+  /* the pressure dial must not touch it — a stepped param is one press one
+     entry however hard the key is leaned on */
+  const hard = adjust(spec, 1, 1, 1);
+  rows.push({ k: 'x1 up', got: hard, want: L[L.indexOf(1) + 1],
+              ok: String(hard === L[L.indexOf(1) + 1]) });
+
+  return { cols: ['stepped', 'n', 'lo', 'hi', 'seq', 'off', 'end', 'endstuck',
+                  'up', 'dn', 'fineup', 'finedn', 'got', 'want', 'ok', 'note'], rows };
+}
+
 const PROBES = { level: probeLevel, spectrum: probeSpectrum, cursor: probeCursor,
                    preset: probePreset, key: probeKey, keypath: probeKeyPath,
                    roundtrip: probeRoundTrip,
@@ -6932,7 +6992,8 @@ const PROBES = { level: probeLevel, spectrum: probeSpectrum, cursor: probeCursor
                    lfosync: probeLfoSync,
                    lforate: probeLfoRate,
                    dyn: probeDyn,
-                   ampstack: probeAmpStack };
+                   ampstack: probeAmpStack,
+                   ratstep: probeRatStep };
   const fn = PROBES[NAME];
   out = fn ? await fn() : (NAME === 'help' ? HELP : { cols: [], rows: [], err: 'no probe named ' + NAME });
 } catch (e) {
