@@ -5103,6 +5103,7 @@ async function probeRollKey() {
  *     tools/probe.sh wtshelf ch=8                                             */
 async function probeWtShelf() {
   const ch = CH === 9 ? 8 : CH;
+  const NOTE2 = Math.round(num(P.note, NOTE));
   const sr = AC.sampleRate;
   const keep = stash(ch);
   const mutes = [], rows = [], notes = [];
@@ -5125,14 +5126,36 @@ async function probeWtShelf() {
       engine.rebuildRack(ch); engine.refresh(ch);
       engine.allOff(); await sleep(50);
       const bus = busOf(ch); if (!bus) return null;
-      engine.noteOn(AC.currentTime + 0.02, ch, NOTE, VEL);
+      engine.noteOn(AC.currentTime + 0.02, ch, NOTE2, VEL);
       await sleep(120);
       const t = tap(bus);
       await sleep(200);
       const [L] = t.stop();
       engine.allOff(); await sleep(30);
       let s2 = 0; for (let i = 0; i < L.length; i++) s2 += L[i] * L[i];
-      return { rms: Math.sqrt(s2 / L.length) };
+      /* AIR: the energy above 5kHz against the whole signal, in dB. On a LOW
+         note that band is pure upper-harmonic content, and it is the first
+         thing a band limit set too low takes away — which is what "cheap on
+         the lower octaves" means. */
+      /* 8192, not 16384 — the tap is 200ms and a 16384-point window needs 372,
+         so the bigger FFT simply never ran and every air column came back
+         empty. Match the window to the take. */
+      const NF = 8192;
+      let air = null;
+      if (L.length >= NF) {
+        const o = Math.round((L.length - NF) / 2);
+        const re = new Float64Array(NF), im = new Float64Array(NF);
+        for (let i = 0; i < NF; i++)
+          re[i] = L[o + i] * (0.5 - 0.5 * Math.cos(2 * Math.PI * i / NF));
+        fft(re, im);
+        const bhz = sr / NF; let hi = 0, all = 0;
+        for (let k2 = 1; k2 < NF / 2; k2++) {
+          const p2 = re[k2] * re[k2] + im[k2] * im[k2];
+          all += p2; if (k2 * bhz > 5000) hi += p2;
+        }
+        air = +(10 * Math.log10(Math.max(1e-20, hi) / Math.max(1e-20, all))).toFixed(1);
+      }
+      return { rms: Math.sqrt(s2 / L.length), air };
     };
     for (let ti = 0; ti < WTBL.length; ti++) {
       const lo = await take(ti, 0), hi = await take(ti, 1);
@@ -5156,6 +5179,7 @@ async function probeWtShelf() {
                   frames: WTBL[ti][1].length, hLo: nLo, hHi: nHi,
                   cenLo: cLo, cenHi: cHi,
                   rmsLo: lo && +lo.rms.toFixed(4), rmsHi: hi && +hi.rms.toFixed(4),
+                  airLo: lo && lo.air, airHi: hi && hi.air,
                   dbLo: lo && +(20 * Math.log10(Math.max(1e-9, lo.rms))).toFixed(1),
                   dbHi: hi && +(20 * Math.log10(Math.max(1e-9, hi.rms))).toFixed(1) });
     }
@@ -5172,11 +5196,15 @@ async function probeWtShelf() {
              'the power-weighted mean HARMONIC NUMBER of the recipe there — 1 is a pure sine. ' +
              'cenHi should be the HIGHER of the two in every row: pos means brighter, ' +
              'everywhere, which is what makes the dial findable without looking.');
+  notes.push('airLo/airHi = energy above 5kHz as a share of the whole, in dB, at pos 0 and ' +
+             'pos 1. On a low note that band is pure upper-harmonic content and it is the ' +
+             'first thing a band limit set too low takes away. Pass note=36 to ask about C2.');
   notes.push('rms is what createPeriodicWave leaves after normalising to peak 1, so a rich ' +
              'table is quieter than a sine by construction. It is the SPREAD that matters.');
   const bad = rows.filter(r => r.cenHi != null && r.cenLo != null && r.cenHi < r.cenLo);
   if (bad.length) notes.push('!! pos gets DARKER in: ' + bad.map(r => r.k).join(', '));
-  return { cols: ['frames', 'hLo', 'hHi', 'cenLo', 'cenHi', 'rmsLo', 'rmsHi', 'dbLo', 'dbHi'],
+  return { cols: ['frames', 'hLo', 'hHi', 'cenLo', 'cenHi', 'rmsLo', 'rmsHi',
+                  'airLo', 'airHi', 'dbLo', 'dbHi'],
            rows, notes };
 }
 
@@ -5380,20 +5408,30 @@ async function probeLfoSync() {
                grid: fmod((gridBeatsAt(at) / beats) * 360, 360),
                clock: fmod(at * wantHz * 360, 360) };
     };
-    const A = await grab();
+    /* ⚠ THREE NOTES, NOT ONE. The two axes are both mod 360 and at a random
+       moment they can AGREE — one run called the same build grid-locked AND
+       free-running in the same table. An axis only wins if it matches every
+       take. */
+    const takes = [];
+    for (let i = 0; i < 3; i++) { takes.push(await grab()); await sleep(170); }
     engine.setWave = realSW;
+    const A = takes[0];
     const near = (a, b) => (a == null || b == null) ? 999
       : Math.abs(fmod(a - b + 180, 360) - 180);
-    const dGrid = near(A.deg, A.grid), dClock = near(A.deg, A.clock);
+    const dGrid = Math.max.apply(null, takes.map(t => near(t.deg, t.grid)));
+    const dClock = Math.max.apply(null, takes.map(t => near(t.deg, t.clock)));
     rows.push({ k: 'rate', want: +wantHz.toFixed(4), got: A.hz != null ? +A.hz.toFixed(4) : null,
                 err: A.hz != null ? +(A.hz - wantHz).toFixed(4) : null,
                 verdict: (A.hz != null && Math.abs(A.hz - wantHz) < 0.01) ? 'LOCKED' : 'WRONG' });
+    const gOK = dGrid < 3, cOK = dClock < 3;
     rows.push({ k: 'phase axis: the GRID', want: +A.grid.toFixed(1),
                 got: A.deg == null ? null : +A.deg.toFixed(1), err: +dGrid.toFixed(1),
-                verdict: dGrid < 3 ? 'LOCKED TO THE BAR' : 'no' });
+                verdict: gOK && cOK ? 'AMBIGUOUS - run again'
+                       : gOK ? 'LOCKED TO THE BAR' : 'no' });
     rows.push({ k: 'phase axis: the audio CLOCK', want: +A.clock.toFixed(1),
                 got: A.deg == null ? null : +A.deg.toFixed(1), err: +dClock.toFixed(1),
-                verdict: dClock < 3 ? 'FREE-RUNNING (not synced)' : 'no' });
+                verdict: gOK && cOK ? 'AMBIGUOUS - run again'
+                       : cOK ? 'FREE-RUNNING (not synced)' : 'no' });
 
     /* and the tempo: move it under a HELD note and see whether the running
        oscillator follows */
@@ -5422,7 +5460,8 @@ async function probeLfoSync() {
   notes.push('the two phase rows are the SAME number measured against two different axes, ' +
              'and exactly one of them should match: the GRID means the wave is where the bar ' +
              'says, the audio CLOCK means it runs at the right rate and lands anywhere, which ' +
-             'is what not-synced feels like.');
+             'is what not-synced feels like. err is the WORST of three takes, because the ' +
+             'two axes are both mod 360 and can coincide at any one moment.');
   return { cols: ['want', 'got', 'err', 'verdict'], rows, notes };
 }
 

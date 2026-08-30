@@ -28,8 +28,13 @@ import soundfile as sf
 RAW = "https://raw.githubusercontent.com/KristofferKarlAxelEkstrand/AKWF-FREE/master/AKWF"
 API = "https://api.github.com/repos/KristofferKarlAxelEkstrand/AKWF-FREE/contents/AKWF"
 
-HARM = 48          # createPeriodicWave takes 64; past ~48 the trim eats them anyway
-FLOOR = 0.012      # drop a harmonic under this — it is inaudible and it is bytes
+HARM = 256         # a C2 carries 337 harmonics under Nyquist; 48 was throwing
+                   # away two and a half octaves of every one of these waves,
+                   # which is what "cheap on the lower octaves" was. The source
+                   # cycles are 600 samples, so 300 is all there is to take.
+FLOOR = 0.006      # drop a harmonic under this — inaudible, and it is bytes.
+                   # Halved with the ceiling raised: at -44dB a harmonic still
+                   # carries air on a bright table and the trim still bites.
 FRAMES = 5         # per table, evenly spread across the folder's brightness range
 POOL = 24          # how many of the folder's waves to audition
 
