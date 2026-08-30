@@ -53,6 +53,137 @@ probe in probe.js for *"wt op modulating the position of a wavetable is very
 crackly"*. Left alone; only NEXT.md was committed from here. **Check `git
 status` before staging anything in this repo — this is the second time today.**
 
+# A WAVETABLE SWEEP BLENDS INSTEAD OF SWAPPING, AND THE DICE FIRE ON THE PRESS — 2026-08-30
+
+Gad, two: *"wt op modulating the position of a wavetable is very crackly, needs
+to be smooth"* and *"the roll clicking should activate on pressing / not on key
+release - also for modifiers+roll"*.
+
+## THE WAVETABLE — THREE FAULTS, AND THEY ARE ALL pwxAim's
+
+The wt operator is a PAIR of oscillators crossfading; every table change lands
+on the standby. That is the same machine as the pulse width's, and it had the
+same three faults — which is the lesson: **anything built as "land it on the
+silent twin" wants all three of these checked at once.**
+
+**1 — THE TABLE LANDED ON A COPY YOU COULD HEAR.** 12ms time constant against
+an 8ms control tick, so the standby never got there.
+
+      MEASURED, LFO on pos a:   gain of the copy a table landed ON
+        before   0.794 worst, 0.376 median      a near-full-scale flip, 125/s
+        after    0.021
+
+It writes only onto a copy whose **measured** gain is under 0.03 now, or waits
+a tick. Not "the one that ought to be silent" — the one that is.
+
+**2 — IT SWAPPED WHERE IT SHOULD BLEND, and this was the real one.** Landing
+silently is not enough: each swap is still a 5ms crossfade of the DIFFERENCE
+between two tables, which is a 100Hz amplitude modulation of a broadband
+signal. ⚠ **It got WORSE as the crossfade got faster** — that is the tell, and
+it is what says the crossfade IS the artifact rather than a cure for it.
+
+`wtAim` straddles instead, exactly as `pwxAim` does for width: the rung below
+the position on one copy, the rung above on the other, blended by the fraction
+between them. The blend follows the modulator continuously — no transient — and
+a copy is only ever re-tabled once its weight has reached zero.
+
+      MEASURED, junk between the harmonics ADDED by a 0.2Hz sweep
+        before   20.6 dB          after   5.9 dB
+      MEASURED, the blend against the two pure rungs it sits between
+        -0.01 dB — phase-locked, nothing lost
+
+**3 — AND IT WAS 3.28ms OF MAIN THREAD PER TABLE.** `wtWave` synthesised 1024
+samples and then ran a 64x1024 DFT — **131,072 trig calls** — to recover the
+harmonics it had just built the wave FROM. Only the FOLDER makes new harmonics;
+nothing else in there does. With fold off it hands the recipe straight over.
+
+      VERIFIED against the DFT it replaces, 600 table/position/morph combos:
+        worst coefficient error 1.19e-7      (float32 rounding)
+      VERIFIED that createPeriodicWave's own normalisation undoes a uniform
+        scale, so the peak normalisation goes with it:
+        identical to 3e-7 with the recipe scaled by 0.0137 and by 53.2
+
+**COLD CACHE, pos a under a 2Hz LFO, against live:**
+
+                              before    after
+      wtWave main-thread ms    94.9      35.0    per 700ms window
+      as % of the thread       13.6%      5.0%
+      cache misses              129        53
+      junk added by the sweep  30.7      24.7 dB
+      residual crest            5.9       5.5    (floor 5.3)
+
+⚠ **WHAT IS NOT FIXED.** A full-range sweep faster than about **1Hz** moves more
+than one rung per control tick, the straddle cannot bracket it, and it degrades
+to a handover per tick. **125 timbre updates a second is the main-thread control
+rate, not the crossfade** — the same ceiling everything on `modTick` has. If Gad
+still hears roughness it will be there, and the answer is the audio thread, not
+another time constant.
+
+⚠ **AND `added` IS A TRAP.** The junk-between-the-teeth number cannot tell a big
+smooth sweep from a small steppy one — `pwmall`'s header already says so and I
+walked into it anyway, reading a 25.7 -> 33 as a regression when it was run-to-
+run noise. The number that DOES separate them is the one-period second
+difference's **crest**: a slide cancels, a step leaves an isolated spike. Both
+are in `tools/probe.sh wtpos`.
+
+## THE DICE FIRE ON THE PRESS
+
+The roll fired on the key UP so the press could learn whether an arrow was
+coming. `rollKey()` holds the body once now and the keydown calls it; every
+modifier is already down before `/` is, so press time knows everything release
+time knew.
+
+    tools/probe.sh rollkey        every gesture, PRESS or release
+
+      /  ⇧/ fresh  ⇧⌥/ wild  \+/ sound  v+/ vel  n+/ notes  win+/ latch
+      ... all PRESS, n=1, right mode and right scope
+      / then win     PRESS, and STILL latches on the release
+      / then ↑       PRESS, wild 35->40, dial ok
+
+⚠ **v and n only become scope holds under the SCOPE key** (`ctlOf`), and `/` is
+guarded by `!altOf` — so the real gesture is ctrl+v, let ctrl go, keep v down,
+press `/`. Cost me a round of "the scope is not arriving" until the probe said
+so.
+
+⚠ **THE COST, and Gad should know it:** `/`+↑↓ is the wildness dial and the
+press cannot know an arrow is coming, so **reaching for wildness now rolls once
+on the way in.** That is inherent to the ask, not a bug. If he wants the dial
+back without a roll it needs a different key for wildness.
+
+The release stays live for exactly one thing: a latch key reached for AFTER the
+press (`latchArmHeld` sets `rLatch` on any held hand), which the press could not
+have seen.
+
+## QA CHECKLIST — 2026-08-30
+
+Ordered by what is most likely to be wrong.
+
+1. **Sweep a wavetable position with an LFO — the whole ask.** Put a wt op on a
+   channel, route an LFO to `pos a`, hold a note. It should glide, not crackle.
+   MEASURED: at 0.2Hz the junk a sweep adds went 20.6dB -> 5.9dB; the standby
+   gain a table lands on went 0.794 -> 0.021. **Try a FAST one too (2Hz+, full
+   range) and say if it is still rough** — that case is improved but not solved,
+   and the limit there is the 125/s control tick, not the crossfade.
+2. **Tap `/`. It should roll the instant you press it**, not when you let go.
+   Then every modifier: ⇧/ fresh · ⇧⌥/ wild · `\`+/ sound · ctrl-v-then-/ vel ·
+   ctrl-n-then-/ notes · win+/ latches auto-roll. MEASURED: all nine land on the
+   press, one roll each, right mode and right scope.
+3. **⚠ `/` + ↑↓ now ROLLS ONCE before it dials wildness.** That is the price of
+   (2) and it is expected — check it does not get in your way. MEASURED: the
+   dial still moves, 35 -> 40.
+4. **Press `/`, THEN reach for the win key, then let go.** It should roll on the
+   press and ALSO latch auto-roll on the release. MEASURED: both.
+5. **A wt op with FOLD up.** Fold still takes the old DFT path — untouched — so
+   a fold sweep should sound exactly as it did, just still the expensive one
+   (2.5ms a table). MEASURED: the fold path is unchanged code; its sound was not
+   A/B'd by ear.
+6. **A static wt note, any table.** Should be bit-identical to before: the new
+   recipe path was checked against the DFT over 600 combinations at 1.19e-7.
+   MEASURED numerically, NOT by ear.
+7. **Everything that is not a wavetable.** K909 measured identical to live;
+   BES1/DORAC/SNR deltas moved between two runs, so they are capture noise on
+   noise-driven sounds and none of them carries a wt operator anyway.
+
 # K909 REPLACED, AND HIS TRANSPOSE WAS BEING DROPPED — 2026-08-30
 
 Gad: *"my last kick was too much here is a replacement."*
