@@ -83,6 +83,119 @@ probe in probe.js for *"wt op modulating the position of a wavetable is very
 crackly"*. Left alone; only NEXT.md was committed from here. **Check `git
 status` before staging anything in this repo — this is the second time today.**
 
+# THIRTY TABLES, AND THE LFO SHAPES THAT WERE NEVER OSCILLATORS — 2026-08-30 (late evening)
+
+Gad: *"yo the new ones some dope now! do you want to redo the original tables
+also? you can also make more the new ones sound great!"* and *"i dont have live
+rate manipulation its not audible and we need it - regression"*.
+
+## THE LFO: THREE WRITE PATHS FAILING IDENTICALLY IS NOT A WRITE-PATH BUG
+
+He reported it from a held scope, from a mod route AND from the mouse. All
+three moved the running oscillator in my tests, which is what said the write
+path was innocent.
+
+⚠ **ONLY THE FOUR PLAIN SHAPES AT ZERO SKEW ARE OSCILLATORS.** s&h, drift and
+any skewed wave are a `ConstantSource` with **sixteen seconds of ramps already
+written into it** — there is no `frequency` to turn, and both live paths tested
+for one and skipped them in silence. It was never audible on those; it only
+looked like a regression because the plain shapes work.
+
+    MEASURED, rate 2Hz -> 8Hz under a held note. tv = total variation per
+    second, so four times the rate is four times the tv, whatever the shape:
+
+                      before        after
+        sine          x4.0 LIVE     x3.9 LIVE
+        tri           x4.0 LIVE     x3.9 LIVE
+        sine skewed   x1.0 STUCK    x4.1 LIVE
+        s&h           x0.5 STUCK    x11.4 LIVE
+        drift         x0.7 STUCK    x6.4 LIVE
+
+`lfoRelay` cancels from now, pins the value the wave is at, and writes the shape
+again at the new rate **continuing from its phase**, so it speeds up rather than
+restarting. The schedule is factored into `lfoSched`, called at note-on and on
+every re-lay — two spellings of a waveform is two answers to what it looks like.
+
+⚠ **The metric mattered here.** A crossing count undercounts a RANDOM sequence
+by a factor unrelated to the rate: it read 0.94 for a 2Hz s&h and 2.5 for an
+8Hz one, which is neither right nor a clean ratio. Total variation is exact for
+every shape. `tools/probe.sh lforate`.
+
+## THIRTY TABLES, AND THE ORIGINALS REDONE
+
+⚠ **NO FACTORY PRESET USES A WAVETABLE** — zero occurrences of `wav 14` in the
+library — so redoing the originals cost nothing that ships.
+
+**Eight of the ten are redone** from AKWF folders of the same archetype, so
+`vox` is still vowels and `organ` is still an organ, at 256 harmonics instead
+of 4-14. Mean harmonic number at pos 1: basic 1.6→8.5 · vox 1.3→15.5 · metal
+6.0→11.5 · organ 3.2→9.4 · fifths 3.1→16.6 · grit 4.0→8.8.
+
+⚠ **`vox` used to get DARKER as pos rose** — its frames were A-E-I-O-U and U is
+duller than A. Ordering by centroid fixed the one table that disagreed with its
+own dial. All thirty brighten now.
+
+**Two are deliberately not redone, and both were tried:** `glass` (AKWF_sinharm
+measured THINNER than the hand-written one — 3 harmonics against 6) and `sub`
+(a sub bass IS its lack of harmonics).
+
+**Ten more, picked on a MEASUREMENT.** `tools/gen_wavetables.py --scan` rates
+every folder by how far its five frames' brightness travels. ⚠ My first pass
+picked by NAME and produced four duds: bw_sawbright's position went BACKWARDS,
+and theremin, stringbox and pluckalgo barely moved. AKWF's numbered miscellany
+rates far above every named folder — `ak04` sweeps mean harmonic 1.0 → 114.4.
+
+    c604 snip epno ak04 ak08 ak11 ak01 ak17 ak13 ak14
+
+Their names say only where they came from: an evocative name for a sound nobody
+has heard is a lie. Rename once played.
+
+⚠ **THE GENERATOR NO LONGER NEEDS THE API.** The contents endpoint is capped at
+60 requests an hour unauthenticated and one `--scan` spends the lot; the tree
+page is ordinary HTML and is not capped. It also settled the filenames, which
+no amount of guessing at raw URLs would have: **AKWF_0004 holds AKWF_0301.wav
+upward — the numbering runs ACROSS folders.**
+
+## THE SHELF IS EVENED — 23.3dB -> 5.9dB
+
+Gad's call, asked and answered. Peak normalisation made the BRIGHTEST tables
+the quietest, because a spiky wave normalised to peak 1 has a fraction of a
+sine's RMS. Frames are scaled toward a common loudness now (`WTRMS`), gain
+capped (`WTCAP`) so nothing runs away.
+
+    MEASURED   shelf -9.0 to -14.9dB, where it spanned -6.0 to -29.3
+    and it lands where the NATIVE oscillators are:
+      wt basic -10.2   ·   sine -9.6   ·   square -8.0   ·   saw -12.9
+
+⚠ A first pass aimed at 0.30 evened it to 5.3dB and left the WHOLE SHELF 7dB
+under every other engine — the same fader hunt one step along. The target has
+to be anchored to what the other oscillators measure, not chosen for tidiness.
+
+**HEADROOM, measured:** the hottest table (ak04 at pos 1) peaks **2.165** on the
+channel bus — a K909 kick is 2.05 — and five notes of it at unison 4 through a
+q=9 resonant filter reach 0.56 at the master with **zero clipped samples**.
+
+## QA CHECKLIST — 2026-08-30 late evening
+
+1. **⚠ LFO RATE UNDER A HELD NOTE, on s&h / drift / a SKEWED shape.** Those
+   three were completely dead and are the whole point of this round. MEASURED:
+   stuck at x0.5-1.0, now x4-11.
+2. **⚠ EVERY TABLE IS A DIFFERENT LEVEL THAN IT WAS.** The shelf is 5.9dB wide
+   instead of 23.3 and sits with the other oscillators. Anything you saved with
+   a wt op has moved. **Say if the new resting level is wrong** — it is aimed at
+   the native sine.
+3. **Play the redone originals** — `basic vox brass pulse metal organ fifths
+   grit`. Same archetypes, far more harmonics. `glass` and `sub` are untouched
+   on purpose.
+4. **Sweep pos on `vox`.** It used to get darker as the dial went up; it now
+   gets brighter like everything else.
+5. **The ten new ones**, especially `ak04` and `ak01` — the two widest sweeps on
+   the shelf. Rename any that earn a name.
+6. **A big chord on `ak04` with a resonant filter.** It is the hottest thing on
+   the shelf. MEASURED: 0.56 at the master, no clipped samples.
+7. **LFO sync** (previous round, still worth a pass): a division should land ON
+   the beat, and a tempo change should reach a sounding note.
+
 # HIGH-RESOLUTION WAVETABLES, AND A SYNCED LFO THAT LANDS ON THE BAR — 2026-08-30 (evening)
 
 Gad: *"ok much smoother now - but can you make the wavetables more high
