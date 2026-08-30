@@ -1,3 +1,58 @@
+# PER-PAD LOUDNESS WAS ALREADY BUILT — 2026-08-30
+
+## THE ANSWER TO "check they are normalized"
+
+Gad asked, I measured the RAW FILES, reported **19.6dB of spread** (ride 19.3
+inside its own drum across kits), offered three fixes, and he picked option 1:
+per-pad level from measured loudness.
+
+**Option 1 already exists, and is better than what I was about to build.**
+`padLoud` / `padLvl` / `MIXROLE`, and `smpPad` has been calling them all along:
+
+    padLoud(buf,dcyF,rate)   ITU-R BS.1770 K-WEIGHTED LUFS, not plain rms —
+                             and it accounts for the ONSET, the pad's own
+                             ENVELOPE applied in real time, and the pad's
+                             PLAYBACK RATE. That last one is the subtle part
+                             and its comment already carries the measurement:
+                             on KTJAZ the cymbal and ride are the SAME FILE,
+                             and pad 7 read -27.4 LUFS against pad 11's -42.8.
+                             Fifteen decibels, one take, because a kit's twelve
+                             pads are twelve different speeds.
+    MIXROLE                  targets per INSTRUMENT, not per category — the
+                             correction for MIXT lumping clap, rim and snare
+                             onto cat 'snr' and giving a rimshot a snare's
+                             fader.
+
+**MEASURED at the pad, which is what reaches the ear** — nine acoustic kits,
+108 pads, loudness after the fader:
+
+      kick 0.0   snare 0.0   cymbal 0.0   ride 0.0    hat-open 0.0
+      tom  0.0   rim   0.0   shaker 0.0   conga 0.0   hat-closed 0.1
+      clap 0.0   cowbell 0.0                          (dB spread across kits)
+
+**Zero.** The same drum is at identical loudness in every kit. All 19.3dB of
+that raw-file `ride` spread is already corrected. The 11dB that remains is
+BETWEEN drum types — kick -18 to shaker -29 — and is MIXROLE working as
+intended, because a shaker should be quieter than a kick.
+
+⚠ **MY 19.6dB NUMBER MEASURED THE WRONG THING.** Raw file rms is not what the
+ear gets: the pad applies an envelope, a rate and a fader on the way. The
+question "are the samples normalised" has two different answers depending on
+where you put the meter, and the one that matters is at the pad. A tool that
+stamped raw rms into the manifest was written and then DELETED rather than
+shipped, because it would have invited someone to trust the wrong number.
+
+**Nothing to build. Peak normalisation is exact (0.8900 on all 90 files) and
+loudness normalisation is already done properly one layer down.**
+
+## ⚠ ANOTHER SESSION IS IN index.html AND tools/probe.js
+
+Found mid-turn, uncommitted in the working tree and none of it mine: wavetable
+crossfade cache keys (`ka`/`kb`, a new `E.wtKey`) in index.html, and a `wtpos`
+probe in probe.js for *"wt op modulating the position of a wavetable is very
+crackly"*. Left alone; only NEXT.md was committed from here. **Check `git
+status` before staging anything in this repo — this is the second time today.**
+
 # K909 REPLACED, AND HIS TRANSPOSE WAS BEING DROPPED — 2026-08-30
 
 Gad: *"my last kick was too much here is a replacement."*
