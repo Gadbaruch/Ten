@@ -83,6 +83,153 @@ probe in probe.js for *"wt op modulating the position of a wavetable is very
 crackly"*. Left alone; only NEXT.md was committed from here. **Check `git
 status` before staging anything in this repo — this is the second time today.**
 
+# THE BLEND RAMPS LINEARLY, AND TEN DIGITAL WAVETABLES — 2026-08-30 (afternoon)
+
+Gad asked whether two tables crossfading is really how a wavetable synth works,
+then: *"yes make the fade linear. and please add a bunch more wavetables that
+are more digital extreme sounding."*
+
+## IT IS HOW THEY WORK, AND VITAL'S NUMBER IS 7ms AGAINST OUR 8
+
+Serum is closed, so the reading was done against **Vital** — open, GPLv3, built
+to Serum's shape (2048-sample frames, 256 frames, spectral morph).
+
+    constexpr mono_float kWavetableFadeTime = 0.007f;   // synth_oscillator.cpp:47
+
+It recomputes the table every 7ms and lerps `last_buffers_` -> `wave_buffers_`
+across every sample of that window, `t = (n+1)/num_buffer_samples`, reset to 0
+the instant the next table lands. **A pair of tables, crossfaded, at 7ms.** The
+architecture here was right. One detail was not.
+
+                        Vital                    TEN before
+      frame             2048 samples, 257 max    harmonic recipe, 4-5 frames
+      band-limiting     11 copies, one/octave    createPeriodicWave does it
+      phase read        Catmull-Rom 4-point      Chrome's OscillatorNode
+      FADE SHAPE        linear, fills the 7ms    setTargetAtTime, tau 1.5ms
+
+**The exponential is done in ~5ms and then SITS FLAT for the rest of the tick.**
+That flat spot is the staircase, and it explains the reading that made no sense
+in the morning: the junk got WORSE as the crossfade got faster, which is
+backwards for a click and exactly right for a fade that finishes early and
+waits. The blend ramps linearly over the interval since the last call now —
+measured, not assumed, because automation calls `wtLive` as well as `modTick`.
+
+    MEASURED, position driven at 0.1 rung per tick, three runs each:
+      new    added 0.2 / 0.3 / 0.2 dB     rS 0.00029 / 0.00030 / 0.00029
+      live   added 9.2 / 0.1 / 15.1       rS 0.00325 / 0.00023 / 0.00303
+
+Consistently clean against intermittently ten times worse.
+
+**And the fallback is Vital's algorithm now.** Above a rung a tick no pair of
+adjacent rungs can bracket the position; the old fallback slammed the weights to
+0/1 and handed the sound to a copy holding a STALE table, then walked it back.
+Now the exact position lands on the copy that is already silent and the pair
+fades monotonically. Which branch runs is chosen on the **smoothed rate**, not
+on whether this tick's rungs happened to bracket — a per-tick test HUNTS exactly
+where the two meet and measured worse than either.
+
+## ⚠ FOUR THINGS THAT MEASURED CONFIDENTLY AND WRONG
+
+This afternoon was mostly instrument-building, and every one of these cost real
+time. They are the transferable part.
+
+1. **`cancelAndHoldAtTime` is worse than the idiom it replaces.** It is what the
+   spec points you at. Swapping that ONE line sent the spike percentile from
+   7.5 to 20-24 and the spike energy share from 0.05 to 0.34-0.43, and back
+   again when it came out. `AC.currentTime` is the START of the last rendered
+   quantum and therefore already past; cancel-and-hold at a past time plus a
+   ramp from it does not land where the arithmetic says. Read the value, pin it
+   with `setValueAtTime`, ramp from the pin.
+
+2. **An LFO is a NON-STATIONARY test signal.** A sine sweeps fast in the middle
+   and slow at the ends, so every statistic reads whichever part of the cycle
+   the window caught — the same configuration gave `added` 0.1, 18.2 and 26.2
+   on three runs, and the spike metric read the fast middle as a spike train
+   (0.575 on a sweep with no steps in it at all). `wtpos` DRIVES the position at
+   a constant `rungs` per tick now, which is also the dial that decides which
+   branch of `wtAim` runs.
+
+3. **`spectral()` returns the PEAK BIN as `.hz`** — the fundamental, for every
+   harmonic tone — and its `.centroid` is dominated by 8000 bins of noise floor
+   and reads ~1500Hz for a pure sine. Brightness comes from the RECIPE now,
+   which IS the spectrum, exactly, with no audio in the way.
+
+4. **A sweep that measures TOO CLEAN is a sweep that is not happening.** Taking
+   pwxAim's "drive the stale copy to zero" out of the straddle stalled it
+   completely — nothing reached the gate, no table ever landed — and it read
+   0 writes and a residual BELOW the static floor. That line is not a
+   consolation prize, it is what CREATES the silence the next tick writes into.
+
+⚠ **And the artifact that is left is on BOTH builds:** a few randomly placed
+bursts a second, correlating with control ticks stretching to 28-46ms. That is
+**main-thread jitter, not the crossfade**, and it is the AudioWorklet's job.
+
+## TEN DIGITAL WAVETABLES — the shelf goes from harmonic 6 to 25
+
+**AKWF-FREE** (Kristoffer Ekstrand), 4300 single-cycle waveforms, **CC0 1.0** —
+checked against that repository's own `LICENSE.md`, not a forum's summary.
+
+    crush  chip  vgame  fm  dist  gap  raw  drawn  grain  sym
+
+`tools/gen_wavetables.py` converts and names the source file of every frame.
+TEN's tables are harmonic RECIPES, so an imported wave becomes its magnitude
+spectrum: 600-sample cycle, rfft, 48 harmonics.
+
+    MEASURED, power-weighted mean harmonic number, pos 0 -> pos 1
+      old shelf   1.0 -> 6.0 at its brightest (metal)
+      new         5.6 to 24.8    fm 24.8 · vgame 15.7 · grain 14.8 · raw 11.8
+
+**Frames are ordered by spectral centroid**, dark to bright, so `pos` means the
+same thing everywhere — 19 of 20 tables now brighten with it. The one that does
+not is `vox`, whose frames are A-E-I-O-U and whose U is genuinely darker than
+its A. Left alone.
+
+⚠ **PHASE IS NOT WHY RICH TABLES ARE QUIET.** I nearly rebuilt the frame format
+to carry phase on that theory. MEASURED, five source waves band-limited to the
+same 48 harmonics and peak-normalised both ways: zero phase was **LOUDER** on
+three of them (+3.3, +0.9dB) and quieter on one (-6.9). These waveforms are
+simply spiky, and a spiky wave peak-normalised is quiet. True in Serum too.
+
+⚠ **THE LEVEL SPREAD IS NOW 14.3dB, -6.9 to -21.2** (the old shelf was already
+7.9dB wide). Nothing in the recipe can fix it — createPeriodicWave normalises to
+peak 1 and undoes any uniform scale, measured to 3e-7 — so evening it out means
+a **compensating gain in the voice**, which would change the level of every wt
+preset already saved. **Raised with Gad, not taken.**
+
+⚠ **APPEND ONLY.** `wta`/`wtb` are stored as INDICES. `wtCycle` was still
+clamping the index to 9 and would have drawn `sub` for all ten new ones.
+
+## QA CHECKLIST — 2026-08-30 afternoon
+
+Ordered by what is most likely to be wrong.
+
+1. **⚠ THE LEVEL DROP ON THE NEW TABLES, and it is the one to judge.** Put a wt
+   op on a channel, sweep `tbl a` from `basic` through to `sym` with `pos a` up
+   high. The new ten are QUIETER — up to 14dB against the loudest old one.
+   MEASURED: -6.9 to -21.2 dB across the shelf. **Tell me whether that needs
+   evening out**; it can be done, but it moves the level of every wt preset you
+   have already saved.
+2. **Sweep `pos a` with an LFO — the fade change.** Should glide. MEASURED at a
+   slow sweep: 0.2 dB of added junk on three runs where live gave 9.2 / 0.1 /
+   15.1. **A fast full-range sweep is the one still worth reporting** — what is
+   left there is main-thread jitter and no crossfade fixes it.
+3. **Play the new ten.** `crush chip vgame fm dist gap raw drawn grain sym` at
+   the end of the `tbl a`/`tbl b` list. MEASURED as far richer — 47-48 harmonics
+   against the old shelf's 4-14 — but **nobody has listened to them yet**, and
+   which ones earn their place is your ear, not the numbers.
+4. **Sweep `pos` in each new table.** It should get BRIGHTER, always, in all
+   ten. MEASURED: mean harmonic number rises in 19 of 20 tables; `vox` is the
+   exception and always was.
+5. **Load an old preset that uses a wavetable.** It must come back on the same
+   table it was saved with — the new ten are appended, so every stored index
+   still points where it did. MEASURED: WTNAMES[0..9] unchanged, `wtCycle`
+   fixed to draw all twenty.
+6. **The `fold` dial, on any table.** Untouched — it still takes the old DFT
+   path. Should sound exactly as it did. NOT LISTENED TO.
+7. **The dice on the press** (this morning's, still worth one pass). Tap `/` and
+   it should roll as you press, not as you let go — and `/`+↑↓ now rolls once
+   on the way to the wildness dial.
+
 # A WAVETABLE SWEEP BLENDS INSTEAD OF SWAPPING, AND THE DICE FIRE ON THE PRESS — 2026-08-30
 
 Gad, two: *"wt op modulating the position of a wavetable is very crackly, needs
