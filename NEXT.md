@@ -83,6 +83,61 @@ probe in probe.js for *"wt op modulating the position of a wavetable is very
 crackly"*. Left alone; only NEXT.md was committed from here. **Check `git
 status` before staging anything in this repo — this is the second time today.**
 
+# ONE PRESS MAY NOT CROSS THE DIAL — 2026-08-30 (night, later)
+
+Gad: *"it works but the rate and div param sensitivity is extreme, in fact also
+the freq param on filters, its impossible to fine tune anything it jumps really
+high values."*
+
+**Nothing bounded `m`.** The coarse step is 10, `dialScale()` multiplies it
+AGAIN by up to ten on a bottomed hall-effect key, and ⚠ **for the exponential
+types the multiplier is an EXPONENT** — 10 does not mean ten steps, it means
+the step to the TENTH. `1.25^10` is ×9.3 in one press.
+
+    MEASURED, one press, before -> after:
+                        coarse            coarse + a hard press
+      lfo rate 2Hz      18.6 -> 3.91      40 (the max)  -> 3.91
+      lfo div 6 of 15   14   -> 9         14 (the end)  -> 9
+      filter frq 2k     6212 -> 2810      20000 (max)   -> 2810
+      filter reso 1     2    -> 2         unchanged: `big` states its own
+
+Two caps, one per kind of dial:
+- **EXPONENTIAL** (`freq`, `time`) — the exponent is capped at three: coarse
+  becomes ×1.40 on a filter and ×1.95 on a rate.
+- **EVERYTHING ELSE** — capped at a fifth of the param's own range, so a
+  fifteen-entry table moves three at a time and never end to end.
+- `big` and `mul` are untouched: they only ask whether `m` is over 1, and they
+  are where a param states its own coarse step rather than inheriting one.
+
+    THE LADDER, PROPERLY SPACED FOR THE FIRST TIME:
+      filter frq   fine 1.1%   plain 12%   coarse 40%
+      lfo rate     fine 2.3%   plain 25%   coarse 95%
+
+Yesterday every one of those was pinned to the FINE column by the scope key;
+this morning coarse was UNBOUNDED. Both ends are bounded now.
+
+⚠ **The regression net for this is `tools/probe.sh steps`** — it walks every
+param and checks the 0.01 / 0.1 rule Gad set on 2026-08-28. 77 unit-range
+params pass identically against live, and reso is still 0.1 / 1 / 0.01.
+
+## ⚠ THE SHAPE OF THIS WHOLE DAY, and it is the transferable part
+
+"The LFO is not live tweakable" was reported FOUR times and was a different
+real bug each time:
+
+1. A synced LFO's phase came off the audio clock, not the bar.
+2. s&h / drift / any skewed shape are not oscillators at all — no `frequency`
+   to turn, so every live-rate path skipped them in silence.
+3. The scope key was ALSO the fine step, so every dial in a held scope moved a
+   tenth as far as it should.
+4. And then the coarse step was unbounded, so it moved to the end of the range.
+
+**Every probe written for 1 and 2 passed on the build he was calling broken**,
+because they all asked *did the value change* rather than *did it change
+ENOUGH, and not too much*. A dial has THREE failure modes — dead, too small to
+hear, too big to place — and only the first one is what "it doesn't work"
+sounds like. Measure the SIZE of a step, against the range it lives in.
+
 # THE SCOPE KEY WAS ALSO THE FINE STEP — 2026-08-30 (night)
 
 Gad: *"lfo still not live tweakable"*, after the previous round had already
