@@ -1494,7 +1494,7 @@ const recPlayed=(pi,tBeat,midi,vel,durBeats)=>recPlayNote(pi,tBeat,sndOut(pi,mid
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-30.1216';
+const BUILD='2026-08-30.1233';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -6469,6 +6469,23 @@ function setBpm(v){
      it dying early, one gap per cycle, for the same reason a stretched loop
      did. Same rule, same call. */
   engine.audRelockAll();
+  /* A SYNCED LFO IS DEFINED AGAINST THE TEMPO, so moving the tempo has to move
+     it NOW — the same rule as the fitted take above and the cloud below. A
+     held note kept the rate it was built at, so a tempo change left every
+     sounding synced LFO running at the OLD division until the next note. */
+  try{
+    const n9=AC.currentTime;
+    for(const i of CHANS()){
+      const md9=(S.presets[i]||{}).mod||[];
+      for(const vo of engine.act[i]||[]){
+        for(const L of (vo&&vo.lfoN)||[]){
+          const m9=md9[L.mi];
+          if(!m9||m9.src!==2||Math.round(m9.syn||0)!==1||!L.lo||!L.lo.frequency)continue;
+          L.lo.frequency.setTargetAtTime(clamp(lfoHz(m9),0.02,80),n9,0.02);
+        }
+      }
+    }
+  }catch(_){}
   /* a cloud whose density is per BEAT is defined against the tempo, so moving
      the tempo has to move it now — same rule as the fitted take above */
   for(const i of CHANS()){const p9=S.presets[i];
@@ -7479,8 +7496,12 @@ class Voice{
           /* `rt` rides along so the LFO resolves its destination through the
              SAME _destOf every other source uses — the MD2LFO number is kept
              only for the pan check, which the control tick still owns */
+          /* syn/div ride along because a SYNCED lfo's phase is a position in
+             BEATS, and the builder cannot work that out from a rate in Hz */
           lfoList.push({dst:MD2LFO[rt.dst],idx:rt.idx,wav:m.wav,rate:lfoHz(me),skw:me.skw||0,
                         amt:rt.amt,ph:me.ph??m.ph,free:Math.round(m.ltr??1)===1,mi:mi2,
+                        syn:Math.round(me.syn||0)===1,
+                        div:LFODIV[clamp(Math.round(me.rdiv??4),0,LFODIV.length-1)][1],
                         rt,ri});
       }
     }
@@ -8607,7 +8628,18 @@ class Voice{
          an OscillatorNode has no phase offset of its own. */
       if(src2.osc){
         if(lf.free){
-          const deg=fmod((lf.ph||0)+at*lf.rate*360,360);
+          /* A SYNCED LFO HAS TO LAND WHERE THE BAR SAYS. `at*rate*360` is the
+             phase of a wave that has been running since the AudioContext
+             started, and the transport's zero is somewhere else entirely — so
+             a synced LFO ran at exactly the right RATE and still never lined
+             up with anything, which is what "doesn't do sync" is. Its phase is
+             a position in BEATS: one cycle per `div` of them.
+             gridBeatsAt, not beatsAt, because the free grid ticks whether or
+             not the transport is rolling and a synced LFO should be coherent
+             either way — the same axis live quantize uses. */
+          const deg=lf.syn&&lf.div>0
+            ? fmod((lf.ph||0)+(gridBeatsAt(at)/lf.div)*360,360)
+            : fmod((lf.ph||0)+at*lf.rate*360,360);
           E.setWave(lo,LFOW_PW[lf.wav]??0,deg);
         }else if(lf.ph)E.setWave(lo,LFOW_PW[lf.wav]??0,lf.ph);
       }

@@ -5304,6 +5304,128 @@ async function probeWtAlias() {
   return { cols: ['hz', 'carrier', 'trueSb', 'aliasSb', 'aliasVsTrue'], rows, notes };
 }
 
+/* ---------------- lfosync: does a synced LFO actually LOCK? --------------
+ * Gad, 2026-08-30: "something broke with lfo doesnt do sync anymore."
+ *
+ * Sync is TWO claims and the rate is only the easy one:
+ *   RATE   1/4 at 120bpm is 2Hz. This was always right.
+ *   PHASE  two notes a whole number of bars apart must find the wave in the
+ *          SAME PLACE. That is what makes it feel locked, and it is what a
+ *          free-run phase taken off AC.currentTime cannot do — the audio
+ *          clock's zero and the transport's zero are unrelated.
+ *   TEMPO  moving the tempo has to move a SOUNDING one, not just the next note.
+ *
+ * The phase is read out of the built PeriodicWave rather than guessed: the
+ * wave's own coefficients carry the phase setWave baked in.
+ *
+ *     tools/probe.sh lfosync ch=8 bpm=120 rdiv=6                              */
+async function probeLfoSync() {
+  const ch = CH === 9 ? 8 : CH;
+  const BPM = num(P.bpm, 120);
+  const RD = Math.round(num(P.rdiv, 6));
+  const keep = stash(ch);
+  const mutes = [], rows = [], notes = [];
+  const bpm0 = T.bpm;
+  let realSW = null;
+  try {
+    if (T.playing) stop();
+    pin(ch);
+    mutes.push(...muteOthers([ch]));
+    setBpm(BPM);
+    const p = S.presets[ch];
+    p.cat = 'keys';
+    p.osc = rack(mkOsc);
+    p.osc[0] = { wav: 0, mode: 0, dst: 0, rat: 1, amt: 1, fine: 0, ph: 0, phm: 0, pw: 0.5 };
+    p.flt = rack(mkFlt); p.flt[0].typ = 0;
+    p.fx = rack(mkFx); p.env = rack(mkEnv);
+    p.env[0] = { dst: 1, idx: 0, amt: 100, a: 0.004, d: 0.02, s: 1, r: 0.05, crv: 0 };
+    p.mod = rack(mkMod);
+    p.mix.lvl = 1; p.mix.pan = 0;
+    /* ltr 1 = FREE, which is the mode where the phase has to come off the grid;
+       retrig restarts at every note and can never be out of sync by definition */
+    p.mod[0] = Object.assign(mkMod(0), {
+      src: 2, wav: 0, rate: 5, syn: 1, rdiv: RD, ltr: 1, ph: 0, off: false,
+      routes: [{ dst: 0, idx: 0, amt: 100, tgt: null,
+                 addr: { rack: 'flt', slot: 0, key: 'frq', lbl: 'freq', sid: 0 } }] });
+    p.flt[0] = Object.assign(mkFlt(0), { typ: 1, frq: 2000, q: 1 });
+    engine.rebuildRack(ch); engine.refresh(ch);
+
+    const beats = LFODIV[Math.max(0, Math.min(LFODIV.length - 1, RD))][1];
+    const wantHz = 1 / (beats * (60 / BPM));
+    /* ONE BAR in seconds — the interval two notes must be apart to land on the
+       same phase for any division that divides a bar evenly */
+    const bar = 4 * (60 / BPM);
+
+    /* ⚠ CAPTURE WHAT THE BUILDER ACTUALLY WROTE. The first cut of this probe
+       recomputed the phase from the same grid function the fix uses and then
+       compared it with itself — so it read identically on both builds and
+       said DRIFTING on the one that had just been fixed. setWave is where the
+       phase is baked in; wrap it and take the number. */
+    const seen = [];
+    realSW = engine.setWave.bind(engine);
+    engine.setWave = function (osc, w, ph, wid) { seen.push(ph); return realSW(osc, w, ph, wid); };
+    const grab = async () => {
+      engine.allOff(); await sleep(60);
+      seen.length = 0;
+      const at = AC.currentTime + 0.02;
+      engine.noteOn(at, ch, NOTE, VEL);
+      await sleep(140);
+      const v = (engine.act[ch] || [])[0];
+      const L = v && v.lfoN && v.lfoN[0];
+      const hz = (L && L.lo && L.lo.frequency) ? L.lo.frequency.value : null;
+      const deg = seen.length ? seen[seen.length - 1] : null;
+      engine.allOff(); await sleep(40);
+      /* the two candidate phase axes, at this note's own start time */
+      return { hz, deg, at,
+               grid: fmod((gridBeatsAt(at) / beats) * 360, 360),
+               clock: fmod(at * wantHz * 360, 360) };
+    };
+    const A = await grab();
+    engine.setWave = realSW;
+    const near = (a, b) => (a == null || b == null) ? 999
+      : Math.abs(fmod(a - b + 180, 360) - 180);
+    const dGrid = near(A.deg, A.grid), dClock = near(A.deg, A.clock);
+    rows.push({ k: 'rate', want: +wantHz.toFixed(4), got: A.hz != null ? +A.hz.toFixed(4) : null,
+                err: A.hz != null ? +(A.hz - wantHz).toFixed(4) : null,
+                verdict: (A.hz != null && Math.abs(A.hz - wantHz) < 0.01) ? 'LOCKED' : 'WRONG' });
+    rows.push({ k: 'phase axis: the GRID', want: +A.grid.toFixed(1),
+                got: A.deg == null ? null : +A.deg.toFixed(1), err: +dGrid.toFixed(1),
+                verdict: dGrid < 3 ? 'LOCKED TO THE BAR' : 'no' });
+    rows.push({ k: 'phase axis: the audio CLOCK', want: +A.clock.toFixed(1),
+                got: A.deg == null ? null : +A.deg.toFixed(1), err: +dClock.toFixed(1),
+                verdict: dClock < 3 ? 'FREE-RUNNING (not synced)' : 'no' });
+
+    /* and the tempo: move it under a HELD note and see whether the running
+       oscillator follows */
+    engine.allOff(); await sleep(60);
+    engine.noteOn(AC.currentTime + 0.02, ch, NOTE, VEL);
+    await sleep(160);
+    const v2 = (engine.act[ch] || [])[0];
+    const L2 = v2 && v2.lfoN && v2.lfoN[0];
+    const before = (L2 && L2.lo) ? L2.lo.frequency.value : null;
+    setBpm(BPM * 2);
+    await sleep(220);
+    const after = (L2 && L2.lo) ? L2.lo.frequency.value : null;
+    engine.allOff();
+    rows.push({ k: 'tempo x2 under a held note', want: +(wantHz * 2).toFixed(4),
+                got: after != null ? +after.toFixed(4) : null,
+                err: (after != null && before != null) ? +(after - before).toFixed(4) : null,
+                verdict: (after != null && Math.abs(after - wantHz * 2) < 0.05) ? 'FOLLOWS' : 'STUCK' });
+    notes.push('division ' + LFODIV[RD][0] + ' = ' + beats + ' beats at ' + BPM +
+               'bpm · trig FREE (retrig restarts every note and cannot be out of sync)');
+  } finally {
+    try { if (realSW) engine.setWave = realSW; } catch (_) {}
+    try { setBpm(bpm0); } catch (_) {}
+    for (const m of mutes) try { m(); } catch (_) {}
+    unstash(ch, keep);
+  }
+  notes.push('the two phase rows are the SAME number measured against two different axes, ' +
+             'and exactly one of them should match: the GRID means the wave is where the bar ' +
+             'says, the audio CLOCK means it runs at the right rate and lands anywhere, which ' +
+             'is what not-synced feels like.');
+  return { cols: ['want', 'got', 'err', 'verdict'], rows, notes };
+}
+
 const HELP = {
   cols: ['args'],
   rows: [
@@ -5348,6 +5470,7 @@ const HELP = {
     { k: 'smplib',   args: 'ch=8 names=tr808-kick-01,linn-snare-01 \u2014 point a synth op at named library one-shots and hear whether they sound' },
     { k: 'spread',   args: "ch=8 ty=rake \u2014 can a bank filter's spread be modulated, and does a tweak reach a held note" },
     { k: 'pwmall',   args: 'ch=8 rate=2 amt=70 wavs=0,1,2,3 \u2014 which waves still STEP their width, for waves a pulse metric cannot see' },
+    { k: 'lfosync',  args: 'ch=8 bpm=120 rdiv=6 \u2014 does a synced LFO lock its RATE, its PHASE and follow the tempo' },
     { k: 'wtalias',  args: 'ch=8 lfo=40 \u2014 is the MODULATOR aliasing? true sideband vs the control-tick fold' },
     { k: 'wtshelf',  args: 'ch=8 \u2014 every wavetable at pos 0 and pos 1: harmonics, centroid, level' },
     { k: 'rollkey',  args: '\u2014 does the dice key fire on the PRESS, for every modifier combination' },
@@ -6470,7 +6593,8 @@ const PROBES = { level: probeLevel, spectrum: probeSpectrum, cursor: probeCursor
                    wtpos: probeWtPos,
                    rollkey: probeRollKey,
                    wtshelf: probeWtShelf,
-                   wtalias: probeWtAlias };
+                   wtalias: probeWtAlias,
+                   lfosync: probeLfoSync };
   const fn = PROBES[NAME];
   out = fn ? await fn() : (NAME === 'help' ? HELP : { cols: [], rows: [], err: 'no probe named ' + NAME });
 } catch (e) {
