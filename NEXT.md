@@ -1,3 +1,87 @@
+# THE PRESSURE DIAL WAS PROMOTING A PLAIN PRESS TO A COARSE ONE — 2026-08-30 (on main)
+
+Gad, on the FUN60 and comparing it against the Mac keyboard: *"on a operator,
+and I'm tweaking the level… on the Mac, with shift it goes by 0.1, without
+shift 0.01, in both directions. And on the fun sixty keyboard, if I go up it
+jumps by 0.1 WITHOUT shift. And when I click shift, also. So it doesn't have
+the fine tuning."* Channel volume he reports as fine.
+
+**MEASURED — `tools/probe.sh dialstep`, new probe, one press through the real
+key handler at three key depths, against the board-off reference:**
+
+      op level, one press up        mac    d0     d50    d100
+        before                      0.01   0.002  0.1    0.1     ← a CLIFF
+        after                       0.01   0.002  0.014  0.1
+        shift, before and after     0.1    0.1    0.1    0.1
+
+Half a millimetre past the middle of the travel and a plain press was already
+moving the coarse amount. Everything between 0.002 and 0.1 was unreachable, and
+both sides of the cliff read the same, so shift had nothing left to do.
+
+## THE CAUSE — one number carrying two questions
+
+`m` reaches `adjust()` as the MODIFIER TIER and nothing else: every caller
+passes `kmult(e)` or `magMult(e,H)`, both of which are exactly 0.1, 1 or 10.
+Then `dialScale()` multiplies it by up to ten for how deep the key is. `big`
+and `mul` were gated on the RESULT being over 1 — so depth alone crossed the
+gate, and a hard press became a shift press.
+
+`const mod=m` before the depth goes on, and the two coarse branches read that.
+Depth goes on scaling the NORMAL step, which is the pressure dial's own stated
+job: *"gentle is a tenth of the normal step, half travel is the normal step,
+bottomed out is ten times it."*
+
+**`jump` ALREADY DID THIS AND SAID WHY** — *"asked before dialScale() touches
+`m`, because a pool dial's groups are not a continuum and pressure has nothing
+to say about them."* `big` and `mul` are the same kind of thing and were the
+exception; now all three follow the one rule.
+
+**AND `curve:'vol'` IS DELIBERATELY UNTOUCHED**, which is why the channel fader
+already felt right to him: it BUCKETS m into three sizes (`m>=10?10:m<=0.2?0.5
+:2`) rather than testing `m>1`, so depth walks it 0.5 → 2 → 10 with no cliff.
+That is the shape to copy if another param ever needs depth to reach a coarse
+step — bucket it, never gate on it.
+
+## ⚠ STILL OPEN: ratio, ⇧ + DOWN
+
+He also reports: *"when I go with shift, going up doubles, so jumps by octaves.
+But when I go down with shift, it's as if I'm not clicking shift."*
+
+**IT MEASURES CORRECT HERE, at every depth: from ×1, ⇧↑ gives ×2 and ⇧↓ gives
+×0.5.** So one of three things, and the first two need his board to tell apart:
+
+  1. **He was somewhere the two coincide.** At ×0.25, ⇧↓ (÷2 → 0.125) and a
+     plain ↓ (−0.125 → 0.125) land on the SAME number. At the ×0.125 floor both
+     clamp and nothing moves at all.
+  2. **Shift is not arriving on that key.** His ↓ and → come from the BOARD's
+     own remap to real arrow keycodes while ↑ and ← are synthesized by
+     `arrowAlias`, so the two arrows genuinely travel different roads — and
+     only the synthesized one is known to carry `shiftKey` deliberately.
+  3. **It is inherent and it is a perception.** A multiplicative dial is
+     ASYMMETRIC in absolute terms: from ×1, up jumps +1 and down jumps −0.5;
+     from ×4, +4 and −2. ⇧↓ will always feel half as strong as ⇧↑ even when
+     both are exactly one octave.
+
+**THE FIVE-SECOND TEST THAT SEPARATES THEM: set ratio to ×4 and press ⇧↓ once.
+×2 means it works (case 1 or 3). ×3.875 means shift is being lost on that key
+(case 2), and then it is `arrowAlias`/the board remap, not `adjust()`.**
+
+## QA
+
+1. **Op level on the FUN60, plain press, vary how hard.** Right: a light press
+   creeps (~0.002), a normal press moves ~0.014, a bottomed one moves 0.1 —
+   a continuous range with the fine end back. Wrong (what you found): anything
+   past half travel jumped straight to 0.1. **Measured, three depths.**
+2. **Op level with ⇧, light vs bottomed.** Right: 0.1 every time, exactly like
+   the Mac — depth must NOT change it. **Measured: flat at all three depths.**
+3. **Op level with the scope key (fine).** Right: still the fine tier,
+   0.0002–0.01 by depth. **Measured, unchanged.**
+4. **Channel volume.** Right: unchanged — it was already the one that felt
+   right and nothing in it moved. **Not measured as audio; the `curve:'vol'`
+   branch is untouched by construction.**
+5. **Ratio ⇧↓ from ×4.** See the open question above — this is the one that
+   still needs your board to answer.
+
 # THE REPEAT KEPT TICKING AFTER THE FINGER LEFT — 2026-08-30 (on main)
 
 Gad, straight after the `nopress` fix landed: *"there is actually another issue

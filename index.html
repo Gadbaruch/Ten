@@ -1518,7 +1518,7 @@ const recPlayed=(pi,tBeat,midi,vel,durBeats)=>recPlayNote(pi,tBeat,sndOut(pi,mid
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-30.1536';
+const BUILD='2026-08-30.1652';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -3390,11 +3390,36 @@ function arepStart(code){
   AREP.timer=setTimeout(step,110);             // no half-second wait to get going
 }
 function adjust(spec,v,dir,m=1){
+  /* ⚠ WHICH MODIFIER ASKED, KEPT APART FROM HOW HARD THE KEY IS — and the two
+     were one number, which is the bug (Gad, 2026-08-30, on the FUN60: "it
+     jumps by 0.1 without shift. And when I click shift, also. So it doesn't
+     have the fine tuning").
+     `m` arrives as the MODIFIER TIER and nothing else — every caller passes
+     kmult(e) or magMult(e,H), both of which are 0.1, 1 or 10 — and then
+     dialScale() multiplies it by up to ten for the key's depth. `big` and
+     `mul` were gated on the RESULT being over 1, so half a millimetre of extra
+     travel promoted a plain press into a coarse one:
+
+           op level, one press up        mac    d0     d50    d100
+             before                      0.01   0.002  0.1    0.1
+             after                       0.01   0.002  0.014  0.1
+
+     A CLIFF, not a dial. Everything between 0.002 and 0.1 was unreachable and
+     both sides of it read as the coarse step, so shift had nothing left to do.
+     `mod` is the tier as asked, before depth, and it is what the two coarse
+     branches read now. Depth goes on scaling the NORMAL step, which is the
+     pressure dial's own stated job: "gentle is a tenth of the normal step,
+     half travel is the normal step, bottomed out is ten times it."
+     `curve:'vol'` is deliberately NOT changed — it BUCKETS m into three sizes
+     rather than testing m>1, so depth walks it 0.5 → 2 → 10 with no cliff, and
+     Gad reports the channel fader as the one that already feels right. */
+  const mod=m;
   /* `jump` is `big`'s semantic sibling: what the COARSE step means when the
      right answer is not a number of places but a place. Asked before
      dialScale() touches `m`, because a pool dial's groups are not a continuum
-     and pressure has nothing to say about them. */
-  if(spec.jump&&m>1)return spec.jump(v,dir);
+     and pressure has nothing to say about them — which is the rule the other
+     two now follow rather than the exception it used to be. */
+  if(spec.jump&&mod>1)return spec.jump(v,dir);
   /* A MENU IS NOT A DIAL. Pressing an enum harder should not skip nine entries
      to reach the tenth — one press, one option, always. Depth only means
      something where the values are a continuum. */
@@ -3447,13 +3472,13 @@ function adjust(spec,v,dir,m=1){
   /* `mul` says the coarse step MULTIPLIES. Whole numbers were the wrong idea
      for a ratio: coming down from 1 the next thing you want is the octave
      below, and stepping to 0 is not a ratio at all. ×2 and ÷2 both ways. */
-  if(spec.mul&&m>1){
+  if(spec.mul&&mod>1){
     const nvM=clamp(v*Math.pow(spec.mul,dir),spec.min,spec.max);
     return Math.round(nvM*10000)/10000;
   }
   /* `big` says what the coarse step MEANS for this param rather than leaving
      it as ten of the fine one. */
-  if(spec.big&&m>1){
+  if(spec.big&&mod>1){
     const nvB=clamp(Math.round(v/spec.big+dir)*spec.big,spec.min,spec.max);
     return Math.round(nvB*10000)/10000;
   }

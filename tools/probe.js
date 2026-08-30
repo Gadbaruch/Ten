@@ -5580,6 +5580,7 @@ const HELP = {
     { k: 'padpred',  args: 'kit=KT808 — offline buffer+envelope loudness vs the measured bus, to prove the model' },
     { k: 'kitmix',   args: 'kit=KT808,KTLIN|ROLL|ROLL80 ms=400 real=1 — BS.1770 loudness + 8-band balance of every pad in a kit, against the role target' },
     { k: 'ampstack', args: 'ch=4 rate=6 amt=100 — does an lfo on amp defeat the amp envelope' },
+    { k: 'dialstep', args: 'ch=4 — what ONE press moves, per modifier and per key depth, against the mac (board off) reference' },
     { k: 'arepinertia', args: 'ch=4 depth=1 shift=1 — how many repeat ticks land AFTER the key is released, and that a bounce still resumes' },
     { k: 'ratstep',  args: '— the hall dial is OFF the ratio: same 0.125 step at every key depth, with op level as the control that must still scale' },
     { k: 'dyn',      args: 'cat=kik n=4 ch=4 — the dynamics layer: same roll at vel 1.0 vs 0.3' },
@@ -7057,6 +7058,73 @@ async function probeArepInertia() {
   return { cols: ['depth', 'shift', 'gap', 'stepped', 'held', 'after', 'want', 'ok', 'note'], rows };
 }
 
+/* WHAT ONE PRESS ACTUALLY MOVES, per modifier and per key depth, driven
+ * through the REAL key handler rather than through adjust() alone — kmult(e)
+ * is half the question and it lives in the handler.
+ * The `mac` column is the reference: board off, dialScale() pinned at 1, which
+ * is the behaviour Gad is comparing against ("on the Mac... shift goes by 0.1,
+ * without shift 0.01, both directions").
+ * Read the DEPTH columns against it: a step that is flat across depth has lost
+ * the pressure dial, and a step that LEAPS to the coarse value and stays there
+ * has lost the fine one. */
+async function probeDialStep() {
+  const ch = num(P.ch, 4), oi = MODULES.findIndex(x => x && x.id === 'osc');
+  const keepDrv = HE.driver, keepPrs = HE.pressure, keepOn = HE.on, keepDial = CFG.dial;
+  const keepSr = KM.sr, keepShl = KM.shl, keepScp = KM.scp,
+        keepSrL = KM.srLatch, keepAltL = KM.altLatch;
+  const keepLayer = S.layer, keepMod = S.curMod, keepSlot = S.curSlot,
+        keepPx = S.slotParam, keepCp = S.curParam, keepSnd = S.editSnd, keepMSel = S.mSel;
+  const keepSyn = ARROWSYN;
+  const rows = [];
+  const DEPTHS = [0, 0.5, 1];
+  try {
+    S.editSnd = ch; S.layer = 2; S.curMod = oi; S.curSlot = 0; S.mSel = 0;
+    const specs = paramsFor(oi, S.presets[ch].osc[0]);
+
+    /* one press, through onKeyDown, with the board in a stated state */
+    const press = (key, code, mod, depth, from) => {
+      KM.sr = KM.shl = KM.scp = false; KM.srLatch = KM.altLatch = false;
+      if (mod === 'shift') KM.sr = true;
+      if (mod === 'fine') KM.scp = true;               // altOf() is the scope key
+      if (depth == null) { HE.on = false; CFG.dial = 0; }
+      else { HE.on = true; CFG.dial = 1; HE.driver = () => depth; HE.pressure = () => depth; }
+      const px = specs.findIndex(x => x.key === key);
+      S.slotParam = S.curParam = px;
+      const o = S.presets[ch].osc[0];
+      o[key] = from;
+      ARROWSYN = true;
+      try {
+        document.dispatchEvent(new KeyboardEvent('keydown',
+          { code, key: code, bubbles: true, shiftKey: mod === 'shift' }));
+      } finally { ARROWSYN = false; arepStop(); }
+      return +(o[key] - from).toFixed(5);
+    };
+
+    const PARAMS = [
+      { key: 'amt', lbl: 'op level', from: 0.5 },      // step 0.01, big 0.1
+      { key: 'rat', lbl: 'ratio',    from: 1 },        // step 0.125, mul x2, nopress
+    ];
+    for (const P2 of PARAMS)
+      for (const mod of ['plain', 'shift', 'fine'])
+        for (const [code, arrow] of [['ArrowUp', 'up'], ['ArrowDown', 'dn']]) {
+          const mac = press(P2.key, code, mod, null, P2.from);
+          const d = DEPTHS.map(z => press(P2.key, code, mod, z, P2.from));
+          rows.push({ k: P2.lbl + ' ' + mod + ' ' + arrow, mac,
+                      d0: d[0], d50: d[1], d100: d[2],
+                      flat: String(d.every(x => x === d[0])),
+                      note: mac === 0 ? 'MOVED NOTHING on the mac reference' : '' });
+        }
+  } finally {
+    HE.driver = keepDrv; HE.pressure = keepPrs; HE.on = keepOn; CFG.dial = keepDial;
+    KM.sr = keepSr; KM.shl = keepShl; KM.scp = keepScp;
+    KM.srLatch = keepSrL; KM.altLatch = keepAltL;
+    S.layer = keepLayer; S.curMod = keepMod; S.curSlot = keepSlot;
+    S.slotParam = keepPx; S.curParam = keepCp; S.editSnd = keepSnd; S.mSel = keepMSel;
+    ARROWSYN = keepSyn; arepStop();
+  }
+  return { cols: ['mac', 'd0', 'd50', 'd100', 'flat', 'note'], rows };
+}
+
 const PROBES = { level: probeLevel, spectrum: probeSpectrum, cursor: probeCursor,
                    preset: probePreset, key: probeKey, keypath: probeKeyPath,
                    roundtrip: probeRoundTrip,
@@ -7115,6 +7183,7 @@ const PROBES = { level: probeLevel, spectrum: probeSpectrum, cursor: probeCursor
                    dyn: probeDyn,
                    ampstack: probeAmpStack,
                    ratstep: probeRatStep,
+                   dialstep: probeDialStep,
                    arepinertia: probeArepInertia };
   const fn = PROBES[NAME];
   out = fn ? await fn() : (NAME === 'help' ? HELP : { cols: [], rows: [], err: 'no probe named ' + NAME });
