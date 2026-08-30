@@ -1518,7 +1518,7 @@ const recPlayed=(pi,tBeat,midi,vel,durBeats)=>recPlayNote(pi,tBeat,sndOut(pi,mid
    shown on the `build` row, and that row also ASKS the server: it fetches the
    page with no-store, compares this string, and reloads past the cache if the
    answer is newer. */
-const BUILD='2026-08-30.1357';
+const BUILD='2026-08-30.1408';
 function checkUpdate(){
   const bare=location.href.split('?')[0].split('#')[0];
   flash('checking the server…');
@@ -7334,11 +7334,20 @@ function fltChain(ac,p,at){
 class Voice{
   /* live per-note pressure, 0..1 — what the 'press' MOD source follows */
   setPressure(x){
-    if(this.killed||!this.pressN||!this.pressN.length)return;
+    if(this.killed)return;
     /* the shaping happens HERE, before the glide, so curve decides where the
        response lives and glide decides how quickly it gets there */
     const g=this.pressCurve||1;
     this.press=g===1?clamp(x,0,1):Math.pow(clamp(x,0,1),g);
+    /* RECORDING THE VALUE IS NOT THE SAME AS DELIVERING IT, and conflating the
+       two is the other half of "press on lfo rate didnt budge". The guard used
+       to be `!pressN.length` and sat above this line, so a voice with no
+       per-voice press AudioParam never stored `press` at all — and the control
+       tick, which reads exactly that field for every ADDRESSED destination,
+       saw 0 forever. A route to a mod rate claims no AudioParam by definition,
+       so pressN was empty in precisely the case Gad was testing. State first,
+       delivery second; the loop below is free when there is nothing to feed. */
+    if(!this.pressN||!this.pressN.length)return;
     const t=AC.currentTime;
     for(const n of this.pressN)
       try{n.p.setTargetAtTime((n.base||0)+this.press*n.sc,t,this.pressGlide);}catch(_){}
@@ -11181,6 +11190,31 @@ class Engine{
       if(!this._sh[k]||this._sh[k].step!==step)this._sh[k]={step,v:Math.random()*2-1};
       return this._sh[k].v;
     }
+    /* PRESS AND MACRO REACHED NOTHING ADDRESSED (Gad, 2026-08-30: "i tried to
+       set press on and lfo rate and it didnt budge"). Both worked on the
+       LEGACY per-voice routes — those are wired straight to an AudioParam at
+       note-on, which is why press on a filter measured 0 -> 1928 -> 3875 — and
+       both fell out of THIS function, so every addressed `ctrl` or `next`
+       destination saw them return null and skipped the route entirely. Two of
+       the nine sources could not drive a mod rate, an lfo depth, a crop, a
+       spread or an envelope time. Measured before: press NULL, macro NULL,
+       every other source a number.
+
+       PRESS IS PER-VOICE AND THIS TICK IS PER-CHANNEL, so it has to be
+       reduced: the DEEPEST finger currently down wins. Max and not the latest,
+       because a channel-wide control should follow the hardest press being
+       held rather than flicker to whichever note was struck most recently, and
+       not an average, which would fall as you add notes without lifting
+       anything. No voices means nothing is being pressed, which is 0. */
+    if(s===6){
+      let mx=0;
+      for(const v of this.act[pi]||[]){
+        if(!v||v.killed)continue;
+        const q=+v.press||0; if(q>mx)mx=q;
+      }
+      return mx;
+    }
+    if(s===MSRC_MACRO)return macroVal(pi,m);
     return null;
   }
   /* THE BUS FILTER HAS NO VOICE TO WALK. cutLive and dialLive both loop over
